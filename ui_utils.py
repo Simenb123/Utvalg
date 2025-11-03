@@ -1,41 +1,25 @@
 from __future__ import annotations
-import pandas as pd
 import tkinter as tk
 from tkinter import ttk
+from datetime import datetime
+from formatting import parse_amount
 
-from formatting import parse_amount, fmt_date
-
-def enable_treeview_sort(tree: ttk.Treeview, col_types: dict[str, str]) -> None:
-    """
-    col_types: {"kolnavn": "int"|"amount"|"date"|"text", ...}
-    """
-    def sorter(col: str, reverse: bool) -> None:
-        items = [(tree.set(k, col), k) for k in tree.get_children("")]
-        typ = (col_types or {}).get(col, "text")
-
-        def key_func(val: tuple[str, str]):
-            s = val[0]
-            if typ == "int":
-                try:
-                    return int(str(s).replace(" ", "").replace("\xa0", ""))
-                except Exception:
-                    return 0
-            if typ == "amount":
-                v = parse_amount(s)
-                return v if v is not None else 0.0
-            if typ == "date":
-                try:
-                    d = pd.to_datetime(s, dayfirst=True, errors="coerce")
-                    return d.to_datetime64()
-                except Exception:
-                    return pd.NaT
-            return str(s).lower()
-
-        items.sort(key=key_func, reverse=reverse)
-        for idx, (_, k) in enumerate(items):
-            tree.move(k, "", idx)
-        # toggle next
-        tree.heading(col, command=lambda: sorter(col, not reverse))
-
+def enable_treeview_sort(tree: ttk.Treeview, types: dict[str, str]) -> None:
+    """Klikk på kolonneoverskrift for å sortere. types: {"col": "int|amount|date|text"}"""
+    def _sort(col, reverse):
+        rows = [(tree.set(k, col), k) for k in tree.get_children("")]
+        typ = types.get(col, "text")
+        if typ == "int":
+            conv = lambda x: int(str(x).replace(" ", "") or 0)
+        elif typ == "amount":
+            conv = lambda x: parse_amount(x) or 0.0
+        elif typ == "date":
+            conv = lambda x: datetime.strptime(str(x), "%d.%m.%Y") if x else datetime.min
+        else:
+            conv = lambda x: str(x)
+        rows.sort(key=lambda t: conv(t[0]), reverse=reverse)
+        for index, (_, k) in enumerate(rows):
+            tree.move(k, "", index)
+        tree.heading(col, command=lambda: _sort(col, not reverse))
     for col in tree["columns"]:
-        tree.heading(col, command=lambda c=col: sorter(c, False))
+        tree.heading(col, command=lambda c=col: _sort(c, False))

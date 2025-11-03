@@ -4,68 +4,19 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/Utvalg.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/TODO.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ab_analysis.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ab_analyzers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ab_key_deviation.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ab_matchers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/analysis_pack.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/analyzers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/analyzers_line_checks.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/analyzers_outliers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/analyzers_round_share.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/column_memory.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/controller.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/controller_core.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/controller_export.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/controller_sample.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/controller_scope.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/controller_selection.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/data_prep.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/excel_export.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/excel_formatting.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/formatting.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/index_match_python.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/io_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/logic.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ml_map.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_ab_compare.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyser.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_dataset.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_studio.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/preferences.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/scope.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/session.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/settings_entry.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/stats_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/treeutils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ui_main.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ui_shell.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ui_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/utvalgsgenerator.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_ab.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_analyze.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_dataset.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_drilldown.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_main.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_preview.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_scope.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_selection.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_selection_studio.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_settings.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/widgets.py" afterDir="false" />
+    <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
+      <change afterPath="$PROJECT_DIR$/export_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/page_utvalg.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/theme.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/controller_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/controller_core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/formatting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/io_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/io_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml_map.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/session.py" beforeDir="false" afterPath="$PROJECT_DIR$/session.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -123,6 +74,18 @@
       <option name="presentableId" value="Default" />
       <updated>1761670768273</updated>
     </task>
+    <task id="LOCAL−00001" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1762186659188</created>
+      <option name="number" value="LOCAL−00001" />
+      <option name="presentableId" value="LOCAL−00001" />
+      <updated>1762186659188</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Utvalg" />
+    <option name="LAST_COMMIT_MESSAGE" value="Utvalg" />
   </component>
 </project>

@@ -1,86 +1,68 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from typing import Optional
-
 import pandas as pd
-
 from models import Columns
-
-
-@dataclass
-class _State:
-    direction: str = "Alle"      # "Alle" | "Debet" | "Kredit"
-    basis: str = "signed"        # "signed" | "abs"
-    min_amount: Optional[float] = None
-    max_amount: Optional[float] = None
-
 
 class DataControllerCore:
     """
-    Tynt service‑lag mellom UI og DataFrame:
-    - holder 'clean' df (med riktige typer)
-    - bygger pivot per konto
-    - leverer filtrert df til drilldown
+    Holder en 'prepared' DataFrame og bygger filtre/pivot.
     """
     def __init__(self) -> None:
         self.df_clean: Optional[pd.DataFrame] = None
-        self.df_acc: Optional[pd.DataFrame] = None
-        self.cols = Columns()
-        self._st = _State()
+        self.cols: Optional[Columns] = None
+        self._dir = "Alle"
+        self._basis = "signed"  # 'signed' | 'abs'
+        self._min: Optional[float] = None
+        self._max: Optional[float] = None
+        self.df_acc: Optional[pd.DataFrame] = None  # pivot pr konto
 
-    # init
     def init_prepared(self, df: pd.DataFrame, cols: Columns) -> None:
-        self.df_clean = df.copy()
+        self.df_clean = df
         self.cols = cols
-        self._recompute()
+        self.recompute()
 
-    # config
-    def set_direction(self, direction: str) -> None:
-        self._st.direction = direction or "Alle"
-        self._recompute()
+    def set_direction(self, v: str) -> None:
+        self._dir = (v or "Alle")
+        self.recompute()
 
     def set_amount_basis(self, basis: str) -> None:
-        self._st.basis = basis if basis in {"signed", "abs"} else "signed"
-        self._recompute()
+        self._basis = basis if basis in ("signed", "abs") else "signed"
+        self.recompute()
 
-    def set_amount_range(self, mi: Optional[float], ma: Optional[float]) -> None:
-        self._st.min_amount, self._st.max_amount = mi, ma
-        self._recompute()
+    def set_amount_range(self, vmin: Optional[float], vmax: Optional[float]) -> None:
+        self._min, self._max = vmin, vmax
+        self.recompute()
 
-    # data
-    def filtered_df(self) -> Optional[pd.DataFrame]:
-        if self.df_clean is None:
-            return None
+    def filtered_df(self) -> pd.DataFrame:
+        if self.df_clean is None or self.cols is None:
+            return pd.DataFrame()
         c = self.cols
         df = self.df_clean
-
         # retning
-        if self._st.direction.lower().startswith("debet"):
+        if (self._dir or "").lower().startswith("debet"):
             df = df[df[c.belop] > 0]
-        elif self._st.direction.lower().startswith("kredit"):
+        elif (self._dir or "").lower().startswith("kredit"):
             df = df[df[c.belop] < 0]
-
-        # basis for terskler
-        series = df[c.belop].abs() if self._st.basis == "abs" else df[c.belop]
-        if self._st.min_amount is not None:
-            df = df[series >= float(self._st.min_amount)]
-        if self._st.max_amount is not None:
-            df = df[series <= float(self._st.max_amount)]
+        # beløp
+        if self._min is not None:
+            df = df[df[c.belop] >= float(self._min)]
+        if self._max is not None:
+            df = df[df[c.belop] <= float(self._max)]
         return df
 
-    # intern
-    def _recompute(self) -> None:
-        if self.df_clean is None:
+    def recompute(self) -> None:
+        if self.df_clean is None or self.cols is None:
             self.df_acc = None
             return
         df = self.filtered_df()
-        if df is None or df.empty:
-            self.df_acc = pd.DataFrame(columns=[self.cols.konto, self.cols.kontonavn, "Antall", "Sum"])
-            return
         c = self.cols
-        self.df_acc = (
+        if df.empty:
+            self.df_acc = df
+            return
+        grp = (
             df.groupby([c.konto, c.kontonavn])[c.belop]
-              .agg(Antall="count", Sum="sum")
-              .reset_index()
-              .sort_values([c.konto, c.kontonavn])
+            .agg(Antall="count", Sum="sum")
+            .reset_index()
+            .sort_values([c.konto, c.kontonavn])
         )
+        self.df_acc = grp

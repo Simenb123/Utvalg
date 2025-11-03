@@ -1,70 +1,49 @@
-# ui_main.py
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk
-
-from theme import apply_sisu_theme
-from dataset_pane import DatasetPane
+from tkinter import ttk, messagebox
+from theme import setup_theme
+from dataset_pane import DatasetPage
 from page_analyse import AnalysePage
-from page_utvalg import UtvalgPage
-from session import set_dataset, get_dataset, has_dataset
+from views_selection_studio import SelectionStudio
+from session import has_dataset
 
-
-class MainUI:
+class MainUI(tk.Tk):
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Utvalgsgenerator")
-        self.root.geometry("1220x780")
-        apply_sisu_theme(self.root)
+        super().__init__()
+        self.title("Utvalgsgenerator")
+        self.geometry("1280x780")
+        setup_theme(self)
 
-        self._build_menu()
-
-        self.nb = ttk.Notebook(self.root)
-        self.nb.pack(fill=tk.BOTH, expand=True)
+        # Meny
+        menubar = tk.Menu(self)
+        m_file = tk.Menu(menubar, tearoff=False)
+        m_file.add_command(label="Avslutt", command=self.destroy)
+        menubar.add_cascade(label="Fil", menu=m_file)
+        self.config(menu=menubar)
 
         # Faner
-        self.tab_dataset = ttk.Frame(self.nb); self.nb.add(self.tab_dataset, text="Datasett")
-        self.tab_analyse = ttk.Frame(self.nb); self.nb.add(self.tab_analyse, text="Analyse")
-        self.tab_utvalg  = ttk.Frame(self.nb); self.nb.add(self.tab_utvalg,  text="Utvalg")
+        self.nb = ttk.Notebook(self); self.nb.pack(fill=tk.BOTH, expand=True)
 
-        # Innhold
-        self.dp = DatasetPane(self.tab_dataset, on_built=self._apply_dataset)
-        self.dp.frm.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        self.page_dataset = DatasetPage(self.nb, on_ready=self._go_analyse)
+        self.nb.add(self.page_dataset, text="Datasett")
 
-        self.analyse = AnalysePage(self.tab_analyse, on_to_utvalg=self._open_utvalg)
-        self.analyse.pack(fill=tk.BOTH, expand=True)
+        self.page_analyse = AnalysePage(self.nb, open_selection_cb=self._go_selection)
+        self.nb.add(self.page_analyse, text="Analyse")
 
-        self.utvalg = UtvalgPage(self.tab_utvalg)
-        self.utvalg.pack(fill=tk.BOTH, expand=True)
+        self.page_selection = SelectionStudio(self.nb)
+        self.nb.add(self.page_selection, text="Utvalg")
 
-    def _apply_dataset(self, df, cols):
-        set_dataset(df, cols)
-        self.nb.select(self.tab_analyse)
-        # Sørg for at Analyse fylles
-        self.analyse.refresh_from_session()
+        # Start på Datasett
+        self.nb.select(self.page_dataset)
 
-    def _open_utvalg(self, accounts, direction, vmin, vmax):
-        df, cols = get_dataset()
-        if df is None or cols is None:
+    # Callbacks
+    def _go_analyse(self):
+        self.page_analyse.refresh_from_session()
+        self.nb.select(self.page_analyse)
+
+    def _go_selection(self, accounts):
+        if not has_dataset():
+            messagebox.showinfo("Utvalg", "Bygg datasett først.")
             return
-        # For utvalg bruker vi som default absolutt-beløp i filter
-        self.utvalg.prepare(df, cols, accounts, direction=direction, min_amount=vmin, max_amount=vmax, use_abs=True)
-        self.nb.select(self.tab_utvalg)
-
-    def _build_menu(self):
-        m = tk.Menu(self.root); self.root.config(menu=m)
-
-        m_file = tk.Menu(m, tearoff=False); m.add_cascade(label="Fil", menu=m_file)
-        m_file.add_command(label="Avslutt", command=self.root.destroy)
-
-        m_nav = tk.Menu(m, tearoff=False); m.add_cascade(label="Naviger", menu=m_nav)
-        m_nav.add_command(label="Datasett", command=lambda: self.nb.select(self.tab_dataset))
-        m_nav.add_command(label="Analyse", command=lambda: self.nb.select(self.tab_analyse))
-        m_nav.add_command(label="Utvalg",  command=lambda: self.nb.select(self.tab_utvalg))
-
-    def mainLoop(self):
-        self.root.mainloop()
-
-
-if __name__ == "__main__":
-    MainUI().mainLoop()
+        self.page_selection.set_accounts(accounts)
+        self.nb.select(self.page_selection)

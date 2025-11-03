@@ -1,0 +1,8 @@
+{
+  "konto": "AccountID",
+  "kontonavn": "AccountDescription",
+  "bilag": "VoucherID",
+  "belop": "Amount",
+  "dato": "TransactionDate",
+  "tekst": "Description"
+}
