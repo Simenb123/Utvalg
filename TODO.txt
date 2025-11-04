@@ -1,3 +1,31 @@
+TODO LIST
+
+Hva gjenstår (prioritert TODO)
+
+A/B mellom to kilder (Datasett A+B)
+– Egen fanedel for å laste inn/B‑mappe, og kjøre krysshint A↔B (likt beløp/motsatt/two‑sum/duplikat pr. part/konto/periode).
+– Ytelse: bucketing og caps per “bucket”.
+
+UI‑polish
+– Zebra‑striper i Treeview, “pinne” kolonner, smartere kolonnebredder, raskere søk i transaksjoner.
+– Flytte noen hjelpeknapper til verktøylinje og gi tydeligere “state‑badges”.
+
+Skalerbarhet/ytelse
+– Virtuell/lazy Treeview for store datasett, caching av pivoter, mer vektoriserte A/B‑søk.
+
+Automatisert test
+– Pytest for IO/format/ML/analyse. Små representative testfiler (CSV/XLSX) med ulike header‑varianter.
+
+Flere del‑analyser
+– Terskel‑mønstre, brukermønstre, tid‑på‑døgnet, avvik mot saldobalanse, toleranser pr. konto/part.
+
+Eksportmaler
+– Excel‑mal med pivoter/diagrammer/slicere og “rapportark”.
+
+
+-----------
+
+Tidligere:
 TODO liste på forslag til implementeringer
 
 1. GL(Hovedbok) pivot som viser GL transaksjoner fordelt per måned.
@@ -10,6 +38,7 @@ Jeg vet ikke hvordan dette kan gjøres på best mulig måte men det bør være e
 
 
 
+diverse tidligere:
 Okey så her er greia. Første steg er å velge ut hele populasjonen, f.eks at man markerer alle kontoer mellom intervallet 6-7999.
 Dette er å anse som "Populasjonen"- Så får man mulighet til å dele opp i underpopulasjoner,
 f.eks at man ønsker å ta ut konto 7210 og se på den alene, evt. splitte mellom ulike type kostnader.

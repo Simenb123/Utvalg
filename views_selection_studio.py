@@ -1,216 +1,94 @@
 from __future__ import annotations
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Sequence
-import pandas as pd
+from dataclasses import dataclass
+from typing import Optional, List
+import re
 import numpy as np
-
-from session import get_dataset
+import pandas as pd
 from models import Columns
-from formatting import fmt_amount, fmt_int, parse_amount, fmt_date
-from export_utils import export_selection_to_excel
 
-class SelectionStudio(ttk.Frame):
-    """
-    Segmentering/kvantiler + trekk/eksport.
-    Brukes som fane i hovedvinduet.
-    """
-    def __init__(self, parent: ttk.Notebook):
-        super().__init__(parent)
-        self.df: Optional[pd.DataFrame] = None
-        self.cols: Optional[Columns] = None
-        self._accounts: Optional[Sequence[int]] = None
+@dataclass
+class ScopeCfg:
+    name: str = "Populasjon"
+    accounts_expr: str = ""
+    direction: str = "Alle"
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
+    apply_to: str = "Alle"
+    use_abs: bool = True
+    date_from: Optional[pd.Timestamp] = None
+    date_to: Optional[pd.Timestamp] = None
 
-        self._build()
+@dataclass
+class BucketCfg:
+    n: int = 0
+    method: str = "quantile"
+    basis: str = "abs"
 
-    def _build(self):
-        # Filterlinje
-        filt = ttk.Frame(self, padding=8); filt.pack(fill=tk.X)
-        ttk.Label(filt, text="Retning:").pack(side=tk.LEFT)
-        self.var_dir = tk.StringVar(value="Alle")
-        self.cbo_dir = ttk.Combobox(filt, state="readonly", values=["Alle","Debet","Kredit"], width=8, textvariable=self.var_dir)
-        self.cbo_dir.pack(side=tk.LEFT, padx=(6,12))
-        ttk.Label(filt, text="Min beløp:").pack(side=tk.LEFT)
-        self.ent_min = ttk.Entry(filt, width=12); self.ent_min.pack(side=tk.LEFT, padx=(4,6))
-        ttk.Label(filt, text="Maks beløp:").pack(side=tk.LEFT)
-        self.ent_max = ttk.Entry(filt, width=12); self.ent_max.pack(side=tk.LEFT, padx=(4,12))
-        ttk.Button(filt, text="Oppdater", command=self.refresh).pack(side=tk.LEFT, padx=(4,12))
+def _parse_accounts_expr(expr: str) -> List[str]:
+    expr = (expr or "").strip()
+    if not expr: return []
+    parts = [e.strip() for e in expr.split(",") if e.strip()]
+    return parts
 
-        self.pop_lbl = ttk.Label(filt, text="Populasjon = 0 linjer | sum 0,00"); self.pop_lbl.pack(side=tk.LEFT, padx=12)
-
-        # Segmenttabel – venstre
-        split = ttk.Panedwindow(self, orient=tk.HORIZONTAL); split.pack(fill=tk.BOTH, expand=True, padx=8, pady=6)
-
-        left = ttk.Frame(split); split.add(left, weight=2)
-        cfg = ttk.Frame(left); cfg.pack(fill=tk.X)
-        ttk.Label(cfg, text="Kvantiler:").pack(side=tk.LEFT)
-        self.cbo_bins = ttk.Combobox(cfg, state="readonly", width=10, values=["Ingen", 2,3,4,5,6,8,10])
-        self.cbo_bins.set("Ingen"); self.cbo_bins.pack(side=tk.LEFT, padx=(6,12))
-        ttk.Button(cfg, text="Bygg kvantiler", command=self.refresh).pack(side=tk.LEFT)
-
-        self.tree_seg = ttk.Treeview(left, columns=("seg","linjer","sum"), show="headings", selectmode="browse")
-        for c, t, w, a in (("seg","Segment",300,"w"),("linjer","Linjer",80,"e"),("sum","Sum",140,"e")):
-            self.tree_seg.heading(c, text=t); self.tree_seg.column(c, width=w, anchor=a)
-        self.tree_seg.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ttk.Scrollbar(left, orient="vertical", command=self.tree_seg.yview).pack(side=tk.RIGHT, fill=tk.Y)
-        self.tree_seg.bind("<<TreeviewSelect>>", lambda _e: self._fill_transactions())
-
-        # Transaksjoner – høyre
-        right = ttk.Frame(split); split.add(right, weight=5)
-        self.tree_tx = ttk.Treeview(right, columns=("dato","bilag","tekst","belop","konto","navn"), show="headings")
-        for c, t, w, a in (("dato","Dato",90,"w"),("bilag","Bilag",120,"w"),("tekst","Tekst",380,"w"),("belop","Beløp",120,"e"),("konto","Konto",80,"e"),("navn","Kontonavn",220,"w")):
-            self.tree_tx.heading(c, text=t); self.tree_tx.column(c, width=w, anchor=a)
-        self.tree_tx.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ttk.Scrollbar(right, orient="vertical", command=self.tree_tx.yview).pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Bunn – trekk/eksport
-        bottom = ttk.Frame(self, padding=8); bottom.pack(fill=tk.X)
-        ttk.Label(bottom, text="Antall bilag:").pack(side=tk.LEFT)
-        self.ent_n = ttk.Entry(bottom, width=6); self.ent_n.insert(0, "20"); self.ent_n.pack(side=tk.LEFT, padx=(6,12))
-        self.var_per_bucket = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bottom, text="Trekk pr. bøtte (kvantil)", variable=self.var_per_bucket).pack(side=tk.LEFT)
-
-        ttk.Label(bottom, text="Seed:").pack(side=tk.LEFT, padx=(12,0))
-        self.ent_seed = ttk.Entry(bottom, width=8); self.ent_seed.pack(side=tk.LEFT, padx=(6,12))
-
-        ttk.Button(bottom, text="Trekk bilag", command=self._do_sample).pack(side=tk.LEFT)
-        ttk.Button(bottom, text="Eksporter til Excel (åpne)", command=self._export).pack(side=tk.RIGHT)
-
-    # ---------- API fra Analyse ----------
-    def set_accounts(self, accounts):
-        self._accounts = list(accounts) if accounts else None
-        self.refresh()
-
-    # ---------- core ----------
-    def _get_filtered(self) -> pd.DataFrame:
-        df, cols = get_dataset()
-        if df is None or cols is None:
-            return pd.DataFrame()
-        self.df, self.cols = df, cols
-        c = cols
-        out = df
-        # konto-subset
-        if self._accounts:
-            out = out[out[c.konto].astype("Int64").isin(self._accounts)]
-        # retning
-        dir_sel = (self.cbo_dir.get() or "Alle").lower()
-        if dir_sel.startswith("debet"):
-            out = out[out[c.belop] > 0]
-        elif dir_sel.startswith("kredit"):
-            out = out[out[c.belop] < 0]
-        # beløpsintervall
-        mn = parse_amount(self.ent_min.get() or None)
-        mx = parse_amount(self.ent_max.get() or None)
-        if mn is not None:
-            out = out[out[c.belop] >= mn]
-        if mx is not None:
-            out = out[out[c.belop] <= mx]
-        return out.copy()
-
-    def refresh(self):
-        df = self._get_filtered()
-        c = self.cols
-        for iid in self.tree_seg.get_children(): self.tree_seg.delete(iid)
-        for iid in self.tree_tx.get_children(): self.tree_tx.delete(iid)
-        self.pop_lbl.config(text=f"Populasjon = {len(df):,} linjer | sum {fmt_amount(df[c.belop].sum() if c else 0)}")
-        if df.empty or c is None:
-            return
-
-        # kvantiler
-        nb = self.cbo_bins.get()
-        nb = int(nb) if (isinstance(nb, str) and nb.isdigit()) else (nb if isinstance(nb, int) else 0)
-
-        # hovedsegment (alt)
-        self.tree_seg.insert("", tk.END, iid="__ALL__", values=("Populasjon", fmt_int(len(df)), fmt_amount(float(df[c.belop].sum()))))
-
-        self._df_cache = {"__ALL__": df}
-        if nb and nb > 0:
-            qs = np.linspace(0, 1, nb+1)
-            edges = df[c.belop].quantile(qs).to_list()
-            for i in range(1, len(edges)):
-                if edges[i] <= edges[i-1]:
-                    edges[i] = edges[i-1] + 0.01
-            labels = [f"{fmt_amount(edges[i])} – {fmt_amount(edges[i+1])}" for i in range(nb)]
-            cats = pd.cut(df[c.belop], bins=edges, include_lowest=True, labels=labels)
-            for label in labels:
-                seg_df = df[cats == label]
-                self._df_cache[label] = seg_df
-                self.tree_seg.insert("", tk.END, iid=label, values=(label, fmt_int(len(seg_df)), fmt_amount(float(seg_df[c.belop].sum()))))
-
-        # velg første rad
-        first = self.tree_seg.get_children()
-        if first:
-            self.tree_seg.selection_set(first[0])
-            self._fill_transactions()
-
-    def _fill_transactions(self):
-        sel = self.tree_seg.selection()
-        if not sel: return
-        key = sel[0]
-        df = self._df_cache.get(key)
-        if df is None: return
-        c = self.cols
-        for iid in self.tree_tx.get_children(): self.tree_tx.delete(iid)
-        dcol = c.dato if (c and c.dato in df.columns) else None
-        tcol = c.tekst if (c and c.tekst in df.columns) else None
-        for _, r in df.iterrows():
-            dato = fmt_date(r[dcol]) if dcol else ""
-            bilag = str(r[c.bilag])
-            tekst = str(r[tcol]) if tcol else ""
-            belop = fmt_amount(float(r[c.belop]) if pd.notna(r[c.belop]) else 0.0)
-            konto = str(r[c.konto])
-            navn  = str(r[c.kontonavn] or "")
-            self.tree_tx.insert("", tk.END, values=(dato, bilag, tekst, belop, konto, navn))
-
-    # ---------- sampling / export ----------
-    def _do_sample(self):
-        sel = self.tree_seg.selection()
-        if not sel:
-            messagebox.showwarning("Trekk", "Velg et segment.")
-            return
-        key = sel[0]
-        df = self._df_cache.get(key)
-        if df is None or df.empty:
-            messagebox.showwarning("Trekk", "Segmentet er tomt."); return
-        c = self.cols
-        try:
-            n = max(1, int(self.ent_n.get()))
-        except Exception:
-            messagebox.showwarning("Antall", "Ugyldig antall."); return
-
-        per_bucket = bool(self.var_per_bucket.get())
-        seed = None
-        try:
-            seed = int(self.ent_seed.get())
-        except Exception:
-            seed = None
-
-        if per_bucket and key == "__ALL__":
-            messagebox.showinfo("Trekk", "Velg en bestemt kvantil-bøtte for 'Trekk pr. bøtte'.")
-            return
-
-        unike = df[c.bilag].dropna().astype(str).drop_duplicates()
-        if unike.empty:
-            messagebox.showwarning("Trekk", "Ingen bilagsnummer funnet.")
-            return
-
-        if per_bucket:
-            sample = unike.sample(n=min(n, len(unike)), random_state=seed)
+def _acct_mask(series: pd.Series, tokens: List[str]) -> pd.Series:
+    s = series.astype(str)
+    mask = pd.Series(False, index=series.index)
+    for t in tokens:
+        if "-" in t and not "*" in t:
+            lo, hi = t.split("-", 1)
+            try:
+                import re as _re
+                lo_i = int(_re.sub(r"\D", "", lo))
+                hi_i = int(_re.sub(r"\D", "", hi))
+                mask |= series.astype("Int64").astype(int).between(lo_i, hi_i, inclusive="both")
+            except Exception:
+                continue
+        elif "*" in t:
+            pat = "^" + re.escape(t).replace("\\*", ".*") + "$"
+            mask |= s.str.match(pat)
         else:
-            sample = unike.sample(n=min(n, len(unike)), random_state=seed)
+            try: v = int(re.sub(r"\D", "", t)); mask |= (series.astype("Int64").astype(int) == v)
+            except Exception: mask |= (s == t)
+    return mask
 
-        self._sample_ids = set(sample.tolist())
-        rader = (df[c.bilag].astype(str).isin(self._sample_ids)).sum()
-        messagebox.showinfo("Trekk klart", f"Valgte {len(self._sample_ids)} bilag. Linjer i utvalget: {rader:,}.")
+def apply_scope(df: pd.DataFrame, cols: Columns, cfg: ScopeCfg) -> pd.DataFrame:
+    c = cols; d = df.copy()
+    if getattr(c, "dato", None) and c.dato in d.columns:
+        if cfg.date_from is not None:
+            d = d[d[c.dato] >= cfg.date_from]
+        if cfg.date_to is not None:
+            d = d[d[c.dato] <= cfg.date_to]
+    tokens = _parse_accounts_expr(cfg.accounts_expr)
+    if tokens: d = d[_acct_mask(d[c.konto], tokens)]
+    if cfg.direction.lower().startswith("debet"): d = d[d[c.belop] > 0]
+    elif cfg.direction.lower().startswith("kredit"): d = d[d[c.belop] < 0]
+    if cfg.min_amount is not None or cfg.max_amount is not None:
+        s = d[c.belop].abs() if (cfg.use_abs and cfg.apply_to == "Alle") else d[c.belop]
+        if cfg.apply_to.lower().startswith("debet"): s = d[c.belop][d[c.belop] > 0]
+        elif cfg.apply_to.lower().startswith("kredit"): s = d[c.belop][d[c.belop] < 0]
+        if cfg.min_amount is not None: d = d[s >= cfg.min_amount]
+        if cfg.max_amount is not None: d = d[s <= cfg.max_amount]
+    return d
 
-    def _export(self):
-        if not hasattr(self, "_sample_ids") or not self._sample_ids:
-            messagebox.showinfo("Eksport", "Trekk bilag før eksport.")
-            return
-        df, c = self.df, self.cols
-        if df is None or c is None:
-            return
-        try:
-            export_selection_to_excel(df, c, self._sample_ids)
-        except Exception as e:
-            messagebox.showerror("Eksport feilet", str(e))
+def pivot_accounts(df: pd.DataFrame, cols: Columns) -> pd.DataFrame:
+    if df is None or df.empty: return pd.DataFrame()
+    c = cols
+    return (df.groupby([c.konto, c.kontonavn])[c.belop].agg(Linjer="count", Sum="sum").reset_index().sort_values([c.konto, c.kontonavn]))
+
+def stratify(df: pd.DataFrame, cols: Columns, bcfg: BucketCfg) -> pd.DataFrame:
+    if df is None or df.empty or bcfg.n <= 0: return pd.DataFrame(columns=["Bucket","Unike bilag","Sum"])
+    c = cols; s = df[c.belop].abs() if bcfg.basis == "abs" else df[c.belop]
+    if bcfg.method == "equal":
+        mn, mx = float(s.min()), float(s.max())
+        if mn == mx: edges = [mn, mx]
+        else: edges = list(np.linspace(mn, mx, bcfg.n + 1))
+    else:
+        qs = np.linspace(0, 1, bcfg.n + 1); edges = s.quantile(qs).tolist()
+        for i in range(1, len(edges)):
+            if edges[i] <= edges[i-1]: edges[i] = edges[i-1] + 0.01
+    labels = [f"{edges[i]:,.2f} – {edges[i+1]:,.2f}" for i in range(bcfg.n)]
+    cats = pd.cut(s, bins=edges, include_lowest=True, labels=labels)
+    tab = df.assign(Bucket=cats).groupby("Bucket")[c.bilag].nunique().reset_index(name="Unike bilag")
+    sums = df.assign(Bucket=cats).groupby("Bucket")[c.belop].sum().reset_index(name="Sum")
+    out = tab.merge(sums, on="Bucket", how="left")
+    return out

@@ -1,17 +1,12 @@
 from __future__ import annotations
-from typing import Optional, Tuple
+from typing import Tuple, Optional
 import pandas as pd
 from models import Columns
-
-_DF: Optional[pd.DataFrame] = None
-_COLS: Optional[Columns] = None
-
+_df: Optional[pd.DataFrame] = None
+_cols: Optional[Columns] = None
 def set_dataset(df: pd.DataFrame, cols: Columns) -> None:
-    global _DF, _COLS
-    _DF, _COLS = df.copy(), cols
-
+    global _df, _cols; _df, _cols = df, cols
 def get_dataset() -> Tuple[Optional[pd.DataFrame], Optional[Columns]]:
-    return _DF, _COLS
-
+    return _df, _cols
 def has_dataset() -> bool:
-    return _DF is not None and _COLS is not None
+    return _df is not None and _cols is not None

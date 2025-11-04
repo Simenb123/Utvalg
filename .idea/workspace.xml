@@ -5,18 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/export_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_utvalg.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/theme.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/controller_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/controller_core.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/formatting.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/io_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/io_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ml_map.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/session.py" beforeDir="false" afterPath="$PROJECT_DIR$/session.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -81,7 +71,14 @@
       <option name="presentableId" value="LOCAL−00001" />
       <updated>1762186659188</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL−00002" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1762207456690</created>
+      <option name="number" value="LOCAL−00002" />
+      <option name="presentableId" value="LOCAL−00002" />
+      <updated>1762207456690</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

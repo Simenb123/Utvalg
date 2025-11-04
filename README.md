@@ -1,31 +1,41 @@
-# Utvalgsgenerator – Runde C (leveranse)
 
-Denne leveransen er en **selvstendig** og ryddig modulær versjon av appen.
-Alt er standard Python (.py). Start med `app.py`.
+# Handover – Utvalg (M5c)
+
+Dette er siste stabile leveranse (**M5c**) av appen for revisjonsanalyse av hovedbok (Tkinter, én‑vindu). Inneholder samtlige `.py`‑filer og denne README.md.
+
+## Kort om flyten
+- **Datasett**: Åpne fil → header‑deteksjon → kolonnemapping (konto, kontonavn, bilag, beløp, dato, tekst, part; valgfritt: forfall/periodestart/periodeslutt) → **Bygg datasett** (lagres i session og Analyse‑fanen oppdateres).
+- **Analyse**: Søk/filter (retning, beløp, periode), pivot pr. konto, transaksjoner for markerte kontoer, **dbl‑klikk drilldown** på bilag, **motpost‑fordeling**, **Til utvalg**.
+- **Utvalg**: Populasjon og underpopulasjoner (konto‑uttrykk, beløp/retning/periode), stratifisering i bøtter, *trekk n bilag*, eksport (temp‑xlsx).
+- **Analyser (Excel)**: Runde beløp‑andeler, Outliers, A/B‑krysshint (likt beløp / motsatt fortegn / two‑sum), Duplikater (flere varianter), Periodekontroller (inkl. forfall/egen rad‑periode).
 
 ## Kjøring
 ```bash
-python app.py
+pip install pandas numpy openpyxl chardet
+python ui_main.py
 ```
 
-Avhengigheter: `pandas`, `numpy`, `openpyxl`, `chardet` (for CSV).
+## Viktige prinsipper
+- **Norsk format** i visning: `dd.mm.yyyy` og tusenskiller m/ komma‑desimal.
+- **Mini‑ML** (`ml_map.py`) gjenkjenner filtyper basert på header‑signatur + co‑occurrence‑hint for hele kolonnesett.
+- **Best‑effort eksport**: analyser som mangler forutsetninger blir utelatt fremfor å feile.
 
-## Struktur (kort)
-- `app.py` – entrypoint.
-- `ui_main.py` – hovedvindu, faner: Datasett, Analyse, Utvalg.
-- `dataset_pane.py` – åpne fil, finne header, velge kolonner, bygge datasett.
-- `page_analyse.py` – kontopivot til venstre + transaksjoner til høyre.
-- `views_selection_studio.py` – segmentering/kvantiler og trekk/eksport.
-- `controller_core.py` – filtrerings/kalkulasjonslogikk.
-- `io_utils.py` – lesing av Excel/CSV, header-deteksjon, kolonne‑gjetting.
-- `formatting.py` – norsk formatering (beløp/dato) + parser.
-- `models.py` – dataklasser for kolonner m.m.
-- `session.py` – delt datasett mellom faner.
-- `preferences.py` – enkle preferanser (json).
-- `ui_utils.py` & `theme.py` – UI‑nytte og tema.
-- `export_utils.py` – Excel‑eksport (åpner filen direkte).
+## TODO (neste utvikler)
+1. **A/B mellom to kilder** – eget “Datasett B” + menypunkt for A↔B‑krysshint. Ytelse: bucketing og grenset n for par.
+2. **UI‑polish** – zebra‑striper, pinne kolonner, raskere søk i transaksjoner, bedre kolonnebreddestyring.
+3. **Skalerbarhet** – lazy‑load/virtuell Treeview for store filer, caching av pivoter.
+4. **Tester** – pytest for IO/format/ML/analyse. Testdata: små CSV/Excel‑snutter med ulike headere.
+5. **Flere analyser** – terskel‑mønstre, bruker/part‑sekvenser, avvik mot saldobalanse, toleranser pr. konto/part.
+6. **Eksportmaler** – Excel‑mal med pivoter, slicere og formler per ark.
 
-## Viktige valg
-- **Norsk visning**: tusenskiller med mellomrom og komma som desimal.
-- **Ingen popup‑storm**: Alt skjer i hovedvindu/faner. (Kun fil‑dialoger når nødvendig.)
-- **Debug**: Detaljerte `try/except` med `messagebox` og konsoll‑logging.
+## Filer
+Se koden i denne mappen. Nøkler:
+- `dataset_pane.py` (innlasting/kolonnemapping/ML)
+- `page_analyse.py` (pivot, drilldown, motpost, til utvalg)
+- `page_utvalg.py` (populasjon/underpop/stratifisering/trekk/eksport)
+- `analysis_pkg.py`, `ab_analysis.py`, `dup_period_checks.py` (analyser)
+- `io_utils.py`, `formatting.py`, `ml_map.py` (I/O, format, ML)
+- `excel_export.py` (temp‑xlsx, åpnes direkte)
+- `theme.py`, `logger.py`, `ui_utils.py`, `session.py`, `controller_core.py`
+
+God videre utvikling!

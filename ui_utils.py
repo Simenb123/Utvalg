@@ -1,25 +1,30 @@
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
-from datetime import datetime
+from typing import Dict, Any
 from formatting import parse_amount
 
-def enable_treeview_sort(tree: ttk.Treeview, types: dict[str, str]) -> None:
-    """Klikk på kolonneoverskrift for å sortere. types: {"col": "int|amount|date|text"}"""
-    def _sort(col, reverse):
-        rows = [(tree.set(k, col), k) for k in tree.get_children("")]
-        typ = types.get(col, "text")
-        if typ == "int":
-            conv = lambda x: int(str(x).replace(" ", "") or 0)
-        elif typ == "amount":
-            conv = lambda x: parse_amount(x) or 0.0
-        elif typ == "date":
-            conv = lambda x: datetime.strptime(str(x), "%d.%m.%Y") if x else datetime.min
-        else:
-            conv = lambda x: str(x)
-        rows.sort(key=lambda t: conv(t[0]), reverse=reverse)
-        for index, (_, k) in enumerate(rows):
-            tree.move(k, "", index)
-        tree.heading(col, command=lambda: _sort(col, not reverse))
+def enable_treeview_sort(tree: ttk.Treeview, types: Dict[str, str]) -> None:
+    sort_state = {}
+    def sort_by(col: str):
+        items = [(iid, tree.set(iid, col)) for iid in tree.get_children("")]
+        t = types.get(col, "text")
+        def keyfun(v: str) -> Any:
+            if t == "int":
+                try: return int(str(v).replace(" ", ""))
+                except Exception: return 0
+            if t == "amount":
+                try:
+                    s = (v or "").replace(" ", "").replace("kr","").replace("\u00A0","").replace(".", "").replace(",", ".")
+                    return float(s)
+                except Exception:
+                    return 0.0
+            if t == "date":
+                return v
+            return str(v).lower()
+        items.sort(key=lambda pair: keyfun(pair[1]), reverse=sort_state.get(col, False))
+        for idx, (iid, _v) in enumerate(items):
+            tree.move(iid, "", idx)
+        sort_state[col] = not sort_state.get(col, False)
     for col in tree["columns"]:
-        tree.heading(col, command=lambda c=col: _sort(c, False))
+        tree.heading(col, command=lambda c=col: sort_by(c))
