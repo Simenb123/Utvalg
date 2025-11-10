@@ -1,0 +1,59 @@
+{
+  "last_client": "ukjent",
+  "last_open_dir": "C:\\Users\\ib91\\Desktop\\SAF-T\\NBS Regnskap AS SAF-T Financial_829031132_20250820182035_1_1 NY 05.11.2025 kl 1353_SAFT_OUTPUT\\excel",
+  "pinned": {
+    "analyse": [
+      "Konto",
+      "Kontonavn",
+      "Bilag",
+      "Beløp"
+    ],
+    "utvalg": [
+      "Konto",
+      "Kontonavn",
+      "Bilag",
+      "Beløp"
+    ]
+  },
+  "analyse.series": [
+    "3"
+  ],
+  "analyse.pinned": [
+    "Beløp",
+    "Bilag"
+  ],
+  "utvalg.pinned": [
+    "Konto",
+    "Kontonavn",
+    "Bilag",
+    "Beløp"
+  ],
+  "analyse.columns.order": [
+    "Konto",
+    "Kontonavn",
+    "Bilag",
+    "Dato",
+    "Beløp",
+    "Tekst",
+    "Kundenr",
+    "Kundenavn",
+    "Leverandørnr",
+    "Leverandørnavn",
+    "Valuta",
+    "Valutabeløp",
+    "MVA-kode",
+    "MVA-beløp",
+    "MVA-prosent"
+  ],
+  "analyse.columns.visible": [
+    "Konto",
+    "Kontonavn",
+    "Bilag",
+    "Dato",
+    "Beløp",
+    "Tekst",
+    "MVA-kode",
+    "MVA-beløp",
+    "MVA-prosent"
+  ]
+}

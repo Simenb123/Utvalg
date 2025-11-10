@@ -1,0 +1,90 @@
+{
+  "version": 2,
+  "flags": {
+    "learning_enabled": true,
+    "memory_enabled": true
+  },
+  "global": {
+    "accountid": {
+      "konto": 17
+    },
+    "accountdescription": {
+      "kontonavn": 17
+    },
+    "voucherid": {
+      "bilag": 17
+    },
+    "amount": {
+      "belop": 16
+    },
+    "debit": {
+      "debit": 17
+    },
+    "credit": {
+      "credit": 17
+    },
+    "description": {
+      "tekst": 17
+    },
+    "date": {
+      "dato": 17
+    },
+    "customerid": {
+      "part": 17
+    }
+  },
+  "schemas": {
+    "5de56f4811fdc9d68047fc3d0be013926b5fd01c": {
+      "mapping": {
+        "konto": "AccountID",
+        "kontonavn": "AccountDescription",
+        "bilag": "VoucherID",
+        "belop": "Amount",
+        "debit": "Debit",
+        "credit": "Credit",
+        "tekst": "Description",
+        "dato": "Date",
+        "part": "CustomerID"
+      },
+      "cols": [
+        "Date",
+        "VoucherID",
+        "VoucherNo",
+        "JournalID",
+        "DocumentNumber",
+        "AccountID",
+        "AccountDescription",
+        "CustomerID",
+        "CustomerName",
+        "SupplierID",
+        "SupplierName",
+        "Debit",
+        "Credit",
+        "Amount",
+        "TaxCode",
+        "TaxAmount",
+        "DebitTaxAmount",
+        "CreditTaxAmount",
+        "PostingDate",
+        "TransactionDate",
+        "Year",
+        "Period",
+        "RecordID",
+        "SystemID",
+        "BatchID",
+        "SourceDocumentID",
+        "CustomerVATNumber",
+        "SupplierVATNumber",
+        "Description",
+        "CurrencyCode",
+        "AmountCurrency",
+        "ExchangeRate",
+        "TaxType",
+        "TaxCountryRegion",
+        "TaxPercentage",
+        "IsGL",
+        "SourceType"
+      ]
+    }
+  }
+}

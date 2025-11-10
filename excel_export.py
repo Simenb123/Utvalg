@@ -1,27 +1,21 @@
+
 from __future__ import annotations
-from typing import Dict
-import os, sys, tempfile, subprocess
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
-def _san(name: str) -> str:
-    bad = '[]:*?/\\'
-    for ch in bad: name = name.replace(ch, "_")
-    return name[:31] if len(name) > 31 else name
+def export_strata_and_sample(xlsx_path: str, strata_df: pd.DataFrame, sample_df: pd.DataFrame) -> None:
+    """Eksporter to ark: 'Strata' og 'Trekk' med norsk formateringsvennlig data.
+    Lar Excel gjøre visningen; vi holder oss enkle for kompatibilitet.
+    """
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Strata"
+    for r in dataframe_to_rows(strata_df, index=False, header=True):
+        ws1.append(r)
 
-def _open_path(path: str) -> None:
-    try:
-        if sys.platform.startswith("win"): os.startfile(path)  # type: ignore[attr-defined]
-        elif sys.platform == "darwin": subprocess.Popen(["open", path])
-        else: subprocess.Popen(["xdg-open", path])
-    except Exception: pass
+    ws2 = wb.create_sheet("Trekk")
+    for r in dataframe_to_rows(sample_df, index=False, header=True):
+        ws2.append(r)
 
-def export_temp_excel(sheets: Dict[str, pd.DataFrame], prefix: str = "Utvalg_") -> str:
-    import warnings
-    warnings.simplefilter("ignore", category=FutureWarning)
-    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".xlsx"); os.close(fd)
-    with pd.ExcelWriter(path, engine="openpyxl") as xw:
-        for name, df in sheets.items():
-            if df is None: continue
-            try: df.to_excel(xw, sheet_name=_san(str(name)), index=False)
-            except Exception: pd.DataFrame(df).to_excel(xw, sheet_name=_san(str(name)), index=False)
-    _open_path(path); return path
+    wb.save(xlsx_path)

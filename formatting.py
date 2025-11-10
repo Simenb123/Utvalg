@@ -1,47 +1,61 @@
 from __future__ import annotations
-from typing import Any, Optional
+import math
 import pandas as pd
-import numpy as np
+from typing import Any, Optional
 
-DECIMAL_COMMA = True
+_THINSPACE = "\u202F"  # reserved if we want, but we use normal space per spec
 
-def fmt_amount(x: Any) -> str:
-    try: xv = float(x)
-    except (TypeError, ValueError): return ""
-    txt = f"{xv:,.2f}"
-    if DECIMAL_COMMA:
-        txt = txt.replace(",", " ").replace(".", ",")
-    return txt
+def format_number_no(x: Any, decimals: int = 2) -> str:
+    """Norsk visning: tusenskiller ' ' (mellomrom), komma som desimal."""
+    if x is None:
+        return ""
+    try:
+        if isinstance(x, (pd.Series, pd.DataFrame)):
+            raise TypeError("format_number_no expects scalar")
+        if isinstance(x, str) and x.strip() == "":
+            return ""
+        v = float(x)
+        if math.isnan(v):
+            return ""
+    except Exception:
+        return str(x)
+    s = f"{v:,.{decimals}f}"  # 1,234,567.89
+    # bytt om: komma -> mellomrom (tusen), punktum -> komma (desimal)
+    s = s.replace(",", " ").replace(".", ",")
+    return s
 
-def fmt_int(n: Any) -> str:
-    try: iv = int(n)
-    except (TypeError, ValueError): return "0"
-    txt = f"{iv:,}"
-    if DECIMAL_COMMA: txt = txt.replace(",", " ")
-    return txt
-
-def parse_amount(s: Any) -> Optional[float]:
-    if s is None: return None
-    t = str(s).strip()
-    if t == "": return None
-    t = t.replace(" ", "").replace("kr", "").replace("\u00A0","").replace(".", "").replace(",", ".")
-    try: return float(t)
-    except Exception: return None
-
-def fmt_date(v: Any) -> str:
-    if v is None or (isinstance(v, float) and np.isnan(v)): return ""
-    try: d = pd.to_datetime(v, errors="coerce", dayfirst=True)
-    except Exception: return ""
-    if pd.isna(d): return ""
-    return d.strftime("%d.%m.%Y")
-
-def parse_date(s: str):
-    s = (s or "").strip()
-    if not s: return None
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+def format_int_no(x: Any) -> str:
+    if x is None:
+        return ""
+    try:
+        v = int(x)
+    except Exception:
+        # fall back to float->int when it's like 12.0
         try:
-            return pd.to_datetime(s, format=fmt, errors="raise")
+            v = int(float(x))
         except Exception:
-            continue
-    d = pd.to_datetime(s, errors="coerce", dayfirst=True)
-    return None if pd.isna(d) else d
+            return str(x)
+    s = f"{v:,}".replace(",", " ")
+    return s
+
+def format_date_no(x: Any) -> str:
+    if x is None:
+        return ""
+    try:
+        if isinstance(x, str):
+            ts = pd.to_datetime(x, errors="coerce", dayfirst=True)
+        else:
+            ts = pd.to_datetime(x, errors="coerce")
+        if pd.isna(ts):
+            return ""
+        return ts.strftime("%d.%m.%Y")
+    except Exception:
+        return str(x)
+
+def is_number_like_col(col_name: str) -> bool:
+    lname = (col_name or "").lower()
+    return any(k in lname for k in ["beløp","belop","sum","mva","valuta","amount"])
+
+def is_percent_col(col_name: str) -> bool:
+    lname = (col_name or "").lower()
+    return "prosent" in lname or lname.endswith("%")

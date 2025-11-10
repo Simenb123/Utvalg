@@ -3,14 +3,15 @@ from dataclasses import dataclass
 
 @dataclass
 class Columns:
+    # Obligatoriske
     konto: str = ""
     kontonavn: str = ""
     bilag: str = ""
     belop: str = ""
-    tekst: str = ""
+    # Valgfrie
     dato: str = ""
+    tekst: str = ""
     part: str = ""
-    # Ekstra dato-felter (valgfritt)
-    due: str = ""           # Forfallsdato
-    periodestart: str = ""  # Periode-startkolonne
-    periodeslutt: str = ""  # Periode-sluttkolonne
+    due: str = ""            # forfallsdato
+    periodestart: str = ""   # periode-start
+    periodeslutt: str = ""   # periode-slutt
