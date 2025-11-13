@@ -1,142 +1,214 @@
+"""Utvalg – fane for transaksjonsutvalg og stratifisering."""
+
 from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk, messagebox
+
 import pandas as pd
+from typing import Optional, Callable
 
+# Forsøk å importere stratifiseringsdialogen fra pakken.
+# Ved feil vises en klar feilmelding i stedet for fallback-stub.
 try:
-    import session  # type: ignore
-except Exception:
-    class session:  # type: ignore
-        dataset = None
+    from .views_selection_studio import SelectionStudio
+except Exception as e:
+    from tkinter import messagebox
+    def _show_strat_error():
+        messagebox.showerror(
+            "Stratifisering",
+            f"Feil ved lasting av stratifieringsmodul: {e}"
+        )
+    class SelectionStudio:
+        def __init__(self, master, df: pd.DataFrame, on_commit: Callable | None = None,
+                     df_all: pd.DataFrame | None = None) -> None:
+            _show_strat_error()
 
-from io_utils import apply_kontoserie_filter
-from views_virtual_transactions import VirtualTransactionsPanel
-
-try:
-    from views_selection_studio import SelectionStudio
-except Exception:
-    class SelectionStudio:  # stub
-        def __init__(self, master, df, on_commit=None): 
-            messagebox.showinfo("Stratifisering", "Stratifisering er ikke tilgjengelig i denne builden.")
-
-try:
-    from views_bilag_drill import BilagDrillDialog
-except Exception:
-    class BilagDrillDialog:  # stub
-        def __init__(self, master, df, bilag_col="Bilag"): pass
-        def preset_and_show(self, *_a, **_k):
-            messagebox.showinfo("Bilagsdrill", "Bilagsdrill er ikke tilgjengelig i denne builden.")
-
-try:
-    from ui_loading import LoadingOverlay
-except Exception:
-    class LoadingOverlay:
-        def __init__(self, *_a, **_k): pass
-        def busy(self, *_a, **_k):
-            class _C: 
-                def __enter__(self_s): return None
-                def __exit__(self_s, *e): return False
-            return _C()
+# Import av resten av applikasjonens komponenter
+from .views_virtual_transactions import VirtualTransactionsPanel
+from .preferences import preferences
+from . import session
+from .bus import emit
 
 class UtvalgPage(ttk.Frame):
-    def __init__(self, master):
-        super().__init__(master)
-        self.loading = LoadingOverlay(self)
-        self._df_all = pd.DataFrame()
-        self._df_filtered = pd.DataFrame()
-        self._visible_columns = []
+    """
+    Fane for å vise utvalgte transaksjoner og starte stratifisering.
+    Den viser alle transaksjoner for de kontoene du markerer i Analyse-fanen,
+    og lar deg filtrere og sende videre til stratifisering.
+    """
 
-        self._build_ui()
-        self.after(300, self._autoload_from_session)
+    def __init__(self, parent, *_, **__) -> None:
+        super().__init__(parent)
+        self.pack(fill='both', expand=True)
 
-    def _build_ui(self):
-        bar = ttk.Frame(self); bar.pack(fill="x", padx=6, pady=6)
-        ttk.Label(bar, text="Søk:").pack(side="left")
+        # DataFrame for alle transaksjoner (basert på valgte kontoer)
+        self._df_all: Optional[pd.DataFrame] = None
+        # DataFrame med filtrerte transaksjoner som vises i tabellen
+        self._df_show: pd.DataFrame = pd.DataFrame()
+
+        # Preferanser for hvilke kolonner som vises og er pinned
+        self._visible_columns: list[str] = []
+        self._pinned_columns: list[str] = []
+        self._display_limit = preferences.get("utvalg.display_limit", 200)
+
+        # Registrer deg som klar i bus-systemet
+        emit("UTVALG_PAGE_READY", self)
+
+        # UI‑variabler for søk og filtre
         self.var_search = tk.StringVar()
-        ttk.Entry(bar, textvariable=self.var_search, width=20).pack(side="left")
-
-        ttk.Label(bar, text="Retning:").pack(side="left", padx=(8,0))
         self.var_dir = tk.StringVar(value="Alle")
-        ttk.Combobox(bar, values=("Alle","Debet","Kredit"), textvariable=self.var_dir, width=8, state="readonly").pack(side="left")
+        self.vars_series = [tk.BooleanVar(value=False) for _ in range(9)]
 
-        ttk.Label(bar, text="Kontoserier:").pack(side="left", padx=(8,0))
-        self.var_series = {i: tk.BooleanVar(value=False) for i in range(1,9+1)}
-        for i in range(1,9+1):
-            ttk.Checkbutton(bar, text=str(i), variable=self.var_series[i], command=self.apply_filters).pack(side="left")
+        # Bygg brukergrensesnittet
+        self._build_ui()
 
-        ttk.Button(bar, text="Bruk filtre", command=self.apply_filters).pack(side="left", padx=(8,0))
-        ttk.Button(bar, text="Til underpop/Stratifisering", command=self._open_studio).pack(side="left", padx=(8,0))
+        # Oppdater sammendrag
+        self._update_filter_summary()
 
-        self.lbl_sum = ttk.Label(self, text="Oppsummering: rader=0 | sum=0,00")
-        self.lbl_sum.pack(anchor="w", padx=6)
+    def _build_ui(self) -> None:
+        """Bygg topp-panel med søk, retning og kontoserier samt transaksjonstabell."""
+        top = ttk.Frame(self)
+        top.pack(fill='x', pady=4, padx=4)
 
-        self.trans = VirtualTransactionsPanel(self, columns=["Bilag","Konto","Kontonavn","Dato","Beløp","Tekst"],
-                                              display_limit=200, on_row_dblclick=self._open_drill)
-        self.trans.pack(fill="both", expand=True, padx=6, pady=6)
+        ttk.Label(top, text="Søk:").grid(row=0, column=0, sticky='w')
+        ttk.Entry(top, textvariable=self.var_search, width=20).grid(row=0, column=1, sticky='w')
+        ttk.Label(top, text="Retning:").grid(row=0, column=2, sticky='w', padx=(10, 0))
+        ttk.Combobox(
+            top, values=("Alle", "Debet", "Kredit"), textvariable=self.var_dir,
+            state="readonly", width=10
+        ).grid(row=0, column=3, sticky='w')
 
-    def _autoload_from_session(self):
-        try:
-            if getattr(session, "dataset", None) is None or len(session.dataset)==0:
-                return
-            df: pd.DataFrame = session.dataset.copy()
-        except Exception:
-            return
-        base_cols = ["Bilag","Konto","Kontonavn","Dato","Beløp","Tekst",
-                     "Kundenr","Kundenavn","Leverandørnr","Leverandørnavn","Valuta","Valutabeløp","MVA-kode","MVA-beløp","MVA-prosent"]
-        self._visible_columns = [c for c in base_cols if c in df.columns] or list(df.columns[:10])
-        self._df_all = df
+        ttk.Label(top, text="Kontoserier:").grid(row=0, column=4, sticky='w', padx=(10, 0))
+        for i in range(9):
+            ttk.Checkbutton(
+                top, text=str(i+1), variable=self.vars_series[i]
+            ).grid(row=0, column=5+i, sticky='w')
+
+        ttk.Button(top, text="Bruk filtre", command=self.apply_filters).grid(row=0, column=14, sticky='w', padx=(10, 0))
+        ttk.Button(top, text="Til underpop/Stratifisering", command=self._open_studio).grid(row=0, column=15, sticky='w')
+
+        # Oppsummering av antall rader og sum
+        self.lbl_summary = ttk.Label(self, text="Grunnlag: rader=0 | sum=0,00")
+        self.lbl_summary.pack(anchor='w', padx=4)
+
+        # Transaksjonsliste (VirtualTransactionsPanel)
+        self.trans = VirtualTransactionsPanel(self, on_row_dblclick=self._on_row_dblclick)
+        self.trans.pack(fill='both', expand=True)
+
+    def on_dataset_loaded(self, df: pd.DataFrame) -> None:
+        """Kalles når Dataset-panelet har lastet inn et datasett."""
+        self._df_all = df.copy()
         self.apply_filters()
 
-    def apply_filters(self):
-        with self.loading.busy("Filtrerer utvalg..."):
-            df = self._df_all
-            if df.empty:
-                self.trans.set_dataframe(pd.DataFrame(), columns=self._visible_columns)
-                self.lbl_sum.config(text="Oppsummering: rader=0 | sum=0,00")
-                return
-            q = self.var_search.get().strip().lower()
-            if q:
-                txtcols = [c for c in ("Tekst","Kontonavn") if c in df.columns]
-                if txtcols:
-                    mask = False
-                    for c in txtcols:
-                        mask = mask | df[c].astype(str).str.lower().str.contains(q, na=False)
-                    df = df[mask]
-            if "Beløp" in df.columns:
-                bel = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0.0)
-                dirv = self.var_dir.get()
-                if dirv=="Debet": df = df[bel>0]
-                elif dirv=="Kredit": df = df[bel<0]
-            series = {i for i,var in self.var_series.items() if var.get()}
-            if series:
-                df = apply_kontoserie_filter(df, series, konto_col="Konto")
-
-            self._df_filtered = df
-            n = len(df)
-            s = pd.to_numeric(df.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0).sum()
-            self.lbl_sum.config(text=f"Oppsummering: rader={n:,} | sum={s:,.2f}".replace(",", " ").replace(".", ","))
-            self.trans.set_dataframe(df[self._visible_columns], columns=self._visible_columns)
-
-    def _open_studio(self):
-        if self._df_filtered.empty:
-            messagebox.showinfo("Stratifisering", "Ingen rader i utvalg. Marker kontoer og/eller sett filtre først.")
+    def apply_filters(self) -> None:
+        """
+        Filtrer transaksjoner basert på søk, retning og kontoserier.
+        Denne metoden oppdaterer _df_show og tabellen.
+        """
+        if self._df_all is None:
             return
-        def on_commit(sample_df: pd.DataFrame):
-            self._df_filtered = sample_df.copy()
-            n = len(sample_df)
-            s = pd.to_numeric(sample_df.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0).sum()
-            self.lbl_sum.config(text=f"Oppsummering: rader={n:,} | sum={s:,.2f}".replace(",", " ").replace(".", ","))
-            self.trans.set_dataframe(self._df_filtered[self._visible_columns], columns=self._visible_columns)
-        try:
-            SelectionStudio(self, self._df_filtered, on_commit=on_commit)
-        except Exception:
-            messagebox.showinfo("Stratifisering", "Stratifisering ikke tilgjengelig i denne builden.")
 
-    def _open_drill(self, row):
+        df = self._df_all.copy()
+
+        # Filter på tekst/kontonavn
+        query = self.var_search.get().strip().lower()
+        if query:
+            mask = df["Tekst"].astype(str).str.lower().str.contains(query) \
+                 | df["Kontonavn"].astype(str).str.lower().str.contains(query)
+            df = df[mask]
+
+        # Filter på retning
+        bel = pd.to_numeric(df.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0)
+        if self.var_dir.get() == "Debet":
+            df = df[bel > 0]
+        elif self.var_dir.get() == "Kredit":
+            df = df[bel < 0]
+
+        # Filter på kontoserier (første siffer i kontonummer)
+        selected_series = [i+1 for i, var in enumerate(self.vars_series) if var.get()]
+        if selected_series:
+            mask = df["Konto"].astype(str).str[0].astype(int).isin(selected_series)
+            df = df[mask]
+
+        self._df_show = df
+        self._prepare_columns()
+        self.trans.set_dataframe(
+            df, columns=self._visible_columns,
+            pinned=self._pinned_columns, limit=self._display_limit
+        )
+        self._update_filter_summary()
+
+    def _prepare_columns(self) -> None:
+        """
+        Bestem rekkefølge og visning av kolonner basert på default rekkefølge og preferanser.
+        """
+        base_columns = [
+            "Bilag", "Konto", "Kontonavn", "Dato", "Beløp", "Tekst",
+            "Kundenr", "Kundenavn", "Leverandørnr", "Leverandørnavn",
+            "Valuta", "Valutabeløp", "MVA-kode", "MVA-beløp", "MVA-prosent"
+        ]
+        cols = [c for c in base_columns if c in self._df_show.columns]
+
+        pinned = preferences.get("utvalg.pinned", [])
+        visible = preferences.get("utvalg.visible", cols)
+
+        pinned_ordered = [c for c in pinned if c in cols]
+        self._pinned_columns = pinned_ordered
+        self._visible_columns = pinned_ordered + [c for c in visible if c not in pinned_ordered]
+
+    def _update_filter_summary(self) -> None:
+        """Vis antall rader og sum av beløp for visningen."""
+        if self._df_show.empty:
+            self.lbl_summary.config(text="Grunnlag: rader=0 | sum=0,00")
+            return
+        total = len(self._df_show)
+        sum_bel = pd.to_numeric(
+            self._df_show.get("Beløp", pd.Series(dtype="float64")),
+            errors="coerce"
+        ).fillna(0.0).sum()
+        text = f"Grunnlag: rader={total:,} | sum={sum_bel:,.2f}".replace(",", " ").replace(".", ",")
+        self.lbl_summary.config(text=text)
+
+    def _open_studio(self) -> None:
+        """
+        Åpne stratifiseringsvinduet (SelectionStudio) med gjeldende utvalg.
+        """
+        if self._df_show.empty:
+            messagebox.showinfo("Stratifisering", "Ingen rader i utvalget.")
+            return
+
+        def on_commit(df_sample: pd.DataFrame) -> None:
+            """
+            Oppdater tabellen med sample etter stratifisering.
+            """
+            if df_sample is not None and not df_sample.empty:
+                # Fjern 'Stratum'-kolonne hvis den finnes
+                df_sample = df_sample.drop(columns=[c for c in df_sample.columns if c == 'Stratum'], errors="ignore")
+                self._df_show = df_sample
+                self._prepare_columns()
+                self.trans.set_dataframe(
+                    df_sample, columns=self._visible_columns,
+                    pinned=self._pinned_columns, limit=self._display_limit
+                )
+                self._update_filter_summary()
+
+        # Åpne SelectionStudio
+        SelectionStudio(self, self._df_show, on_commit, self._df_all)
+
+    def _on_row_dblclick(self, row_data: dict) -> None:
+        """
+        Ved dobbeltklikk: scroll til alle linjer i utvalget med samme bilag.
+        """
         try:
-            if row is None or "Bilag" not in self._df_all.columns:
+            bilag = row_data.get("Bilag")
+            if bilag is None:
                 return
-            dlg = BilagDrillDialog(self, self._df_all, bilag_col="Bilag")
-            dlg.preset_and_show(row.get("Bilag",""))
+            mask = self._df_show["Bilag"] == bilag
+            self.trans.set_dataframe(
+                self._df_show.loc[mask],
+                columns=self._visible_columns,
+                pinned=self._pinned_columns,
+                limit=0  # vis alle rader for bilaget
+            )
         except Exception:
-            messagebox.showinfo("Bilag", "Bilagsdrill ikke tilgjengelig i denne builden.")
+            pass

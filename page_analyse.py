@@ -100,6 +100,8 @@ class AnalysePage(ttk.Frame):
 
         ttk.Button(bar, text="Nullstill", command=self._reset_filters).pack(side="left")
         ttk.Button(bar, text="Bruk filtre", command=lambda: self._schedule_apply(force_now=True)).pack(side="left", padx=(8,0))
+        # Knapp for å markere alle kontoer i pivoten; gjør det enklere å sende alle filtrerte kontoer til utvalg
+        ttk.Button(bar, text="Marker alle", command=self._select_all_pivot).pack(side="left", padx=(8,0))
         ttk.Button(bar, text="Til utvalg", command=self._send_to_selection).pack(side="left", padx=(8,0))
 
         self.pin_menu_btn = ttk.Menubutton(bar, text="Pinned kolonner"); self.pin_menu=tk.Menu(self.pin_menu_btn, tearoff=False)
@@ -110,7 +112,8 @@ class AnalysePage(ttk.Frame):
         left = ttk.Frame(body); left.columnconfigure(0, weight=1); left.rowconfigure(1, weight=1)
         ttk.Label(left, text="Pivot pr. konto").grid(row=0,column=0,sticky="w")
         self.pivot = ttk.Treeview(left, columns=["Konto","Kontonavn","Sum","Antall"], show="headings", selectmode="extended", takefocus=True)
-        for c,w in [("Konto",110),("Kontonavn",300),("Sum",120),("Antall",80)]:
+        # Øk standardbredden for Konto-kolonnen for bedre lesbarhet
+        for c,w in [("Konto",140),("Kontonavn",300),("Sum",120),("Antall",80)]:
             self.pivot.heading(c, text=c, command=(lambda col=c: self._on_pivot_heading(col)))
             self.pivot.column(c, width=w, anchor=("e" if c in ("Sum","Antall") else "w"))
         self.pivot.grid(row=1,column=0,sticky="nsew", padx=6, pady=6)
@@ -121,11 +124,25 @@ class AnalysePage(ttk.Frame):
         self.lbl_summary.grid(row=1, column=0, sticky="w", padx=6, pady=(0,2))
         self.trans = VirtualTransactionsPanel(right, columns=PRIORITY_TRANS_COLS)
         self.trans.grid(row=2,column=0,sticky="nsew", padx=6, pady=6)
-        body.add(left, weight=1); body.add(right, weight=2)
+        # Gi venstresiden (pivot) noe mer plass utgangsmessig. Tidligere var ratio 1:2,
+        # men brukerne rapporterte at pivot-området ble for smalt. Ved å øke vekten til
+        # 3 for venstre og 5 for høyre får vi et mer balansert forhold.
+        body.add(left, weight=3); body.add(right, weight=5)
         status = ttk.Frame(self); status.grid(row=3,column=0,sticky="ew", padx=6, pady=(0,6))
         self.lbl_status = ttk.Label(status, text="Transaksjoner: 0 rader"); self.lbl_status.pack(side="left")
         self._refresh_pinned_menu()
         self.pivot.bind("<<TreeviewSelect>>", lambda e: self._refresh_summary())
+
+    def _select_all_pivot(self):
+        """Markerer alle kontoer i pivot-listen slik at de kan sendes til utvalg."""
+        try:
+            items = self.pivot.get_children("")
+            if items:
+                self.pivot.selection_set(items)
+                # Oppdater oppsummering når alle er markert
+                self._refresh_summary()
+        except Exception:
+            pass
 
     def _on_limit_changed(self, *_):
         val = self.cmb_limit.get()
@@ -377,9 +394,38 @@ class AnalysePage(ttk.Frame):
         else:
             dd = df
         n = len(dd)
-        s_val = float(dd["Beløp"].astype(float).sum()) if "Beløp" in dd.columns else 0.0
+        # Antall unike bilag (vouchere) i gjeldende filtrering
+        try:
+            unique_bilag = int(dd["Bilag"].astype(str).nunique()) if "Bilag" in dd.columns else 0
+        except Exception:
+            unique_bilag = 0
+        # Beregn sum, min, maks og gjennomsnitt for beløp
+        if "Beløp" in dd.columns:
+            try:
+                vals = dd["Beløp"].astype(float)
+            except Exception:
+                vals = pd.to_numeric(dd["Beløp"], errors="coerce").fillna(0.0)
+            s_val = float(vals.sum()) if len(vals)>0 else 0.0
+            # Min og maks bør beregnes på absolutte verdier slik at negative beløp viser riktig tall
+            try:
+                min_val = float(vals.min()) if len(vals)>0 else 0.0
+                max_val = float(vals.max()) if len(vals)>0 else 0.0
+                avg_val = float(vals.mean()) if len(vals)>0 else 0.0
+            except Exception:
+                min_val = max_val = avg_val = 0.0
+        else:
+            s_val = min_val = max_val = avg_val = 0.0
         shown = min(self._display_limit or n, n)
-        self.lbl_summary.configure(text=f"Oppsummering: rader={n:,} | sum={format_number_no(s_val,2)} (viser {shown:,})".replace(",", " "))
+        # Formatér tall med norsk tusenskiller/komma
+        sum_txt = format_number_no(s_val, 2)
+        min_txt = format_number_no(min_val, 2)
+        max_txt = format_number_no(max_val, 2)
+        avg_txt = format_number_no(avg_val, 2)
+        # Sett tekst
+        txt = (f"Oppsummering: rader={n:,} | bilag={unique_bilag:,} | sum={sum_txt}"
+               f" | min={min_txt} | max={max_txt} | gj.sn={avg_txt}"
+               f" (viser {shown:,})")
+        self.lbl_summary.configure(text=txt.replace(",", " "))
 
     def _send_to_selection(self):
         sel = self.pivot.selection()
@@ -390,11 +436,33 @@ class AnalysePage(ttk.Frame):
         if not accounts:
             accounts = [self.pivot.item(i, "values")[0] for i in self.pivot.get_children("")]
         try:
+            # Emit bus-event hvis bus er tilgjengelig. Dette lar Utvalg-siden lytte på hendelsen.
             if self.bus and hasattr(self.bus, "emit"):
                 self.bus.emit("SELECTION_SET_ACCOUNTS", {"accounts": accounts})
+            # Oppdater den delte session.SELECTION-strukturen
             import session as SM
-            s = getattr(SM,"SELECTION",{}) or {}
-            s["accounts"] = accounts; s["version"] = int(s.get("version",0))+1; SM.SELECTION = s
-            messagebox.showinfo("Utvalg", f"Overførte {len(accounts)} kontoer til Utvalg.")
+            sel = getattr(SM, "SELECTION", {}) or {}
+            sel["accounts"] = accounts
+            sel["version"] = int(sel.get("version", 0)) + 1
+            SM.SELECTION = sel
+            # Forsøk å oppdatere UtvalgPage direkte via bus hvis den er registrert
+            try:
+                import bus  # type: ignore
+                up = None
+                if hasattr(bus, "get_utvalg_page"):
+                    up = bus.get_utvalg_page()
+                if up is not None:
+                    # Oppdater visningen i GUI-tråden
+                    if hasattr(up, "after"):
+                        up.after(0, up.apply_filters)
+                    else:
+                        up.apply_filters()
+            except Exception:
+                pass
+            # Gi brukeren en tydelig beskjed om neste steg
+            messagebox.showinfo(
+                "Utvalg",
+                f"Overførte {len(accounts)} kontoer til Utvalg.\nGå til Utvalg-fanen for videre filtrering og trekk."
+            )
         except Exception:
             pass

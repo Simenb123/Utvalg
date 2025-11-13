@@ -1,3 +1,15 @@
+"""
+LEGACY-FIL (ikke i aktiv bruk)
+
+Dette er en tidligere versjon av analyse-siden.
+Ny funksjonalitet skal normalt IKKE legges her.
+
+Gjeldende analyse-GUI er:
+    AnalysePage i page_analyse.py
+
+Filen beholdes midlertidig som referanse/backup.
+"""
+
 # page_analyser.py
 from __future__ import annotations
 import tkinter as tk

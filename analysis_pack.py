@@ -1,3 +1,14 @@
+"""
+LEGACY-FIL (analyselogikk)
+
+Dette var en tidligere versjon av analyselogikken.
+Ny logikk skal ligge i analysis_pkg.py.
+
+Filen beholdes midlertidig som referanse/backup.
+"""
+
+
+
 # analysis_pack.py
 from __future__ import annotations
 from dataclasses import dataclass

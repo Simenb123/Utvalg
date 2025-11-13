@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-# (valgfritt) kompatibilitetspatch for AnalysePage – trygt å importere selv om filen ikke finnes
-try:
-    import analysis_compat_patch  # noqa: F401
-except Exception:
-    pass
 
 def run() -> None:
     """
@@ -37,6 +32,7 @@ def run() -> None:
         "Fant ingen App-klasse i ui_main (forventet _App/App/MainApp/Application), "
         "og ingen create_app()/build_app()/make_app() som returnerer en Tk-app."
     )
+
 
 if __name__ == "__main__":
     run()

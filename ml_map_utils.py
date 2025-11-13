@@ -16,28 +16,101 @@ CANON = [
 ]
 
 ALIASES = {
-    "Konto": {"konto","kontonr","kontonummer","account","account no","account number","gl account","gl"},
-    "Kontonavn": {"kontonavn","konto navn","kontobetegnelse","account name","gl name","gl tekst"},
-    "Bilag": {"bilag","doknr","dokumentnr","document no","voucher","voucher no","voucher number","bilagsnr","bilagsnummer","dok nr"},
-    "Beløp": {"beløp","belop","amount","beløp (nok)","beløp nok","bel\u00f8p"},
-    "Dato": {"dato","bilagsdato","posteringsdato","transaksjonsdato","date","posting date","document date"},
-    "Tekst": {"tekst","posteringstekst","beskrivelse","description","text"},
-    "Kundenr": {"kundenr","kundnr","kund id","customer id","customer no","customer number"},
-    "Kundenavn": {"kundenavn","customer name","navn kunde"},
-    "Leverandørnr": {"leverand\u00f8rnr","leverandornr","lev nr","supplier id","supplier no","vendor id","vendor no","vendor number"},
-    "Leverandørnavn": {"leverand\u00f8rnavn","leverandornavn","supplier name","vendor name","navn leverand\u00f8r"},
-    "MVA-kode": {"mva-kode","mvakode","vat code","tax code","mva kode"},
-    "MVA-beløp": {"mva-beløp","mvabeløp","mva beløp","vat amount","tax amount"},
-    "MVA-prosent": {"mva-prosent","mvaprosent","mva %","vat %","tax %"},
-    "Valuta": {"valuta","currency","valutakode","currency code"},
-    "Valutabeløp": {"valutabeløp","valuta beløp","amount (cur)","amount currency","foreign amount"},
+    # Ny aliasliste. Hver kanonisk felt peker på en mengde mulige kolonnenavn, inkludert engelske SAF‑T‑varianter.
+    "Konto": {
+        "konto","kontonr","kontonummer",
+        "account","account no","account number","gl account","gl",
+        "accountid","account id","accountid","account number","accountnumber"
+    },
+    "Kontonavn": {
+        "kontonavn","konto navn","kontobetegnelse",
+        "account name","gl name","gl tekst",
+        "accountdescription","account description","account desc"
+    },
+    "Bilag": {
+        "bilag","doknr","dokumentnr","dok nr",
+        "document no","document number","documentno","docno","doc no",
+        "voucher","voucher no","voucher number","voucherno",
+        "bilagsnr","bilagsnummer"
+    },
+    "Beløp": {
+        "beløp","belop","bel\u00f8p",
+        "amount","amount (nok)","beløp (nok)","beløp nok",
+        "line amount","amount local","amount nok"
+    },
+    "Dato": {
+        "dato","bilagsdato","posteringsdato","transaksjonsdato",
+        "date","posting date","document date"
+    },
+    "Tekst": {
+        "tekst","posteringstekst","beskrivelse",
+        "description","text","postingtext","posting text"
+    },
+    "Kundenr": {
+        "kundenr","kundnr","kund id",
+        "customer id","customerid","customer no","customer number"
+    },
+    "Kundenavn": {
+        "kundenavn","customer name","navn kunde","customername","customer description"
+    },
+    "Leverandørnr": {
+        "leverand\u00f8rnr","leverandornr","lev nr",
+        "supplier id","supplierid","supplier no","supplier number",
+        "vendor id","vendorid","vendor no","vendor number"
+    },
+    "Leverandørnavn": {
+        "leverand\u00f8rnavn","leverandornavn","navn leverand\u00f8r",
+        "supplier name","suppliername",
+        "vendor name","vendorname"
+    },
+    "MVA-kode": {
+        "mva-kode","mvakode","mva kode",
+        "vat code","vatcode","tax code","taxcode"
+    },
+    "MVA-beløp": {
+        "mva-beløp","mvabeløp","mva beløp",
+        "vat amount","vatamount","tax amount","taxamount"
+    },
+    "MVA-prosent": {
+        "mva-prosent","mvaprosent","mva %",
+        "vat %","vat%","tax %","tax%",
+        "vat percentage","vatpercentage","tax rate","taxrate"
+    },
+    "Valuta": {
+        "valuta","currency","valutakode",
+        "currency code","currencycode"
+    },
+    "Valutabeløp": {
+        "valutabeløp","valuta beløp",
+        "amount (cur)","amount currency","amountcurrency","foreign amount","foreignamount"
+    },
 }
 
 def canonical_fields() -> List[str]:
     return list(CANON)
 
 def _norm(s: str) -> str:
-    return (s or "").strip().lower().replace("\u00a0"," ")
+    """Normaliser en header ved å fjerne diakritika, trimme og slå sammen whitespace."""
+    import unicodedata
+    # Start med en strip-et streng i lower case
+    s = (s or "").strip().lower()
+    # Normaliser unicode (NFKD).
+    s = unicodedata.normalize("NFKD", s)
+    # Erstatt norske og nordiske bokstaver med enklere ekvivalenter før ascii-encoding.
+    # Dette gjør at beløp, beloep, belop alle normaliseres til "belop".
+    replacements = {
+        'ø': 'o', 'œ': 'oe', 'æ': 'ae', 'å': 'a', 'ä': 'a', 'ö': 'o',
+        'é': 'e', 'á': 'a', 'à': 'a', 'è': 'e', 'ê': 'e', 'ë': 'e'
+    }
+    for ch, repl in replacements.items():
+        s = s.replace(ch, repl)
+    # Konverter til ascii og dropp eventuelle gjenværende diakritiske tegn
+    s = s.encode("ascii", "ignore").decode("ascii")
+    # Erstatt ikke-brytende mellomrom med vanlige mellomrom
+    s = s.replace("\u00a0", " ")
+    # Kollaps flere mellomrom til ett
+    s = " ".join(s.split())
+    return s
 
 def _fingerprint(headers: List[str]) -> str:
     return "|".join(sorted({_norm(h) for h in headers if h}))[:2000]

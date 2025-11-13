@@ -133,16 +133,23 @@ class DatasetPane(ttk.Frame):
         with self.loading.busy("Leser overskrifter…"):
             cols = self._read_headers_only(p)
             self.headers = cols
+            # Tilbakestill combobox-verdier og populér med nye kolonner
             for cb in self.combos.values():
                 cb["values"] = cols
                 cb.set("")
-            # ML-foreslå
+            # ML-foreslå mapping basert på historikk og alias
             ml = load_ml_map()
             mapping = suggest_mapping(cols, ml) or {}
             for canon, src in mapping.items():
                 if canon in self.combos and src in cols:
                     self.combos[canon].set(src)
-        self.status.configure(text=f"Lest {len(self.headers)} kolonner i header.")
+            # Beregn antall felter som ble truffet via ML/alias
+            num_hits = len([c for c in CANON if mapping.get(c)])
+        # Oppdater status med både antall kolonner og antall felter som ble gjettet
+        try:
+            self.status.configure(text=f"Lest {len(self.headers)} kolonner. Fant {num_hits}/{len(CANON)} felt (ML/alias).")
+        except Exception:
+            self.status.configure(text=f"Lest {len(self.headers)} kolonner.")
 
     def _guess(self):
         if not self.headers:
@@ -155,6 +162,12 @@ class DatasetPane(ttk.Frame):
             cb = self.combos.get(canon)
             if cb and src in self.headers:
                 cb.set(src)
+        # Oppdater status med antall trufne felt
+        num_hits = len([c for c in CANON if mapping.get(c)])
+        try:
+            self.status.configure(text=f"Gjettet {num_hits}/{len(CANON)} felt (ML/alias).")
+        except Exception:
+            pass
 
     def _build_dataset(self):
         p = self.path_var.get().strip()
@@ -170,7 +183,40 @@ class DatasetPane(ttk.Frame):
 
         df = None
         try:
+            # Vis en dedikert Toplevel med fremdriftsindikator for å gjøre
+            # brukeropplevelsen tydelig. Selv om GUI kan fryse under
+            # innlesingen, vil dette vinduet gjøre det klart at noe skjer.
+            progress = tk.Toplevel(self)
+            try:
+                progress.title("Laster datasett")
+                # Gjør vinduet modal og transient til toppvinduet
+                root = self.winfo_toplevel()
+                progress.transient(root)
+                progress.grab_set()
+                progress.resizable(False, False)
+                # Senter vinduet på foreldrevinduet
+                root.update_idletasks()
+                w, h = 420, 140
+                rx, ry = root.winfo_rootx(), root.winfo_rooty()
+                rw, rh = root.winfo_width(), root.winfo_height()
+                x = rx + (rw - w) // 2
+                y = ry + (rh - h) // 2
+                progress.geometry(f"{w}x{h}+{x}+{y}")
+                # Tekst og progressbar
+                ttk.Label(progress, text="Laster datasett, vennligst vent…", padding=12).pack(anchor="center")
+                pb = ttk.Progressbar(progress, mode="indeterminate")
+                pb.pack(fill="x", padx=16, pady=(0,16))
+                pb.start(10)
+                progress.update_idletasks()
+            except Exception:
+                progress = None
+
             with self.loading.busy("Bygger datasett…"):
+                # Tving frem oppdatering av GUI slik at overlay og toppvindu vises
+                try:
+                    self.update_idletasks()
+                except Exception:
+                    pass
                 # Rask bygging
                 df = build_from_file(p, mapping=mapping)
                 # Lagre ML
@@ -183,16 +229,30 @@ class DatasetPane(ttk.Frame):
                 session.dataset = df
                 try: bus.emit("DATASET_BUILT", df)
                 except Exception: pass
+
         except Exception as e:
+            # Lukk progresjonsvindu ved feil
+            try:
+                if progress is not None:
+                    progress.destroy()
+            except Exception:
+                pass
             if callable(self._on_error):
                 try: self._on_error(e)
                 except Exception: pass
             messagebox.showerror("Datasett", f"Feil ved bygging: {e}")
             return
 
+        # Lukk progresjonsvindu etter vellykket bygging
+        try:
+            if progress is not None:
+                progress.destroy()
+        except Exception:
+            pass
+
         n = len(df) if isinstance(df, pd.DataFrame) else 0
         k = len(df.columns) if isinstance(df, pd.DataFrame) else 0
-        self.status.configure(text=f"Datasett bygd: rader={n:,}, kolonner={k}".replace(",", " "))
+        self.status.configure(text=f"Datasett bygd: rader={n:,} kolonner={k}".replace(",", " "))
         try:
             messagebox.showinfo("Datasett", f"Klar. Rader={n:,} | Kolonner={k}".replace(",", " "))
         except Exception:

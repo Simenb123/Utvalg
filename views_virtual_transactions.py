@@ -42,13 +42,19 @@ def _fmt_date_no(v: Any) -> str:
 
 def _fmt_cell(v: Any, colname: str) -> str:
     cn = (colname or "").lower()
+    # Behandle datokolonner først
     if "dato" in cn or "date" in cn:
         return _fmt_date_no(v)
+    # Konto- og bilagskolonner skal alltid vises som tekst, uten tusenskiller
+    if "konto" in cn or "bilag" in cn:
+        return "" if _is_nan(v) else str(v)
+    # For rene tall formaterer vi med norsk tusenskiller/komma
     try:
         if isinstance(v, (int, float)):
             return _fmt_number_no(v)
     except Exception:
         pass
+    # Fallback til tekst
     return "" if _is_nan(v) else str(v)
 
 class VirtualTransactionsPanel(ttk.Frame):
