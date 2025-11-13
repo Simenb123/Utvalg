@@ -1,0 +1,17 @@
+{
+  "global": {
+    "analyse": {
+      "display_limit": 100,
+      "pinned": [
+        "Bilag",
+        "Beløp",
+        "Tekst",
+        "Kundenr",
+        "Konto",
+        "Kontonavn"
+      ]
+    }
+  },
+  "clients": {},
+  "last_client": "ukjent"
+}

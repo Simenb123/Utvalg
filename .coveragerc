@@ -1,0 +1,11 @@
+[run]
+omit =
+    .venv/*
+    tests/*
+    */page_analyser.py
+    */analysis_pack.py
+    */analysis_compat_patch.py
+    */legacy/*
+
+[report]
+show_missing = True
