@@ -1,4 +1,11 @@
-"""Utvalg – fane for transaksjonsutvalg og stratifisering."""
+""" page_utvalg.py
+
+Denne koden lager “Utvalg”-fanen i et Tkinter-GUI der du kan se,
+filtrere og sende transaksjoner videre til stratifisering.
+
+Utvalg – fane for transaksjonsutvalg og stratifisering."""
+
+
 
 from __future__ import annotations
 
