@@ -5,19 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/stratifiering.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bus.py" beforeDir="false" afterPath="$PROJECT_DIR$/bus.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_build_fast.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_build_fast.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/page_utvalg.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_utvalg.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/session.py" beforeDir="false" afterPath="$PROJECT_DIR$/session.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_selection_studio.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_virtual_transactions.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_virtual_transactions.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -34,6 +22,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;Simenb123&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/Simenb123/Utvalg.git&quot;,
+    &quot;accountId&quot;: &quot;5f4d07fd-9395-497a-9f44-8df8dd996101&quot;
+  }
+}</component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 4
 }</component>
@@ -45,19 +45,44 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor&quot;: &quot;Run&quot;,
+    &quot;Python tests.Python tests in test_analysis_pkg.py.executor&quot;: &quot;Run&quot;,
     &quot;Python.app.executor&quot;: &quot;Run&quot;,
     &quot;Python.index_match_python.executor&quot;: &quot;Run&quot;,
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_analysis_pkg.executor&quot;: &quot;Run&quot;,
     &quot;Python.ui_main.executor&quot;: &quot;Run&quot;,
     &quot;Python.utvalgsgenerator.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;
   }
 }</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
     </key>
+  </component>
+  <component name="RunManager">
+    <configuration name="Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
+      <module name="Utvalg" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/tests" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="_new_additionalArguments" value="&quot;&quot;" />
+      <option name="_new_target" value="&quot;test_analysis_pkg.test_round_share_by_group_konto_basic&quot;" />
+      <option name="_new_targetType" value="&quot;PYTHON&quot;" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic" />
+      </list>
+    </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
@@ -103,7 +128,42 @@
       <option name="presentableId" value="LOCAL−00004" />
       <updated>1762795369739</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL−00005" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763069378915</created>
+      <option name="number" value="LOCAL−00005" />
+      <option name="presentableId" value="LOCAL−00005" />
+      <updated>1763069378915</updated>
+    </task>
+    <task id="LOCAL−00006" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763072999787</created>
+      <option name="number" value="LOCAL−00006" />
+      <option name="presentableId" value="LOCAL−00006" />
+      <updated>1763072999787</updated>
+    </task>
+    <task id="LOCAL−00007" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763076571639</created>
+      <option name="number" value="LOCAL−00007" />
+      <option name="presentableId" value="LOCAL−00007" />
+      <updated>1763076571639</updated>
+    </task>
+    <task id="LOCAL−00008" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763081374668</created>
+      <option name="number" value="LOCAL−00008" />
+      <option name="presentableId" value="LOCAL−00008" />
+      <updated>1763081374668</updated>
+    </task>
+    <task id="LOCAL−00009" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763083171589</created>
+      <option name="number" value="LOCAL−00009" />
+      <option name="presentableId" value="LOCAL−00009" />
+      <updated>1763083171589</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
