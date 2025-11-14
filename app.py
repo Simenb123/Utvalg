@@ -10,6 +10,7 @@ def run() -> None:
     """
     import importlib
 
+    # Importer UI-modulen
     ui = importlib.import_module("ui_main")
 
     # 1) Forsøk kjente klassenavn
@@ -28,6 +29,7 @@ def run() -> None:
                 inst.mainloop()
                 return
 
+    # Kommer vi hit, fant vi verken klasse eller fabrikkfunksjon
     raise ImportError(
         "Fant ingen App-klasse i ui_main (forventet _App/App/MainApp/Application), "
         "og ingen create_app()/build_app()/make_app() som returnerer en Tk-app."

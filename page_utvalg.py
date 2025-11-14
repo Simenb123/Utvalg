@@ -11,7 +11,7 @@ from typing import Optional, Callable
 # Forsøk å importere stratifiseringsdialogen fra pakken.
 # Ved feil vises en klar feilmelding i stedet for fallback-stub.
 try:
-    from .views_selection_studio import SelectionStudio
+    from views_selection_studio import SelectionStudio
 except Exception as e:
     from tkinter import messagebox
     def _show_strat_error():
@@ -25,10 +25,10 @@ except Exception as e:
             _show_strat_error()
 
 # Import av resten av applikasjonens komponenter
-from .views_virtual_transactions import VirtualTransactionsPanel
-from .preferences import preferences
-from . import session
-from .bus import emit
+from views_virtual_transactions import VirtualTransactionsPanel
+import preferences
+import session
+from bus import emit
 
 class UtvalgPage(ttk.Frame):
     """
