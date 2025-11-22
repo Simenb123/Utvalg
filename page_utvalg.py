@@ -3,8 +3,7 @@
 Denne koden lager “Utvalg”-fanen i et Tkinter-GUI der du kan se,
 filtrere og sende transaksjoner videre til stratifisering.
 
-Utvalg – fane for transaksjonsutvalg og stratifisering.
-"""
+Utvalg – fane for transaksjonsutvalg og stratifisering."""
 
 from __future__ import annotations
 
@@ -18,13 +17,16 @@ from typing import Optional, Callable, List
 # Ved feil vises en klar feilmelding i stedet for fallback-stub.
 try:
     from views_selection_studio import SelectionStudio
+    _STRAT_IMPORT_ERROR_MSG = ""  # ikke i bruk når importen lykkes
 except Exception as e:  # pragma: no cover - kun fallback i runtime
     from tkinter import messagebox as _messagebox
 
-    def _show_strat_error():
+    _STRAT_IMPORT_ERROR_MSG = f"Feil ved lasting av stratifieringsmodul: {e}"
+
+    def _show_strat_error() -> None:
         _messagebox.showerror(
             "Stratifisering",
-            f"Feil ved lasting av stratifieringsmodul: {e}"
+            _STRAT_IMPORT_ERROR_MSG or "Ukjent feil ved lasting av stratifiseringsmodul."
         )
 
     class SelectionStudio:  # type: ignore[misc]
@@ -42,7 +44,7 @@ except Exception as e:  # pragma: no cover - kun fallback i runtime
 from views_virtual_transactions import VirtualTransactionsPanel
 import preferences
 import session
-from bus import emit
+from bus import emit, set_utvalg_page
 
 
 def filter_utvalg_dataframe(
@@ -52,33 +54,33 @@ def filter_utvalg_dataframe(
     selected_series: List[int],
 ) -> pd.DataFrame:
     """
-    Ren filtreringsfunksjon brukt av UtvalgPage.apply_filters.
+    Ren filtreringsfunksjon for Utvalg-fanen.
 
-    Denne er bevisst GUI-uavhengig slik at den kan testes med pytest uten Tkinter.
+    Brukes både av UtvalgPage.apply_filters (GUI) og av pytest-testene
+    i tests/test_utvalg_filters.py.
 
     Parametre
     ---------
     df_all : DataFrame
-        Alle transaksjoner i utvalgsgrunnlaget.
+        Grunnlaget som skal filtreres.
     query : str
-        Tekstsøk – matches mot Tekst og Kontonavn (case-insensitiv).
+        Tekstsøk som matches mot Tekst og Kontonavn (case-insensitiv).
     dir_value : {"Alle", "Debet", "Kredit"}
-        Retningsfilter basert på fortegn i Beløp.
+        Retningsfilter (fortegn på Beløp).
     selected_series : list[int]
-        Liste over kontoserier (første siffer i Konto) som skal beholdes.
+        Liste med kontoserier (første siffer i Konto) som skal beholdes.
 
     Returnerer
     ----------
     DataFrame
-        Filtrert DataFrame med samme kolonner som df_all.
+        Filtrert DataFrame.
     """
     if df_all is None or df_all.empty:
-        # Returner tom DF med samme kolonner
-        return df_all.iloc[0:0].copy()
+        return df_all.iloc[0:0].copy() if df_all is not None else pd.DataFrame()
 
     df = df_all.copy()
 
-    # 1) Filter på tekst/kontonavn
+    # 1) Tekst/kontonavn
     q = (query or "").strip().lower()
     if q:
         mask = pd.Series(False, index=df.index)
@@ -91,7 +93,7 @@ def filter_utvalg_dataframe(
 
         df = df[mask]
 
-    # 2) Filter på retning (Debet/Kredit)
+    # 2) Retning (Debet/Kredit/Alle)
     bel = pd.to_numeric(
         df.get("Beløp", pd.Series(dtype="float64")),
         errors="coerce",
@@ -102,14 +104,11 @@ def filter_utvalg_dataframe(
     elif dir_value == "Kredit":
         df = df[bel < 0]
 
-    # 3) Filter på kontoserier (første siffer i kontonummer)
+    # 3) Kontoserier
     if selected_series:
         if "Konto" not in df.columns:
-            # Ingen kontokolonne → ingen rader matcher
             return df.iloc[0:0].copy()
-
         konto_first = df["Konto"].astype(str).str[0]
-        # Bare de radene hvor første tegn er et siffer og i selected_series
         mask_series = konto_first.str.isdigit() & konto_first.astype(int).isin(selected_series)
         df = df[mask_series]
 
@@ -137,7 +136,8 @@ class UtvalgPage(ttk.Frame):
         self._pinned_columns: list[str] = []
         self._display_limit = preferences.get("utvalg.display_limit", 200)
 
-        # Registrer deg som klar i bus-systemet
+        # Registrer deg hos bus slik at Analyse-siden kan trigge apply_filters
+        set_utvalg_page(self)
         emit("UTVALG_PAGE_READY", self)
 
         # UI-variabler for søk og filtre
@@ -170,9 +170,7 @@ class UtvalgPage(ttk.Frame):
         ttk.Label(top, text="Kontoserier:").grid(row=0, column=4, sticky="w", padx=(10, 0))
         for i in range(9):
             ttk.Checkbutton(top, text=str(i + 1), variable=self.vars_series[i]).grid(
-                row=0,
-                column=5 + i,
-                sticky="w",
+                row=0, column=5 + i, sticky="w"
             )
 
         ttk.Button(top, text="Bruk filtre", command=self.apply_filters).grid(
@@ -195,18 +193,57 @@ class UtvalgPage(ttk.Frame):
         self._df_all = df.copy()
         self.apply_filters()
 
+    def _get_dataset_from_session(self) -> Optional[pd.DataFrame]:
+        """Hent dataset fra session dersom _df_all er tomt."""
+        try:
+            df = getattr(session, "dataset", None)
+        except Exception:
+            df = None
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            return df
+        return None
+
+    def _get_selected_accounts(self) -> list[str]:
+        """Hent kontoliste fra session.SELECTION.accounts (som strenger)."""
+        try:
+            sel = getattr(session, "SELECTION", {}) or {}
+            accounts = sel.get("accounts") or []
+        except Exception:
+            accounts = []
+        # Normaliser til str
+        return [str(a) for a in accounts]
+
     def apply_filters(self) -> None:
         """
-        Filtrer transaksjoner basert på søk, retning og kontoserier.
+        Filtrer transaksjoner basert på kontoutvalg, søk, retning og kontoserier.
         Denne metoden oppdaterer _df_show og tabellen.
         """
+        # Sørg for at vi har et grunnlag å filtrere på
         if self._df_all is None:
-            return
+            df_session = self._get_dataset_from_session()
+            if df_session is None:
+                # Ingen datasett tilgjengelig
+                self._df_show = pd.DataFrame()
+                self.trans.set_dataframe(pd.DataFrame(), columns=[], pinned=[], limit=0)
+                self._update_filter_summary()
+                return
+            self._df_all = df_session.copy()
 
+        df = self._df_all.copy()
+
+        # 1) Filter på kontoutvalg fra Analyse (session.SELECTION["accounts"])
+        accounts = self._get_selected_accounts()
+        if accounts:
+            if "Konto" in df.columns:
+                df = df[df["Konto"].astype(str).isin(accounts)]
+            else:
+                df = df.iloc[0:0]
+
+        # 2–4) Bruk den rene hjelpefunksjonen for resten av filtrene
         selected_series = [i + 1 for i, var in enumerate(self.vars_series) if var.get()]
 
         df = filter_utvalg_dataframe(
-            df_all=self._df_all,
+            df_all=df,
             query=self.var_search.get(),
             dir_value=self.var_dir.get(),
             selected_series=selected_series,
@@ -279,10 +316,7 @@ class UtvalgPage(ttk.Frame):
             """
             if df_sample is not None and not df_sample.empty:
                 # Fjern 'Stratum'-kolonne hvis den finnes
-                df_sample = df_sample.drop(
-                    columns=[c for c in df_sample.columns if c == "Stratum"],
-                    errors="ignore",
-                )
+                df_sample = df_sample.drop(columns=[c for c in df_sample.columns if c == "Stratum"], errors="ignore")
                 self._df_show = df_sample
                 self._prepare_columns()
                 self.trans.set_dataframe(
@@ -312,5 +346,4 @@ class UtvalgPage(ttk.Frame):
                 limit=0,  # vis alle rader for bilaget
             )
         except Exception:
-            # Vi svelger feil her – drilldown skal ikke krasje hele GUI-et.
             pass

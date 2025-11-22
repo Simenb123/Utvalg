@@ -53,7 +53,7 @@ def test_filter_selectionstudio_kredit_only():
 def test_filter_selectionstudio_min_max_netto():
     df_base = _make_df()
 
-    # direction Alle, min 0, max 200 → bilag 1 og 2
+    # direction Alle, min 0, max 200 → kun bilag 1 (100 ligger i intervallet, -50 gjør ikke det)
     df, summary = filter_selectionstudio_dataframe(
         df_base=df_base,
         direction="Alle",
@@ -62,9 +62,9 @@ def test_filter_selectionstudio_min_max_netto():
         use_abs=False,
     )
 
-    assert set(df["Bilag"].tolist()) == {1, 2}
-    # Netto sum: 100 + (-50) = 50
-    assert summary["S"] == pytest.approx(50.0)
+    assert set(df["Bilag"].tolist()) == {1}
+    # Netto sum: 100
+    assert summary["S"] == pytest.approx(100.0)
 
 
 def test_filter_selectionstudio_min_max_abs():
