@@ -2,33 +2,32 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional
+from typing import Optional, Callable
 
 import pandas as pd
 
-# Viktig: absolutt import, ikke "from .stratifiering ..."
 from stratifiering import beregn_strata, trekk_sample, summer_per_bilag
 
 
-class SelectionStudio(tk.Toplevel):
+class SelectionStudio(ttk.Frame):
     """
     Veiviser for delutvalg/stratifisering.
-    Krever df_base (grunnlag) og valgfritt df_all (for totalsummer).
 
-    df_base: transaksjoner for valgt kontointervall (fra Utvalg-fanen)
+    Denne versjonen er en ttk.Frame slik at den kan embeddes i en fane
+    (Utvalg-fanen) i stedet for å være et eget popup-vindu.
+
+    df_base: transaksjoner for valgt kontointervall (fra Analyse/Utvalg)
     df_all:  eventuelt alle transaksjoner for klienten (for sum bilag alle kontoer)
     """
 
     def __init__(
         self,
-        master,
-        df: pd.DataFrame,
-        on_commit=None,
+        master: tk.Misc,
+        df_base: pd.DataFrame,
+        on_commit: Optional[Callable[[pd.DataFrame], None]] = None,
         df_all: Optional[pd.DataFrame] = None,
     ) -> None:
         super().__init__(master)
-        self.title("Delutvalg og stratifisering")
-        self.geometry("1200x750")
         self.on_commit = on_commit
 
         # Litt mindre font for hjelpetekster
@@ -38,8 +37,8 @@ class SelectionStudio(tk.Toplevel):
         except Exception:
             pass
 
-        # Data – hard reset av index slik at "Bilag" GARANTERT er kolonne, ikke index
-        self.df_base = df.copy().reset_index(drop=False)
+        # Data initielt (kan byttes ut via load_data)
+        self.df_base = df_base.copy().reset_index(drop=False)
         self.df_all = df_all.copy().reset_index(drop=False) if df_all is not None else None
         self.df_work = self.df_base.copy()  # filtrert grunnlag
 
@@ -71,6 +70,41 @@ class SelectionStudio(tk.Toplevel):
         self._build_ui()
 
         # Første gangs filtrering og oppsummering
+        self._apply_filters()
+        self._update_summary()
+        self._update_sample_view()
+
+    # ---------------- Offentlig API ----------------
+
+    def load_data(self, df_base: pd.DataFrame, df_all: Optional[pd.DataFrame]) -> None:
+        """
+        Last inn et nytt grunnlag (populasjon) for stratifisering.
+
+        Brukes når Analyse/Utvalg velger en ny kontopopulasjon.
+        """
+        self.df_base = df_base.copy().reset_index(drop=False)
+        self.df_all = df_all.copy().reset_index(drop=False) if df_all is not None else None
+        self.df_work = self.df_base.copy()
+        self.summary = None
+        self.bilag_df = None
+        self.interval_map = {}
+        self.custom_counts = {}
+        self.sample_df = pd.DataFrame()
+
+        # Nullstill UI-variabler til fornuftige defaults
+        self.var_dir.set("Alle")
+        self.var_min.set("")
+        self.var_max.set("")
+        self.var_abs.set(True)
+        self.var_mode.set("quantile")
+        self.var_k.set(5)
+        self.var_n_per.set(5)
+        self.var_total.set(0)
+        self.var_auto.set(False)
+        self.var_show_sum_bilag_int.set(False)
+        self.var_show_sum_rows_int.set(False)
+        self.var_show_sum_bilag_all.set(False)
+
         self._apply_filters()
         self._update_summary()
         self._update_sample_view()
@@ -459,7 +493,6 @@ class SelectionStudio(tk.Toplevel):
     def _on_commit(self) -> None:
         if self.on_commit and not self.sample_df.empty:
             self.on_commit(self.sample_df)
-            self.destroy()
 
     # ---------------- Eksporter til Excel ----------------
 
