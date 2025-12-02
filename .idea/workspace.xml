@@ -5,24 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/CHANGELOG.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README tests.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_HOTFIX.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_PERF.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R10.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b_hotfix.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R12.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R7.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_selectionstudio_filters.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/moduledescriptions.txt" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/tests/.coverage" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_ml_map_aliases.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -256,7 +241,14 @@
       <option name="presentableId" value="LOCAL−00015" />
       <updated>1764644649958</updated>
     </task>
-    <option name="localTasksCounter" value="16" />
+    <task id="LOCAL−00016" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1764672194834</created>
+      <option name="number" value="LOCAL−00016" />
+      <option name="presentableId" value="LOCAL−00016" />
+      <updated>1764672194834</updated>
+    </task>
+    <option name="localTasksCounter" value="17" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

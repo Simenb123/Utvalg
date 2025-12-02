@@ -2,120 +2,175 @@
 """
 ml_map_utils.py – R12f
 Laster/lagrer .ml_map.json og hjelper til med å foreslå/oppdatere kolonnekart.
-Bevarer bakoverkompatibilitet:
-- Støtter både struktur som {fp: mapping} og {"signatures":[{"headers":[...], "mapping":{...}}]}.
+
+Denne filen er en tilpasset kopi av modulens innhold fra det opprinnelige
+Utvalg‑prosjektet. I tillegg til original funksjonalitet har vi lagt til
+flere aliaser for å gjenkjenne flere varianter av feltnavn som ofte
+forekommer i regnskapsdata. Disse aliasene gjør at automatisk gjetting av
+kolonnekarting (mapping) blir mer treffsikker. Ingen av funksjonene i
+modulen sender data utenfor programmet; læring består kun i å lagre
+tidligere mapping lokalt i `.ml_map.json`.
+
+Endringer fra originalen:
+ * Utvidet alias‑sets for flere felt (Beløp, MVA‑kode, MVA‑beløp,
+   MVA‑prosent, Valuta, Valutabeløp) med nye synonymer slik at felt som
+   «Bokført beløp», «ISO‑kode», «Belap i valuta», «avg kode» og
+   «Mva‑sats» gjenkjennes.
+ * Kommentert kode for klarhet.
 """
+
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional
-import json, os, re
+import json
+import os
 
+# Liste over kanoniske felt. Rekkefølgen her brukes når DataFrame skal
+# reorganiseres etter mapping.
 CANON = [
-    "Konto","Kontonavn","Bilag","Beløp","Dato","Tekst",
-    "Kundenr","Kundenavn","Leverandørnr","Leverandørnavn",
-    "MVA-kode","MVA-beløp","MVA-prosent","Valuta","Valutabeløp"
+    "Konto", "Kontonavn", "Bilag", "Beløp", "Dato", "Tekst",
+    "Kundenr", "Kundenavn", "Leverandørnr", "Leverandørnavn",
+    "MVA-kode", "MVA-beløp", "MVA-prosent", "Valuta", "Valutabeløp"
 ]
 
-ALIASES = {
-    # Ny aliasliste. Hver kanonisk felt peker på en mengde mulige kolonnenavn, inkludert engelske SAF‑T‑varianter.
+# Aliaslisten under hjelper til med å matche kolonnenavn i regneark mot
+# kanoniske felt. Hver nøkkel er et kanonisk felt og peker på en mengde
+# mulige header‑strenger. Alle strenger her bør skrives i små bokstaver,
+# uten diakritiske tegn (akkurat slik _norm() produserer), slik at
+# direkte membership‑sjekk i suggest_mapping() fungerer.
+ALIASES: Dict[str, set[str]] = {
+    # Konto: kontonummer og generelle GL‑kontoaliaser
     "Konto": {
-        "konto","kontonr","kontonummer",
-        "account","account no","account number","gl account","gl",
-        "accountid","account id","accountid","account number","accountnumber"
+        "konto", "kontonr", "kontonummer","nr", "nummer"
+        "account", "account no", "account no." "account number", "gl account", "gl",
+        "accountid", "account id", "accountid", "account number", "accountnumber"
     },
+    # Kontonavn: navn eller beskrivelse for konto
     "Kontonavn": {
-        "kontonavn","konto navn","kontobetegnelse",
-        "account name","gl name","gl tekst",
-        "accountdescription","account description","account desc"
+        "kontonavn", "konto navn", "kontobetegnelse", "kontobeskrivelse", "navn"
+        "account name", "accountname", "gl name", "gl tekst",
+        "accountdescription", "account description", "account desc"
     },
+    # Bilag: dokumentnummer eller voucher
     "Bilag": {
-        "bilag","doknr","dokumentnr","dok nr",
-        "document no","document number","documentno","docno","doc no",
-        "voucher","voucher no","voucher number","voucherno",
-        "bilagsnr","bilagsnummer"
+        "bilag", "doknr", "dokumentnr", "dok nr",
+        "document no", "document number", "documentno", "docno", "doc no",
+        "voucher", "voucher no", "voucher number", "voucherno",
+        "bilagsnr", "bilagsnummer"
     },
+    # Beløp: beløp i lokal valuta. Vi har lagt til flere varianter som
+    # bokført beløp for å fange opp kolonner som heter f.eks. "Bokført beløp".
     "Beløp": {
-        "beløp","belop","bel\u00f8p",
-        "amount","amount (nok)","beløp (nok)","beløp nok",
-        "line amount","amount local","amount nok"
+        "beløp", "belop", "beløp",
+        "amount", "amount (nok)", "beløp (nok)", "beløp nok",
+        "line amount", "amount local", "amount nok",
+        # nye aliaser for bokførte beløp
+        "bokfort belop", "bokfort beløp", "bokført belop", "bokført beløp"
     },
+    # Dato: dato for bilag, postering eller transaksjon
     "Dato": {
-        "dato","bilagsdato","posteringsdato","transaksjonsdato",
-        "date","posting date","document date"
+        "dato", "bilagsdato", "posteringsdato", "transaksjonsdato",
+        "date", "posting date", "document date"
     },
+    # Tekst: posteringstekst eller beskrivelse
     "Tekst": {
-        "tekst","posteringstekst","beskrivelse",
-        "description","text","postingtext","posting text"
+        "tekst", "posteringstekst", "beskrivelse",
+        "description", "text", "postingtext", "posting text"
     },
+    # Kundenr: kundenummer
     "Kundenr": {
-        "kundenr","kundnr","kund id",
-        "customer id","customerid","customer no","customer number"
+        "kundenr", "kundnr", "kund id",
+        "customer id", "customerid", "customer no", "customer number"
     },
+    # Kundenavn: kundenavn
     "Kundenavn": {
-        "kundenavn","customer name","navn kunde","customername","customer description"
+        "kundenavn", "customer name", "navn kunde", "customername", "customer description", "kunde"
     },
+    # Leverandørnr: leverandørnummer
     "Leverandørnr": {
-        "leverand\u00f8rnr","leverandornr","lev nr",
-        "supplier id","supplierid","supplier no","supplier number",
-        "vendor id","vendorid","vendor no","vendor number"
+        "leverandørnr", "leverandornr", "lev nr",
+        "supplier id", "supplierid", "supplier no", "supplier number",
+        "vendor id", "vendorid", "vendor no", "vendor number"
     },
+    # Leverandørnavn: leverandørnavn
     "Leverandørnavn": {
-        "leverand\u00f8rnavn","leverandornavn","navn leverand\u00f8r",
-        "supplier name","suppliername",
-        "vendor name","vendorname"
+        "leverandørnavn", "leverandornavn", "navn leverandør","leverandør"
+        "supplier name", "suppliername", "vendor name", "vendorname", "supplier"
     },
+    # MVA-kode: avgiftskode. Vi har utvidet med avg-kode-varianter.
     "MVA-kode": {
-        "mva-kode","mvakode","mva kode",
-        "vat code","vatcode","tax code","taxcode"
+        "mva-kode", "mvakode", "mva kode",
+        "vat code", "vatcode", "tax code", "taxcode",
+        # nye aliaser
+        "avg-kode", "avg kode", "avgkode", "avg.-kode", "avgiftskode", "avgifts-kode"
     },
+    # MVA-beløp: avgiftsbeløp. Vi har lagt til variasjoner uten diakritika.
     "MVA-beløp": {
-        "mva-beløp","mvabeløp","mva beløp",
-        "vat amount","vatamount","tax amount","taxamount"
+        "mva-beløp", "mvabeløp", "mva beløp",
+        "vat amount", "vatamount", "tax amount", "taxamount",
+        # nye aliaser
+        "mva-belop", "mvabelop", "mva belop"
     },
+    # MVA-prosent: avgiftssats i prosent. Nye aliaser inkluderer mva-sats.
     "MVA-prosent": {
-        "mva-prosent","mvaprosent","mva %",
-        "vat %","vat%","tax %","tax%",
-        "vat percentage","vatpercentage","tax rate","taxrate"
+        "mva-prosent", "mvaprosent", "mva %",
+        "vat %", "vat%", "tax %", "tax%",
+        "vat percentage", "vatpercentage", "tax rate", "taxrate",
+        # nye aliaser
+        "mva-sats", "mvasats", "mva sats"
     },
+    # Valuta: valutakode. Vi har lagt til ISO-varianter.
     "Valuta": {
-        "valuta","currency","valutakode",
-        "currency code","currencycode"
+        "valuta", "currency", "valutakode",
+        "currency code", "currencycode",
+        # nye aliaser for ISO-koder
+        "iso", "iso-kode", "iso kode", "iso code", "isokode"
     },
+    # Valutabeløp: beløp i utenlandsk valuta. Nye aliaser for beløp i valuta.
     "Valutabeløp": {
-        "valutabeløp","valuta beløp",
-        "amount (cur)","amount currency","amountcurrency","foreign amount","foreignamount"
+        "valutabeløp", "valuta beløp",
+        "amount (cur)", "amount currency", "amountcurrency", "foreign amount", "foreignamount",
+        # nye aliaser
+        "belap i valuta", "beløp i valuta", "belop i valuta", "beloep i valuta",
+        "belap i utenlandsk valuta", "beløp i utenlandsk valuta", "belop i utenlandsk valuta",
+        "beløp valuta", "belop valuta"
+        "valutabeloep", "valutabelop", "valutabeløp"
     },
 }
 
 def canonical_fields() -> List[str]:
+    """Returner listen over kanoniske felter i fast rekkefølge."""
     return list(CANON)
 
 def _norm(s: str) -> str:
-    """Normaliser en header ved å fjerne diakritika, trimme og slå sammen whitespace."""
+    """
+    Normaliser en header ved å fjerne diakritika, trimme og slå sammen
+    whitespace. Denne funksjonen gjør at aliasene matcher uavhengig av
+    store/små bokstaver, norske bokstaver og ekstra mellomrom.
+    """
     import unicodedata
-    # Start med en strip-et streng i lower case
     s = (s or "").strip().lower()
     # Normaliser unicode (NFKD).
     s = unicodedata.normalize("NFKD", s)
-    # Erstatt norske og nordiske bokstaver med enklere ekvivalenter før ascii-encoding.
-    # Dette gjør at beløp, beloep, belop alle normaliseres til "belop".
+    # Erstatt norske og nordiske bokstaver med enklere ekvivalenter før ascii
     replacements = {
         'ø': 'o', 'œ': 'oe', 'æ': 'ae', 'å': 'a', 'ä': 'a', 'ö': 'o',
         'é': 'e', 'á': 'a', 'à': 'a', 'è': 'e', 'ê': 'e', 'ë': 'e'
     }
     for ch, repl in replacements.items():
         s = s.replace(ch, repl)
-    # Konverter til ascii og dropp eventuelle gjenværende diakritiske tegn
+    # Dropp eventuelle gjenværende diakritiske tegn
     s = s.encode("ascii", "ignore").decode("ascii")
-    # Erstatt ikke-brytende mellomrom med vanlige mellomrom
+    # Erstatt ikke‑brytende mellomrom med vanlige mellomrom og kollaps flere
     s = s.replace("\u00a0", " ")
-    # Kollaps flere mellomrom til ett
     s = " ".join(s.split())
     return s
 
 def _fingerprint(headers: List[str]) -> str:
+    """Lag en fingeravtrykkstreng fra headerlisten for å sammenligne datasett."""
     return "|".join(sorted({_norm(h) for h in headers if h}))[:2000]
 
 def load_ml_map(path: str = ".ml_map.json") -> dict:
+    """Les tidligere læring fra `.ml_map.json` hvis filen finnes."""
     try:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -127,6 +182,7 @@ def load_ml_map(path: str = ".ml_map.json") -> dict:
     return {}
 
 def save_ml_map(data: dict, path: str = ".ml_map.json") -> None:
+    """Skriv læringsobjektet til disk på en sikker måte."""
     try:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -136,19 +192,25 @@ def save_ml_map(data: dict, path: str = ".ml_map.json") -> None:
         pass
 
 def _iter_signatures(ml: dict) -> List[Tuple[str, List[str], dict]]:
+    """
+    Iterate over signaturene i ml_map. Støtter både gammel (fp->mapping) og
+    ny struktur (signatures-list).
+    """
     out: List[Tuple[str, List[str], dict]] = []
     if not isinstance(ml, dict):
         return out
     # Style A: {fp: mapping}
     for k, v in ml.items():
-        if isinstance(v, dict) and all(isinstance(kk,str) for kk in v.keys()):
-            # we don't have headers list, only fp -> can't compute similarity properly; store empty headers
+        if isinstance(v, dict) and all(isinstance(kk, str) for kk in v.keys()):
+            # Vi har ikke headers-liste, kun fingerprint. Vi kan ikke
+            # beregne likhet, så vi lagrer en tom headerliste.
             out.append((str(k), [], v))
     # Style B: {"signatures":[{"headers":[...], "mapping":{...}}]}
     sigs = ml.get("signatures")
     if isinstance(sigs, list):
         for item in sigs:
-            if not isinstance(item, dict): continue
+            if not isinstance(item, dict):
+                continue
             headers = item.get("headers", [])
             mapping = item.get("mapping", {})
             fp = item.get("fp") or _fingerprint(headers)
@@ -157,11 +219,18 @@ def _iter_signatures(ml: dict) -> List[Tuple[str, List[str], dict]]:
     return out
 
 def suggest_mapping(headers: List[str], ml: Optional[dict] = None) -> Optional[dict]:
-    """Returner mapping {Canon: SourceCol} eller None om vi ikke finner noe godt.”"""
-    if not headers: return None
+    """
+    Returner en foreslått mapping {Canon: SourceCol} for de kolonnene som
+    kan matches enten via tidligere læring (ml_map) eller via aliaslisten.
+    Dersom vi ikke finner noen gode treff, returneres None.
+    """
+    if not headers:
+        return None
     headers_norm = {_norm(h) for h in headers if h}
     ml = ml or load_ml_map()
-    best = None; best_score = 0.0
+    # Først prøv å finne en match basert på historiske signaturer
+    best: Optional[dict] = None
+    best_score = 0.0
     for fp, sig_headers, mapping in _iter_signatures(ml):
         if sig_headers:
             sig_norm = {_norm(h) for h in sig_headers if h}
@@ -169,48 +238,63 @@ def suggest_mapping(headers: List[str], ml: Optional[dict] = None) -> Optional[d
             union = max(1, len(headers_norm | sig_norm))
             score = inter / union
         else:
-            # only fp – compare equality of fp as heuristic
+            # bare fingerprint – sammenlign likhet mellom fingerprint
             score = 1.0 if fp == _fingerprint(list(headers_norm)) else 0.0
         if score > best_score:
-            best_score = score; best = mapping
+            best_score = score
+            best = mapping
     if best and best_score >= 0.55:
-        # filter to columns that actually exist
-        return {k:v for k,v in best.items() if v in headers}
-    # fallback via aliases
+        # Filtrer til kolonner som faktisk eksisterer i input
+        return {k: v for k, v in best.items() if v in headers}
+    # Fallback via aliasmatch
     lowered = {_norm(h): h for h in headers}
-    guess = {}
+    guess: Dict[str, str] = {}
     for canon, alias_set in ALIASES.items():
         for cand in alias_set:
+            # Aliasene i ALIASES er i normalisert form; lowered har normaliserte
+            # nøkler. Sjekk direkte membership.
             if cand in lowered:
-                guess[canon] = lowered[cand]; break
+                guess[canon] = lowered[cand]
+                break
     return guess or None
 
 def update_ml_map(headers: List[str], mapping: dict, ml: Optional[dict] = None, path: str = ".ml_map.json") -> dict:
-    """Flett inn ny signatur uten å overskrive eksisterende på annen struktur.”"""
+    """
+    Flett inn en ny signatur i ml_map uten å overskrive eksisterende
+    strukturer. Både gammel og ny struktur i .ml_map.json støttes.
+    """
     ml = ml or load_ml_map(path)
     fp = _fingerprint(headers)
     # Style A: direkte fp->mapping
-    if all(isinstance(k,str) and isinstance(v,dict) for k,v in ml.items() if k!="signatures"):
+    if all(isinstance(k, str) and isinstance(v, dict) for k, v in ml.items() if k != "signatures"):
         cur = ml.get(fp, {})
         if isinstance(cur, dict):
-            cur.update({k:v for k,v in mapping.items() if v in headers})
+            cur.update({k: v for k, v in mapping.items() if v in headers})
             ml[fp] = cur
     # Style B: signatures-liste
     sigs = ml.get("signatures")
     if not isinstance(sigs, list):
         sigs = []
-    # find same fp
-    idx = None
+    # finn samme fingerprint
+    idx: Optional[int] = None
     for i, item in enumerate(sigs):
-        if isinstance(item, dict) and (item.get("fp") == fp or _fingerprint(item.get("headers", [])) == fp):
-            idx = i; break
-    entry = {"fp": fp, "headers": list(headers), "mapping": {k:v for k,v in mapping.items() if v in headers}}
+        if isinstance(item, dict) and (
+            item.get("fp") == fp or _fingerprint(item.get("headers", [])) == fp
+        ):
+            idx = i
+            break
+    entry = {
+        "fp": fp,
+        "headers": list(headers),
+        "mapping": {k: v for k, v in mapping.items() if v in headers},
+    }
     if idx is None:
         sigs.append(entry)
     else:
         # merge
         old = sigs[idx].get("mapping", {}) if isinstance(sigs[idx], dict) else {}
-        if not isinstance(old, dict): old = {}
+        if not isinstance(old, dict):
+            old = {}
         old.update(entry["mapping"])
         sigs[idx] = {"fp": fp, "headers": list(headers), "mapping": old}
     ml["signatures"] = sigs
@@ -218,11 +302,16 @@ def update_ml_map(headers: List[str], mapping: dict, ml: Optional[dict] = None, 
     return ml
 
 def apply_mapping(df, mapping: dict):
-    """Returner DataFrame der kolonner er mappet til kanoniske navn. Ikke-eksisterende ignoreres.”"""
+    """
+    Returner en kopi av DataFrame der kolonner er mappet til kanoniske navn.
+    Ikke-eksisterende felter i mapping ignoreres. Hvis df er None eller
+    mapping er None, returneres df uendret.
+    """
     if df is None or mapping is None:
         return df
+    # Omvendt mapping: fra datakolonne til kanonisk felt
     rename = {src: canon for canon, src in mapping.items() if src in df.columns}
     out = df.rename(columns=rename)
-    # optional rekkefølge
+    # plasser kanoniske felter først, deretter de som ikke er i listen
     cols = [c for c in CANON if c in out.columns] + [c for c in out.columns if c not in CANON]
     return out.loc[:, cols]
