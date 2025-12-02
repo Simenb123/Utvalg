@@ -1,5 +1,5 @@
-# Utvalg – R12d/R12e/R12f samlebundle
-Generert: 2025-11-10T15:07:09.501498Z
+# Utvalg
+
 
 **Innhold**
 - `preferences.py` – kompatibel modul med get/set + load/save (lagrer i .session/preferences.json om mulig)
@@ -18,3 +18,17 @@ Generert: 2025-11-10T15:07:09.501498Z
 
 **Trygghet**
 - Alle filer er bakoverkompatible. Hvis enkelte moduler (f.eks. `views_column_chooser`) mangler, bruker vi stubs for å unngå krasj.
+
+
+
+## Testing
+
+Prosjektet bruker `pytest` for automatiserte tester.
+
+### Installere avhengigheter
+
+Opprett og aktiver et virtuelt miljø (valgfritt, men anbefalt), og installer avhengigheter:
+
+```bash
+pip install -r requirements.txt
+pip install pytest

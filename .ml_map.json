@@ -378,6 +378,58 @@
         "Valuta": "CurrencyCode",
         "Valutabeløp": "AmountCurrency"
       }
+    },
+    {
+      "fp": "ansvarlig|ar|avdeling|avg.kode|belop i valuta|bilagsart|bilagsdato|bilagsjour.nr|bilagsnr|bokfort belop|ekstratekst|fakturanr|grunnlag|iso-kode|kontonr|motkonto|mva-belop|mva-sats|navn|omsetn.klasse|opprinnelse|ordrenr|periode|prosjekt|prosjekt navn|registrert belop|reklamasjon|reklamasjonsnavn|rev.nr|service nr navn pa butikk|service regnskap|tekst|valutakurs|valuteringsdato",
+      "headers": [
+        "År",
+        "Peri­ode",
+        "Navn",
+        "Kontonr",
+        "Bilagsnr",
+        "Bilags­dato",
+        "Valuter­ings­dato",
+        "Bilags­art",
+        "Tekst",
+        "Bokført beløp",
+        "Grunn­lag",
+        "Mva-beløp",
+        "ISO-kode",
+        "Valuta­kurs",
+        "Beløp i valuta",
+        "Registrert beløp",
+        "Mot­konto",
+        "Ekstra­tekst",
+        "Faktu­ra­nr",
+        "Avdeling",
+        "Prosjekt",
+        "Prosjekt navn",
+        "Service regnskap",
+        "Service nr Navn på butikk",
+        "An­svarlig",
+        "Omsetn.­klasse",
+        "Avg.­kode",
+        "Mva-sats",
+        "Opprin­nelse",
+        "Bilags­jour.nr",
+        "Rev.nr",
+        "Reklamasjon",
+        "Reklamasjonsnavn",
+        "Ordrenr"
+      ],
+      "mapping": {
+        "Konto": "Kontonr",
+        "Kontonavn": "Navn",
+        "Bilag": "Bilagsnr",
+        "Beløp": "Bokført beløp",
+        "Dato": "Bilags­dato",
+        "Tekst": "Tekst",
+        "MVA-kode": "Avg.­kode",
+        "MVA-beløp": "Mva-beløp",
+        "MVA-prosent": "Mva-sats",
+        "Valuta": "ISO-kode",
+        "Valutabeløp": "Beløp i valuta"
+      }
     }
   ]
 }

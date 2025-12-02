@@ -5,28 +5,24 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/doc/ui_overview.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/header_detection.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_model.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_bus_selection_flow.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_header_detection.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_model.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_utvalg_commit_flow.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.preferences.json" beforeDir="false" afterPath="$PROJECT_DIR$/.preferences.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/bus.py" beforeDir="false" afterPath="$PROJECT_DIR$/bus.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README tests.txt" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README tests.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_HOTFIX.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_HOTFIX.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_PERF.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_PERF.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_R10.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R10.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_R11b.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_R11b_hotfix.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b_hotfix.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_R12.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R12.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_R7.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R7.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README_selectionstudio_filters.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_selectionstudio_filters.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/CHANGELOG.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README tests.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_HOTFIX.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_PERF.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R10.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b_hotfix.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R12.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R7.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_ARCHIVE/README_selectionstudio_filters.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/moduledescriptions.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/tests/.coverage" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_page_analyse_interface.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_page_analyse_interface.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -66,29 +62,57 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor&quot;: &quot;Run&quot;,
-    &quot;Python tests.Python tests in test_analysis_pkg.py.executor&quot;: &quot;Run&quot;,
-    &quot;Python.app.executor&quot;: &quot;Run&quot;,
-    &quot;Python.index_match_python.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test_analysis_pkg.executor&quot;: &quot;Run&quot;,
-    &quot;Python.ui_main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.utvalgsgenerator.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor": "Run",
+    "Python tests.Python tests in test_analysis_pkg.py.executor": "Run",
+    "Python.app.executor": "Run",
+    "Python.index_match_python.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.python app.py.executor": "Run",
+    "Python.test_analysis_pkg.executor": "Run",
+    "Python.ui_main.executor": "Run",
+    "Python.utvalgsgenerator.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "C:/Users/ib91/Desktop/PyCharmProjects/Utvalg/tests"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc\README_ARCHIVE" />
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
   </component>
-  <component name="RunManager">
+  <component name="RunManager" selected="Python.python app.py">
+    <configuration name="python app.py" type="PythonConfigurationType" factoryName="Python" temporary="true">
+      <module name="Utvalg" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/doc" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="app.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
       <module name="Utvalg" />
       <option name="ENV_FILES" value="" />
@@ -106,6 +130,7 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.python app.py" />
         <item itemvalue="Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic" />
       </list>
     </recent_temporary>
@@ -224,7 +249,14 @@
       <option name="presentableId" value="LOCAL−00014" />
       <updated>1763938901526</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL−00015" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1764644649958</created>
+      <option name="number" value="LOCAL−00015" />
+      <option name="presentableId" value="LOCAL−00015" />
+      <updated>1764644649958</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
