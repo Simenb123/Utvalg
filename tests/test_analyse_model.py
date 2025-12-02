@@ -1,11 +1,12 @@
 """
-Unit tests for analyse_model functions.
+Enhetstester for analyse_model.
 
-These tests validate the behaviour of build_pivot_by_account and
-build_summary using small in‑memory DataFrames. They check that
-aggregations are computed correctly and that edge cases (empty DataFrame
-or missing columns) are handled gracefully.
+Disse testene verifiserer at pivotfunksjonen og hjelpefunksjonene i
+analyse_model fungerer som forventet. Det testes både "happy path" og
+kanttilfeller, slik at koden tåler tomme data eller manglende kolonner.
 """
+
+from __future__ import annotations
 
 import pandas as pd
 
@@ -13,7 +14,7 @@ from analyse_model import build_pivot_by_account, build_summary, filter_by_accou
 
 
 def test_build_pivot_by_account_basic() -> None:
-    """Pivot should group by Konto and Kontonavn, summing Beløp and counting Bilag."""
+    """Pivot skal gruppere på Konto (og Kontonavn) og summere Beløp/telle Bilag."""
     df = pd.DataFrame({
         "Konto": [1000, 1000, 2000],
         "Kontonavn": ["Bank", "Bank", "Kasse"],
@@ -21,9 +22,12 @@ def test_build_pivot_by_account_basic() -> None:
         "Bilag": ["1", "2", "3"],
     })
     pivot = build_pivot_by_account(df)
-    # to_dict for easier assertions
-    rows = {row["Konto"]: row for _, row in pivot.set_index("Konto").iterrows()}
-    assert len(rows) == 2, "Pivot should produce two rows for two accounts"
+    # Kontroller at pivot har forventede kolonner
+    expected_cols = {"Konto", "Kontonavn", "Sum beløp", "Antall bilag"}
+    assert expected_cols.issubset(set(pivot.columns))
+    # Konverter til dictionary for enkel sjekk
+    rows = {int(row["Konto"]): row for _, row in pivot.set_index("Konto").iterrows()}
+    assert len(rows) == 2
     # Konto 1000
     r1000 = rows[1000]
     assert r1000["Sum beløp"] == 300.0
@@ -34,8 +38,8 @@ def test_build_pivot_by_account_basic() -> None:
     assert r2000["Antall bilag"] == 1
 
 
-def test_build_pivot_without_optional_columns() -> None:
-    """Pivot should return unique konto when Beløp/Bilag are missing."""
+def test_build_pivot_without_belop_or_bilag() -> None:
+    """Når Beløp og Bilag mangler, skal pivot returnere unike kontoer."""
     df = pd.DataFrame({
         "Konto": [1, 2, 2, 3],
         "Kontonavn": ["A", "B", "B", "C"],
@@ -45,7 +49,7 @@ def test_build_pivot_without_optional_columns() -> None:
 
 
 def test_build_summary() -> None:
-    """Summary should compute total rows, sum of Beløp and min/max dates."""
+    """Oppsummering skal gi antall rader, sum beløp og min/max dato."""
     df = pd.DataFrame({
         "Beløp": [10, -5, 3],
         "Dato": ["01.01.2020", "15.02.2020", "02.01.2020"],
@@ -58,11 +62,11 @@ def test_build_summary() -> None:
 
 
 def test_filter_by_accounts() -> None:
-    """filter_by_accounts should return rows for specified accounts as strings."""
+    """filter_by_accounts skal returnere rader for spesifiserte kontoer."""
     df = pd.DataFrame({
         "Konto": ["100", 200, 100, "300"],
         "Value": [1, 2, 3, 4],
     })
     out = filter_by_accounts(df, [100, "300"])
-    # Should include rows where Konto equals "100" or 100 and "300"
+    # Skal inkludere rader der Konto er "100"/100 eller "300"
     assert list(out["Konto"]) == ["100", 100, "300"]

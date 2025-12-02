@@ -40,14 +40,14 @@ CANON = [
 ALIASES: Dict[str, set[str]] = {
     # Konto: kontonummer og generelle GL‑kontoaliaser
     "Konto": {
-        "konto", "kontonr", "kontonummer","nr", "nummer"
-        "account", "account no", "account no." "account number", "gl account", "gl",
+        "konto", "kontonr", "kontonummer",
+        "account", "account no", "account number", "gl account", "gl",
         "accountid", "account id", "accountid", "account number", "accountnumber"
     },
     # Kontonavn: navn eller beskrivelse for konto
     "Kontonavn": {
-        "kontonavn", "konto navn", "kontobetegnelse", "kontobeskrivelse", "navn"
-        "account name", "accountname", "gl name", "gl tekst",
+        "kontonavn", "konto navn", "kontobetegnelse",
+        "account name", "gl name", "gl tekst",
         "accountdescription", "account description", "account desc"
     },
     # Bilag: dokumentnummer eller voucher
@@ -83,7 +83,7 @@ ALIASES: Dict[str, set[str]] = {
     },
     # Kundenavn: kundenavn
     "Kundenavn": {
-        "kundenavn", "customer name", "navn kunde", "customername", "customer description", "kunde"
+        "kundenavn", "customer name", "navn kunde", "customername", "customer description"
     },
     # Leverandørnr: leverandørnummer
     "Leverandørnr": {
@@ -93,15 +93,15 @@ ALIASES: Dict[str, set[str]] = {
     },
     # Leverandørnavn: leverandørnavn
     "Leverandørnavn": {
-        "leverandørnavn", "leverandornavn", "navn leverandør","leverandør"
-        "supplier name", "suppliername", "vendor name", "vendorname", "supplier"
+        "leverandørnavn", "leverandornavn", "navn leverandør",
+        "supplier name", "suppliername", "vendor name", "vendorname"
     },
     # MVA-kode: avgiftskode. Vi har utvidet med avg-kode-varianter.
     "MVA-kode": {
         "mva-kode", "mvakode", "mva kode",
         "vat code", "vatcode", "tax code", "taxcode",
         # nye aliaser
-        "avg-kode", "avg kode", "avgkode", "avg.-kode", "avgiftskode", "avgifts-kode"
+        "avg-kode", "avg kode", "avgkode", "avg.-kode"
     },
     # MVA-beløp: avgiftsbeløp. Vi har lagt til variasjoner uten diakritika.
     "MVA-beløp": {
@@ -130,10 +130,9 @@ ALIASES: Dict[str, set[str]] = {
         "valutabeløp", "valuta beløp",
         "amount (cur)", "amount currency", "amountcurrency", "foreign amount", "foreignamount",
         # nye aliaser
-        "belap i valuta", "beløp i valuta", "belop i valuta", "beloep i valuta",
+        "belap i valuta", "beløp i valuta", "belop i valuta",
         "belap i utenlandsk valuta", "beløp i utenlandsk valuta", "belop i utenlandsk valuta",
         "beløp valuta", "belop valuta"
-        "valutabeloep", "valutabelop", "valutabeløp"
     },
 }
 
