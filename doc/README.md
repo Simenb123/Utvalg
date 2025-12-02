@@ -1,5 +1,10 @@
 # Utvalg
 
+**Hurtigstart**
+1. Kopiér alle filene ved siden av dine eksisterende `.py`-filer (samme nivå som `app.py`).
+2. Start `python app.py`
+3. (Valgfritt) Bytt din nåværende `dataset_pane.py` med denne for å få loading+fastload+ML.
+
 
 **Innhold**
 - `preferences.py` – kompatibel modul med get/set + load/save (lagrer i .session/preferences.json om mulig)
@@ -11,14 +16,9 @@
 - `dataset_build_fast.py` – hurtig innlesing med usecols + robust parsing
 - `dataset_pane.py` – valgfri drop-in som kobler inn overlay + fastload + ML
 
-**Hurtigstart**
-1. Kopiér alle filene ved siden av dine eksisterende `.py`-filer (samme nivå som `app.py`).
-2. Start `python app.py`.
-3. (Valgfritt) Bytt din nåværende `dataset_pane.py` med denne for å få loading+fastload+ML.
 
 **Trygghet**
 - Alle filer er bakoverkompatible. Hvis enkelte moduler (f.eks. `views_column_chooser`) mangler, bruker vi stubs for å unngå krasj.
-
 
 
 ## Testing

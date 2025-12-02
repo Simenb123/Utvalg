@@ -1,34 +1,33 @@
+# -*- coding: utf-8 -*-
 """
-AnalysePage module.
+page_analyse.py
 
-This module defines a minimal AnalysePage class that can be used with a
-Tkinter‑based GUI. The primary goal of this implementation is to expose
-a stable interface for testing and future extensions. The class keeps
-track of a session object and an optional dataset, and it allows the
-registration of a callback that will be invoked when the user wants to
-send a selection of accounts to the next step in the workflow.
+Denne modulen definerer en AnalysePage som viser en oppsummering av
+regnskapsdata etter at datasetet er bygd. Klassen er designet for å
+fungere sammen med Tkinter‐basert GUI (bruker ttk.Widget). Den kan
+fremvise en pivotert oversikt per konto, vise detaljlinjer for valgte
+kontoer og sende utvalgte kontoer videre til utvalgsmodulen.
 
-The interface is intentionally simple: most of the GUI logic has been
-omitted to keep the module lightweight and easy to test. In a real
-application, methods like ``_load_from_session`` and ``_send_to_selection``
-would contain substantial UI updates and event handling.
+Sammenlignet med den minimale implementasjonen tidligere i prosjektet,
+inneholder denne versjonen en faktisk visning av data. Pivotlogikken
+ligger i analyse_model.py for å kunne testes separat.
+
+Merk: Når Tkinter ikke er tilgjengelig (f.eks. i headless testmiljø),
+faller klassen tilbake til en dummy-implementasjon av ttk.Frame. Da
+bygges ingen faktiske widgets, men metoder som refresh_from_session
+og set_utvalg_callback fungerer fortsatt slik at tester kan kjøre
+uavhengig av GUI.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, List, Optional
 
 try:
     import pandas as pd  # type: ignore
 except Exception:
-    # pandas is optional for this minimal interface; only used for type hints.
     pd = None  # type: ignore
 
-# Attempt to import Tkinter. In environments where Tkinter is not available
-# (e.g., headless CI systems), we fall back to a dummy ``ttk`` module with a
-# minimal ``Frame`` implementation. This allows unit tests to import this
-# module without raising ImportError, while still providing a real widget
-# hierarchy when running the full GUI application.
 try:
     import tkinter as tk  # noqa: F401
     from tkinter import ttk  # type: ignore
@@ -36,7 +35,6 @@ except Exception:
     # Fallback dummy Frame if tkinter is unavailable
     class _DummyFrame:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            # Store args/kwargs for potential debugging but do nothing else
             self._dummy_args = args
             self._dummy_kwargs = kwargs
 
@@ -45,112 +43,216 @@ except Exception:
 
     ttk = _DummyTtk()  # type: ignore
 
+from analyse_model import build_pivot_by_account, filter_by_accounts
+
 
 class AnalysePage(ttk.Frame):
-    """Minimal AnalysePage for a Tkinter‑based application.
-
-    This class derives from :class:`tkinter.ttk.Frame` so that it can be
-    embedded inside a :class:`tkinter.ttk.Notebook`. It holds a reference to
-    the current session and an optional dataset. It also allows clients to
-    register a callback that will be invoked when the user requests to send
-    a selection of accounts to the next step in the workflow.
-
-    Parameters
-    ----------
-    parent : Any
-        The parent widget (typically a :class:`ttk.Notebook` instance). This
-        value is forwarded to the :class:`ttk.Frame` constructor.
+    """
+    AnalysePage viser en pivotert oversikt per konto og en liste over
+    tilhørende transaksjoner. Brukeren kan markere kontoer og sende dem
+    videre til utvalg.
     """
 
     def __init__(self, parent: Any) -> None:
-        # Initialise the ttk.Frame base class so that this object can be added
-        # to a Notebook. Without this call, ttk will raise a TclError when
-        # trying to pack or add the widget to a container.
         super().__init__(parent)
-        # Store the parent in case it is needed later
         self.parent: Any = parent
-        # Reference to the current session; set in refresh_from_session
         self._session: Optional[Any] = None
-        # Optional dataset extracted from the session; may be a pandas DataFrame
-        self.dataset: Optional[Any] = None
-        # Callback to notify when a selection of accounts should be sent to the next step
-        self._utvalg_callback: Optional[Callable[[Any], None]] = None
+        self.dataset: Optional[pd.DataFrame] = None
+        self._utvalg_callback: Optional[Callable[[Iterable[Any]], None]] = None
+        # GUI widgets set in _build_ui() (may be None in headless env)
+        self.summary_tree: Any = None
+        self.detail_tree: Any = None
+        self._build_ui()
 
-    # Public API -----------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Offentlig API
 
-    def set_utvalg_callback(self, callback: Callable[[Any], None]) -> None:
-        """Register a callback for sending selected accounts to the utvalg step.
-
-        Parameters
-        ----------
-        callback : Callable[[Any], None]
-            A function that accepts a single argument representing the
-            selected accounts. When :meth:`_send_to_selection` is called,
-            this callback will be invoked if it has been registered.
-        """
+    def set_utvalg_callback(self, callback: Callable[[Iterable[Any]], None]) -> None:
+        """Registrer en callback for når kontoer skal sendes videre til utvalg."""
         self._utvalg_callback = callback
 
     def refresh_from_session(self, session: Any) -> None:
-        """Refresh the AnalysePage using the provided session.
-
-        This method sets the current session reference and attempts to
-        retrieve a dataset from the session. If the session has an
-        attribute named ``dataset``, it will be stored on the page for
-        later use. Any exceptions raised during loading are swallowed to
-        prevent the GUI from crashing unexpectedly.
-
-        Parameters
-        ----------
-        session : Any
-            An object representing the current session state. The session
-            should provide a ``dataset`` attribute or property if a
-            dataset is available.
         """
-        # Assign the incoming session so it can be used by other methods
+        Oppdater AnalysePage basert på en ny session.
+
+        Hvis session har en attributt ``dataset`` settes denne på siden,
+        og pivot og detaljer oppdateres.
+        """
         self._session = session
-        # Extract a dataset from the session if present
+        # Forsøk å hente et dataset fra sessionen
+        df = None
         if hasattr(session, "dataset"):
             try:
-                self.dataset = session.dataset  # type: ignore[assignment]
+                df = session.dataset  # type: ignore[assignment]
             except Exception:
-                # Ignore any errors when reading the dataset from the session
-                self.dataset = None
-        # Perform any additional loading that subclasses or extended versions
-        # of this class might implement. Exceptions are ignored to avoid
-        # propagating errors to the caller.
-        try:
-            self._load_from_session()
-        except Exception:
-            pass
+                df = None
+        # Støtt fallback attributtnavn fra andre implementasjoner
+        if df is None and hasattr(session, "df"):
+            try:
+                df = session.df  # type: ignore[assignment]
+            except Exception:
+                df = None
+        # Oppdater dataset og UI
+        if isinstance(df, pd.DataFrame):
+            self.dataset = df
+        else:
+            self.dataset = None
+        self._update_summary()
 
-    # Internal API ---------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Intern API (GUI)
 
-    def _load_from_session(self) -> None:
-        """Load UI state from the current session.
-
-        Subclasses may override this method to perform any necessary
-        operations when the session changes, such as rebuilding pivot
-        tables or updating widgets. The default implementation does
-        nothing.
+    def _build_ui(self) -> None:
         """
-        # In a full implementation, this method would refresh GUI widgets
-        # based on the dataset and any other state stored in the session.
-        return None
+        Konstruer GUI-komponentene for analysefanen. Hvis Tkinter er
+        utilgjengelig, settes widgets til None slik at de ikke brukes.
+        """
+        # Dersom ttk er dummy (f.eks. i testmiljø uten GUI), hopp over
+        try:
+            # Oppsett av grid. To kolonner: pivotoversikt og detaljvisning
+            self.columnconfigure(0, weight=1)
+            self.columnconfigure(1, weight=2)
+            self.rowconfigure(0, weight=1)
 
-    def _send_to_selection(self, accounts: Any) -> None:
-        """Send selected accounts to the utvalg callback, if one is registered.
+            # Venstre side: pivotert oversikt per konto
+            left = ttk.Frame(self)
+            left.grid(row=0, column=0, sticky="nsew")
+            # Treeview for pivot
+            self.summary_tree = ttk.Treeview(left, show="headings")
+            yscroll = ttk.Scrollbar(left, orient="vertical", command=self.summary_tree.yview)
+            self.summary_tree.configure(yscrollcommand=yscroll.set)
+            self.summary_tree.pack(side="left", fill="both", expand=True)
+            yscroll.pack(side="right", fill="y")
+            # Bind velg
+            self.summary_tree.bind("<<TreeviewSelect>>", self._on_summary_select)
 
-        Parameters
-        ----------
-        accounts : Any
-            A representation of the selected accounts, typically a list
-            or other iterable. If a callback has been registered via
-            :meth:`set_utvalg_callback`, it will be invoked with this
-            value.
+            # Høyre side: detaljvisning for valgte kontoer
+            right = ttk.Frame(self)
+            right.grid(row=0, column=1, sticky="nsew")
+            self.detail_tree = ttk.Treeview(right, show="headings")
+            yscroll2 = ttk.Scrollbar(right, orient="vertical", command=self.detail_tree.yview)
+            self.detail_tree.configure(yscrollcommand=yscroll2.set)
+            self.detail_tree.pack(side="left", fill="both", expand=True)
+            yscroll2.pack(side="right", fill="y")
+
+            # Bunnlinje med knapp for å sende til utvalg
+            bottom = ttk.Frame(self)
+            bottom.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 4))
+            btn = ttk.Button(bottom, text="Til utvalg", command=self._on_send_selection)
+            btn.pack(side="left", padx=(4, 4))
+        except Exception:
+            # Ikke tilgjengelig GUI – bruk None som plassholdere
+            self.summary_tree = None
+            self.detail_tree = None
+
+    def _update_summary(self) -> None:
+        """
+        Beregn pivotoversikt og oppdater GUI. Hvis det ikke finnes GUI,
+        returneres bare.
+        """
+        if self.summary_tree is None or self.dataset is None:
+            return
+        # Bygg pivot
+        try:
+            pivot = build_pivot_by_account(self.dataset)
+        except Exception:
+            pivot = None
+        # Rens tidligere innhold
+        for item in self.summary_tree.get_children() if self.summary_tree else []:
+            self.summary_tree.delete(item)
+        if pivot is None or pivot.empty:
+            # Fjern tidligere kolonner
+            self.summary_tree["columns"] = []
+            return
+        # Sett opp kolonner
+        columns = list(pivot.columns)
+        self.summary_tree["columns"] = columns
+        for col in columns:
+            self.summary_tree.heading(col, text=str(col))
+            # Sett en generisk bredde (kan justeres basert på innhold)
+            self.summary_tree.column(col, width=120, anchor="w")
+        # Legg til rader
+        for _, row in pivot.iterrows():
+            self.summary_tree.insert("", "end", values=list(row))
+        # Etter oppdatering bør detaljvisningen tømmes
+        self._update_details([])
+
+    def _on_summary_select(self, _event: Any) -> None:
+        """
+        Når brukeren markerer konto(er) i pivot-tabellen, filtrer dataset
+        og vis tilhørende transaksjoner i detaljvisningen.
+        """
+        if self.summary_tree is None or self.detail_tree is None or self.dataset is None:
+            return
+        sel = self.summary_tree.selection()
+        accounts: List[Any] = []
+        for iid in sel:
+            # Første kolonne er alltid "Konto"
+            values = self.summary_tree.item(iid).get("values", [])
+            if values:
+                accounts.append(values[0])
+        self._update_details(accounts)
+
+    def _update_details(self, accounts: Iterable[Any]) -> None:
+        """
+        Oppdater detaljvisningen med transaksjoner for de gitte kontoene.
+        Hvis listen er tom, tømmes detaljvisningen.
+        """
+        if self.detail_tree is None:
+            return
+        # Fjern eksisterende rader
+        for iid in self.detail_tree.get_children():
+            self.detail_tree.delete(iid)
+        # Hvis dataset ikke satt eller ingen kontoer valgt, tøm kolonner
+        if self.dataset is None or not accounts:
+            self.detail_tree["columns"] = []
+            return
+        # Filtrer dataset på konto
+        try:
+            df = filter_by_accounts(self.dataset, accounts)
+        except Exception:
+            df = None
+        if df is None or df.empty:
+            self.detail_tree["columns"] = []
+            return
+        # Sett opp kolonner
+        cols = list(df.columns)
+        self.detail_tree["columns"] = cols
+        for col in cols:
+            self.detail_tree.heading(col, text=str(col))
+            self.detail_tree.column(col, width=120, anchor="w")
+        # Legg til rader
+        for _, row in df.iterrows():
+            # Konverter alle verdier til str for sikkerhets skyld
+            vals = [str(v) if v is not None else "" for v in row.tolist()]
+            self.detail_tree.insert("", "end", values=vals)
+
+    def _on_send_selection(self) -> None:
+        """
+        Hent markerte kontoer i pivotvisningen og send dem videre via
+        registrert callback.
+        """
+        if self.summary_tree is None:
+            return
+        sel = self.summary_tree.selection()
+        accounts: List[Any] = []
+        for iid in sel:
+            values = self.summary_tree.item(iid).get("values", [])
+            if values:
+                accounts.append(values[0])
+        # Send videre hvis callback finnes
+        self._send_to_selection(accounts)
+
+    # ------------------------------------------------------------------
+    # Arvet fra minimal implementasjon
+
+    def _send_to_selection(self, accounts: Iterable[Any]) -> None:
+        """
+        Invokér registrert utvalg-callback med en liste over kontoer.
+        Svak exceptions for å unngå at GUI krasjer på callback-feil.
         """
         if self._utvalg_callback is not None:
             try:
                 self._utvalg_callback(accounts)
             except Exception:
-                # Swallow exceptions in callbacks to prevent GUI crashes
                 pass

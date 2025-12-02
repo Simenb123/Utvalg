@@ -5,9 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/tests/test_ml_map_aliases.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -248,7 +248,14 @@
       <option name="presentableId" value="LOCAL−00016" />
       <updated>1764672194834</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL−00017" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1764672795848</created>
+      <option name="number" value="LOCAL−00017" />
+      <option name="presentableId" value="LOCAL−00017" />
+      <updated>1764672795848</updated>
+    </task>
+    <option name="localTasksCounter" value="18" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
