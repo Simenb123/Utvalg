@@ -35,15 +35,15 @@
     "Dato",
     "Beløp",
     "Tekst",
-    "Kundenr",
-    "Kundenavn",
-    "Leverandørnr",
-    "Leverandørnavn",
     "Valuta",
     "Valutabeløp",
     "MVA-kode",
     "MVA-beløp",
-    "MVA-prosent"
+    "MVA-prosent",
+    "Kundenr",
+    "Kundenavn",
+    "Leverandørnr",
+    "Leverandørnavn"
   ],
   "analyse.columns.visible": [
     "Konto",

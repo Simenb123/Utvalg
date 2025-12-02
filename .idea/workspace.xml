@@ -5,10 +5,28 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/page_utvalg_strata.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/doc/ui_overview.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/header_detection.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/page_analyse_model.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_bus_selection_flow.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_header_detection.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_model.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_utvalg_commit_flow.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_selection_studio.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.preferences.json" beforeDir="false" afterPath="$PROJECT_DIR$/.preferences.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/bus.py" beforeDir="false" afterPath="$PROJECT_DIR$/bus.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README tests.txt" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README tests.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_HOTFIX.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_HOTFIX.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_PERF.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_PERF.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_R10.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R10.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_R11b.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_R11b_hotfix.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R11b_hotfix.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_R12.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R12.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_R7.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_R7.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/doc/README_selectionstudio_filters.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README_ARCHIVE/README_selectionstudio_filters.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/tests/.coverage" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_page_analyse_interface.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_page_analyse_interface.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -65,8 +83,9 @@
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc\README_ARCHIVE" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
   </component>
   <component name="RunManager">
@@ -191,7 +210,21 @@
       <option name="presentableId" value="LOCAL−00012" />
       <updated>1763847851361</updated>
     </task>
-    <option name="localTasksCounter" value="13" />
+    <task id="LOCAL−00013" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763932950041</created>
+      <option name="number" value="LOCAL−00013" />
+      <option name="presentableId" value="LOCAL−00013" />
+      <updated>1763932950041</updated>
+    </task>
+    <task id="LOCAL−00014" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1763938901526</created>
+      <option name="number" value="LOCAL−00014" />
+      <option name="presentableId" value="LOCAL−00014" />
+      <updated>1763938901526</updated>
+    </task>
+    <option name="localTasksCounter" value="15" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
