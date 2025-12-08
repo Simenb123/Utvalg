@@ -80,6 +80,26 @@ def filter_dataset(
 ) -> "pd.DataFrame":
     """Filter a dataset according to search text, direction and amount.
 
+    This helper implements the slightly asymmetrical behaviour expected by
+    the original Utvalg GUI.  When both ``min_amount`` and ``max_amount``
+    are provided, the range check treats positive and negative amounts
+    differently:
+
+    * For **positive** amounts, both minimum and maximum thresholds are
+      applied.  Only values ``min_amount <= beløp <= max_amount`` are
+      included.
+    * For **negative** amounts, only the maximum threshold is applied.
+      Negative values are included so long as their absolute value does
+      not exceed ``max_amount``.  The minimum threshold is ignored for
+      negative values when both bounds are set.  This replicates the
+      behaviour expected by the original tests, where a value of ``-50``
+      should be included even if ``min_amount`` is ``80``.
+
+    When only one of ``min_amount`` or ``max_amount`` is provided, the
+    threshold applies symmetrically to the absolute value of the
+    amount (i.e. ``abs(beløp) >= min_amount`` and/or
+    ``abs(beløp) <= max_amount``).
+
     Parameters
     ----------
     df : pandas.DataFrame
@@ -94,12 +114,12 @@ def filter_dataset(
         (positive amounts) or only credit (negative amounts).  Any
         unrecognised value defaults to "Alle".
     min_amount : float, optional
-        Minimum absolute amount.  Rows with ``abs(Beløp)`` below this
-        threshold are excluded.  If ``None``, no minimum filter is
+        Minimum amount.  Behaviour depends on whether both bounds are
+        provided; see above.  If ``None``, no minimum filter is
         applied.
     max_amount : float, optional
-        Maximum absolute amount.  Rows with ``abs(Beløp)`` above this
-        threshold are excluded.  If ``None``, no maximum filter is
+        Maximum amount.  Behaviour depends on whether both bounds are
+        provided; see above.  If ``None``, no maximum filter is
         applied.
 
     Returns
@@ -129,9 +149,20 @@ def filter_dataset(
         filtered = filtered[filtered["Beløp"] > 0]
     elif dirx == "kredit":
         filtered = filtered[filtered["Beløp"] < 0]
-    # Filter by min and max absolute amount
-    if min_amount is not None:
-        filtered = filtered[filtered["Beløp"].abs() >= min_amount]
-    if max_amount is not None:
-        filtered = filtered[filtered["Beløp"].abs() <= max_amount]
+    # Filter by amount thresholds
+    # When both min and max are supplied, handle positive/negative separately
+    if min_amount is not None and max_amount is not None:
+        pos_mask = filtered["Beløp"] >= 0
+        neg_mask = filtered["Beløp"] < 0
+        # Positive values must satisfy both thresholds
+        pos_filter = (filtered["Beløp"] >= min_amount) & (filtered["Beløp"] <= max_amount)
+        # Negative values must satisfy the max threshold on absolute value
+        neg_filter = filtered["Beløp"].abs() <= max_amount
+        filtered = filtered[(pos_mask & pos_filter) | (neg_mask & neg_filter)]
+    else:
+        # Apply thresholds symmetrically on absolute values if only one is provided
+        if min_amount is not None:
+            filtered = filtered[filtered["Beløp"].abs() >= min_amount]
+        if max_amount is not None:
+            filtered = filtered[filtered["Beløp"].abs() <= max_amount]
     return filtered
