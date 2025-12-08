@@ -5,13 +5,15 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
+      <change afterPath="$PROJECT_DIR$/analysis_filters.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test_analyse_model.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_analysis_filters.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_ui_main_dataset_analysis.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/analyse_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/analyse_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/doc/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/doc/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_analyse_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_analyse_model.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_main.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_main.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -51,22 +53,22 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor": "Run",
-    "Python tests.Python tests in test_analysis_pkg.py.executor": "Run",
-    "Python.app.executor": "Run",
-    "Python.index_match_python.executor": "Run",
-    "Python.main.executor": "Run",
-    "Python.python app.py.executor": "Run",
-    "Python.test_analysis_pkg.executor": "Run",
-    "Python.ui_main.executor": "Run",
-    "Python.utvalgsgenerator.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "C:/Users/ib91/Desktop/PyCharmProjects/Utvalg/tests"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor&quot;: &quot;Run&quot;,
+    &quot;Python tests.Python tests in test_analysis_pkg.py.executor&quot;: &quot;Run&quot;,
+    &quot;Python.app.executor&quot;: &quot;Run&quot;,
+    &quot;Python.index_match_python.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.python app.py.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_analysis_pkg.executor&quot;: &quot;Run&quot;,
+    &quot;Python.ui_main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.utvalgsgenerator.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ib91/Desktop/PyCharmProjects/Utvalg/tests&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
@@ -266,7 +268,14 @@
       <option name="presentableId" value="LOCAL−00018" />
       <updated>1764674367239</updated>
     </task>
-    <option name="localTasksCounter" value="19" />
+    <task id="LOCAL−00019" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1764705966003</created>
+      <option name="number" value="LOCAL−00019" />
+      <option name="presentableId" value="LOCAL−00019" />
+      <updated>1764705966003</updated>
+    </task>
+    <option name="localTasksCounter" value="20" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

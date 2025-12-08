@@ -71,6 +71,41 @@ class App(tk.Tk):
         # Dataset-fane
         self.page_dataset = DatasetPage(self.nb)
         self.nb.add(self.page_dataset, text="Dataset")
+        # Når DatasetPane er ferdig med å bygge datasettet, vil vi gjerne
+        # oppdatere Analyse-fanen automatisk. DatasetPane støtter en
+        # on_dataset_ready-callback gjennom et privat attributt. Her
+        # registrerer vi en lokal callback som gjør tre ting:
+        #   1) Lagre datasettet til session (defensivt, DatasetPane gjør dette selv).
+        #   2) Kalle AnalysePage.refresh_from_session() slik at pivoten
+        #      blir bygget og vist.
+        #   3) Bytte til Analyse-fanen i notebooken for å vise resultatet.
+        try:
+            dp = getattr(self.page_dataset, "dp", None)
+            if dp is not None:
+                def _on_data_ready(df: pd.DataFrame) -> None:
+                    # Oppdater session med datasettet hvis modulen er importert
+                    try:
+                        if session is not None:
+                            session.dataset = df  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    # Oppdater Analyse-fanen
+                    try:
+                        if hasattr(self.page_analyse, "refresh_from_session"):
+                            # type: ignore[call-arg]
+                            self.page_analyse.refresh_from_session(session)  # type: ignore[arg-type]
+                    except Exception:
+                        pass
+                    # Bytt til Analyse-fanen for å vise pivoten
+                    try:
+                        self.nb.select(self.page_analyse)
+                    except Exception:
+                        pass
+                # type: ignore[assignment]
+                dp._on_ready = _on_data_ready  # registrer callback
+        except Exception:
+            # Hvis datasetpanelet mangler dp eller setting feiler, gjør ingenting
+            pass
 
         # Analyse-fane
         self.page_analyse = AnalysePage(self.nb)
