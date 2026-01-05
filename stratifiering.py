@@ -1,295 +1,255 @@
-import numpy as np
+import random
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
 
 
-def beregn_strata(df: pd.DataFrame, k: int, mode: str, abs_belop: bool):
+def beregn_strata(df: pd.DataFrame, k: int = 5, mode: str = "quantile", abs_belop: bool = False):
     """
-    Del bilagene i k grupper (quantile eller equal) basert på sum per bilag.
-
-    Parametre
-    ---------
-    df : DataFrame
-        Transaksjonsdata med minst kolonnen "Bilag" og "Beløp".
-    k : int
-        Ønsket antall grupper (minimum 2 – høyere tall justeres ned hvis
-        datagrunnlaget ikke gir nok unike verdier).
-    mode : {"quantile", "equal"}
-        "quantile" – like store grupper etter antall bilag (så langt det går).
-        "equal" – like brede intervaller i NOK.
-    abs_belop : bool
-        Hvis True brukes absoluttbeløp ved summering per bilag.
-
-    Returnerer
-    ----------
-    summary : DataFrame
-        Én rad per gruppe med antall bilag, sum, min, median og maks.
-    bilag_df : DataFrame
-        Én rad per bilag med sum og gruppekode (__grp__).
-    interval_map : dict[int, str]
-        Oppslag fra gruppe-id til tekstlig intervall ("(x, y]") for visning.
+    Lager strata på bilagsnivå.
+    - Først aggregeres df til bilag_df med sum per bilag (netto eller absolutt).
+    - Deretter deles bilag_df inn i k grupper etter sum.
+      mode: "quantile" => like mange bilag i hver gruppe, "equal" => like beløpsintervaller.
+    Returnerer:
+      summary: DataFrame med gruppe-statistikk,
+      bilag_df: DataFrame med Bilag, SumBeløp, __grp__,
+      interval_map: dict gruppe -> interval string (kan brukes til visning)
     """
-    bel = pd.to_numeric(df.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0)
+    if df is None or df.empty:
+        summary = pd.DataFrame(columns=["Gruppe", "Antall_bilag", "SumBeløp", "Min_Beløp", "Median_Beløp", "Max_Beløp", "Intervall"])
+        bilag_df = pd.DataFrame(columns=["Bilag", "SumBeløp", "__grp__"])
+        return summary, bilag_df, {}
 
-    # Summér per bilag: bruk absoluttbeløp hvis angitt
-    if abs_belop:
-        s_bilag = df.groupby("Bilag")[bel.name].apply(lambda x: x.abs().sum())
+    belop = df["Beløp"].abs() if abs_belop else df["Beløp"]
+    bilag_df = df.groupby("Bilag", as_index=False).apply(lambda g: belop.loc[g.index].sum(), include_groups=False)
+    bilag_df = bilag_df.rename(columns={None: "SumBeløp"})
+    # groupby.apply gir ofte en DataFrame med index, vi vil ha vanlige kolonner
+    if "Bilag" not in bilag_df.columns:
+        bilag_df = bilag_df.reset_index()
+
+    # Sikre riktige datatyper
+    bilag_df["SumBeløp"] = pd.to_numeric(bilag_df["SumBeløp"], errors="coerce").fillna(0.0)
+
+    if k < 1:
+        k = 1
+    k = min(k, len(bilag_df)) if len(bilag_df) > 0 else 1
+
+    if mode == "quantile":
+        # pd.qcut kan feile hvis mange like verdier; duplicates="drop" reduserer antall grupper
+        try:
+            bilag_df["__grp__"] = pd.qcut(bilag_df["SumBeløp"], q=k, labels=False, duplicates="drop") + 1
+        except ValueError:
+            # fallback: alt i én gruppe
+            bilag_df["__grp__"] = 1
     else:
-        s_bilag = df.groupby("Bilag")[bel.name].sum()
+        # equal beløpsintervaller
+        minv = bilag_df["SumBeløp"].min()
+        maxv = bilag_df["SumBeløp"].max()
+        if minv == maxv:
+            bilag_df["__grp__"] = 1
+        else:
+            bins = pd.interval_range(start=minv, end=maxv, periods=k)
+            # cut bruker bins (interval objects)
+            bilag_df["__bin__"] = pd.cut(bilag_df["SumBeløp"], bins=bins, include_lowest=True)
+            # map intervaller til 1..k
+            mapping = {iv: i + 1 for i, iv in enumerate(sorted(bins))}
+            bilag_df["__grp__"] = bilag_df["__bin__"].map(mapping).fillna(1).astype(int)
+            bilag_df = bilag_df.drop(columns=["__bin__"])
 
-    # Dropp bilag uten gyldig nøkkel
-    s_bilag = s_bilag[~s_bilag.index.isna()]
+    # summary pr gruppe
+    grp = bilag_df.groupby("__grp__")["SumBeløp"]
+    summary = grp.agg(
+        Antall_bilag="count",
+        SumBeløp="sum",
+        Min_Beløp="min",
+        Median_Beløp="median",
+        Max_Beløp="max",
+    ).reset_index().rename(columns={"__grp__": "Gruppe"})
 
-    # Minst 2 grupper
-    k = max(2, int(k))
-
-    if len(s_bilag) == 0:
-        # Tomt grunnlag – returner tomme strukturer
-        empty_summary = pd.DataFrame(
-            columns=["Gruppe", "Antall_bilag", "SumBeløp", "Min_Beløp", "Median_Beløp", "Max_Beløp", "Intervall"]
-        )
-        empty_bilag_df = pd.DataFrame(columns=["Bilag", "SumBeløp", "__interval__", "__grp__"])
-        return empty_summary, empty_bilag_df, {}
-
-    # Quantile = like store grupper etter sum, equal = like store intervaller
-    if mode == "equal":
-        cats = pd.cut(s_bilag, bins=k, duplicates="drop")
-    else:
-        # Default til quantile hvis noe annet er oppgitt
-        cats = pd.qcut(s_bilag, q=k, duplicates="drop")
-
-    # Sorter intervaller og lag gruppekoder 1..n
-    intervals = cats.cat.categories
-    sorted_intervals = sorted(
-        intervals,
-        key=lambda iv: iv.left if hasattr(iv, "left") else float(str(iv).split(",")[0].strip("(["))
-    )
-    mapping = {iv: idx + 1 for idx, iv in enumerate(sorted_intervals)}
-
-    bilag_df = pd.DataFrame({
-        "Bilag": s_bilag.index.astype(object),
-        "SumBeløp": s_bilag.values,
-        "__interval__": cats
-    })
-    bilag_df["__grp__"] = bilag_df["__interval__"].map(mapping)
-
-    # Bygg oppsummering per gruppe
-    tmp = bilag_df.copy()
-    summary = (
-        tmp.groupby("__grp__", observed=True)["SumBeløp"]
-        .agg(
-            Antall_bilag="count",
-            SumBeløp="sum",
-            Min_Beløp="min",
-            Median_Beløp="median",
-            Max_Beløp="max",
-        )
-        .reset_index()
-        .rename(columns={"__grp__": "Gruppe"})
-    )
-
-    interval_map = {mapping[iv]: str(iv) for iv in mapping}
+    # Intervall per gruppe (for visning)
+    # Vi lager en map: Gruppe -> "[min, max]" basert på faktiske min/max i gruppen
+    interval_map = {}
+    for _, r in summary.iterrows():
+        g = int(r["Gruppe"])
+        interval_map[g] = f"[{r['Min_Beløp']:.2f}, {r['Max_Beløp']:.2f}]"
     summary["Intervall"] = summary["Gruppe"].map(interval_map)
     summary = summary.sort_values("Gruppe").reset_index(drop=True)
     return summary, bilag_df, interval_map
 
 
+def stratify_bilag(
+    df: pd.DataFrame,
+    k: int = 5,
+    method: str = "quantile",
+    abs_belop: bool = False,
+):
+    """Bakoverkompatibel alias for :func:`beregn_strata`.
+
+    Repoet har både norsk og engelsk navngivning i omløp. Enkelte moduler/tester
+    forventer `stratify_bilag`, mens den opprinnelige implementasjonen heter
+    `beregn_strata`.
+
+    Dette wrapper-kallet gjør at vi kan stabilisere API-et og få grønn pytest,
+    uten store refaktor-endringer akkurat nå.
+    """
+    return beregn_strata(df=df, k=k, mode=method, abs_belop=abs_belop)
+
+
 def trekk_sample(
     bilag_df: pd.DataFrame,
     summary: pd.DataFrame,
-    custom_counts: Optional[Dict[int, int]],
-    n_per_group: int,
-    total_n: int,
-    auto_fordel: bool,
-) -> List:
+    custom_counts: dict[int, int] | None = None,
+    n_per_group: int = 5,
+    total_n: int = 0,
+    auto_fordel: bool = False,
+    seed: int = 42,
+):
     """
-    Trekk bilag fra hver gruppe basert på enten custom_counts, total_n eller n_per_group.
-
-    Prioritet:
-    1. Hvis custom_counts er gitt, brukes disse (klippes til maks tilgjengelig per gruppe).
-    2. Ellers, hvis total_n > 0:
-       - fordeles enten proporsjonalt (auto_fordel=True) eller jevnt (auto_fordel=False)
-         mellom gruppene, men aldri flere enn det finnes totalt.
-    3. Ellers brukes n_per_group som fast antall per gruppe.
-
-    Funksjonen garanterer:
-    - det trekkes aldri flere bilag enn det finnes totalt,
-    - ingen bilag trekkes mer enn én gang,
-    - ingen risiko for uendelige løkker ved "over-bestilling".
+    Trekker bilag fra bilag_df etter grupper.
+    - Hvis custom_counts er satt, brukes det som eksakt antall per gruppe (klippes til tilgjengelige bilag).
+    - Ellers:
+        - Hvis total_n > 0:
+            - auto_fordel=True => fordel total_n proporsjonalt etter SumBeløp
+            - auto_fordel=False => trekk total_n jevnt over grupper
+        - Hvis total_n == 0: trekk n_per_group per gruppe
+    Returnerer liste med Bilag (strings) som er valgt.
     """
-    tmp = bilag_df.copy()
-    if tmp.empty or summary.empty:
+    if bilag_df is None or bilag_df.empty:
         return []
 
-    # Antall tilgjengelige bilag per gruppe (kapasitet)
-    bilags_per_group: Dict[int, int] = tmp.groupby("__grp__").size().to_dict()
-    group_counts: Dict[int, int] = {}
-    k_actual = len(summary)
+    rng = random.Random(seed)
+    bilag_df = bilag_df.copy()
+    bilag_df["__grp__"] = bilag_df["__grp__"].astype(int)
 
-    if k_actual == 0:
-        return []
+    # tilgjengelig per gruppe
+    available = bilag_df.groupby("__grp__")["Bilag"].apply(list).to_dict()
+    groups = sorted(available.keys())
 
-    # 1. Egendefinerte antall per gruppe
+    # bygg counts per gruppe
+    counts = {g: 0 for g in groups}
+
     if custom_counts:
-        for grp, cnt in custom_counts.items():
-            max_count = bilags_per_group.get(grp, 0)
-            group_counts[grp] = max(0, min(int(cnt), max_count))
-
-    # 2. Total_n: fordel jevnt eller etter sumandel
-    elif total_n > 0:
-        # Klipp total_n til maks tilgjengelig for å unngå uendelige løkker
-        max_available = int(sum(bilags_per_group.values()))
-        total_n = max(0, min(int(total_n), max_available))
-
-        if total_n == 0:
-            group_counts = {int(row["Gruppe"]): 0 for _, row in summary.iterrows()}
-        else:
-            # Hjelpestruktur for kapasitet
-            capacities: Dict[int, int] = {
-                int(row["Gruppe"]): bilags_per_group.get(int(row["Gruppe"]), 0)
-                for _, row in summary.iterrows()
-            }
-
-            def _adjust_counts_to_total(
-                provisional: Dict[int, int],
-                target_total: int,
-                order: List[int],
-                caps: Dict[int, int],
-            ) -> Dict[int, int]:
-                """
-                Juster foreløpige group_counts slik at summen blir target_total.
-
-                Øker eller reduserer med 1 per steg i oppgitt rekkefølge, uten å
-                overskride kapasitet eller gå under 0.
-                """
-                current = sum(provisional.values())
-                diff = int(target_total - current)
-
-                if diff == 0:
-                    return provisional
-
-                # Vi endrer bare i riktig retning, diff beveger seg monotont mot 0
-                while diff != 0:
-                    changed = False
-                    for g in order:
-                        if diff > 0:
-                            if provisional.get(g, 0) < caps.get(g, 0):
-                                provisional[g] = provisional.get(g, 0) + 1
-                                diff -= 1
-                                changed = True
-                        elif diff < 0:
-                            if provisional.get(g, 0) > 0:
-                                provisional[g] = provisional.get(g, 0) - 1
-                                diff += 1
-                                changed = True
-
-                        if diff == 0:
-                            break
-
-                    if not changed:
-                        # Kan ikke justere mer (burde ikke skje når target_total <= sum(capacities))
-                        break
-                return provisional
-
-            total_sum = float(abs(summary["SumBeløp"]).sum())
-
-            if auto_fordel and total_sum > 0.0:
-                # Proposjonal fordeling etter sumandel
-                provisional: Dict[int, int] = {}
-                fracs: Dict[int, float] = {}
-
-                for _, row in summary.iterrows():
-                    g = int(row["Gruppe"])
-                    share = float(abs(row["SumBeløp"])) / total_sum
-                    fracs[g] = share
-                    n_grp = int(round(total_n * share))
-                    provisional[g] = min(n_grp, capacities.get(g, 0))
-
-                order_inc = sorted(fracs, key=fracs.get)          # for reduksjon
-                order_dec = sorted(fracs, key=fracs.get, reverse=True)  # for økning
-
-                # Juster opp/ned til vi treffer total_n
-                current_total = sum(provisional.values())
-                if current_total < total_n:
-                    group_counts = _adjust_counts_to_total(provisional, total_n, order_dec, capacities)
-                elif current_total > total_n:
-                    group_counts = _adjust_counts_to_total(provisional, total_n, order_inc, capacities)
-                else:
-                    group_counts = provisional
-
-            else:
-                # Jevn fordeling når auto_fordel=False eller total_sum == 0
-                groups: List[int] = [int(row["Gruppe"]) for _, row in summary.iterrows()]
-
-                base = int(total_n // k_actual)
-                provisional: Dict[int, int] = {}
-
-                for g in groups:
-                    provisional[g] = min(base, capacities.get(g, 0))
-
-                # Rest (pga. avrunding) fordeles i grupperekkefølge
-                group_counts = _adjust_counts_to_total(provisional, total_n, groups, capacities)
-
-    # 3. Fast antall per gruppe
+        for g in groups:
+            counts[g] = int(custom_counts.get(g, 0))
     else:
-        n_per = max(0, int(n_per_group))
-        for _, row in summary.iterrows():
-            g = int(row["Gruppe"])
-            max_count = bilags_per_group.get(g, 0)
-            group_counts[g] = min(n_per, max_count)
+        if total_n and total_n > 0:
+            if auto_fordel:
+                # fordel proporsjonalt etter SumBeløp
+                # fall back til antall hvis SumBeløp mangler
+                if "SumBeløp" in summary.columns:
+                    grp_sum = summary.set_index("Gruppe")["SumBeløp"].to_dict()
+                    total_sum = sum(float(grp_sum.get(g, 0.0)) for g in groups)
+                    if total_sum <= 0:
+                        # jevn fordeling hvis sum=0
+                        per = max(1, total_n // max(1, len(groups)))
+                        for g in groups:
+                            counts[g] = per
+                    else:
+                        # initial tildeling
+                        for g in groups:
+                            frac = float(grp_sum.get(g, 0.0)) / total_sum
+                            counts[g] = int(round(frac * total_n))
+                else:
+                    # fallback: jevnt
+                    per = max(1, total_n // max(1, len(groups)))
+                    for g in groups:
+                        counts[g] = per
 
-    # Trekk bilag fra hver gruppe
-    rng = np.random.default_rng()
-    selected: List = []
+                # juster opp/ned så totalsum matcher total_n
+                current = sum(counts.values())
+                # hvis rounding ga avvik, juster fra største grupper
+                if current != total_n and len(groups) > 0:
+                    # ranger grupper etter sum (høyest først)
+                    if "SumBeløp" in summary.columns:
+                        grp_sum = summary.set_index("Gruppe")["SumBeløp"].to_dict()
+                        order = sorted(groups, key=lambda g: float(grp_sum.get(g, 0.0)), reverse=True)
+                    else:
+                        order = list(groups)
 
-    for grp, n in group_counts.items():
-        if n <= 0:
-            continue
-        bilags = tmp.loc[tmp["__grp__"] == grp, "Bilag"].tolist()
-
-        if n >= len(bilags):
-            # Ta alle bilag i gruppen
-            selected.extend(bilags)
+                    while current < total_n:
+                        for g in order:
+                            counts[g] += 1
+                            current += 1
+                            if current >= total_n:
+                                break
+                    while current > total_n:
+                        for g in order:
+                            if counts[g] > 0:
+                                counts[g] -= 1
+                                current -= 1
+                                if current <= total_n:
+                                    break
+            else:
+                # jevn fordeling på grupper
+                per = max(1, total_n // max(1, len(groups)))
+                for g in groups:
+                    counts[g] = per
+                # fordel resten
+                rest = total_n - sum(counts.values())
+                i = 0
+                while rest > 0 and len(groups) > 0:
+                    counts[groups[i % len(groups)]] += 1
+                    rest -= 1
+                    i += 1
         else:
-            # Tilfeldig utvalg uten erstatning
-            chosen = rng.choice(bilags, size=int(n), replace=False).tolist()
-            selected.extend(chosen)
+            # fast per gruppe
+            for g in groups:
+                counts[g] = int(n_per_group)
+
+    # klipp counts til tilgjengelige
+    for g in groups:
+        counts[g] = min(counts[g], len(available[g]))
+
+    # hvis total_n var større enn totalt tilgjengelig, returner alle
+    total_available = sum(len(v) for v in available.values())
+    if total_n and total_n > total_available:
+        return [b for sub in available.values() for b in sub]
+
+    # trekk tilfeldig per gruppe
+    selected = []
+    for g in groups:
+        candidates = list(available[g])
+        rng.shuffle(candidates)
+        selected.extend(candidates[: counts[g]])
+
+    # Hvis total_n er satt og vi likevel har fått litt for mange (pga klipping/fordeling), klipp globalt
+    if total_n and len(selected) > total_n:
+        rng.shuffle(selected)
+        selected = selected[:total_n]
 
     return selected
 
 
-def summer_per_bilag(
-    df_base: pd.DataFrame,
-    df_all: Optional[pd.DataFrame],
-    bilag_list: List,
-) -> pd.DataFrame:
+def summer_per_bilag(df_base: pd.DataFrame, df_all: pd.DataFrame | None, bilag_list: list):
     """
-    Returner en DataFrame med summer per bilag.
-
-    Kolonner
-    --------
-    Bilag
-    Sum bilag (kontointervallet)
-        Netto sum av bilag i df_base.
-    Sum rader (kontointervallet)
-        Absolutt sum av alle rader i df_base (alle linjer for bilaget).
-    Sum bilag (alle kontoer)
-        Netto sum av bilag i df_all (hvis df_all gis), ellers 0.0.
+    Lager oppsummeringstabell per bilag:
+    - Sum bilag (kontointervallet): netto sum innenfor df_base (fra kontointervallet)
+    - Sum rader (kontointervallet): sum av absoluttverdier innenfor df_base
+    - Sum bilag (alle kontoer): netto sum innenfor df_all (hele dataset), hvis df_all gitt
     """
-    out = pd.DataFrame({"Bilag": bilag_list})
+    if df_base is None or df_base.empty:
+        return pd.DataFrame(
+            columns=[
+                "Bilag",
+                "Sum bilag (kontointervallet)",
+                "Sum rader (kontointervallet)",
+                "Sum bilag (alle kontoer)",
+            ]
+        )
 
-    bel_base = pd.to_numeric(df_base.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0)
-    sum_bilag_int = df_base.groupby("Bilag")[bel_base.name].sum()
-    sum_rows_int = df_base.groupby("Bilag")[bel_base.name].apply(lambda x: x.abs().sum())
+    base = df_base[df_base["Bilag"].isin(bilag_list)].copy()
+    out = base.groupby("Bilag")["Beløp"].agg(
+        **{
+            "Sum bilag (kontointervallet)": "sum",
+            "Sum rader (kontointervallet)": lambda s: s.abs().sum(),
+        }
+    ).reset_index()
 
-    out["Sum bilag (kontointervallet)"] = out["Bilag"].map(sum_bilag_int).fillna(0.0)
-    out["Sum rader (kontointervallet)"] = out["Bilag"].map(sum_rows_int).fillna(0.0)
-
-    if df_all is not None:
-        bel_all = pd.to_numeric(df_all.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0)
-        sum_bilag_all = df_all.groupby("Bilag")[bel_all.name].sum()
-        out["Sum bilag (alle kontoer)"] = out["Bilag"].map(sum_bilag_all).fillna(0.0)
+    if df_all is not None and not df_all.empty:
+        all_df = df_all[df_all["Bilag"].isin(bilag_list)].copy()
+        all_sum = all_df.groupby("Bilag")["Beløp"].sum().reset_index().rename(columns={"Beløp": "Sum bilag (alle kontoer)"})
+        out = out.merge(all_sum, on="Bilag", how="left")
     else:
-        out["Sum bilag (alle kontoer)"] = 0.0
+        out["Sum bilag (alle kontoer)"] = out["Sum bilag (kontointervallet)"]
 
+    # fyll NaN
+    out["Sum bilag (alle kontoer)"] = out["Sum bilag (alle kontoer)"].fillna(out["Sum bilag (kontointervallet)"])
     return out

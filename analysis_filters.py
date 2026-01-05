@@ -1,168 +1,181 @@
-"""
-analysis_filters.py
---------------------
-
-This module contains helper functions for parsing filter values and
-filtering a pandas DataFrame based on simple criteria used in the
-analysis page of the Utvalg project.  Separating this logic into its
-own module makes it easier to unit test independently of the GUI and
-keeps ``page_analyse.py`` focused on user interface concerns.
-
-The functions defined here deliberately avoid any dependencies on
-Tkinter and instead operate purely on values and pandas DataFrames.
-
-Functions
-~~~~~~~~~
-
-``parse_amount``
-    Parse a string representing a number into a ``float``.  Accepts
-    optional whitespace, grouping spaces, comma or dot as decimal
-    separator, and returns ``None`` if the input is empty or cannot
-    be converted.
-
-``filter_dataset``
-    Filter a DataFrame according to search text, debit/credit
-    direction, and minimum/maximum absolute amount.  Returns the
-    filtered DataFrame or the original if filtering is not possible.
-"""
-
 from __future__ import annotations
 
-from typing import Optional
+"""
+analysis_filters.py
 
-try:
-    import pandas as pd  # type: ignore
-except Exception:  # pragma: no cover
-    pd = None  # type: ignore
+Small, testable helpers for the Analyse-tab filtering.
+
+Design goals
+- Be tolerant to small UI/API naming differences (e.g. `query` vs `search`)
+  so the GUI doesn't break due to a keyword mismatch.
+- Keep the filtering semantics stable and covered by tests.
+
+Filtering rules (current)
+- `direction`:
+    - "Alle": no sign filtering
+    - "Debet" (or "Inngående"): keep Beløp > 0
+    - "Kredit" (or "Utgående"): keep Beløp < 0
+- Amount thresholds are applied on ABS(Beløp), except:
+    - when BOTH min and max are set:
+        * Positive values must satisfy: min <= Beløp <= max
+        * Negative values are only constrained by max (ABS(Beløp) <= max)
+- Account filtering:
+    - `accounts`: exact account numbers (e.g. 1500, 2400)
+    - account-series (kontoserier): first digit of account (0-9)
+      can be supplied via `konto_series` / `kontoserier` / `series`,
+      or mixed into `accounts` as single-digit values.
+"""
+
+from typing import Any, Iterable, Optional
+
+import pandas as pd
 
 
-def parse_amount(text: str) -> Optional[float]:
-    """Parse a numeric string to a float.
-
-    This helper function accepts strings that may contain spaces as
-    thousands separators and either a comma or a dot as the decimal
-    separator.  Leading/trailing whitespace is ignored.  If the input
-    is empty or cannot be converted to a number, ``None`` is
-    returned.
-
-    Parameters
-    ----------
-    text : str
-        The text to parse.  If ``None`` or empty after stripping,
-        ``None`` is returned.
-
-    Returns
-    -------
-    Optional[float]
-        The parsed floating point number, or ``None`` if parsing fails.
+def parse_amount(value: Any) -> Optional[float]:
     """
-    if text is None:
+    Parse an amount from user input.
+
+    Accepts:
+      - None / "" / whitespace -> None
+      - numbers -> float(number)
+      - strings like "1 234,56", "1234.56", "-1 234,56" (NBSP) -> float
+    """
+    if value is None:
         return None
-    s = text.strip()
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    s = str(value).strip()
     if not s:
         return None
-    # Replace common thousand separators and normalise decimal comma
-    s = s.replace(" ", "").replace("\xa0", "")  # remove spaces and nbsp
-    if s.count(",") == 1 and s.count(".") == 0:
-        s = s.replace(",", ".")
+
+    # Normalise common thousand separators and decimal comma.
+    # Keep digits, minus, comma, dot. Remove spaces and NBSP etc.
+    s = s.replace("\u00A0", " ").replace("\u202F", " ")
+    s = s.replace(" ", "")
+    s = s.replace(",", ".")
     try:
         return float(s)
-    except Exception:
+    except ValueError:
         return None
+
+
+def _as_iterable(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    # strings should be treated as scalars, not iterables of chars
+    if isinstance(value, (str, bytes, int)):
+        return [value]
+    try:
+        return list(value)
+    except TypeError:
+        return [value]
 
 
 def filter_dataset(
-    df: "pd.DataFrame",
-    search: str = "",
+    df: pd.DataFrame,
+    search: str | None = None,
+    *,
+    query: str | None = None,
     direction: str = "Alle",
-    min_amount: Optional[float] = None,
-    max_amount: Optional[float] = None,
-) -> "pd.DataFrame":
-    """Filter a dataset according to search text, direction and amount.
-
-    This helper implements the slightly asymmetrical behaviour expected by
-    the original Utvalg GUI.  When both ``min_amount`` and ``max_amount``
-    are provided, the range check treats positive and negative amounts
-    differently:
-
-    * For **positive** amounts, both minimum and maximum thresholds are
-      applied.  Only values ``min_amount <= beløp <= max_amount`` are
-      included.
-    * For **negative** amounts, only the maximum threshold is applied.
-      Negative values are included so long as their absolute value does
-      not exceed ``max_amount``.  The minimum threshold is ignored for
-      negative values when both bounds are set.  This replicates the
-      behaviour expected by the original tests, where a value of ``-50``
-      should be included even if ``min_amount`` is ``80``.
-
-    When only one of ``min_amount`` or ``max_amount`` is provided, the
-    threshold applies symmetrically to the absolute value of the
-    amount (i.e. ``abs(beløp) >= min_amount`` and/or
-    ``abs(beløp) <= max_amount``).
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        The input DataFrame to filter.  Must contain at least the
-        columns ``"Konto"``, ``"Kontonavn"`` and ``"Beløp"``.
-    search : str, optional
-        A substring to search for in either the ``"Konto"`` (as
-        string) or ``"Kontonavn"`` columns.  Case-insensitive.  If
-        empty, no search filtering is applied.
-    direction : {"Alle", "Debet", "Kredit"}, optional
-        Choose whether to include all transactions, only debit
-        (positive amounts) or only credit (negative amounts).  Any
-        unrecognised value defaults to "Alle".
-    min_amount : float, optional
-        Minimum amount.  Behaviour depends on whether both bounds are
-        provided; see above.  If ``None``, no minimum filter is
-        applied.
-    max_amount : float, optional
-        Maximum amount.  Behaviour depends on whether both bounds are
-        provided; see above.  If ``None``, no maximum filter is
-        applied.
-
-    Returns
-    -------
-    pandas.DataFrame
-        A filtered DataFrame.  If filtering cannot be performed due
-        to missing dependencies or columns, the input is returned.
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    accounts: Iterable[str | int] | None = None,
+    konto_series: Iterable[str | int] | None = None,
+    kontoserier: Iterable[str | int] | None = None,
+    series: Iterable[str | int] | None = None,
+    **_: Any,
+) -> pd.DataFrame:
     """
-    # Ensure pandas is available and we have required columns
-    if pd is None or not isinstance(df, pd.DataFrame):
-        return df
-    required_cols = {"Konto", "Kontonavn", "Beløp"}
-    if not required_cols.issubset(set(df.columns)):
-        return df
-    filtered = df
-    # Filter by search text
-    if search:
-        pattern = str(search).lower()
-        mask = (
-            df["Konto"].astype(str).str.lower().str.contains(pattern, na=False)
-            | df["Kontonavn"].astype(str).str.lower().str.contains(pattern, na=False)
-        )
-        filtered = filtered[mask]
-    # Filter by direction
-    dirx = (direction or "Alle").lower()
-    if dirx == "debet":
-        filtered = filtered[filtered["Beløp"] > 0]
-    elif dirx == "kredit":
-        filtered = filtered[filtered["Beløp"] < 0]
-    # Filter by amount thresholds
-    # When both min and max are supplied, handle positive/negative separately
-    if min_amount is not None and max_amount is not None:
-        pos_mask = filtered["Beløp"] >= 0
-        neg_mask = filtered["Beløp"] < 0
-        # Positive values must satisfy both thresholds
-        pos_filter = (filtered["Beløp"] >= min_amount) & (filtered["Beløp"] <= max_amount)
-        # Negative values must satisfy the max threshold on absolute value
-        neg_filter = filtered["Beløp"].abs() <= max_amount
-        filtered = filtered[(pos_mask & pos_filter) | (neg_mask & neg_filter)]
-    else:
-        # Apply thresholds symmetrically on absolute values if only one is provided
-        if min_amount is not None:
-            filtered = filtered[filtered["Beløp"].abs() >= min_amount]
-        if max_amount is not None:
-            filtered = filtered[filtered["Beløp"].abs() <= max_amount]
-    return filtered
+    Filter a dataset by text, direction, amount thresholds and account filters.
+
+    The function is intentionally tolerant to keyword naming differences:
+    - `query` is treated as an alias for `search` (used by some GUI code).
+    - Account-series can be provided via `konto_series`, `kontoserier` or `series`.
+    - Unknown extra keyword args are ignored so the GUI won't crash if it passes
+      a field that an older/newer version doesn't use.
+    """
+    if df is None or df.empty:
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+
+    out = df
+
+    # Alias handling
+    if (search is None or str(search).strip() == "") and query:
+        search = query
+
+    # 1) Search filter
+    s = str(search).strip() if search is not None else ""
+    if s:
+        s_lower = s.lower()
+        cols = [c for c in ("Konto", "Kontonavn", "Tekst", "Kundenr", "Bilag") if c in out.columns]
+        if cols:
+            mask = pd.Series(False, index=out.index)
+            for c in cols:
+                mask |= out[c].astype(str).str.lower().str.contains(s_lower, na=False)
+            out = out.loc[mask]
+
+    if out.empty:
+        return out.copy()
+
+    # 2) Direction (sign) filter (requires Beløp)
+    if "Beløp" in out.columns:
+        belop_series = pd.to_numeric(out["Beløp"], errors="coerce")
+        dir_norm = str(direction or "Alle").strip().lower()
+        if dir_norm in {"debet", "inngående", "inngaaende", "inn"}:
+            out = out.loc[belop_series > 0]
+        elif dir_norm in {"kredit", "utgående", "utgaaende", "ut"}:
+            out = out.loc[belop_series < 0]
+
+    if out.empty:
+        return out.copy()
+
+    # 3) Amount thresholds (requires Beløp)
+    if "Beløp" in out.columns and (min_amount is not None or max_amount is not None):
+        belop = pd.to_numeric(out["Beløp"], errors="coerce")
+        abs_amount = belop.abs()
+
+        if min_amount is not None and max_amount is not None:
+            pos_mask = (belop >= float(min_amount)) & (belop <= float(max_amount))
+            neg_mask = (belop < 0) & (abs_amount <= float(max_amount))
+            out = out.loc[pos_mask | neg_mask]
+        elif min_amount is not None:
+            out = out.loc[abs_amount >= float(min_amount)]
+        elif max_amount is not None:
+            out = out.loc[abs_amount <= float(max_amount)]
+
+    if out.empty:
+        return out.copy()
+
+    # 4) Account-series / accounts filters
+    konto_col = "Konto"
+    if konto_col in out.columns:
+        konto_str = out[konto_col].astype(str).str.strip()
+
+        # Collect account-series (first digit)
+        series_vals: set[str] = set()
+        for src in (konto_series, kontoserier, series):
+            for v in _as_iterable(src):
+                sv = str(v).strip()
+                if sv:
+                    series_vals.add(sv)
+
+        # Also accept single-digit values inside `accounts` as series filters
+        acct_vals: set[str] = set()
+        for v in _as_iterable(accounts):
+            sv = str(v).strip()
+            if not sv:
+                continue
+            if sv.isdigit() and len(sv) == 1:
+                series_vals.add(sv)
+            else:
+                acct_vals.add(sv)
+
+        if series_vals:
+            first_digit = konto_str.str[0].fillna("")
+            out = out.loc[first_digit.isin(series_vals)]
+
+        if acct_vals:
+            out = out.loc[konto_str.isin(acct_vals)]
+
+    return out.copy()

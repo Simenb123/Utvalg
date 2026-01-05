@@ -74,5 +74,3 @@ def test_utvalg_callback() -> None:
     assert called_with.get("accounts") == [1, 2, 3], (
         "Callback did not receive the expected accounts"
     )
-
-

@@ -105,3 +105,17 @@ def test_is_percent_col():
     assert is_percent_col("Beløp") is False
     assert is_percent_col("") is False
     assert is_percent_col(None) is False  # type: ignore[arg-type]
+
+def test_fmt_amount_alias() -> None:
+    from formatting import fmt_amount
+
+    assert fmt_amount(1234.5) == "1 234,50"
+    assert fmt_amount(None) == ""
+    assert fmt_amount("  ") == ""
+
+
+def test_format_date_alias() -> None:
+    from formatting import format_date
+
+    assert format_date("2024-01-02") == "02.01.2024"
+    assert format_date(None) == ""

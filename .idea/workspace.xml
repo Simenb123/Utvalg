@@ -5,8 +5,35 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" afterPath="$PROJECT_DIR$/.coverage" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/konto_utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio_drill.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio_helpers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_controller_export.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_excel_formatting.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_models_scopeconfig.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_drill.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers_aliases.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers_compat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers_regression.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/analysis_filters.py" beforeDir="false" afterPath="$PROJECT_DIR$/analysis_filters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/controller_export.py" beforeDir="false" afterPath="$PROJECT_DIR$/controller_export.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/excel_formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/excel_formatting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/formatting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_utvalg_strata.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_utvalg_strata.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_analysis_filters.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_analysis_filters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_formatting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_page_analyse.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_main.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views_selection_studio.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -46,22 +73,22 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor": "Run",
-    "Python tests.Python tests in test_analysis_pkg.py.executor": "Run",
-    "Python.app.executor": "Run",
-    "Python.index_match_python.executor": "Run",
-    "Python.main.executor": "Run",
-    "Python.python app.py.executor": "Run",
-    "Python.test_analysis_pkg.executor": "Run",
-    "Python.ui_main.executor": "Run",
-    "Python.utvalgsgenerator.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "C:/Users/ib91/Desktop/PyCharmProjects/Utvalg"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python tests.Python tests for test_analysis_pkg.test_round_share_by_group_konto_basic.executor&quot;: &quot;Run&quot;,
+    &quot;Python tests.Python tests in test_analysis_pkg.py.executor&quot;: &quot;Run&quot;,
+    &quot;Python.app.executor&quot;: &quot;Run&quot;,
+    &quot;Python.index_match_python.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.python app.py.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_analysis_pkg.executor&quot;: &quot;Run&quot;,
+    &quot;Python.ui_main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.utvalgsgenerator.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ib91/Desktop/PyCharmProjects/Utvalg&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
@@ -275,7 +302,14 @@
       <option name="presentableId" value="LOCAL−00020" />
       <updated>1765163469459</updated>
     </task>
-    <option name="localTasksCounter" value="21" />
+    <task id="LOCAL−00021" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1765166110917</created>
+      <option name="number" value="LOCAL−00021" />
+      <option name="presentableId" value="LOCAL−00021" />
+      <updated>1765166110918</updated>
+    </task>
+    <option name="localTasksCounter" value="22" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

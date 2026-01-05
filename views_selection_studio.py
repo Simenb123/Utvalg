@@ -1,571 +1,690 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Callable
+from tkinter import ttk, messagebox
 
 import pandas as pd
 
-from stratifiering import beregn_strata, trekk_sample, summer_per_bilag
+from controller_export import export_to_excel
+from selection_studio_helpers import (
+    PopulationMetrics,
+    build_population_summary_text,
+    build_sample_summary_text,
+    build_source_text,
+    compute_population_metrics,
+    confidence_factor,
+    fmt_amount_no,
+    fmt_int_no,
+    format_interval_no,
+    parse_amount,
+    suggest_sample_size,
+)
+
+from stratifiering import stratify_bilag
+
+try:
+    from selection_studio_drill import open_drilldown
+except Exception:
+    open_drilldown = None
+
+
+__all__ = [
+    "SelectionStudio",
+    # Re-export helpers for tests in this repo
+    "PopulationMetrics",
+    "compute_population_metrics",
+    "format_interval_no",
+    "build_source_text",
+    "build_population_summary_text",
+    "build_sample_summary_text",
+    "suggest_sample_size",
+    "parse_amount",
+]
 
 
 class SelectionStudio(ttk.Frame):
     """
-    Veiviser for delutvalg/stratifisering.
+    Utvalg (Selection Studio) - compact UI.
 
-    Denne versjonen er en ttk.Frame slik at den kan embeddes i en fane
-    (Utvalg-fanen) i stedet for å være et eget popup-vindu.
-
-    df_base: transaksjoner for valgt kontointervall (fra Analyse/Utvalg)
-    df_all:  eventuelt alle transaksjoner for klienten (for sum bilag alle kontoer)
+    Key idea:
+      - Keep the main flow simple (less is more)
+      - Provide "advanced" only when needed
+      - Keep helper functions stable (tests rely on them)
     """
 
-    def __init__(
-        self,
-        master: tk.Misc,
-        df_base: pd.DataFrame,
-        on_commit: Optional[Callable[[pd.DataFrame], None]] = None,
-        df_all: Optional[pd.DataFrame] = None,
-    ) -> None:
+    def __init__(self, master: tk.Misc, *, on_commit_selection=None):
         super().__init__(master)
-        self.on_commit = on_commit
+        self.on_commit_selection = on_commit_selection
 
-        # Litt mindre font for hjelpetekster
-        try:
-            style = ttk.Style(self)
-            style.configure("small.TLabel", font=("Segoe UI", 8), wraplength=160)
-        except Exception:
-            pass
+        # Data
+        self._df_all: pd.DataFrame | None = None
+        self._df_base: pd.DataFrame | None = None  # filtered base
+        self._df_bilag: pd.DataFrame | None = None  # bilag-summed df (for strata + sampling)
+        self._df_sample: pd.DataFrame | None = None
 
-        # Data initielt (kan byttes ut via load_data)
-        self.df_base = df_base.copy().reset_index(drop=False)
-        self.df_all = df_all.copy().reset_index(drop=False) if df_all is not None else None
-        self.df_work = self.df_base.copy()  # filtrert grunnlag
+        self._interval_map: dict[int, object] = {}
+        self._removed_rows = 0
+        self._removed_bilag = 0
 
-        # Interne variabler for stratifisering
-        self.summary: Optional[pd.DataFrame] = None
-        self.bilag_df: Optional[pd.DataFrame] = None
-        self.interval_map: dict[int, str] = {}
-        self.custom_counts: dict[int, int] = {}
-        self.sample_df: pd.DataFrame = pd.DataFrame()
-
-        # UI-variabler
+        # UI state
         self.var_dir = tk.StringVar(value="Alle")
-        self.var_min = tk.StringVar(value="")
-        self.var_max = tk.StringVar(value="")
-        self.var_abs = tk.BooleanVar(value=True)
+        self.var_from = tk.StringVar(value="")
+        self.var_to = tk.StringVar(value="")
+        self.var_use_abs = tk.BooleanVar(value=True)
 
-        self.var_mode = tk.StringVar(value="quantile")
+        # Risk / assurance (backwards compat: keep risk_factor as 1-5 style int)
+        self.var_risk = tk.IntVar(value=3)  # 3 = middels (legacy scale)
+        self.var_risk_label = tk.StringVar(value="Middels")
+
+        self.var_assurance = tk.StringVar(value="90%")  # internal percent string
+        self.var_conf_label = tk.StringVar(value="Middels")  # UI friendly
+
+        self.var_method = tk.StringVar(value="quantile")
         self.var_k = tk.IntVar(value=5)
 
-        self.var_n_per = tk.IntVar(value=5)
-        self.var_total = tk.IntVar(value=0)
-        self.var_auto = tk.BooleanVar(value=False)
+        self.var_top_threshold = tk.StringVar(value="")
+        self.var_sample_n = tk.IntVar(value=0)
 
-        self.var_show_sum_bilag_int = tk.BooleanVar(value=False)
-        self.var_show_sum_rows_int = tk.BooleanVar(value=False)
-        self.var_show_sum_bilag_all = tk.BooleanVar(value=False)
+        # Optional: formula inputs (kept in Avansert)
+        self.var_tol_err = tk.StringVar(value="")
+        self.var_exp_err = tk.StringVar(value="")
 
-        # Bygg UI
+        self._refresh_job = None
+        self._advanced_visible = False
+
         self._build_ui()
+        self._wire_events()
 
-        # Første gangs filtrering og oppsummering
-        self._apply_filters()
-        self._update_summary()
-        self._update_sample_view()
+    # ----------------
+    # Public API
+    # ----------------
 
-    # ---------------- Offentlig API ----------------
+    def load_data(self, df_all: pd.DataFrame, df_base: pd.DataFrame | None = None):
+        self._df_all = df_all
+        self._df_base = df_base if df_base is not None else df_all
 
-    def load_data(self, df_base: pd.DataFrame, df_all: Optional[pd.DataFrame]) -> None:
-        """
-        Last inn et nytt grunnlag (populasjon) for stratifisering.
+        # label top
+        self.lbl_source.config(text=build_source_text(self._df_base, self._df_all))
 
-        Brukes når Analyse/Utvalg velger en ny kontopopulasjon.
-        """
-        self.df_base = df_base.copy().reset_index(drop=False)
-        self.df_all = df_all.copy().reset_index(drop=False) if df_all is not None else None
-        self.df_work = self.df_base.copy()
-        self.summary = None
-        self.bilag_df = None
-        self.interval_map = {}
-        self.custom_counts = {}
-        self.sample_df = pd.DataFrame()
+        self._schedule_refresh(clear_tables=True)
 
-        # Nullstill UI-variabler til fornuftige defaults
-        self.var_dir.set("Alle")
-        self.var_min.set("")
-        self.var_max.set("")
-        self.var_abs.set(True)
-        self.var_mode.set("quantile")
-        self.var_k.set(5)
-        self.var_n_per.set(5)
-        self.var_total.set(0)
-        self.var_auto.set(False)
-        self.var_show_sum_bilag_int.set(False)
-        self.var_show_sum_rows_int.set(False)
-        self.var_show_sum_bilag_all.set(False)
+    # ----------------
+    # UI
+    # ----------------
 
-        self._apply_filters()
-        self._update_summary()
-        self._update_sample_view()
+    def _build_ui(self):
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-    # ---------------- UI-bygging ----------------
+        # Top info bar
+        top = ttk.Frame(self)
+        top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
+        top.grid_columnconfigure(0, weight=1)
 
-    def _build_ui(self) -> None:
-        # Venstre panel (kontroller)
-        left = ttk.Frame(self)
-        left.pack(side="left", fill="y", padx=6, pady=6)
+        self.lbl_source = ttk.Label(top, text="Kilde: (ingen data)")
+        self.lbl_source.grid(row=0, column=0, sticky="w")
 
-        # Høyre panel (grupper + sample)
-        right = ttk.Frame(self)
-        right.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+        self.lbl_pop = ttk.Label(top, text="")
+        self.lbl_pop.grid(row=0, column=1, sticky="e", padx=(12, 0))
 
-        # --- Steg 1: Filtre ---
-        ttk.Label(left, text="Steg 1: Filtre (grunnlag)", font=("Segoe UI", 10, "bold")).pack(
-            anchor="w", pady=(0, 2)
+        # Left plan panel
+        plan = ttk.Frame(self, padding=8)
+        plan.grid(row=1, column=0, sticky="nsw")
+        plan.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(plan, text="Plan", font=("Segoe UI", 10, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 6)
         )
 
-        ttk.Label(left, text="Retning:").pack(anchor="w")
-        ttk.Combobox(
-            left,
-            values=("Alle", "Debet", "Kredit"),
-            textvariable=self.var_dir,
-            state="readonly",
-            width=10,
-        ).pack(anchor="w")
+        r = 1
+        ttk.Label(plan, text="Retning").grid(row=r, column=0, sticky="w")
+        self.cmb_dir = ttk.Combobox(plan, textvariable=self.var_dir, values=("Alle", "Positiv", "Negativ"),
+                                    state="readonly", width=12)
+        self.cmb_dir.grid(row=r, column=0, sticky="w", pady=(2, 6))
+        r += 1
 
-        ttk.Label(left, text="Beløp fra/til:").pack(anchor="w", pady=(6, 0))
-        row = ttk.Frame(left)
-        row.pack(anchor="w")
-        ttk.Entry(row, textvariable=self.var_min, width=8).pack(side="left")
-        ttk.Label(row, text=" til ").pack(side="left")
-        ttk.Entry(row, textvariable=self.var_max, width=8).pack(side="left")
+        ttk.Label(plan, text="Beløp fra/til").grid(row=r, column=0, sticky="w")
+        frm_amt = ttk.Frame(plan)
+        frm_amt.grid(row=r + 1, column=0, sticky="w", pady=(2, 6))
+        ttk.Entry(frm_amt, textvariable=self.var_from, width=10).grid(row=0, column=0, sticky="w")
+        ttk.Label(frm_amt, text="til").grid(row=0, column=1, padx=6)
+        ttk.Entry(frm_amt, textvariable=self.var_to, width=10).grid(row=0, column=2, sticky="w")
+        r += 2
 
-        ttk.Checkbutton(left, text="Bruk absolutt beløp", variable=self.var_abs).pack(
-            anchor="w", pady=(4, 4)
+        ttk.Checkbutton(plan, text="Bruk absolutt beløp", variable=self.var_use_abs).grid(
+            row=r, column=0, sticky="w", pady=(0, 8)
         )
-        ttk.Button(left, text="Oppdater grunnlag", command=self._on_update_filters).pack(anchor="w")
+        r += 1
 
-        ttk.Separator(left, orient="horizontal").pack(fill="x", pady=8)
-
-        # --- Steg 2: Stratifisering ---
-        ttk.Label(left, text="Steg 2: Stratifisering", font=("Segoe UI", 10, "bold")).pack(
-            anchor="w", pady=(0, 2)
-        )
-
-        ttk.Combobox(
-            left,
-            values=("quantile", "equal"),
-            textvariable=self.var_mode,
+        # Risk + confidence (simplified UI)
+        ttk.Label(plan, text="Risiko").grid(row=r, column=0, sticky="w")
+        self.cmb_risk = ttk.Combobox(
+            plan,
+            textvariable=self.var_risk_label,
+            values=("Lav", "Middels", "Høy"),
             state="readonly",
             width=12,
-        ).pack(anchor="w")
+        )
+        self.cmb_risk.grid(row=r + 1, column=0, sticky="w", pady=(2, 6))
+        r += 2
 
-        ttk.Label(
-            left,
-            text=(
-                "quantile deler bilagene i like store\n"
-                "grupper basert på beløpssum.\n"
-                "equal deler beløpsområdet i like intervaller."
-            ),
-            style="small.TLabel",
-        ).pack(anchor="w", pady=(2, 4))
+        ttk.Label(plan, text="Sikkerhet").grid(row=r, column=0, sticky="w")
+        frm_conf = ttk.Frame(plan)
+        frm_conf.grid(row=r + 1, column=0, sticky="w", pady=(2, 6))
+        self.cmb_conf = ttk.Combobox(
+            frm_conf,
+            textvariable=self.var_conf_label,
+            values=("Lav", "Middels", "Høy"),
+            state="readonly",
+            width=12,
+        )
+        self.cmb_conf.grid(row=0, column=0, sticky="w")
+        ttk.Label(frm_conf, textvariable=self.var_assurance).grid(row=0, column=1, padx=(8, 0), sticky="w")
+        r += 2
 
-        ttk.Label(left, text="Antall grupper (k):").pack(anchor="w")
-        ttk.Spinbox(left, from_=2, to=50, textvariable=self.var_k, width=6).pack(anchor="w")
+        self.lbl_reco = ttk.Label(plan, text="Forslag utvalg: –")
+        self.lbl_reco.grid(row=r, column=0, sticky="w", pady=(4, 6))
+        r += 1
 
-        ttk.Separator(left, orient="horizontal").pack(fill="x", pady=8)
+        ttk.Label(plan, text="Utvalgsstørrelse").grid(row=r, column=0, sticky="w")
+        frm_n = ttk.Frame(plan)
+        frm_n.grid(row=r + 1, column=0, sticky="w", pady=(2, 6))
+        ttk.Spinbox(frm_n, from_=0, to=9999, textvariable=self.var_sample_n, width=8).grid(row=0, column=0)
+        ttk.Label(frm_n, text="(0 = auto)").grid(row=0, column=1, padx=(8, 0))
+        r += 2
 
-        # --- Steg 3: Trekk ---
-        ttk.Label(left, text="Steg 3: Trekk", font=("Segoe UI", 10, "bold")).pack(
-            anchor="w", pady=(0, 2)
+        self.btn_adv = ttk.Button(plan, text="Avansert ▸", command=self._toggle_advanced)
+        self.btn_adv.grid(row=r, column=0, sticky="w", pady=(6, 6))
+        r += 1
+
+        self._adv_frame = ttk.Frame(plan)
+        self._adv_frame.grid(row=r, column=0, sticky="ew")
+        self._adv_frame.grid_columnconfigure(1, weight=1)
+
+        ttk.Label(self._adv_frame, text="Metode").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            self._adv_frame,
+            textvariable=self.var_method,
+            values=("quantile", "equal"),
+            state="readonly",
+            width=12,
+        ).grid(row=0, column=1, sticky="w", pady=2)
+
+        ttk.Label(self._adv_frame, text="Antall grupper (k)").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Spinbox(self._adv_frame, from_=2, to=25, textvariable=self.var_k, width=8).grid(
+            row=1, column=1, sticky="w", pady=(6, 0)
         )
 
-        ttk.Label(left, text="Antall bilag per gruppe:").pack(anchor="w")
-        ttk.Spinbox(left, from_=0, to=1000, textvariable=self.var_n_per, width=6).pack(anchor="w")
-
-        ttk.Label(left, text="Totalt antall bilag i utvalg:").pack(anchor="w", pady=(4, 0))
-        ttk.Spinbox(left, from_=0, to=10000, textvariable=self.var_total, width=8).pack(anchor="w")
-
-        ttk.Checkbutton(left, text="Auto-fordel etter sumandel", variable=self.var_auto).pack(
-            anchor="w", pady=(2, 2)
+        ttk.Label(self._adv_frame, text="100% terskel (>=)").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(self._adv_frame, textvariable=self.var_top_threshold, width=12).grid(
+            row=2, column=1, sticky="w", pady=(6, 0)
         )
 
-        ttk.Button(left, text="Tilpass per gruppe", command=self._custom_counts).pack(anchor="w")
-
-        ttk.Separator(left, orient="horizontal").pack(fill="x", pady=8)
-
-        # --- Visningsalternativer ---
-        ttk.Label(left, text="Visningsalternativer", font=("Segoe UI", 10, "bold")).pack(
-            anchor="w", pady=(0, 2)
+        ttk.Label(self._adv_frame, text="Tolererbar feil").grid(row=3, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(self._adv_frame, textvariable=self.var_tol_err, width=12).grid(
+            row=3, column=1, sticky="w", pady=(10, 0)
         )
 
-        ttk.Checkbutton(
-            left,
-            text="Sum bilag (kontointervallet)",
-            variable=self.var_show_sum_bilag_int,
-            command=self._update_sample_view,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            left,
-            text="Sum rader (kontointervallet)",
-            variable=self.var_show_sum_rows_int,
-            command=self._update_sample_view,
-        ).pack(anchor="w")
-        ttk.Checkbutton(
-            left,
-            text="Sum bilag (alle kontoer)",
-            variable=self.var_show_sum_bilag_all,
-            command=self._update_sample_view,
-        ).pack(anchor="w")
-
-        ttk.Separator(left, orient="horizontal").pack(fill="x", pady=8)
-
-        # --- Handlingsknapper ---
-        btn_row = ttk.Frame(left)
-        btn_row.pack(anchor="w", pady=(0, 0))
-        ttk.Button(btn_row, text="Generer grupper", command=self._on_build_groups).pack(side="left")
-        ttk.Button(btn_row, text="Trekk utvalg", command=self._on_draw_sample).pack(side="left", padx=4)
-        ttk.Button(btn_row, text="Legg i utvalg", command=self._on_commit).pack(side="left", padx=4)
-        ttk.Button(btn_row, text="Eksporter Excel", command=self._on_export).pack(side="left", padx=4)
-
-        # Høyresiden: oversikt og tabeller
-        self.lbl_summary = ttk.Label(
-            right,
-            text="Grunnlag: 0 rader | Sum: 0,00 (Fjernet: 0 rader, 0,00)",
+        ttk.Label(self._adv_frame, text="Forventet feil").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(self._adv_frame, textvariable=self.var_exp_err, width=12).grid(
+            row=4, column=1, sticky="w", pady=(6, 0)
         )
-        self.lbl_summary.pack(anchor="w")
 
-        ttk.Label(right, text="Grupper (strata)").pack(anchor="w", pady=(4, 0))
-        self.tree_strata = ttk.Treeview(
-            right,
-            columns=(
-                "Gruppe",
-                "Antall bilag",
-                "Sum Beløp",
-                "Min Beløp",
-                "Median Beløp",
-                "Maks Beløp",
-                "Intervall",
-            ),
+        # start hidden
+        self._adv_frame.grid_remove()
+
+        # Buttons
+        btns = ttk.Frame(plan)
+        btns.grid(row=r + 1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Button(btns, text="Kjør utvalg", command=self._run_selection).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(btns, text="Legg i utvalg", command=self._commit_selection).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(btns, text="Eksporter Excel", command=self._export_excel).grid(row=0, column=2)
+
+        # Right panel: notebook
+        nb = ttk.Notebook(self)
+        nb.grid(row=1, column=1, sticky="nsew", padx=(0, 8), pady=(0, 8))
+
+        self.frm_groups = ttk.Frame(nb, padding=6)
+        self.frm_sample = ttk.Frame(nb, padding=6)
+        nb.add(self.frm_sample, text="Utvalg")
+        nb.add(self.frm_groups, text="Grupper")
+
+        # Sample tab
+        self.frm_sample.grid_rowconfigure(2, weight=1)
+        self.frm_sample.grid_columnconfigure(0, weight=1)
+
+        self.lbl_sample = ttk.Label(self.frm_sample, text="Utvalg: (ingen bilag trukket)")
+        self.lbl_sample.grid(row=0, column=0, sticky="w")
+
+        frm_sample_btns = ttk.Frame(self.frm_sample)
+        frm_sample_btns.grid(row=1, column=0, sticky="w", pady=(6, 6))
+
+        self.btn_show_accounts = ttk.Button(frm_sample_btns, text="Vis kontoer", command=self._show_accounts_popup)
+        self.btn_show_accounts.grid(row=0, column=0, padx=(0, 6))
+
+        self.btn_drill = ttk.Button(frm_sample_btns, text="Drilldown", command=self._drilldown)
+        self.btn_drill.grid(row=0, column=1)
+        if open_drilldown is None:
+            self.btn_drill.state(["disabled"])
+
+        self.tree_sample = ttk.Treeview(
+            self.frm_sample,
+            columns=("Bilag", "Dato", "Tekst", "SumBeløp", "Gruppe", "Intervall", "Fulltext"),
             show="headings",
-            height=6,
+            height=18,
         )
-        for c, w in zip(
-            self.tree_strata["columns"],
-            (70, 80, 120, 100, 100, 100, 220),
-        ):
-            self.tree_strata.heading(c, text=c)
-            self.tree_strata.column(c, width=w, stretch=(c == "Intervall"))
-        self.tree_strata.pack(fill="x")
+        for col, w in [
+            ("Bilag", 90),
+            ("Dato", 90),
+            ("Tekst", 360),
+            ("SumBeløp", 120),
+            ("Gruppe", 80),
+            ("Intervall", 160),
+            ("Fulltext", 220),
+        ]:
+            self.tree_sample.heading(col, text=col)
+            self.tree_sample.column(col, width=w, anchor="w")
+        self.tree_sample.grid(row=2, column=0, sticky="nsew")
 
-        ttk.Label(right, text="Trekk (sample)").pack(anchor="w", pady=(8, 0))
-        self.tree_sample = ttk.Treeview(right, show="headings")
-        self.tree_sample.pack(fill="both", expand=True)
+        ysb = ttk.Scrollbar(self.frm_sample, orient="vertical", command=self.tree_sample.yview)
+        self.tree_sample.configure(yscrollcommand=ysb.set)
+        ysb.grid(row=2, column=1, sticky="ns")
 
-    # ---------------- Filtre (Steg 1) ----------------
+        # Groups tab
+        self.frm_groups.grid_rowconfigure(1, weight=1)
+        self.frm_groups.grid_columnconfigure(0, weight=1)
 
-    def _on_update_filters(self) -> None:
-        self._apply_filters()
-        self._update_summary()
+        self.lbl_groups = ttk.Label(self.frm_groups, text="Grupper: –")
+        self.lbl_groups.grid(row=0, column=0, sticky="w")
 
-    def _apply_filters(self) -> None:
-        """Bruker retning + min/max-beløp (ev. absolutt) på df_base → df_work."""
-        df = self.df_base.copy()
-        bel = pd.to_numeric(df.get("Beløp", pd.Series(dtype="float64")), errors="coerce").fillna(0.0)
+        self.tree_groups = ttk.Treeview(
+            self.frm_groups,
+            columns=("Gruppe", "Antall bilag", "SumBeløp", "Min", "Median", "Max", "Intervall"),
+            show="headings",
+            height=18,
+        )
+        for col, w in [
+            ("Gruppe", 70),
+            ("Antall bilag", 100),
+            ("SumBeløp", 120),
+            ("Min", 100),
+            ("Median", 100),
+            ("Max", 100),
+            ("Intervall", 180),
+        ]:
+            self.tree_groups.heading(col, text=col)
+            self.tree_groups.column(col, width=w, anchor="w")
+        self.tree_groups.grid(row=1, column=0, sticky="nsew")
 
-        direction = self.var_dir.get()
-        if direction == "Debet":
-            df = df[bel > 0]
-            bel = bel.loc[df.index]
-        elif direction == "Kredit":
-            df = df[bel < 0]
-            bel = bel.loc[df.index]
+        ysb2 = ttk.Scrollbar(self.frm_groups, orient="vertical", command=self.tree_groups.yview)
+        self.tree_groups.configure(yscrollcommand=ysb2.set)
+        ysb2.grid(row=1, column=1, sticky="ns")
 
-        # Beløpsgrenser
-        bel_for_limit = bel.abs() if self.var_abs.get() else bel
+    def _wire_events(self):
+        # When base filters change => refresh population + clear tables
+        for v in (self.var_dir, self.var_from, self.var_to, self.var_use_abs):
+            v.trace_add("write", lambda *_: self._schedule_refresh(clear_tables=True))
 
-        def _parse_limit(raw: str) -> float:
-            s = str(raw).strip()
-            if not s:
-                return float("nan")
-            s = s.replace(" ", "").replace(",", ".")
+        # When parameters change => refresh derived + recompute reco
+        for v in (self.var_risk, self.var_assurance, self.var_method, self.var_k, self.var_top_threshold,
+                  self.var_tol_err, self.var_exp_err):
+            v.trace_add("write", lambda *_: self._schedule_refresh(clear_tables=False))
+
+        # UI combobox selection syncing
+        self.cmb_risk.bind("<<ComboboxSelected>>", lambda e: self._sync_risk_from_label())
+        self.cmb_conf.bind("<<ComboboxSelected>>", lambda e: self._sync_assurance_from_label())
+
+    def _toggle_advanced(self):
+        self._advanced_visible = not self._advanced_visible
+        if self._advanced_visible:
+            self._adv_frame.grid()
+            self.btn_adv.config(text="Avansert ▾")
+        else:
+            self._adv_frame.grid_remove()
+            self.btn_adv.config(text="Avansert ▸")
+
+    def _sync_risk_from_label(self):
+        lbl = (self.var_risk_label.get() or "").strip().lower()
+        # Map to legacy-ish 1-5 scale: 2/3/4 = lav/middels/høy
+        if lbl.startswith("l"):
+            self.var_risk.set(2)
+        elif lbl.startswith("h"):
+            self.var_risk.set(4)
+        else:
+            self.var_risk.set(3)
+
+    def _sync_assurance_from_label(self):
+        lbl = (self.var_conf_label.get() or "").strip().lower()
+        if lbl.startswith("l"):
+            self.var_assurance.set("80%")
+        elif lbl.startswith("h"):
+            self.var_assurance.set("95%")
+        else:
+            self.var_assurance.set("90%")
+
+    # ----------------
+    # Refresh pipeline
+    # ----------------
+
+    def _schedule_refresh(self, *, clear_tables: bool):
+        if self._refresh_job is not None:
             try:
-                return float(s)
+                self.after_cancel(self._refresh_job)
             except Exception:
-                return float("nan")
+                pass
+        self._refresh_job = self.after(80, lambda: self._refresh(clear_tables=clear_tables))
 
-        min_val = _parse_limit(self.var_min.get())
-        max_val = _parse_limit(self.var_max.get())
+    def _refresh(self, *, clear_tables: bool):
+        self._refresh_job = None
 
-        if not pd.isna(min_val):
-            df = df[bel_for_limit >= min_val]
-            bel_for_limit = bel_for_limit.loc[df.index]
-
-        if not pd.isna(max_val):
-            df = df[bel_for_limit <= max_val]
-            bel_for_limit = bel_for_limit.loc[df.index]
-
-        self.df_work = df
-
-    def _update_summary(self) -> None:
-        """Oppdater tekst med N/S og hvor mye filtre har fjernet."""
-        N = len(self.df_work)
-        S = pd.to_numeric(
-            self.df_work.get("Beløp", pd.Series(dtype="float64")),
-            errors="coerce",
-        ).fillna(0.0).sum()
-
-        N0 = len(self.df_base)
-        S0 = pd.to_numeric(
-            self.df_base.get("Beløp", pd.Series(dtype="float64")),
-            errors="coerce",
-        ).fillna(0.0).sum()
-
-        removed_n = N0 - N
-        removed_s = S0 - S
-
-        txt = (
-            f"Grunnlag: {N:,} rader | Sum: {S:,.2f} "
-            f"(Fjernet: {removed_n:,} rader, {removed_s:,.2f})"
-        ).replace(",", " ").replace(".", ",")
-        self.lbl_summary.config(text=txt)
-
-    # ---------------- Steg 2: Generer grupper ----------------
-
-    def _on_build_groups(self) -> None:
-        if self.df_work.empty:
-            messagebox.showinfo("Stratifisering", "Ingen rader i grunnlaget. Oppdater filter først.")
+        if self._df_all is None or self._df_base is None:
             return
 
-        try:
-            summary, bilag_df, interval_map = beregn_strata(
-                self.df_work,
-                k=self.var_k.get(),
-                mode=self.var_mode.get(),
-                abs_belop=self.var_abs.get(),
-            )
-            self.summary, self.bilag_df, self.interval_map = summary, bilag_df, interval_map
-            self.custom_counts = {}
+        # Apply base filters
+        df = self._df_base.copy()
 
-            # Oppdater treet
-            self.tree_strata.delete(*self.tree_strata.get_children())
-            for _, row in summary.iterrows():
-                self.tree_strata.insert(
-                    "",
-                    "end",
-                    values=[
-                        row["Gruppe"],
-                        row["Antall_bilag"],
-                        f"{row['SumBeløp']:.2f}".replace(".", ","),
-                        f"{row['Min_Beløp']:.2f}".replace(".", ","),
-                        f"{row['Median_Beløp']:.2f}".replace(".", ","),
-                        f"{row['Max_Beløp']:.2f}".replace(".", ","),
-                        row["Intervall"],
-                    ],
-                )
+        # Direction
+        if "Beløp" in df.columns:
+            belop = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0.0)
+            if self.var_dir.get() == "Positiv":
+                df = df[belop > 0]
+            elif self.var_dir.get() == "Negativ":
+                df = df[belop < 0]
 
-            self.sample_df = pd.DataFrame()
-            self._update_sample_view()
+        # Amount range
+        lo = parse_amount(self.var_from.get())
+        hi = parse_amount(self.var_to.get())
+        if "Beløp" in df.columns and (lo is not None or hi is not None):
+            belop = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0.0)
+            x = belop.abs() if self.var_use_abs.get() else belop
+            if lo is not None:
+                df = df[x >= lo]
+            if hi is not None:
+                df = df[x <= hi]
 
-        except Exception as e:
-            messagebox.showerror("Stratifisering", f"Feil ved beregning av grupper: {e}")
+        self._removed_rows = int(len(self._df_base) - len(df)) if self._df_base is not None else 0
+        self._removed_bilag = 0
+        if "Bilag" in self._df_base.columns and "Bilag" in df.columns:
+            self._removed_bilag = int(self._df_base["Bilag"].nunique() - df["Bilag"].nunique())
 
-    # ---------------- Steg 3: Tilpass antall per gruppe ----------------
+        self._df_base = df
 
-    def _custom_counts(self) -> None:
-        if self.summary is None or self.summary.empty:
-            messagebox.showinfo("Tilpass", "Generer grupper først.")
-            return
+        metrics = compute_population_metrics(df)
+        self.lbl_pop.config(text=build_population_summary_text(metrics, self._removed_rows, self._removed_bilag))
 
-        top = tk.Toplevel(self)
-        top.title("Tilpass antall bilag per gruppe")
-        frm = ttk.Frame(top, padding=8)
-        frm.pack(fill="both", expand=True)
+        # Recommended sample size (auto)
+        cf = confidence_factor(self.var_risk.get(), self.var_assurance.get())
+        pop_value = float(metrics.sum_abs)
 
-        ttk.Label(frm, text="Antall bilag per gruppe", font=("Segoe UI", 10, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 6)
+        tol = parse_amount(self.var_tol_err.get())
+        exp = parse_amount(self.var_exp_err.get())
+        used_formula = bool(tol is not None and tol > 0 and pop_value > 0 and (tol - float(exp or 0.0)) > 0)
+
+        reco = suggest_sample_size(
+            metrics.bilag,
+            risk_factor=self.var_risk.get(),
+            assurance=self.var_assurance.get(),
+            population_value=pop_value,
+            tolerable_error=tol,
+            expected_error=exp,
         )
-        ttk.Label(frm, text="Gruppe").grid(row=1, column=0, sticky="w")
-        ttk.Label(frm, text="Maks").grid(row=1, column=1, sticky="w")
-        ttk.Label(frm, text="Antall").grid(row=1, column=2, sticky="w")
 
-        vars_dict: dict[int, tk.IntVar] = {}
-        i = 2
-        for _, row in self.summary.iterrows():
-            g = int(row["Gruppe"])
-            max_n = int(row["Antall_bilag"])
-            ttk.Label(frm, text=str(g)).grid(row=i, column=0, sticky="w")
-            ttk.Label(frm, text=str(max_n)).grid(row=i, column=1, sticky="w")
-            v = tk.IntVar(value=min(self.var_n_per.get(), max_n))
-            ttk.Spinbox(frm, from_=0, to=max_n, textvariable=v, width=6).grid(row=i, column=2, sticky="w")
-            vars_dict[g] = v
-            i += 1
-
-        def apply_counts() -> None:
-            self.custom_counts = {g: max(0, v.get()) for g, v in vars_dict.items()}
-            top.destroy()
-
-        ttk.Button(frm, text="Bruk", command=apply_counts).grid(row=i, column=0, pady=(8, 0))
-        ttk.Button(frm, text="Avbryt", command=top.destroy).grid(row=i, column=2, pady=(8, 0))
-
-    # ---------------- Steg 3: Trekk sample ----------------
-
-    def _on_draw_sample(self) -> None:
-        if self.summary is None or self.summary.empty or self.bilag_df is None:
-            messagebox.showinfo("Trekk", "Generer grupper først.")
-            return
-
-        try:
-            selected_bilags = trekk_sample(
-                self.bilag_df,
-                self.summary,
-                custom_counts=self.custom_counts if self.custom_counts else None,
-                n_per_group=self.var_n_per.get(),
-                total_n=self.var_total.get(),
-                auto_fordel=self.var_auto.get(),
-            )
-
-            if selected_bilags:
-                sample_df = self.df_base[self.df_base["Bilag"].isin(selected_bilags)].copy()
-                sample_df = sample_df.merge(
-                    self.bilag_df[["Bilag", "__grp__"]],
-                    on="Bilag",
-                    how="left",
-                )
-                sample_df["Stratum"] = sample_df["__grp__"].map(self.interval_map)
-                sample_df.drop(columns=["__grp__"], inplace=True)
-            else:
-                sample_df = pd.DataFrame()
-
-            if not sample_df.empty:
-                base_for_sum = self.df_base.reset_index(drop=True)
-                all_for_sum = self.df_all.reset_index(drop=True) if self.df_all is not None else None
-                sums_df = summer_per_bilag(base_for_sum, all_for_sum, selected_bilags)
-                sample_df = sample_df.merge(sums_df, on="Bilag", how="left")
-
-            self.sample_df = sample_df
-            self._update_sample_view()
-
-        except Exception as e:
-            messagebox.showerror("Trekk", f"Feil under trekking: {e}")
-
-    # ---------------- Oppdater samplevisning ----------------
-
-    def _update_sample_view(self) -> None:
-        self.tree_sample.delete(*self.tree_sample.get_children())
-
-        if self.sample_df is None or self.sample_df.empty:
-            self.tree_sample["columns"] = ()
-            return
-
-        base_order = ["Bilag", "Konto", "Kontonavn", "Dato", "Beløp", "Tekst"]
-        cols = [c for c in base_order if c in self.sample_df.columns]
-        viscols: list[str] = ["Bilag"] + [c for c in cols if c != "Bilag"]
-
-        # Valgfri visning av summekolonner
-        if self.var_show_sum_bilag_int.get() and "Sum bilag (kontointervallet)" in self.sample_df.columns:
-            viscols.append("Sum bilag (kontointervallet)")
-        if self.var_show_sum_rows_int.get() and "Sum rader (kontointervallet)" in self.sample_df.columns:
-            viscols.append("Sum rader (kontointervallet)")
-        if self.var_show_sum_bilag_all.get() and "Sum bilag (alle kontoer)" in self.sample_df.columns:
-            viscols.append("Sum bilag (alle kontoer)")
-        if "Stratum" in self.sample_df.columns:
-            viscols.append("Stratum")
-
-        self.tree_sample["columns"] = tuple(viscols)
-
-        for c in viscols:
-            self.tree_sample.heading(c, text=c)
-            w = 120
-            if c == "Tekst":
-                w = 200
-            if c.startswith("Sum"):
-                w = 140
-            self.tree_sample.column(c, width=w, stretch=True)
-
-        for _, row in self.sample_df.iterrows():
-            values = [row.get(c, "") for c in viscols]
-            self.tree_sample.insert("", "end", values=values)
-
-    # ---------------- Legg i utvalg ----------------
-
-    def _on_commit(self) -> None:
-        if self.on_commit and not self.sample_df.empty:
-            self.on_commit(self.sample_df)
-
-    # ---------------- Eksporter til Excel ----------------
-
-    def _on_export(self) -> None:
-        if self.sample_df.empty:
-            messagebox.showinfo("Eksport", "Ingen rader i utvalget.")
-            return
-
-        path = filedialog.asksaveasfilename(
-            title="Lagre til Excel",
-            defaultextension=".xlsx",
-            filetypes=[("Excel-filer", "*.xlsx")],
+        tag = "formel" if used_formula else "tommelfinger"
+        self.lbl_reco.config(
+            text=f"Forslag utvalg: {fmt_int_no(reco)} bilag | Konfidensfaktor: {fmt_amount_no(cf, 2)} ({tag})"
         )
-        if not path:
+
+        # If clear_tables: wipe tables + recompute stratification immediately
+        if clear_tables:
+            self._df_sample = None
+            self._clear_tree(self.tree_sample)
+            self.lbl_sample.config(text="Utvalg: (ingen bilag trukket)")
+
+        # Build bilag-summed df for grouping/sampling
+        self._df_bilag = self._build_bilag_df(df)
+
+        # Stratify
+        self._refresh_groups_table()
+
+    def _build_bilag_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["Bilag", "Dato", "Tekst", "SumBeløp", "Fulltext"])
+
+        cols = df.columns
+        have_date = "Dato" in cols
+        have_text = "Tekst" in cols
+
+        g = df.groupby("Bilag", dropna=False)
+
+        out = pd.DataFrame(
+            {
+                "Bilag": g.size().index,
+                "SumBeløp": pd.to_numeric(g["Beløp"].sum(), errors="coerce").fillna(0.0).values
+                if "Beløp" in cols
+                else 0.0,
+            }
+        )
+
+        if have_date:
+            out["Dato"] = g["Dato"].first().values
+        else:
+            out["Dato"] = ""
+
+        if have_text:
+            out["Tekst"] = g["Tekst"].first().fillna("").values
+            # Fulltext can be used later (concat)
+            out["Fulltext"] = g["Tekst"].apply(lambda s: " | ".join([str(x) for x in s.dropna().astype(str)])).values
+        else:
+            out["Tekst"] = ""
+            out["Fulltext"] = ""
+
+        return out
+
+    def _refresh_groups_table(self):
+        self._clear_tree(self.tree_groups)
+        df_b = self._df_bilag
+        if df_b is None or df_b.empty:
+            self.lbl_groups.config(text="Grupper: –")
+            self._interval_map = {}
             return
 
-        try:
-            import openpyxl  # noqa: F401
-        except Exception:
-            messagebox.showerror("Eksport", "openpyxl er ikke installert.")
+        method = self.var_method.get()
+        k = int(self.var_k.get() or 5)
+
+        use_abs = bool(self.var_use_abs.get())
+        values = df_b["SumBeløp"].abs() if use_abs else df_b["SumBeløp"]
+
+        groups, interval_map, stats_df = stratify_bilag(values, method=method, k=k)
+        self._interval_map = interval_map
+
+        # Attach group
+        tmp = df_b.copy()
+        tmp["Gruppe"] = groups
+
+        # Build table from stats_df (already computed in stratifiering)
+        self.lbl_groups.config(text=f"Grupper: {k} ({method})")
+
+        for _, row in stats_df.iterrows():
+            gno = int(row["Gruppe"])
+            n_bilag = int(row.get("Antall bilag", 0))
+            s = float(row.get("SumBeløp", 0.0))
+            mn = float(row.get("Min", 0.0))
+            med = float(row.get("Median", 0.0))
+            mx = float(row.get("Max", 0.0))
+            interval = interval_map.get(gno, "")
+
+            self.tree_groups.insert(
+                "",
+                "end",
+                values=(
+                    gno,
+                    fmt_int_no(n_bilag),
+                    fmt_amount_no(s, 2),
+                    fmt_amount_no(mn, 2),
+                    fmt_amount_no(med, 2),
+                    fmt_amount_no(mx, 2),
+                    format_interval_no(interval),
+                ),
+            )
+
+    # ----------------
+    # Actions
+    # ----------------
+
+    def _run_selection(self):
+        df_b = self._df_bilag
+        if df_b is None or df_b.empty:
+            messagebox.showwarning("Utvalg", "Ingen bilag i grunnlaget.")
             return
 
+        metrics = compute_population_metrics(self._df_base)
+        n_total = int(self.var_sample_n.get() or 0)
+
+        if n_total <= 0:
+            tol = parse_amount(self.var_tol_err.get())
+            exp = parse_amount(self.var_exp_err.get())
+            n_total = suggest_sample_size(
+                metrics.bilag,
+                risk_factor=self.var_risk.get(),
+                assurance=self.var_assurance.get(),
+                population_value=float(metrics.sum_abs),
+                tolerable_error=tol,
+                expected_error=exp,
+            )
+
+        # 100% threshold
+        threshold = parse_amount(self.var_top_threshold.get())
+        if threshold is not None and threshold > 0:
+            must = df_b[df_b["SumBeløp"].abs() >= threshold].copy()
+        else:
+            must = df_b.iloc[0:0].copy()
+
+        # Remaining pool
+        pool = df_b.drop(index=must.index, errors="ignore").copy()
+
+        remaining = max(0, n_total - len(must))
+        sample = must.copy()
+
+        if remaining > 0 and not pool.empty:
+            # Simple random sample by bilag row (not line)
+            sample_rest = pool.sample(n=min(remaining, len(pool)), replace=False, random_state=42)
+            sample = pd.concat([sample, sample_rest], ignore_index=True)
+
+        # Add group + interval
+        if self._interval_map:
+            # We can compute groups again quickly
+            use_abs = bool(self.var_use_abs.get())
+            values = df_b["SumBeløp"].abs() if use_abs else df_b["SumBeløp"]
+            groups, interval_map, _ = stratify_bilag(values, method=self.var_method.get(), k=int(self.var_k.get() or 5))
+            df_b2 = df_b.copy()
+            df_b2["Gruppe"] = groups
+            sample = sample.merge(df_b2[["Bilag", "Gruppe"]], on="Bilag", how="left")
+            sample["Intervall"] = sample["Gruppe"].apply(lambda g: format_interval_no(interval_map.get(int(g), "")))
+
+        self._df_sample = sample
+        self._render_sample()
+
+    def _render_sample(self):
+        self._clear_tree(self.tree_sample)
+
+        if self._df_sample is None or self._df_sample.empty:
+            self.lbl_sample.config(text="Utvalg: (ingen bilag trukket)")
+            return
+
+        self.lbl_sample.config(text=build_sample_summary_text(self._df_sample))
+
+        for _, row in self._df_sample.iterrows():
+            self.tree_sample.insert(
+                "",
+                "end",
+                values=(
+                    row.get("Bilag", ""),
+                    row.get("Dato", ""),
+                    row.get("Tekst", ""),
+                    fmt_amount_no(row.get("SumBeløp", 0.0), 2),
+                    row.get("Gruppe", ""),
+                    row.get("Intervall", ""),
+                    row.get("Fulltext", ""),
+                ),
+            )
+
+    def _commit_selection(self):
+        if self._df_sample is None or self._df_sample.empty:
+            messagebox.showwarning("Utvalg", "Ingen utvalg å legge til.")
+            return
+
+        if self.on_commit_selection is not None:
+            self.on_commit_selection(self._df_sample.copy())
+
+        messagebox.showinfo("Utvalg", "Utvalg lagt til.")
+
+    def _export_excel(self):
+        if self._df_sample is None or self._df_sample.empty:
+            messagebox.showwarning("Eksport", "Ingen utvalg å eksportere.")
+            return
         try:
-            from openpyxl import Workbook
-            from openpyxl.utils.dataframe import dataframe_to_rows
-
-            wb = Workbook()
-
-            # Ark for grupper
-            strata_df = self.summary.copy() if self.summary is not None else pd.DataFrame(
-                columns=self.tree_strata["columns"]
-            )
-            strata_df = strata_df.rename(
-                columns={
-                    "Antall_bilag": "Antall bilag",
-                    "SumBeløp": "Sum Beløp",
-                    "Min_Beløp": "Min Beløp",
-                    "Median_Beløp": "Median Beløp",
-                    "Max_Beløp": "Maks Beløp",
-                }
-            )
-
-            ws = wb.active
-            ws.title = "Grupper"
-            for r in dataframe_to_rows(strata_df, index=False, header=True):
-                ws.append(r)
-
-            # Ark for sample
-            ws2 = wb.create_sheet("Trekk")
-            for r in dataframe_to_rows(self.sample_df, index=False, header=True):
-                ws2.append(r)
-
-            # Ark for summer, hvis aktuelt
-            if "Sum bilag (kontointervallet)" in self.sample_df.columns:
-                df_int = self.sample_df[["Bilag", "Sum bilag (kontointervallet)"]].drop_duplicates()
-                ws3 = wb.create_sheet("Sum bilag kontointervall")
-                for r in dataframe_to_rows(df_int, index=False, header=True):
-                    ws3.append(r)
-
-            if "Sum rader (kontointervallet)" in self.sample_df.columns:
-                df_rows = self.sample_df[["Bilag", "Sum rader (kontointervallet)"]].drop_duplicates()
-                ws4 = wb.create_sheet("Sum rader kontointervall")
-                for r in dataframe_to_rows(df_rows, index=False, header=True):
-                    ws4.append(r)
-
-            if "Sum bilag (alle kontoer)" in self.sample_df.columns:
-                df_all = self.sample_df[["Bilag", "Sum bilag (alle kontoer)"]].drop_duplicates()
-                ws5 = wb.create_sheet("Sum bilag alle kontoer")
-                for r in dataframe_to_rows(df_all, index=False, header=True):
-                    ws5.append(r)
-
-            wb.save(path)
-            messagebox.showinfo("Eksport", f"Utvalget er lagret til {path}")
-
+            export_to_excel(self._df_sample)
+            messagebox.showinfo("Eksport", "Eksportert til Excel.")
         except Exception as e:
-            messagebox.showerror("Eksport", f"Feil under eksport: {e}")
+            messagebox.showerror("Eksportfeil", f"Kunne ikke eksportere.\n\n{e}")
+
+    def _drilldown(self):
+        if open_drilldown is None:
+            return
+        if self._df_sample is None or self._df_sample.empty:
+            messagebox.showwarning("Drilldown", "Kjør utvalg først.")
+            return
+        open_drilldown(self.winfo_toplevel(), df_sample=self._df_sample, df_all=self._df_all)
+
+    def _show_accounts_popup(self):
+        if self._df_base is None or self._df_base.empty or "Konto" not in self._df_base.columns:
+            messagebox.showinfo("Kontoer", "Ingen kontoer tilgjengelig i grunnlaget.")
+            return
+
+        df = self._df_base.copy()
+        # basic account aggregation
+        belop = pd.to_numeric(df.get("Beløp", 0.0), errors="coerce").fillna(0.0)
+        konto = pd.to_numeric(df["Konto"], errors="coerce")
+        kontonavn = df.get("Kontonavn", pd.Series([""] * len(df))).fillna("")
+
+        tmp = pd.DataFrame({"Konto": konto, "Kontonavn": kontonavn, "Beløp": belop, "Bilag": df.get("Bilag")})
+        tmp = tmp.dropna(subset=["Konto"])
+
+        g = tmp.groupby("Konto", dropna=False)
+        out = pd.DataFrame(
+            {
+                "Konto": g.size().index.astype(int),
+                "Kontonavn": g["Kontonavn"].first().values,
+                "Rader": g.size().values,
+                "Bilag": g["Bilag"].nunique().values if "Bilag" in tmp.columns else g.size().values,
+                "Sum": g["Beløp"].sum().values,
+            }
+        ).sort_values("Sum", ascending=False)
+
+        win = tk.Toplevel(self)
+        win.title("Kontoer i grunnlaget")
+        win.geometry("720x520")
+
+        tree = ttk.Treeview(win, columns=("Konto", "Kontonavn", "Rader", "Bilag", "Sum"), show="headings")
+        for col, w in [("Konto", 80), ("Kontonavn", 260), ("Rader", 80), ("Bilag", 80), ("Sum", 120)]:
+            tree.heading(col, text=col)
+            tree.column(col, width=w, anchor="w")
+        tree.pack(fill="both", expand=True)
+
+        for _, r in out.iterrows():
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    int(r["Konto"]),
+                    r["Kontonavn"],
+                    fmt_int_no(r["Rader"]),
+                    fmt_int_no(r["Bilag"]),
+                    fmt_amount_no(r["Sum"], 2),
+                ),
+            )
+
+    @staticmethod
+    def _clear_tree(tree: ttk.Treeview):
+        for item in tree.get_children():
+            tree.delete(item)

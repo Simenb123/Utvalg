@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from stratifiering import beregn_strata, trekk_sample, summer_per_bilag
+from stratifiering import beregn_strata, stratify_bilag, trekk_sample, summer_per_bilag
 
 
 def _make_df_for_strata():
@@ -27,6 +27,23 @@ def test_beregn_strata_quantile_two_groups():
     assert set(bilag_df["Bilag"]) == {"1", "2", "3", "4"}
     # interval_map skal ha én entry per faktisk gruppe
     assert set(interval_map.keys()) == set(summary["Gruppe"])
+
+
+def test_stratify_bilag_er_alias_for_beregn_strata():
+    """Nyere kode kan importere `stratify_bilag`.
+
+    For å unngå store refaktoreringer (risiko) beholder vi `beregn_strata` og
+    eksponerer et alias. Her verifiserer vi at resultatene er identiske.
+    """
+
+    df = _make_df_for_strata()
+    summary1, bilag1, interval_map1 = beregn_strata(df, k=2, mode="quantile", abs_belop=False)
+    summary2, bilag2, interval_map2 = stratify_bilag(df, k=2, method="quantile", abs_belop=False)
+
+    # Samme grupper og bilag
+    assert summary1["Gruppe"].tolist() == summary2["Gruppe"].tolist()
+    assert set(bilag1["Bilag"].tolist()) == set(bilag2["Bilag"].tolist())
+    assert interval_map1 == interval_map2
 
 
 def test_beregn_strata_abs_belop_vs_netto():

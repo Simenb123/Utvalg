@@ -245,8 +245,33 @@ class DatasetPane(ttk.Frame):
                     update_ml_map(self.headers, mapping, ml)
                 except Exception:
                     pass
-                # Lagre i session + bus
-                session.dataset = df
+
+                # ---------------- FIX: lagre dataset konsistent ----------------
+                # Lagre i session (både ny og gammel API) + bus
+                try:
+                    from models import Columns  # type: ignore
+                except Exception:
+                    Columns = None  # type: ignore
+
+                try:
+                    if Columns is not None and hasattr(session, "set_dataset"):
+                        cols_obj = Columns(
+                            konto="Konto",
+                            kontonavn="Kontonavn",
+                            bilag="Bilag",
+                            belop="Beløp",
+                            dato="Dato" if isinstance(df, pd.DataFrame) and "Dato" in df.columns else "",
+                            tekst="Tekst" if isinstance(df, pd.DataFrame) and "Tekst" in df.columns else "",
+                        )
+                        # type: ignore[attr-defined]
+                        session.set_dataset(df, cols_obj)
+                    else:
+                        session.dataset = df
+                except Exception:
+                    # Fallback: aldri la dette knekke GUI
+                    session.dataset = df
+                # ---------------------------------------------------------------
+
                 try:
                     bus.emit("DATASET_BUILT", df)
                 except Exception:
