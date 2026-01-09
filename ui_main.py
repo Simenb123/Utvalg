@@ -53,6 +53,84 @@ except Exception:  # pragma: no cover
     session = None  # type: ignore[assignment]
 
 
+def _normalize_id_series(s: pd.Series) -> pd.Series:
+    """Normaliserer identifikatorer (Bilag/Konto) til robuste strenger.
+
+    Vi har ofte blandede typer i innleste datasett (int/float/str) og noen
+    ganger kommer tall inn som "123.0" (Excel) eller med whitespace.
+
+    Denne funksjonen gjør sammenligning robust ved å:
+    - konvertere til str
+    - strippe whitespace
+    - fjerne en evt. ".0"-hale
+    - fjerne "nan"/"None"
+    """
+
+    if s is None:
+        return pd.Series([], dtype=str)
+
+    # astype(str) gjør NaN -> "nan", så vi rydder opp etterpå
+    out = s.astype(str).str.strip()
+    out = out.str.replace(r"\.0$", "", regex=True)
+    out = out.replace({"nan": "", "None": "", "NaT": ""})
+    return out
+
+
+def expand_bilag_sample_to_transactions(
+    df_sample_bilag: pd.DataFrame,
+    df_transactions: pd.DataFrame,
+    *,
+    bilag_col: str = "Bilag",
+) -> pd.DataFrame:
+    """Konverterer et bilagsutvalg (1 rad per bilag) til transaksjonsrader.
+
+    I SelectionStudio trekkes utvalg på bilagsnivå (kolonnen "Bilag" +
+    "SumBeløp"). Resultat-fanen (page_utvalg.UtvalgPage) forventer derimot
+    transaksjonsrader med bl.a. "Konto" og "Beløp".
+
+    Denne helperen:
+    1) filtrerer df_transactions til bilagene i df_sample_bilag
+    2) (valgfritt) merger på gruppe/intervall per bilag som prefiksede kolonner
+       ("Utvalg_Gruppe", "Utvalg_Intervall", "Utvalg_SumBilag").
+    """
+
+    if df_sample_bilag is None or df_transactions is None:
+        return pd.DataFrame()
+    if df_sample_bilag.empty or df_transactions.empty:
+        return df_transactions.iloc[0:0].copy()
+    if bilag_col not in df_sample_bilag.columns or bilag_col not in df_transactions.columns:
+        # Uten bilag-kolonne kan vi ikke mappe utvalget; returner tomt.
+        return df_transactions.iloc[0:0].copy()
+
+    sample_norm = _normalize_id_series(df_sample_bilag[bilag_col])
+    keys = set(sample_norm[sample_norm != ""].unique().tolist())
+    if not keys:
+        return df_transactions.iloc[0:0].copy()
+
+    tx_norm = _normalize_id_series(df_transactions[bilag_col])
+    mask = tx_norm.isin(keys)
+    out = df_transactions.loc[mask].copy()
+
+    # Legg på metadata fra bilagsutvalget hvis det finnes
+    meta_map = {
+        "Utvalg_Gruppe": "Gruppe",
+        "Utvalg_Intervall": "Intervall",
+        "Utvalg_SumBilag": "SumBeløp",
+    }
+    have = {new: old for new, old in meta_map.items() if old in df_sample_bilag.columns}
+    if have:
+        meta_df = df_sample_bilag[[bilag_col] + list(have.values())].drop_duplicates(subset=[bilag_col]).copy()
+        meta_df["_bilag_norm"] = _normalize_id_series(meta_df[bilag_col])
+        meta_df = meta_df.drop(columns=[bilag_col])
+        meta_df = meta_df.rename(columns={old: new for new, old in have.items()})
+
+        out["_bilag_norm"] = _normalize_id_series(out[bilag_col])
+        out = out.merge(meta_df, on="_bilag_norm", how="left")
+        out = out.drop(columns=["_bilag_norm"], errors="ignore")
+
+    return out
+
+
 class App(tk.Tk):
     """
     Hoved-application med Notebook og faner for Dataset, Analyse, Utvalg, Resultat og Logg.
@@ -159,11 +237,30 @@ class App(tk.Tk):
         if df_sample is None or df_sample.empty:
             return
 
+        # SelectionStudio leverer normalt 1 rad per bilag (Bilag/SumBeløp/...)
+        # mens Resultat-fanen forventer transaksjonsrader. Vi prøver derfor å
+        # "ekspandere" bilagsutvalget til linjer fra session.dataset.
+        df_to_result = df_sample.copy()
+
+        try:
+            df_all = getattr(session, "dataset", None) if session is not None else None
+        except Exception:
+            df_all = None
+
+        if isinstance(df_all, pd.DataFrame) and not df_all.empty:
+            try:
+                df_tx = expand_bilag_sample_to_transactions(df_sample_bilag=df_sample, df_transactions=df_all)
+                if not df_tx.empty:
+                    df_to_result = df_tx
+            except Exception:
+                # Best effort – fall tilbake til df_sample
+                df_to_result = df_sample.copy()
+
         # UtvalgPage (Resultat) har allerede en on_dataset_loaded-metode som kan gjenbrukes
         try:
             if hasattr(self.page_resultat, "on_dataset_loaded"):
                 # type: ignore[call-arg]
-                self.page_resultat.on_dataset_loaded(df_sample.copy())
+                self.page_resultat.on_dataset_loaded(df_to_result.copy())
         except Exception:
             # Vi vil ikke krasje hele appen om noe feiler her
             pass

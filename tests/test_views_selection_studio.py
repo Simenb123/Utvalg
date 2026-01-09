@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from views_selection_studio import (
     PopulationMetrics,
@@ -6,7 +7,9 @@ from views_selection_studio import (
     build_sample_summary_text,
     build_source_text,
     compute_population_metrics,
+    compute_specific_selection_recommendation,
     format_interval_no,
+    stratify_bilag_sums,
 )
 
 
@@ -31,7 +34,9 @@ def test_compute_population_metrics_basic():
 
 
 def test_build_source_text_distinguishes_subset_vs_full():
-    df_all = pd.DataFrame({"Bilag": [1, 2, 3, 4], "Konto": [6000, 6001, 6002, 6003], "Beløp": [1, 1, 1, 1]})
+    df_all = pd.DataFrame(
+        {"Bilag": [1, 2, 3, 4], "Konto": [6000, 6001, 6002, 6003], "Beløp": [1, 1, 1, 1]}
+    )
     df_base = df_all.iloc[:2].copy()
 
     txt_subset = build_source_text(df_base, df_all)
@@ -71,3 +76,48 @@ def test_build_sample_summary_text_uses_bilag_counts():
     assert "3 rader" in txt
     assert "Sum (filtrert grunnlag)" in txt
     assert "Sum (valgte kontoer)" in txt
+
+
+def test_compute_specific_selection_recommendation_splits_population_and_reduces_sample_size():
+    # A and C are always selected (>= tolerable error). We then compute the
+    # additional sample size based on remaining population value.
+    values = pd.Series([200.0, 50.0, 180.0], index=["A", "B", "C"])
+
+    reco = compute_specific_selection_recommendation(
+        bilag_values=values,
+        tolerable_error=100.0,
+        confidence_factor=1.6,
+    )
+
+    assert reco.specific_bilag == ["A", "C"]
+    assert reco.specific_count == 2
+    assert reco.remaining_count == 1
+    # remaining_value_abs = 50; additional_n = ceil((50 / 100) * 1.6) = 1
+    assert reco.additional_n == 1
+    assert reco.total_n == 3
+
+
+def test_stratify_bilag_sums_happy_path_quantile():
+    # This used to crash in SelectionStudio when stratify_bilag was (incorrectly)
+    # called with a Series. The adapter must feed a DataFrame with Bilag/Beløp.
+    bilag_df = pd.DataFrame(
+        {
+            "Bilag": [1, 2, 3, 4],
+            "SumBeløp": [100.0, -200.0, 300.0, -400.0],
+        }
+    )
+
+    summary, bilag_out, interval_map = stratify_bilag_sums(bilag_df, method="quantile", k=2, use_abs=True)
+
+    assert not summary.empty
+    assert "__grp__" in bilag_out.columns
+    assert set(bilag_out["Bilag"]) == {1, 2, 3, 4}
+    assert summary["Gruppe"].nunique() == 2
+    assert set(interval_map.keys()) == set(summary["Gruppe"].astype(int).tolist())
+
+
+def test_stratify_bilag_sums_raises_keyerror_when_columns_missing():
+    bilag_df = pd.DataFrame({"Bilag": [1, 2], "SomethingElse": [10.0, 20.0]})
+
+    with pytest.raises(KeyError):
+        stratify_bilag_sums(bilag_df)
