@@ -30,8 +30,21 @@ import re
 
 from models import Columns
 
+import app_paths
+
 _BASE_DIR = Path(__file__).resolve().parent
-_MEMORY_PATH = _BASE_DIR / "column_memory.json"
+
+
+def _memory_path() -> Path:
+    """Hvor column_memory.json lagres.
+
+    I frozen-modus bruker vi AppData (eller UTVALG_DATA_DIR) slik at filen ikke
+    havner i en midlertidig utpakkingsmappe.
+    """
+
+    if app_paths.is_frozen():
+        return app_paths.data_file("column_memory.json")
+    return _BASE_DIR / "column_memory.json"
 
 def _norm_header(name: str) -> str:
     s = (name or "").strip().lower()
@@ -45,10 +58,31 @@ def fingerprint_columns(cols: List[str]) -> str:
     return sha1(raw).hexdigest()
 
 def _load() -> dict:
-    if not _MEMORY_PATH.exists():
+    path = _memory_path()
+
+    # Migration (best effort): hvis vi kjører frozen og den nye filen ikke finnes,
+    # prøv å lese fra gamle plasseringer (ved siden av exe / cwd / repo).
+    if app_paths.is_frozen() and not path.exists():
+        legacy = app_paths.best_effort_legacy_paths(
+            app_paths.executable_dir() / "column_memory.json",
+            Path.cwd() / "column_memory.json",
+            _BASE_DIR / "column_memory.json",
+        )
+        for lp in legacy:
+            try:
+                data = json.loads(lp.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    # skriv til ny lokasjon
+                    _save(data)
+                    return _load()
+            except Exception:
+                continue
+
+    if not path.exists():
         return {"version": 2, "flags": {"learning_enabled": True, "memory_enabled": True}, "global": {}, "schemas": {}}
+
     try:
-        data = json.loads(_MEMORY_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         data = {"version": 2, "flags": {"learning_enabled": True, "memory_enabled": True}, "global": {}, "schemas": {}}
     # oppgrader strukturer (v1 -> v2)
@@ -69,9 +103,11 @@ def _load() -> dict:
     return data
 
 def _save(mem: dict) -> None:
-    tmp = _MEMORY_PATH.with_suffix(".tmp")
+    path = _memory_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(mem, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(_MEMORY_PATH)
+    tmp.replace(path)
 
 # ---------------- Flags ----------------
 

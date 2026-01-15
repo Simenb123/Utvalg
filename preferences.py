@@ -1,5 +1,21 @@
-"""
-preferences.py  — JSON-backed preferences with global & per-client scopes.
+"""preferences.py
+
+JSON-backed preferences with global & per-client scopes.
+
+Hvor lagres filen?
+-----------------
+I utviklingsmodus (ikke PyInstaller/frozen):
+  - Bruker historisk plassering i prosjektmappen (``.session/preferences.json``
+    hvis mulig, ellers ``preferences.json`` / ``.preferences.json``).
+
+I PyInstaller *onefile* (frozen):
+  - Lagrer i en stabil per-bruker mappe (typisk AppData) for at innstillinger
+    ikke skal havne i en midlertidig utpakkingsmappe.
+
+Overstyring:
+  - UTVALG_DATA_DIR: sett eksplisitt datamappe
+  - UTVALG_PORTABLE=1: (frozen) lagre ved siden av .exe
+
 Compatible API:
   - get(key, default=None, client=None)
   - set(key, value, client=None)
@@ -7,26 +23,56 @@ Compatible API:
   - get_last_client()/set_last_client()
   - load()  -> dict   (compat shim; returns internal data)
   - save(data=None)   (compat shim; persists; if data provided, replaces internal)
-Storage:
-  - Uses '.session/preferences.json' if present/possible, else falls back to 'preferences.json' in project root.
 """
 from __future__ import annotations
-import os, json, threading
+
+import json
+import os
+import threading
+from pathlib import Path
 from typing import Any, Dict
+
+import app_paths
 
 _LOCK = threading.RLock()
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
-_CANDIDATES = [
-    os.path.join(_HERE, ".session", "preferences.json"),
-    os.path.join(_HERE, "preferences.json"),
-]
-for _cand in _CANDIDATES:
-    if os.path.exists(_cand):
-        _PREFS_PATH = _cand
-        break
-else:
-    _PREFS_PATH = _CANDIDATES[0]
+
+def _legacy_candidates() -> list[str]:
+    """Historiske plasseringer i repo/prosjektmappe."""
+
+    return [
+        os.path.join(_HERE, ".session", "preferences.json"),
+        os.path.join(_HERE, "preferences.json"),
+        os.path.join(_HERE, ".preferences.json"),
+    ]
+
+
+_PREFS_PATH: str | None = None
+
+
+def _prefs_path() -> str:
+    """Finn og cache sti for preferences.json."""
+    global _PREFS_PATH
+    if _PREFS_PATH:
+        return _PREFS_PATH
+
+    # I frozen-modus: skriv til per-bruker data mappe.
+    if app_paths.is_frozen():
+        # Legg i en .session undermappe for å beholde gammel struktur.
+        _PREFS_PATH = str(app_paths.data_file("preferences.json", subdir=".session"))
+        return _PREFS_PATH
+
+    # Ikke frozen: behold gammel oppførsel
+    for cand in _legacy_candidates():
+        if os.path.exists(cand):
+            _PREFS_PATH = cand
+            return _PREFS_PATH
+
+    # Default: .session/preferences.json
+    _PREFS_PATH = _legacy_candidates()[0]
+    return _PREFS_PATH
+
 
 def _ensure_dir(path: str) -> None:
     d = os.path.dirname(path)
@@ -63,24 +109,53 @@ def _load() -> None:
     global _DATA
     with _LOCK:
         try:
-            if os.path.exists(_PREFS_PATH):
-                with open(_PREFS_PATH, "r", encoding="utf-8") as f:
+            path = _prefs_path()
+
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
                     obj = json.load(f)
                     if isinstance(obj, dict):
                         _DATA["global"] = obj.get("global", {}) or {}
                         _DATA["clients"] = obj.get("clients", {}) or {}
                         _DATA["last_client"] = obj.get("last_client")
+                return
+
+            # Best effort migrering til AppData ved frozen:
+            # Hvis vi ikke har filen i data-mappen enda, prøv å lese fra
+            # legacy-lokasjoner (ved siden av exe / cwd).
+            if app_paths.is_frozen():
+                legacy = app_paths.best_effort_legacy_paths(
+                    Path(app_paths.executable_dir()) / ".session" / "preferences.json",
+                    Path(app_paths.executable_dir()) / "preferences.json",
+                    Path.cwd() / ".session" / "preferences.json",
+                    Path.cwd() / "preferences.json",
+                    Path.cwd() / ".preferences.json",
+                )
+                for lp in legacy:
+                    try:
+                        with open(lp, "r", encoding="utf-8") as f:
+                            obj = json.load(f)
+                        if isinstance(obj, dict):
+                            _DATA["global"] = obj.get("global", {}) or {}
+                            _DATA["clients"] = obj.get("clients", {}) or {}
+                            _DATA["last_client"] = obj.get("last_client")
+                            # Lagre til ny sti
+                            _save()
+                            return
+                    except Exception:
+                        continue
         except Exception:
             pass
 
 def _save() -> None:
     with _LOCK:
         try:
-            _ensure_dir(_PREFS_PATH)
-            tmp = _PREFS_PATH + ".tmp"
+            path = _prefs_path()
+            _ensure_dir(path)
+            tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(_DATA, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, _PREFS_PATH)
+            os.replace(tmp, path)
         except Exception:
             pass
 

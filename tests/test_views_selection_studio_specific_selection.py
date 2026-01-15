@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-from views_selection_studio import (
+from views_selection_studio_ui import (
     compute_specific_selection_recommendation,
     split_specific_selection_by_tolerable_error,
 )

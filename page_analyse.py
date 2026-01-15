@@ -1,34 +1,32 @@
+# -*- coding: utf-8 -*-
 """page_analyse.py
 
 Analyse-fanen: konto-pivot (venstre) + transaksjonsliste (høyre).
 
-Mål (basert på bug-rapportene):
-- Vise akkumulerte beløp per konto (pivot)
-- Filtrere på kontoserier (1-9) ved avhuking
+Mål:
+- Vise pivot pr konto
+- Filtrere på kontoserier
 - Vise transaksjoner for valgte kontoer
-- Riktig oppsummering: vis både antall/sum for viste rader og for hele seleksjonen
-- Kunne sende markerte kontoer til Utvalg-fanen
+- Bilagsdrilldown fra transaksjonslisten (dobbeltklikk/Enter eller knapp)
 
-Denne implementasjonen holder seg til eksisterende modeller:
-- analyse_model.build_pivot_by_account
-- analysis_filters.filter_dataset
-
-Den er også robust i miljøer uten fungerende Tcl/Tk (CI):
-- Hvis ttk.Frame init feiler med TclError, bygges en "headless" variant som
-  fortsatt tilfredsstiller enhetstestene.
+Viktig for test/CI:
+- Under pytest skal vi ikke åpne messagebox-dialoger (de stopper testkjøringen).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+import os
 from typing import Callable, List, Optional
 
 try:
     import tkinter as tk
-    from tkinter import ttk
+    from tkinter import messagebox, ttk
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
+    messagebox = None  # type: ignore
 
 import pandas as pd
 
@@ -37,6 +35,42 @@ import session
 from analyse_model import build_pivot_by_account
 from analysis_filters import filter_dataset
 from konto_utils import konto_to_str
+
+log = logging.getLogger(__name__)
+
+
+# Bilagsdrilldown
+try:
+    from selection_studio_drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
+except Exception:  # pragma: no cover
+    _open_bilag_drill_dialog = None  # type: ignore
+
+
+def _running_under_pytest() -> bool:
+    # Standard indikator pytest setter. Brukes for å unngå GUI-popups i tester.
+    return "PYTEST_CURRENT_TEST" in os.environ
+
+
+def _safe_showinfo(title: str, msg: str) -> None:
+    if _running_under_pytest():
+        return
+    if messagebox is None:
+        return
+    try:
+        messagebox.showinfo(title, msg)
+    except Exception:
+        pass
+
+
+def _safe_showerror(title: str, msg: str) -> None:
+    if _running_under_pytest():
+        return
+    if messagebox is None:
+        return
+    try:
+        messagebox.showerror(title, msg)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -92,32 +126,21 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
         self._build_ui()
 
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
     # Public API expected by ui_main/tests
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     def set_utvalg_callback(self, callback: Callable[[List[str]], None]) -> None:
         self._utvalg_callback = callback
 
     def refresh_from_session(self, sess: object = session) -> None:
-        """Reload data from session and refresh UI.
-
-        Viktig: Vi beholder råverdien i self.dataset (ikke bare DataFrame),
-        slik at headless-tester kan sette dummy-verdier og verifisere at
-        metoden faktisk oppdaterer feltet.
-        GUI-logikken sjekker isinstance(..., pd.DataFrame) før den opererer.
-        """
         df = getattr(sess, "dataset", None)
-
-        # Behold råverdien på self.dataset (gir enklere testing/headless).
-        # GUI-logikken bruker isinstance(..., pd.DataFrame) før den opererer på data.
         self.dataset = df  # type: ignore[assignment]
-
         self._apply_filters_and_refresh()
 
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
     # UI build
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     def _build_ui(self) -> None:
         if not self._tk_ok:
@@ -157,7 +180,12 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         # Max rows
         ttk.Label(filter_frame, text="Vis:").grid(row=0, column=5, sticky="e", padx=(12, 0))
         spn_rows = ttk.Spinbox(
-            filter_frame, from_=50, to=5000, increment=50, textvariable=self._var_max_rows, width=6
+            filter_frame,
+            from_=50,
+            to=5000,
+            increment=50,
+            textvariable=self._var_max_rows,
+            width=6,
         )
         spn_rows.grid(row=0, column=6, sticky="w", padx=(4, 12))
 
@@ -183,7 +211,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         btn_to_utvalg = ttk.Button(filter_frame, text="Til utvalg", command=self._send_selected_to_utvalg)
         btn_to_utvalg.grid(row=0, column=14, sticky="e", padx=(6, 0))
 
-        # allow the right side to expand
         filter_frame.grid_columnconfigure(14, weight=1)
 
         # Main split
@@ -202,7 +229,12 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         pivot_frame.grid_rowconfigure(0, weight=1)
         pivot_frame.grid_columnconfigure(0, weight=1)
 
-        self._pivot_tree = ttk.Treeview(pivot_frame, columns=self.PIVOT_COLS, show="headings", selectmode="extended")
+        self._pivot_tree = ttk.Treeview(
+            pivot_frame,
+            columns=self.PIVOT_COLS,
+            show="headings",
+            selectmode="extended",
+        )
         for col, w in zip(self.PIVOT_COLS, (90, 220, 110, 70)):
             anchor = "e" if col in ("Sum", "Antall") else "w"
             self._pivot_tree.heading(col, text=col)
@@ -219,8 +251,18 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         tx_frame.grid_rowconfigure(1, weight=1)
         tx_frame.grid_columnconfigure(0, weight=1)
 
-        self._lbl_tx_summary = ttk.Label(tx_frame, text="Oppsummering: (ingen rader)")
-        self._lbl_tx_summary.grid(row=0, column=0, sticky="w", pady=(0, 4))
+        hdr_tx = ttk.Frame(tx_frame)
+        hdr_tx.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        hdr_tx.grid_columnconfigure(0, weight=1)
+
+        self._lbl_tx_summary = ttk.Label(hdr_tx, text="Oppsummering: (ingen rader)")
+        self._lbl_tx_summary.grid(row=0, column=0, sticky="w")
+
+        ttk.Button(
+            hdr_tx,
+            text="Bilagsdrill",
+            command=self._open_bilag_drilldown_from_tx_selection,
+        ).grid(row=0, column=1, sticky="e", padx=(6, 0))
 
         self._tx_tree = ttk.Treeview(tx_frame, columns=self.TX_COLS, show="headings")
         col_widths = {
@@ -242,20 +284,20 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         sb_tx.grid(row=1, column=1, sticky="ns")
         self._tx_tree.configure(yscrollcommand=sb_tx.set)
 
-        # Formatting tags (negative)
         self._tx_tree.tag_configure("neg", foreground="red")
 
-        # Events
+        self._tx_tree.bind("<Double-1>", lambda _e: self._open_bilag_drilldown_from_tx_selection())
+        self._tx_tree.bind("<Return>", lambda _e: self._open_bilag_drilldown_from_tx_selection())
+
         self._pivot_tree.bind("<<TreeviewSelect>>", lambda _e: self._refresh_transactions_view())
 
-        # Helpful shortcuts
         ent_search.bind("<Return>", lambda _e: self._apply_filters_and_refresh())
         ent_min.bind("<Return>", lambda _e: self._apply_filters_and_refresh())
         ent_max.bind("<Return>", lambda _e: self._apply_filters_and_refresh())
 
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
     # Filtering / refresh
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     def _reset_filters(self) -> None:
         if not self._tk_ok:
@@ -270,7 +312,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._apply_filters_and_refresh()
 
     def _apply_filters_and_refresh(self) -> None:
-        # Headless: just keep dataset pointer updated.
         if not self._tk_ok:
             return
 
@@ -288,7 +329,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         min_amount = self._safe_float(self._var_min.get())
         max_amount = self._safe_float(self._var_max.get())
 
-        # kontoserier: if none selected => no kontoserie-filter
         kontoserier = [i for i, v in enumerate(self._series_vars) if v.get()]
         kontoserier_arg = kontoserier if kontoserier else None
 
@@ -302,7 +342,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             kontoserier=kontoserier_arg,
         )
 
-        # Normalise Konto for safe selection/filtering.
         if "Konto" in df_f.columns:
             df_f = df_f.copy()
             df_f["Konto"] = df_f["Konto"].map(konto_to_str)
@@ -328,9 +367,9 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         for item in tree.get_children(""):
             tree.delete(item)
 
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
     # Pivot + transactions
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     def _refresh_pivot(self) -> None:
         if self._pivot_tree is None:
@@ -341,7 +380,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             return
 
         pivot_df = build_pivot_by_account(self._df_filtered)
-        # Expect columns: Konto, Kontonavn, Sum beløp, Antall bilag
         for _, row in pivot_df.iterrows():
             konto = konto_to_str(row.get("Konto", ""))
             navn = str(row.get("Kontonavn", "") or "")
@@ -364,11 +402,15 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         if self._pivot_tree is None:
             return []
         accounts: List[str] = []
-        for item in self._pivot_tree.selection():
+        selected = self._pivot_tree.selection()
+        if not selected:
+            selected = self._pivot_tree.get_children()
+
+        for item in selected:
             konto = konto_to_str(self._pivot_tree.set(item, "Konto"))
             if konto:
                 accounts.append(konto)
-        # de-dupe while preserving order
+
         seen = set()
         unique: List[str] = []
         for a in accounts:
@@ -398,12 +440,10 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
         df_sel_all = self._df_filtered[self._df_filtered["Konto"].isin(sel_accounts)].copy()
 
-        # Totals for full selection
         bel_all = pd.to_numeric(df_sel_all.get("Beløp", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
         total_rows = len(df_sel_all)
         total_sum = float(bel_all.sum())
 
-        # Display subset
         max_rows = int(self._var_max_rows.get() or 200)
         if max_rows <= 0:
             max_rows = 200
@@ -424,7 +464,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 )
             )
 
-        # Column fallbacks
         def _get_kunder(r: pd.Series) -> str:
             for c in ("Kunder", "Kundenavn", "Kunde", "Leverandør", "Motpart"):
                 if c in r.index:
@@ -457,12 +496,119 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 tags=tags,
             )
 
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Bilagsdrilldown (Analyse)
+    # -----------------------------------------------------------------
+
+    def _get_selected_bilag_from_tx_tree(self) -> str:
+        tree = getattr(self, "_tx_tree", None)
+        if tree is None:
+            return ""
+        try:
+            sel = tree.selection()
+        except Exception:
+            sel = ()
+        if not sel:
+            return ""
+
+        item = sel[0]
+        bilag = ""
+        try:
+            bilag = str(tree.set(item, "Bilag") or "")
+        except Exception:
+            bilag = ""
+
+        if not bilag:
+            try:
+                values = tree.item(item).get("values") or []
+                if values:
+                    bilag = str(values[0])
+            except Exception:
+                bilag = ""
+
+        return str(bilag).strip()
+
+    def _open_bilag_drilldown_from_tx_selection(self) -> None:
+        bilag = self._get_selected_bilag_from_tx_tree()
+        if not bilag:
+            _safe_showinfo("Bilagsdrill", "Velg en transaksjon i listen først.")
+            return
+        self._open_bilag_drilldown_for_bilag(bilag)
+
+    def _open_bilag_drilldown_for_bilag(self, bilag_value: str) -> None:
+        if _open_bilag_drill_dialog is None:
+            _safe_showinfo("Bilagsdrill", "Bilagsdrill er ikke tilgjengelig (mangler selection_studio_drill).")
+            return
+
+        df_all = self.dataset if isinstance(getattr(self, "dataset", None), pd.DataFrame) else None
+        df_filtered = self._df_filtered if isinstance(getattr(self, "_df_filtered", None), pd.DataFrame) else None
+
+        if df_all is None:
+            df_all = df_filtered
+        if df_filtered is None:
+            df_filtered = df_all
+
+        if df_all is None or df_filtered is None or not isinstance(df_all, pd.DataFrame) or df_all.empty:
+            _safe_showinfo("Bilagsdrill", "Ingen data tilgjengelig for drilldown.")
+            return
+
+        df_base = df_filtered
+        try:
+            sel_accounts = self._get_selected_accounts()
+        except Exception:
+            sel_accounts = []
+
+        if sel_accounts and "Konto" in df_filtered.columns:
+            try:
+                df_base = df_filtered[df_filtered["Konto"].isin(sel_accounts)].copy()
+                if df_base.empty:
+                    df_base = df_filtered
+            except Exception:
+                df_base = df_filtered
+
+        try:
+            _open_bilag_drill_dialog(
+                self,
+                df_base=df_base,
+                df_all=df_all,
+                bilag_value=bilag_value,
+                bilag_col="Bilag",
+            )
+            return
+        except TypeError:
+            pass
+        except Exception:
+            log.exception("Kunne ikke åpne bilagsdrill (Analyse)")
+            _safe_showerror("Bilagsdrill", "Kunne ikke åpne bilagsdrill. Se logg.")
+            return
+
+        try:
+            _open_bilag_drill_dialog(
+                self,
+                df_base=df_base,
+                df_all=df_all,
+                preset_bilag=bilag_value,
+                bilag_col="Bilag",
+            )
+            return
+        except TypeError:
+            pass
+        except Exception:
+            log.exception("Kunne ikke åpne bilagsdrill (Analyse) via preset_bilag")
+            _safe_showerror("Bilagsdrill", "Kunne ikke åpne bilagsdrill. Se logg.")
+            return
+
+        try:
+            _open_bilag_drill_dialog(self, df_base, df_all, bilag_value)
+        except Exception:
+            log.exception("Kunne ikke åpne bilagsdrill (Analyse) via posisjonelle argumenter")
+            _safe_showerror("Bilagsdrill", "Kunne ikke åpne bilagsdrill. Se logg.")
+
+    # -----------------------------------------------------------------
     # Selection -> Utvalg
-    # ---------------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     def _send_to_selection(self, accounts: List[str]) -> None:
-        """Internal helper for tests + callback-based wiring."""
         if self._utvalg_callback is not None:
             self._utvalg_callback(accounts)
 
@@ -473,3 +619,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 self._lbl_tx_summary.config(text="Ingen kontoer valgt.")
             return
         self._send_to_selection(accounts)
+
+
+__all__ = ["AnalysePage"]

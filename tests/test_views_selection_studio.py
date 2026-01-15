@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from views_selection_studio import (
+from views_selection_studio_ui import (
     PopulationMetrics,
     build_population_summary_text,
     build_sample_summary_text,

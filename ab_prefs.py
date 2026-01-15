@@ -3,23 +3,59 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 import json, tempfile, os
 
-_FILE = Path(__file__).resolve().parent / "ab_presets.json"
+import app_paths
+
+_BASE_DIR = Path(__file__).resolve().parent
+
+
+def _file_path() -> Path:
+    """Hvor ab_presets.json lagres.
+
+    I frozen-modus lagrer vi i AppData (eller UTVALG_DATA_DIR) slik at filen
+    ikke havner i en midlertidig utpakkingsmappe.
+    """
+
+    if app_paths.is_frozen():
+        return app_paths.data_file("ab_presets.json")
+    return _BASE_DIR / "ab_presets.json"
 
 def _read_all() -> Dict[str, Any]:
-    if not _FILE.exists():
+    file_path = _file_path()
+
+    # Best effort migrering (frozen): hvis vi ikke har filen i data-mappen,
+    # prøv å lese fra gamle plasseringer og skriv til ny sti.
+    if app_paths.is_frozen() and not file_path.exists():
+        legacy = app_paths.best_effort_legacy_paths(
+            app_paths.executable_dir() / "ab_presets.json",
+            Path.cwd() / "ab_presets.json",
+            _BASE_DIR / "ab_presets.json",
+        )
+        for lp in legacy:
+            try:
+                with open(lp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    _write_all(data)
+                    break
+            except Exception:
+                continue
+
+    if not file_path.exists():
         return {}
     try:
-        with open(_FILE, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 def _write_all(data: Dict[str, Any]) -> None:
+    file_path = _file_path()
+    file_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.gettempdir()) / ("ab_presets.tmp.json")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _FILE)
+    os.replace(tmp, file_path)
 
 def list_presets() -> List[str]:
     return sorted(_read_all().keys())

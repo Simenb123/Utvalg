@@ -16,7 +16,7 @@ from typing import Optional, Callable, List
 # Forsøk å importere stratifiseringsdialogen fra pakken.
 # Ved feil vises en klar feilmelding i stedet for fallback-stub.
 try:
-    from views_selection_studio import SelectionStudio
+    from views_selection_studio_ui import SelectionStudio
     _STRAT_IMPORT_ERROR_MSG = ""  # ikke i bruk når importen lykkes
 except Exception as e:  # pragma: no cover - kun fallback i runtime
     from tkinter import messagebox as _messagebox

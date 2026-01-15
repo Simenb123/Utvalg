@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Sequence, Set
+from typing import Any, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 
@@ -87,30 +87,115 @@ def _first_existing_column(df: pd.DataFrame, candidates: Sequence[str]) -> Optio
     return None
 
 
-def open_bilag_drill_dialog(
+def _resolve_drilldown_inputs(
     master: Any,
-    df_base: pd.DataFrame,
+    df_base: Optional[pd.DataFrame],
     df_all: Optional[pd.DataFrame],
     bilag_value: Any,
+    *,
+    preset_bilag: Any = None,
+    bilag: Any = None,
+    bilag_id: Any = None,
+    selected_bilag: Any = None,
     bilag_col: str = "Bilag",
+) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], Any, str]:
+    """Normaliser argumenter til open_bilag_drill_dialog.
+
+    Hvorfor finnes denne?
+    ---------------------
+    UI-kode og eldre kallesteder har historisk sendt litt ulike signaturer.
+    Dette helper-laget gjør at vi kan være robuste uten å måtte refaktorere
+    alle kall samtidig.
+
+    Støtter spesielt:
+    - preset_bilag / bilag / bilag_id / selected_bilag som alias for bilag_value
+    - df_base kan mangle: vi forsøker å hente fra master._df_base / master._df_filtered
+    """
+
+    # 1) Bilag-verdi: prioriter eksplisitt bilag_value, ellers alias.
+    resolved_bilag = bilag_value
+    if resolved_bilag is None or str(resolved_bilag).strip() == "":
+        for candidate in (preset_bilag, bilag, bilag_id, selected_bilag):
+            if candidate is None:
+                continue
+            if str(candidate).strip() == "":
+                continue
+            resolved_bilag = candidate
+            break
+
+    # 2) df_base: bruk eksplisitt hvis gitt, ellers prøv å hente fra master.
+    resolved_base = df_base
+    if not isinstance(resolved_base, pd.DataFrame):
+        resolved_base = None
+
+    if resolved_base is None:
+        # SelectionStudio (GUI) har vanligvis _df_base og/eller _df_filtered.
+        for attr in ("_df_base", "_df_filtered"):
+            try:
+                v = getattr(master, attr, None)
+                if isinstance(v, pd.DataFrame):
+                    resolved_base = v
+                    break
+            except Exception:
+                continue
+
+    if resolved_base is None:
+        resolved_base = pd.DataFrame()
+
+    # 3) df_all: hvis ikke gitt, bruk df_base.
+    resolved_all = df_all if isinstance(df_all, pd.DataFrame) else None
+    if resolved_all is None:
+        resolved_all = resolved_base
+
+    # 4) bilag_col: robust str.
+    resolved_col = str(bilag_col or "Bilag")
+
+    return resolved_base, resolved_all, resolved_bilag, resolved_col
+
+
+def open_bilag_drill_dialog(
+    master: Any,
+    df_base: Optional[pd.DataFrame] = None,
+    df_all: Optional[pd.DataFrame] = None,
+    bilag_value: Any = None,
+    # --- Backwards compatible aliases (UI / legacy call sites)
+    preset_bilag: Any = None,
+    bilag: Any = None,
+    bilag_id: Any = None,
+    selected_bilag: Any = None,
+    bilag_col: str = "Bilag",
+    **_ignored_kwargs: Any,
 ) -> None:
     """
     Åpner et enkelt drilldown-vindu for valgt bilag.
     - Bruker df_all hvis tilgjengelig (for å få med motposter)
     - Markerer rader som er i kontoutvalg (df_base)
     """
+    # Normaliser input (robusthet mot ulike signaturer / UI-kall)
+    df_base_res, df_all_res, bilag_res, bilag_col_res = _resolve_drilldown_inputs(
+        master,
+        df_base,
+        df_all,
+        bilag_value,
+        preset_bilag=preset_bilag,
+        bilag=bilag,
+        bilag_id=bilag_id,
+        selected_bilag=selected_bilag,
+        bilag_col=bilag_col,
+    )
+
     if tk is None or ttk is None:  # pragma: no cover
         raise RuntimeError("Tkinter er ikke tilgjengelig i dette miljøet.")
 
-    source_df = df_all if isinstance(df_all, pd.DataFrame) and not df_all.empty else df_base
-    bilag_norm = normalize_bilag_value(bilag_value)
+    source_df = df_all_res if isinstance(df_all_res, pd.DataFrame) and not df_all_res.empty else df_base_res
+    bilag_norm = normalize_bilag_value(bilag_res)
 
-    rows = extract_bilag_rows(source_df, bilag_norm, bilag_col=bilag_col)
+    rows = extract_bilag_rows(source_df, bilag_norm, bilag_col=bilag_col_res)
     if rows.empty:
         messagebox.showinfo("Bilagsdrill", f"Fant ingen rader for bilag: {bilag_norm}")
         return
 
-    konto_set = konto_set_from_df(df_base, konto_col="Konto")
+    konto_set = konto_set_from_df(df_base_res, konto_col="Konto")
     rows = annotate_scope(rows, konto_set, konto_col="Konto")
 
     # Forsøk å lage en "Motpart"-kolonne hvis vi finner en relevant kilde

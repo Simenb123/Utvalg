@@ -144,6 +144,20 @@ def format_amount_no(value: Any, decimals: int = 2) -> str:
     return s
 
 
+def format_amount_input_no(value: Any) -> str:
+    """Formatér tall slik brukere typisk skriver inn beløp (uten desimaler).
+
+    Dette er en **legacy/kompatibilitets-funksjon** brukt av GUI og enkelte
+    varianter av ``views_selection_studio``. Den er ment for felt der man
+    ønsker tusenskiller, men ikke øre.
+
+    Eksempel:
+        1234 -> "1 234"
+        "250 000" -> "250 000"
+    """
+    return format_amount_no(value, decimals=0)
+
+
 def format_int_no(value: Any) -> str:
     """Formatér heltall til norsk format: 1234567 -> '1 234 567'."""
     i = parse_int(value)
@@ -190,8 +204,11 @@ class PopulationMetrics:
     """Små oppsummeringsmetrikker for en populasjon.
 
     Bakoverkompatibilitet:
-      * Nye navn: rows, bilag, konto
+      * Primære navn i ny kode: rows, bilag, konto
+      * Alias brukt i noen tester / eldre kode: row_count, bilag_count, konto_count / account_count
       * Legacy navn brukt i noen tester/eldre kode: n_rows, n_bilag, n_accounts
+
+    Merk: `sum_net` er nettosum (positiv/negativ), mens `sum_abs` er sum av absolutte beløp.
     """
 
     rows: int
@@ -200,7 +217,7 @@ class PopulationMetrics:
     sum_net: float
     sum_abs: float
 
-    # Egen __init__ for å støtte legacy keyword-argumenter.
+    # Egen __init__ for å støtte legacy/alias keyword-argumenter.
     def __init__(
         self,
         rows: int | None = None,
@@ -209,23 +226,64 @@ class PopulationMetrics:
         *,
         sum_net: float = 0.0,
         sum_abs: float = 0.0,
+        # Alias-navn (nyere/andre steder i kode/test)
+        row_count: int | None = None,
+        bilag_count: int | None = None,
+        konto_count: int | None = None,
+        account_count: int | None = None,
+        # Legacy-navn
         n_rows: int | None = None,
         n_bilag: int | None = None,
         n_accounts: int | None = None,
         **_: Any,
     ) -> None:
+        # Prioritet: eksplisitt nye felt -> alias -> legacy
         if rows is None:
-            rows = n_rows
+            rows = row_count if row_count is not None else n_rows
         if bilag is None:
-            bilag = n_bilag
+            bilag = bilag_count if bilag_count is not None else n_bilag
         if konto is None:
-            konto = n_accounts
+            konto = (
+                konto_count
+                if konto_count is not None
+                else (account_count if account_count is not None else n_accounts)
+            )
 
         object.__setattr__(self, "rows", int(rows or 0))
         object.__setattr__(self, "bilag", int(bilag or 0))
         object.__setattr__(self, "konto", int(konto or 0))
         object.__setattr__(self, "sum_net", float(sum_net or 0.0))
         object.__setattr__(self, "sum_abs", float(sum_abs or 0.0))
+
+    # ---- Alias properties (read-only) ----
+    @property
+    def row_count(self) -> int:
+        return self.rows
+
+    @property
+    def bilag_count(self) -> int:
+        return self.bilag
+
+    @property
+    def konto_count(self) -> int:
+        return self.konto
+
+    @property
+    def account_count(self) -> int:
+        return self.konto
+
+    # ---- Legacy properties (read-only) ----
+    @property
+    def n_rows(self) -> int:
+        return self.rows
+
+    @property
+    def n_bilag(self) -> int:
+        return self.bilag
+
+    @property
+    def n_accounts(self) -> int:
+        return self.konto
 
 
 def _find_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
@@ -243,36 +301,57 @@ def _find_col(df: pd.DataFrame, candidates: list[str]) -> Optional[str]:
     return None
 
 
-def compute_population_metrics(df: Optional[pd.DataFrame]) -> PopulationMetrics:
+def compute_population_metrics(
+    df: Optional[pd.DataFrame],
+    amount_col: Optional[str] = None,
+    **_ignored: Any,
+) -> PopulationMetrics:
     """
-    Beregn grunnleggende metrikker for en populasjon (DataFrame).
+    Compute basic metrics for the current population.
 
-    Forventer typisk kolonner:
-    - Bilag
-    - Konto
-    - Beløp / Belop
+    Backwards compatible:
+    - Accepts and ignores deprecated/unknown kwargs (e.g. abs_basis).
+    - Supports both transaction-level columns (Beløp/Belop) and bilag-level (SumBeløp/SumBelop).
     """
     if df is None or df.empty:
         return PopulationMetrics(rows=0, bilag=0, konto=0, sum_net=0.0, sum_abs=0.0)
 
-    bilag_col = _find_col(df, ["Bilag", "bilag", "Voucher"])
-    konto_col = _find_col(df, ["Konto", "konto", "Account"])
-    amount_col = _find_col(df, ["Beløp", "Belop", "Beløp", "Amount", "amount"])
+    bilag_col = _find_col(df, ["Bilag", "bilag", "Voucher", "VOUCHER"])
+    konto_col = _find_col(df, ["Konto", "konto", "Account", "ACCOUNT"])
+    bilag_count = int(df[bilag_col].nunique()) if bilag_col else 0
+    konto_count = int(df[konto_col].nunique()) if konto_col else 0
 
-    rows = int(len(df))
-    bilag = int(df[bilag_col].nunique(dropna=True)) if bilag_col else 0
-    konto = int(df[konto_col].nunique(dropna=True)) if konto_col else 0
+    # Auto-detect amount column when not explicitly provided.
+    if amount_col is None:
+        amount_col = _find_col(
+            df,
+            [
+                "Beløp",
+                "Belop",
+                "Amount",
+                "AMOUNT",
+                "SumBeløp",
+                "SumBelop",
+                "Sum beløp",
+                "Sum belop",
+            ],
+        )
 
     if amount_col:
-        amt = pd.to_numeric(df[amount_col], errors="coerce")
-        sum_net = float(amt.sum(skipna=True))
-        sum_abs = float(amt.abs().sum(skipna=True))
+        amounts = pd.to_numeric(df[amount_col], errors="coerce").fillna(0.0)
+        sum_net = float(amounts.sum())
+        sum_abs = float(amounts.abs().sum())
     else:
         sum_net = 0.0
         sum_abs = 0.0
 
-    return PopulationMetrics(rows=rows, bilag=bilag, konto=konto, sum_net=sum_net, sum_abs=sum_abs)
-
+    return PopulationMetrics(
+        rows=int(len(df)),
+        bilag=bilag_count,
+        konto=konto_count,
+        sum_net=sum_net,
+        sum_abs=sum_abs,
+    )
 
 def build_source_text(df_base: Optional[pd.DataFrame], df_all: Optional[pd.DataFrame] = None) -> str:
     """Lag en kort "kilde"-tekst.
@@ -328,6 +407,127 @@ def build_source_text(df_base: Optional[pd.DataFrame], df_all: Optional[pd.DataF
     if same:
         return "Kilde: hele datasettet"
     return "Kilde: kontoutvalg (delmengde av datasett)"
+
+
+@dataclass(frozen=True)
+class BilagValueMetrics:
+    """Simple bilag-level value metrics used for UI summaries."""
+    n_bilag: int
+    sum_net: float
+    sum_abs: float
+    book_value: float
+
+
+def _compute_bilag_value_metrics(
+    df: Optional[pd.DataFrame],
+    *,
+    amount_col: str,
+    use_abs: bool,
+) -> BilagValueMetrics:
+    if df is None or df.empty:
+        return BilagValueMetrics(n_bilag=0, sum_net=0.0, sum_abs=0.0, book_value=0.0)
+
+    amounts = pd.to_numeric(df[amount_col], errors="coerce").fillna(0.0)
+    sum_net = float(amounts.sum())
+    sum_abs = float(amounts.abs().sum())
+    book_value = sum_abs if use_abs else sum_net
+
+    bilag_col = _find_col(df, ["Bilag", "bilag", "Voucher", "VOUCHER"])
+    n_bilag = int(df[bilag_col].nunique()) if bilag_col else int(len(df))
+
+    return BilagValueMetrics(
+        n_bilag=n_bilag,
+        sum_net=sum_net,
+        sum_abs=sum_abs,
+        book_value=book_value,
+    )
+
+
+def compute_bilag_split_summary(
+    bilag_df: Optional[pd.DataFrame],
+    *,
+    tolerable_error: float,
+    use_abs: bool = True,
+    amount_col: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Compute bilag-level population/specific/remaining metrics.
+
+    Useful for GUI display so user sees:
+    - Population (after filters)
+    - Specific selection (>= tolerable error)
+    - Remaining population (basis for random sample size)
+    """
+    if bilag_df is None or bilag_df.empty:
+        empty = BilagValueMetrics(n_bilag=0, sum_net=0.0, sum_abs=0.0, book_value=0.0)
+        return {
+            "use_abs": bool(use_abs),
+            "tolerable_error": float(tolerable_error or 0.0),
+            "amount_col": None,
+            "population": empty,
+            "specific": empty,
+            "remaining": empty,
+        }
+
+    if amount_col and amount_col not in bilag_df.columns:
+        amount_col = None
+
+    amount_col = amount_col or _find_col(
+        bilag_df,
+        ["SumBeløp", "SumBelop", "Beløp", "Belop", "Amount", "amount"],
+    )
+    if not amount_col:
+        empty = BilagValueMetrics(n_bilag=len(bilag_df), sum_net=0.0, sum_abs=0.0, book_value=0.0)
+        return {
+            "use_abs": bool(use_abs),
+            "tolerable_error": float(tolerable_error or 0.0),
+            "amount_col": None,
+            "population": empty,
+            "specific": BilagValueMetrics(0, 0.0, 0.0, 0.0),
+            "remaining": empty,
+        }
+
+    amounts = pd.to_numeric(bilag_df[amount_col], errors="coerce").fillna(0.0)
+    metric = amounts.abs() if use_abs else amounts
+
+    tol = float(tolerable_error or 0.0)
+    is_specific = metric >= tol
+
+    specific_df = bilag_df[is_specific]
+    remaining_df = bilag_df[~is_specific]
+
+    population_metrics = _compute_bilag_value_metrics(bilag_df, amount_col=amount_col, use_abs=use_abs)
+    specific_metrics = _compute_bilag_value_metrics(specific_df, amount_col=amount_col, use_abs=use_abs)
+    remaining_metrics = _compute_bilag_value_metrics(remaining_df, amount_col=amount_col, use_abs=use_abs)
+
+    return {
+        "use_abs": bool(use_abs),
+        "tolerable_error": tol,
+        "amount_col": amount_col,
+        "population": population_metrics,
+        "specific": specific_metrics,
+        "remaining": remaining_metrics,
+    }
+
+
+def build_bilag_split_summary_text(
+    split: dict[str, Any],
+    *,
+    decimals: int = 0,
+) -> str:
+    """Format bilag split summary as multi-line UI text."""
+    use_abs = bool(split.get("use_abs", True))
+    label = "Bokført verdi (abs)" if use_abs else "Bokført verdi"
+
+    pop: BilagValueMetrics = split["population"]
+    spec: BilagValueMetrics = split["specific"]
+    rem: BilagValueMetrics = split["remaining"]
+
+    return (
+        f"Populasjon: {format_int_no(pop.n_bilag)} bilag | {label}: {format_amount_no(pop.book_value, decimals=decimals)}\n"
+        f"Spesifikk: {format_int_no(spec.n_bilag)} bilag | {label}: {format_amount_no(spec.book_value, decimals=decimals)}\n"
+        f"Restpopulasjon: {format_int_no(rem.n_bilag)} bilag | {label}: {format_amount_no(rem.book_value, decimals=decimals)}"
+    )
 
 
 def build_population_summary_text(

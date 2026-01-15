@@ -21,8 +21,28 @@ Endringer fra originalen:
 
 from __future__ import annotations
 from typing import Dict, List, Tuple, Optional
+from pathlib import Path
 import json
 import os
+
+import app_paths
+
+
+DEFAULT_ML_MAP_FILENAME = ".ml_map.json"
+
+
+def _default_ml_map_path() -> str:
+    """Standard sti til .ml_map.json.
+
+    - I utviklingsmodus (ikke frozen): bruker vi historisk fil i cwd
+      (".ml_map.json") for å være bakoverkompatibel.
+    - I PyInstaller/frozen: skriver vi til AppData (eller UTVALG_DATA_DIR)
+      slik at filen ikke havner i en midlertidig utpakkingsmappe.
+    """
+
+    if app_paths.is_frozen():
+        return str(app_paths.data_file(DEFAULT_ML_MAP_FILENAME))
+    return DEFAULT_ML_MAP_FILENAME
 
 # Liste over kanoniske felt. Rekkefølgen her brukes når DataFrame skal
 # reorganiseres etter mapping.
@@ -168,25 +188,59 @@ def _fingerprint(headers: List[str]) -> str:
     """Lag en fingeravtrykkstreng fra headerlisten for å sammenligne datasett."""
     return "|".join(sorted({_norm(h) for h in headers if h}))[:2000]
 
-def load_ml_map(path: str = ".ml_map.json") -> dict:
-    """Les tidligere læring fra `.ml_map.json` hvis filen finnes."""
+def load_ml_map(path: str | None = None) -> dict:
+    """Les tidligere læring fra `.ml_map.json`.
+
+    Hvis ``path`` ikke er angitt, brukes standard sti:
+      - ikke frozen: cwd/.ml_map.json
+      - frozen: AppData (eller UTVALG_DATA_DIR)/.ml_map.json
+
+    I frozen-modus gjør vi også en *best effort* migrering fra eldre
+    plasseringer (ved siden av exe / cwd) hvis standardfilen ikke finnes.
+    """
+
+    target = path or _default_ml_map_path()
     try:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
+        if os.path.exists(target):
+            with open(target, "r", encoding="utf-8") as f:
                 obj = json.load(f)
                 if isinstance(obj, dict):
                     return obj
+
+        # Best-effort migrering når vi ikke fant filen i target.
+        if path is None and app_paths.is_frozen():
+            legacy_candidates = app_paths.best_effort_legacy_paths(
+                app_paths.executable_dir() / DEFAULT_ML_MAP_FILENAME,
+                os.getcwd() and (Path(os.getcwd()) / DEFAULT_ML_MAP_FILENAME),
+            )
+            for lp in legacy_candidates:
+                try:
+                    with open(lp, "r", encoding="utf-8") as f:
+                        obj = json.load(f)
+                    if isinstance(obj, dict):
+                        # migrer til target
+                        save_ml_map(obj, target)
+                        return obj
+                except Exception:
+                    continue
     except Exception:
         pass
     return {}
 
-def save_ml_map(data: dict, path: str = ".ml_map.json") -> None:
+def save_ml_map(data: dict, path: str | None = None) -> None:
     """Skriv læringsobjektet til disk på en sikker måte."""
+    target = path or _default_ml_map_path()
     try:
-        tmp = path + ".tmp"
+        # Sørg for mappe (spesielt viktig i frozen/AppData)
+        try:
+            Path(target).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        tmp = target + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
+        os.replace(tmp, target)
     except Exception:
         pass
 
@@ -257,7 +311,7 @@ def suggest_mapping(headers: List[str], ml: Optional[dict] = None) -> Optional[d
                 break
     return guess or None
 
-def update_ml_map(headers: List[str], mapping: dict, ml: Optional[dict] = None, path: str = ".ml_map.json") -> dict:
+def update_ml_map(headers: List[str], mapping: dict, ml: Optional[dict] = None, path: str | None = None) -> dict:
     """
     Flett inn en ny signatur i ml_map uten å overskrive eksisterende
     strukturer. Både gammel og ny struktur i .ml_map.json støttes.

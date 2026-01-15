@@ -5,11 +5,48 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/tests/test_ui_main_commit_sample_to_transactions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_specific_selection.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.coverage" beforeDir="false" />
+      <change afterPath="$PROJECT_DIR$/app_paths.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/build_exe.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/doc/img.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio_adapters.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio_bilag.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio_specific.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_build_exe.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_controller_export_excel_report.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_frozen_user_data_paths.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_bilag_drilldown.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers_bilag_split_summary.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers_population_split.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_stratifiering_compat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_utvalg_commit_and_export_kwargs.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_utvalg_excel_export_enhancements.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_adapters.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_build_bilag_dataframe.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_custom_strata.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_negative_sign.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_net_basis.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_no_break_spaces.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_stratify_bilag_sums.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/utvalg_excel_report.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/views_selection_studio_ui.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ab_prefs.py" beforeDir="false" afterPath="$PROJECT_DIR$/ab_prefs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/column_memory.py" beforeDir="false" afterPath="$PROJECT_DIR$/column_memory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/controller_export.py" beforeDir="false" afterPath="$PROJECT_DIR$/controller_export.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/excel_formatting.py" beforeDir="false" afterPath="$PROJECT_DIR$/excel_formatting.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_utvalg.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_utvalg.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_utvalg_strata.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_utvalg_strata.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/preferences.py" beforeDir="false" afterPath="$PROJECT_DIR$/preferences.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_drill.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_drill.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/stratifiering.py" beforeDir="false" afterPath="$PROJECT_DIR$/stratifiering.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_selection_studio_drill.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_selection_studio_drill.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_selection_studio_helpers_aliases.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_selection_studio_helpers_aliases.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_main_commit_sample_to_transactions.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_main_commit_sample_to_transactions.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_views_selection_studio.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_views_selection_studio.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_views_selection_studio_specific_selection.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_views_selection_studio_specific_selection.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/ui_main.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views_selection_studio.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio.py" afterDir="false" />
     </list>
@@ -64,19 +101,19 @@
     &quot;Python.utvalgsgenerator.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Users/ib91/Desktop/PyCharmProjects/Utvalg/tests&quot;
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/ib91/Desktop/PyCharmProjects/Utvalg&quot;
   }
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc\README_ARCHIVE" />
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
   </component>
   <component name="RunManager" selected="Python.python app.py">
@@ -294,7 +331,14 @@
       <option name="presentableId" value="LOCAL−00022" />
       <updated>1767642997026</updated>
     </task>
-    <option name="localTasksCounter" value="23" />
+    <task id="LOCAL−00023" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1767958716655</created>
+      <option name="number" value="LOCAL−00023" />
+      <option name="presentableId" value="LOCAL−00023" />
+      <updated>1767958716655</updated>
+    </task>
+    <option name="localTasksCounter" value="24" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

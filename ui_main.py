@@ -1,365 +1,403 @@
-"""
-ui_main.py
-
-Hovedvindu for Utvalg-prosjektet.
-
-Fanestruktur:
-
-- Dataset   : innlesing / bygging av hovedbokdatasett
-- Analyse   : pivot / kontoanalyse og valg av populasjon (kontoer)
-- Utvalg    : stratifisering og utvalgsarbeid (SelectionStudio som fane)
-- Resultat  : transaksjonsvisning av valgt utvalg (tidligere Utvalg-fane)
-- Logg      : logg / meldinger
-"""
-
+# ui_main.py
 from __future__ import annotations
 
+import logging
 import tkinter as tk
-from tkinter import ttk
-from typing import Any, Optional, List
+from tkinter import messagebox, ttk
+from types import SimpleNamespace
+from typing import List, Optional
 
+import numpy as np
 import pandas as pd
 
-# Faner / sider
-try:
-    from page_dataset import DatasetPage
-except Exception:  # pragma: no cover - fallback hvis modul mangler
-    DatasetPage = ttk.Frame  # type: ignore[misc]
+# Local imports
+import session
 
-try:
-    from page_analyse import AnalysePage
-except Exception:  # pragma: no cover
-    AnalysePage = ttk.Frame  # type: ignore[misc]
+# Pages / views
+from page_dataset import DatasetPage
+from page_analyse import AnalysePage
+from page_utvalg_strata import UtvalgStrataPage
 
-try:
-    from page_utvalg_strata import UtvalgStrataPage
-except Exception:  # pragma: no cover
-    UtvalgStrataPage = ttk.Frame  # type: ignore[misc]
+# "Resultat" fanen i dette repoet er implementert via page_utvalg.UtvalgPage
+# (ikke page_resultat, som du nå får ModuleNotFoundError på)
+from page_utvalg import UtvalgPage
+from page_logg import LoggPage
 
-try:
-    # Denne brukes som Resultat-fane (transaksjonsvisning)
-    from page_utvalg import UtvalgPage
-except Exception:  # pragma: no cover
-    UtvalgPage = ttk.Frame  # type: ignore[misc]
-
-try:
-    from page_logg import LoggPage
-except Exception:  # pragma: no cover
-    LoggPage = ttk.Frame  # type: ignore[misc]
-
-try:
-    import session  # type: ignore[import]
-except Exception:  # pragma: no cover
-    session = None  # type: ignore[assignment]
+log = logging.getLogger(__name__)
 
 
-def _normalize_id_series(s: pd.Series) -> pd.Series:
-    """Normaliserer identifikatorer (Bilag/Konto) til robuste strenger.
+def _normalize_bilag_key(series: pd.Series) -> pd.Series:
+    """Normaliserer bilags-id til en stabil nøkkel (string).
 
-    Vi har ofte blandede typer i innleste datasett (int/float/str) og noen
-    ganger kommer tall inn som "123.0" (Excel) eller med whitespace.
+    Mål:
+      - "3.0" i sample skal matche 3 i transaksjoner
+      - Håndterer blandede typer (str/int/float)
+      - Ikke-kvantifiserbare bilag beholdes som trimmet tekst (f.eks. "A12")
 
-    Denne funksjonen gjør sammenligning robust ved å:
-    - konvertere til str
-    - strippe whitespace
-    - fjerne en evt. ".0"-hale
-    - fjerne "nan"/"None"
+    Returnerer:
+      pandas Series (dtype 'string') med normalisert nøkkel.
     """
+    s_str = series.astype("string").str.strip()
 
-    if s is None:
-        return pd.Series([], dtype=str)
+    # Prøv numerisk normalisering (for å samle "3", "3.0", 3, 3.0 -> "3")
+    num = pd.to_numeric(s_str, errors="coerce")
+    # Robust heltallsdeteksjon (toleranse mot float-feil)
+    is_int = num.notna() & np.isclose(num % 1, 0)
 
-    # astype(str) gjør NaN -> "nan", så vi rydder opp etterpå
-    out = s.astype(str).str.strip()
-    out = out.str.replace(r"\.0$", "", regex=True)
-    out = out.replace({"nan": "", "None": "", "NaT": ""})
-    return out
+    # Konverter kun heltallsverdier til Int64 (bevarer NA) -> string
+    num_int = num.where(is_int).astype("Int64")
+    num_str = num_int.astype("string")
+
+    # Hvis vi har et heltall: bruk det som nøkkel, ellers behold original tekst
+    key = s_str.where(~is_int, num_str)
+    return key
 
 
-def expand_bilag_sample_to_transactions(
-    df_sample_bilag: pd.DataFrame,
-    df_transactions: pd.DataFrame,
-    *,
-    bilag_col: str = "Bilag",
-) -> pd.DataFrame:
-    """Konverterer et bilagsutvalg (1 rad per bilag) til transaksjonsrader.
+def expand_bilag_sample_to_transactions(df_sample_bilag: pd.DataFrame, df_transactions: pd.DataFrame) -> pd.DataFrame:
+    """Utvid et bilag-sample (1 rad per bilag) til transaksjoner.
 
-    I SelectionStudio trekkes utvalg på bilagsnivå (kolonnen "Bilag" +
-    "SumBeløp"). Resultat-fanen (page_utvalg.UtvalgPage) forventer derimot
-    transaksjonsrader med bl.a. "Konto" og "Beløp".
+    - Filtrerer `df_transactions` til alle rader som matcher bilag i `df_sample_bilag`
+    - Normaliserer bilags-id slik at f.eks. "3.0" matcher 3
+    - Slår på metadata fra sample (prefikset med ``Utvalg_``)
 
-    Denne helperen:
-    1) filtrerer df_transactions til bilagene i df_sample_bilag
-    2) (valgfritt) merger på gruppe/intervall per bilag som prefiksede kolonner
-       ("Utvalg_Gruppe", "Utvalg_Intervall", "Utvalg_SumBilag").
+    Merk:
+      - Hvis sample er tomt: returneres et tomt utsnitt av df_transactions (samme kolonner)
+      - Hvis bilag-kolonne mangler: returneres tomt utsnitt av df_transactions
     """
-
-    if df_sample_bilag is None or df_transactions is None:
+    if not isinstance(df_transactions, pd.DataFrame):
         return pd.DataFrame()
-    if df_sample_bilag.empty or df_transactions.empty:
-        return df_transactions.iloc[0:0].copy()
-    if bilag_col not in df_sample_bilag.columns or bilag_col not in df_transactions.columns:
-        # Uten bilag-kolonne kan vi ikke mappe utvalget; returner tomt.
-        return df_transactions.iloc[0:0].copy()
 
-    sample_norm = _normalize_id_series(df_sample_bilag[bilag_col])
-    keys = set(sample_norm[sample_norm != ""].unique().tolist())
-    if not keys:
+    # Hvis transaksjoner er tomt: returner tomt utsnitt med samme kolonner
+    if df_transactions.empty:
         return df_transactions.iloc[0:0].copy()
 
-    tx_norm = _normalize_id_series(df_transactions[bilag_col])
-    mask = tx_norm.isin(keys)
-    out = df_transactions.loc[mask].copy()
+    # Hvis sample er None/tomt: returner tomt utsnitt med samme kolonner (viktig for tester/GUI)
+    if df_sample_bilag is None or not isinstance(df_sample_bilag, pd.DataFrame) or df_sample_bilag.empty:
+        return df_transactions.iloc[0:0].copy()
 
-    # Legg på metadata fra bilagsutvalget hvis det finnes
-    meta_map = {
-        "Utvalg_Gruppe": "Gruppe",
-        "Utvalg_Intervall": "Intervall",
-        "Utvalg_SumBilag": "SumBeløp",
-    }
-    have = {new: old for new, old in meta_map.items() if old in df_sample_bilag.columns}
-    if have:
-        meta_df = df_sample_bilag[[bilag_col] + list(have.values())].drop_duplicates(subset=[bilag_col]).copy()
-        meta_df["_bilag_norm"] = _normalize_id_series(meta_df[bilag_col])
-        meta_df = meta_df.drop(columns=[bilag_col])
-        meta_df = meta_df.rename(columns={old: new for new, old in have.items()})
+    if "Bilag" not in df_sample_bilag.columns or "Bilag" not in df_transactions.columns:
+        return df_transactions.iloc[0:0].copy()
 
-        out["_bilag_norm"] = _normalize_id_series(out[bilag_col])
-        out = out.merge(meta_df, on="_bilag_norm", how="left")
-        out = out.drop(columns=["_bilag_norm"], errors="ignore")
+    # Normaliser bilag-key på begge sider
+    sample_key = _normalize_bilag_key(df_sample_bilag["Bilag"])
+    tx_key = _normalize_bilag_key(df_transactions["Bilag"])
 
-    return out
+    sample_keys = sample_key.dropna().unique().tolist()
+    if not sample_keys:
+        return df_transactions.iloc[0:0].copy()
+
+    # Filtrer transaksjoner
+    mask = tx_key.isin(sample_keys)
+    tx_out = df_transactions.loc[mask].copy()
+    if tx_out.empty:
+        return tx_out
+
+    # Slå på metadata fra sample
+    meta_cols = [c for c in df_sample_bilag.columns if c != "Bilag"]
+    if meta_cols:
+        meta = df_sample_bilag[["Bilag", *meta_cols]].copy()
+        meta["__bilag_key"] = sample_key
+        meta = meta.dropna(subset=["__bilag_key"]).drop_duplicates(subset=["__bilag_key"], keep="first")
+
+        rename_map: dict[str, str] = {}
+        for c in meta_cols:
+            # Ikke dobbel-prefiks hvis kolonnen allerede er prefikset
+            if c.startswith("Utvalg_"):
+                rename_map[c] = c
+            elif c in ("SumBeløp", "SumBelop"):
+                rename_map[c] = "Utvalg_SumBilag"
+            else:
+                rename_map[c] = f"Utvalg_{c}"
+
+        meta = meta.rename(columns=rename_map)
+
+        # Merk: vi merger på en intern nøkkel for robust matching
+        tx_out["__bilag_key"] = tx_key.loc[mask].astype("string")
+        meta_keep_cols = ["__bilag_key", *[rename_map[c] for c in meta_cols]]
+        meta = meta[[c for c in meta_keep_cols if c in meta.columns]]
+
+        tx_out = tx_out.merge(meta, on="__bilag_key", how="left", sort=False)
+        tx_out = tx_out.drop(columns=["__bilag_key"], errors="ignore")
+
+    return tx_out
 
 
 class App(tk.Tk):
-    """
-    Hoved-application med Notebook og faner for Dataset, Analyse, Utvalg, Resultat og Logg.
+    """Hovedapp (Tk).
+
+    Denne klassen forsøker å være *test/CI-vennlig*:
+    Hvis Tk ikke kan initialiseres (typisk i headless Linux), faller den tilbake
+    til et minimalt objekt med de attributtene testene trenger.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self) -> None:
+        self._tk_ok: bool = True
+        self._tk_init_error: Optional[Exception] = None
 
+        try:
+            super().__init__()
+        except Exception as e:  # TclError / display-problemer
+            self._tk_ok = False
+            self._tk_init_error = e
+            self._init_headless()
+            return
+
+        # --- Normal GUI-init ---
         self.title("Utvalg – revisjonsverktøy")
-        self.geometry("1280x800")
+        self.geometry("1100x700")
 
-        # Notebook som holder fanene
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True)
 
-        # Dataset-fane
+        # Pages
         self.page_dataset = DatasetPage(self.nb)
-        self.nb.add(self.page_dataset, text="Dataset")
-        # Når DatasetPane er ferdig med å bygge datasettet, vil vi gjerne
-        # oppdatere Analyse-fanen automatisk. DatasetPane støtter en
-        # on_dataset_ready-callback gjennom et privat attributt. Her
-        # registrerer vi en lokal callback som gjør tre ting:
-        #   1) Lagre datasettet til session (defensivt, DatasetPane gjør dette selv).
-        #   2) Kalle AnalysePage.refresh_from_session() slik at pivoten
-        #      blir bygget og vist.
-        #   3) Bytte til Analyse-fanen i notebooken for å vise resultatet.
-        try:
-            dp = getattr(self.page_dataset, "dp", None)
-            if dp is not None:
-                def _on_data_ready(df: pd.DataFrame) -> None:
-                    # Oppdater session med datasettet hvis modulen er importert
-                    try:
-                        if session is not None:
-                            session.dataset = df  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
-                    # Oppdater Analyse-fanen
-                    try:
-                        if hasattr(self.page_analyse, "refresh_from_session"):
-                            # type: ignore[call-arg]
-                            self.page_analyse.refresh_from_session(session)  # type: ignore[arg-type]
-                    except Exception:
-                        pass
-                    # Bytt til Analyse-fanen for å vise pivoten
-                    try:
-                        self.nb.select(self.page_analyse)
-                    except Exception:
-                        pass
-                # type: ignore[assignment]
-                dp._on_ready = _on_data_ready  # registrer callback
-        except Exception:
-            # Hvis datasetpanelet mangler dp eller setting feiler, gjør ingenting
-            pass
-
-        # Analyse-fane
         self.page_analyse = AnalysePage(self.nb)
-        self.nb.add(self.page_analyse, text="Analyse")
-
-        # Utvalg-fane (stratifisering / SelectionStudio som Frame)
-        self.page_utvalg = UtvalgStrataPage(
-            self.nb,
-            on_commit_sample=self._on_utvalg_commit_sample,
-        )
-        self.nb.add(self.page_utvalg, text="Utvalg")
-
-        # Resultat-fane (gammel Utvalg-fane – transaksjonsliste)
+        self.page_utvalg = UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample)
         self.page_resultat = UtvalgPage(self.nb)
-        self.nb.add(self.page_resultat, text="Resultat")
-
-        # Logg-fane
         self.page_logg = LoggPage(self.nb)
+
+        self.nb.add(self.page_dataset, text="Dataset")
+        self.nb.add(self.page_analyse, text="Analyse")
+        self.nb.add(self.page_utvalg, text="Utvalg")
+        self.nb.add(self.page_resultat, text="Resultat")
         self.nb.add(self.page_logg, text="Logg")
 
-        # Eksponer noen referanser i session for enkel tilgang fra andre moduler
-        if session is not None:
-            try:
-                session.APP = self                  # type: ignore[attr-defined]
-                session.NOTEBOOK = self.nb          # type: ignore[attr-defined]
-                session.UTVALG_STRATA_PAGE = self.page_utvalg  # type: ignore[attr-defined]
-                session.RESULTAT_PAGE = self.page_resultat     # type: ignore[attr-defined]
-            except Exception:
-                # Hvis session-modul ikke har disse feltene fra før, gjør vi ingenting ekstra
-                pass
+        # Gi AnalysePage callback for "Til utvalg"
+        if hasattr(self.page_analyse, "set_utvalg_callback"):
+            self.page_analyse.set_utvalg_callback(self._on_analyse_send_to_utvalg)
 
-        # Valgfritt: hvis AnalysePage har støtte for å registrere callback, koble den til her.
-        # Da kan "Til utvalg"-knappen i Analyse kalle tilbake hit.
+        # La session peke på relevante objekter (brukes av andre moduler)
         try:
-            if hasattr(self.page_analyse, "set_utvalg_callback"):
-                # type: ignore[call-arg]
-                self.page_analyse.set_utvalg_callback(self._on_analyse_send_to_utvalg)
+            session.APP = self
+            session.NOTEBOOK = self.nb
+            session.UTVALG_STRATA_PAGE = self.page_utvalg
         except Exception:
             pass
 
-    # ------------------------------------------------------------------
-    # Dataflyt mellom Utvalg (stratifisering) og Resultat
-    # ------------------------------------------------------------------
+        # Forsøk å koble DatasetPage -> on ready hook slik at Analyse oppdateres etter import
+        self._maybe_install_dataset_ready_hook()
+
+    def _init_headless(self) -> None:
+        """Initialiserer en minimal app når Tk ikke kan brukes."""
+        # Minimal notebook-stub
+        self.nb = SimpleNamespace(  # type: ignore[assignment]
+            select=lambda *_args, **_kwargs: None,
+            add=lambda *_args, **_kwargs: None,
+        )
+
+        # Minimal pages/stubs som testene forventer
+        self.page_analyse = SimpleNamespace(dataset=None)  # type: ignore[assignment]
+
+        # DatasetPage må eksponere .dp, og DatasetPane må ha ._on_ready
+        dp_stub = SimpleNamespace(_on_ready=None)
+        self.page_dataset = SimpleNamespace(dp=dp_stub)  # type: ignore[assignment]
+
+        # Resten brukes ikke av testene, men vi setter dem for robusthet
+        self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
+        self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
+        self.page_logg = SimpleNamespace()  # type: ignore[assignment]
+
+        # Installer hook slik at testene kan finne dp._on_ready og kalle callback
+        self._maybe_install_dataset_ready_hook()
+
+    # --- Tk-sikre wrappers (hindrer krasj i headless) ---
+    def withdraw(self) -> None:  # type: ignore[override]
+        if self._tk_ok:
+            try:
+                super().withdraw()
+            except Exception:
+                pass
+
+    def destroy(self) -> None:  # type: ignore[override]
+        if self._tk_ok:
+            try:
+                super().destroy()
+            except Exception:
+                pass
+
+    def mainloop(self, n: int = 0) -> None:  # type: ignore[override]
+        if not self._tk_ok:
+            raise RuntimeError("tkinter er ikke tilgjengelig i dette miljøet (headless).") from self._tk_init_error
+        super().mainloop(n)
+
+    def _maybe_install_dataset_ready_hook(self) -> None:
+        """Installer callback for når DatasetPane har bygget datasett.
+
+        DatasetPage/DatasetPane har hatt flere varianter i repoet, derfor prøver vi
+        flere attributtnavn.
+
+        Mål:
+          - dp._on_ready skal være callable etter create_app()
+          - Når dataset bygges, skal Analyse-fanen oppdateres automatisk
+        """
+        try:
+            # Ny standard i repoet: DatasetPage.dp
+            dp = getattr(self.page_dataset, "dp", None)
+
+            # Bakoverkompat: dataset_pane / pane
+            if dp is None:
+                dp = getattr(self.page_dataset, "dataset_pane", None)
+            if dp is None:
+                dp = getattr(self.page_dataset, "pane", None)
+
+            if dp is None:
+                return
+
+            # Vanlig mønster: dp._on_ready er en callback (DatasetPane)
+            if hasattr(dp, "_on_ready"):
+                existing = getattr(dp, "_on_ready", None)
+
+                if callable(existing):
+                    # Unngå dobbel-wrapping av samme callback så godt vi kan
+                    if existing is self._on_data_ready:
+                        return
+
+                    def _wrapped_on_ready(df: pd.DataFrame) -> None:
+                        try:
+                            existing(df)
+                        finally:
+                            self._on_data_ready(df)
+
+                    dp._on_ready = _wrapped_on_ready  # type: ignore[attr-defined]
+                    return
+
+                # Hvis eksisterende ikke er callable (typisk None): sett direkte
+                dp._on_ready = self._on_data_ready  # type: ignore[attr-defined]
+                return
+
+            # Alternativt: dp.on_data_ready
+            if hasattr(dp, "on_data_ready"):
+                existing = getattr(dp, "on_data_ready", None)
+
+                if callable(existing):
+                    if existing is self._on_data_ready:
+                        return
+
+                    def _wrapped_on_ready(df: pd.DataFrame) -> None:
+                        try:
+                            existing(df)
+                        finally:
+                            self._on_data_ready(df)
+
+                    dp.on_data_ready = _wrapped_on_ready  # type: ignore[attr-defined]
+                    return
+
+                dp.on_data_ready = self._on_data_ready  # type: ignore[attr-defined]
+                return
+
+        except Exception:
+            # Ikke kræsje appen om hook feiler
+            return
+
+    def _on_data_ready(self, df: pd.DataFrame) -> None:
+        """Kalles når dataset er lastet.
+
+        Oppdaterer session.dataset, refresher Analyse-fanen og bytter til Analyse.
+        """
+        if df is None or df.empty:
+            return
+
+        try:
+            session.dataset = df
+        except Exception:
+            pass
+
+        # Oppdater Analyse
+        try:
+            if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
+                # AnalysePage henter df fra session og setter self.dataset = df (uten copy)
+                self.page_analyse.refresh_from_session(session)  # type: ignore[attr-defined]
+            elif hasattr(self.page_analyse, "on_dataset_loaded") and callable(getattr(self.page_analyse, "on_dataset_loaded")):
+                self.page_analyse.on_dataset_loaded(df)  # type: ignore[attr-defined]
+            else:
+                # Headless/minimal
+                setattr(self.page_analyse, "dataset", df)
+        except Exception:
+            pass
+
+        # Oppdater Resultat også (om ønskelig)
+        try:
+            if hasattr(self.page_resultat, "on_dataset_loaded") and callable(getattr(self.page_resultat, "on_dataset_loaded")):
+                self.page_resultat.on_dataset_loaded(df)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Vis Analyse som neste steg
+        try:
+            if hasattr(self, "nb") and hasattr(self.nb, "select"):
+                self.nb.select(self.page_analyse)
+        except Exception:
+            pass
+
+    def _on_analyse_send_to_utvalg(self, accounts: List[str]) -> None:
+        """Callback fra Analyse-fanen ("Til utvalg")."""
+        accounts = [str(a).strip() for a in (accounts or []) if str(a).strip()]
+        if not accounts:
+            return
+
+        # Lagre i session selection
+        try:
+            if hasattr(session, "set_selection"):
+                session.set_selection(accounts=accounts)
+            else:
+                session.SELECTION["accounts"] = accounts  # type: ignore[attr-defined]
+                session.SELECTION["version"] = int(session.SELECTION.get("version", 0)) + 1  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Last populasjon i Utvalg
+        try:
+            if hasattr(self.page_utvalg, "load_population"):
+                self.page_utvalg.load_population(accounts)  # type: ignore[attr-defined]
+        except Exception as e:
+            try:
+                messagebox.showerror("Feil", f"Kunne ikke overføre kontoer til Utvalg:\n{e}")
+            except Exception:
+                pass
+            return
+
+        # Bytt til Utvalg-fanen
+        try:
+            if hasattr(self, "nb") and hasattr(self.nb, "select"):
+                self.nb.select(self.page_utvalg)
+        except Exception:
+            pass
 
     def _on_utvalg_commit_sample(self, df_sample: pd.DataFrame) -> None:
-        """
-        Callback brukt av UtvalgStrataPage/SelectionStudio når brukeren klikker "Legg i utvalg".
-
-        Vi legger da sample i Resultat-fanen og bytter tab dit.
-        """
+        """Callback fra UtvalgStrataPage/SelectionStudio når brukeren klikker "Legg i utvalg"."""
         if df_sample is None or df_sample.empty:
             return
 
-        # SelectionStudio leverer normalt 1 rad per bilag (Bilag/SumBeløp/...)
-        # mens Resultat-fanen forventer transaksjonsrader. Vi prøver derfor å
-        # "ekspandere" bilagsutvalget til linjer fra session.dataset.
         df_to_result = df_sample.copy()
 
-        try:
-            df_all = getattr(session, "dataset", None) if session is not None else None
-        except Exception:
-            df_all = None
-
+        # Prøv å ekspandere bilag -> transaksjoner hvis vi har full dataset
+        df_all = getattr(session, "dataset", None)
         if isinstance(df_all, pd.DataFrame) and not df_all.empty:
             try:
                 df_tx = expand_bilag_sample_to_transactions(df_sample_bilag=df_sample, df_transactions=df_all)
                 if not df_tx.empty:
                     df_to_result = df_tx
             except Exception:
-                # Best effort – fall tilbake til df_sample
                 df_to_result = df_sample.copy()
 
-        # UtvalgPage (Resultat) har allerede en on_dataset_loaded-metode som kan gjenbrukes
+        # Oppdater Resultat-fanen
         try:
             if hasattr(self.page_resultat, "on_dataset_loaded"):
-                # type: ignore[call-arg]
-                self.page_resultat.on_dataset_loaded(df_to_result.copy())
+                self.page_resultat.on_dataset_loaded(df_to_result.copy())  # type: ignore[attr-defined]
         except Exception:
-            # Vi vil ikke krasje hele appen om noe feiler her
             pass
 
         # Bytt til Resultat-fanen
         try:
-            self.nb.select(self.page_resultat)
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------------
-    # Callback fra Analyse-fanen for å sende kontopopulasjon til Utvalg
-    # ------------------------------------------------------------------
-
-    def _on_analyse_send_to_utvalg(self, accounts: List[str]) -> None:
-        """
-        Callback som Analyse-fanen kan bruke for å sende kontopopulasjon
-        direkte til Utvalg-fanen (stratifisering).
-
-        Forventes at accounts er en liste med kontonumre (str eller tall).
-        """
-        accounts = [str(a) for a in (accounts or [])]
-        if not accounts:
-            return
-
-        # Oppdater session.SELECTION for bakoverkompatibilitet / andre moduler
-        if session is not None:
-            try:
-                sel = getattr(session, "SELECTION", {}) or {}
-                sel["accounts"] = accounts
-                sel["version"] = int(sel.get("version", 0)) + 1
-                session.SELECTION = sel  # type: ignore[attr-defined]
-            except Exception:
-                pass
-
-        # Last populasjonen inn i UtvalgStrataPage (stratifisering)
-        try:
-            if hasattr(self.page_utvalg, "load_population"):
-                # type: ignore[call-arg]
-                self.page_utvalg.load_population(accounts)
-        except Exception:
-            pass
-
-        # Bytt til Utvalg-fanen
-        try:
-            self.nb.select(self.page_utvalg)
+            if hasattr(self, "nb") and hasattr(self.nb, "select"):
+                self.nb.select(self.page_resultat)
         except Exception:
             pass
 
 
-def create_app() -> "App | object":
-    """
-    Fabrikkfunksjon for å opprette App. Kan brukes i tester.
-
-    I CI/headless-miljø kan Tk/Tcl mangle (f.eks. "Can't find a usable init.tcl").
-    Da returnerer vi en minimal "headless" app som dekker det testene trenger.
-    """
-    try:
-        return App()
-    except tk.TclError:
-        # --- Headless fallback (for tests/CI) ---------------------------------
-        import session as _session
-
-        class _HeadlessDatasetPane:
-            def __init__(self) -> None:
-                self._on_ready = None
-
-            def set_on_ready(self, cb):
-                self._on_ready = cb
-
-        class _HeadlessDatasetPage:
-            def __init__(self, on_ready_cb) -> None:
-                self.dp = _HeadlessDatasetPane()
-                self.dp.set_on_ready(on_ready_cb)
-
-        class _HeadlessAnalysePage:
-            def __init__(self) -> None:
-                self.dataset = None
-
-            def refresh_from_session(self, sess):
-                self.dataset = getattr(sess, "dataset", None)
-
-        class _HeadlessApp:
-            def __init__(self) -> None:
-                self.page_analyse = _HeadlessAnalysePage()
-
-                def _on_dataset_ready(df):
-                    _session.dataset = df
-                    self.page_analyse.refresh_from_session(_session)
-
-                self.page_dataset = _HeadlessDatasetPage(_on_dataset_ready)
-
-            def withdraw(self):
-                return None
-
-            def destroy(self):
-                return None
-
-        return _HeadlessApp()
+def create_app() -> App:
+    """Fabrikk for tester og app.py."""
+    return App()
 
 
 if __name__ == "__main__":

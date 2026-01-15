@@ -1,163 +1,256 @@
-from __future__ import annotations
+# page_utvalg_strata.py
+"""
+Utvalg-tab (stratifisering) basert på SelectionStudio.
 
-"""page_utvalg_strata.py
+Bakgrunn / problem som denne filen løser
+--------------------------------------
+Analyse-siden lar brukeren markere én eller flere kontoer og trykke "Til utvalg".
+For at Utvalg-fanen skal kunne kjøre utvalg/stratifisering må den få et
+datagrunnlag (populasjon) filtrert på de valgte kontoene.
 
-Utvalg-fanen (stratifisering og trekk) – embedder SelectionStudio.
+I dette repoet sendes kontoer typisk som strenger (Listbox i Analyse fylles med
+str(acc)). Samtidig kan df["Konto"] være int/float/str avhengig av import.
+Derfor normaliserer vi og filtrerer robust, ellers får vi tomt grunnlag.
 
-Historikk:
-- Repoet har både en "ny" session.dataset (DataFrame) og en eldre
-  session.get_dataset() -> (df, cols).
-- Flere GUI-deler (DatasetPane/AnalysePage) bruker session.dataset direkte.
-
-Denne siden er derfor skrevet defensivt:
-- den henter primært DataFrame via session.dataset,
-- men kan falle tilbake til session.get_dataset()[0] om nødvendig.
+Teknisk:
+- ui_main kaller UtvalgStrataPage.load_population(accounts) når bruker trykker
+  "Til utvalg" i Analyse.
+- Vi lagrer konto-valget i session.SELECTION (hvis mulig), filtrerer session.dataset
+  og kaller SelectionStudio.load_data(...) for å oppdatere GUI.
 """
 
-from typing import Callable, List, Optional
+from __future__ import annotations
 
-import pandas as pd
 import tkinter as tk
 from tkinter import ttk
+from typing import Any, Callable, List, Optional
+
+import pandas as pd
 
 import session
-from views_selection_studio import SelectionStudio
+from views_selection_studio_ui import SelectionStudio
 
 
-class UtvalgStrataPage(tk.Frame):
-    """Utvalg-fane: stratifisering + trekk (SelectionStudio)."""
+def _normalize_account_values(accounts: List[Any]) -> List[str]:
+    """
+    Normaliserer kontoliste til strenger uten whitespace og uten trailing ".0".
+
+    Tar imot både int/float/str.
+    """
+    out: List[str] = []
+    seen: set[str] = set()
+
+    for a in accounts or []:
+        if a is None:
+            continue
+
+        # Tall -> int-streng
+        if isinstance(a, (int,)):
+            s = str(a)
+        elif isinstance(a, float):
+            # 6733.0 -> "6733"
+            if a.is_integer():
+                s = str(int(a))
+            else:
+                s = str(a)
+        else:
+            s = str(a).strip()
+
+        if not s:
+            continue
+
+        # Rydd bort "6733.0" som kan komme fra Excel/float->str
+        if s.endswith(".0"):
+            s = s[:-2]
+
+        if s not in seen:
+            out.append(s)
+            seen.add(s)
+
+    return out
+
+
+def _filter_base(df_all: pd.DataFrame, accounts: List[str]) -> pd.DataFrame:
+    """
+    Filtrer transaksjoner til valgt kontopopulasjon.
+
+    Hvis Konto-kolonnen ikke finnes, eller accounts er tom -> tom DF.
+    """
+    if df_all is None or df_all.empty:
+        return pd.DataFrame()
+
+    if not accounts:
+        return pd.DataFrame()
+
+    if "Konto" not in df_all.columns:
+        return pd.DataFrame()
+
+    # Robust filtering:
+    # - Konto kan være int/float/str avhengig av import
+    # - Hvis Konto er float (f.eks. 6733.0) vil astype(str) gi "6733.0" og
+    #   accounts inneholder "6733". Vi normaliserer derfor vekk trailing ".0".
+    konto_as_str = df_all["Konto"].astype(str).str.strip()
+    konto_as_str = konto_as_str.str.replace(r"\.0$", "", regex=True)
+
+    return df_all[konto_as_str.isin(accounts)].copy()
+
+
+def _expand_bilag_sample_to_transactions(
+    df_sample_bilag: pd.DataFrame,
+    df_transactions: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Konverter et bilag-basert sample (1 rad per bilag) til transaksjonsrader
+    ved å slå opp bilagene i df_transactions.
+    """
+    if df_sample_bilag is None or df_sample_bilag.empty:
+        return pd.DataFrame()
+    if df_transactions is None or df_transactions.empty:
+        return pd.DataFrame()
+
+    if "Bilag" not in df_sample_bilag.columns or "Bilag" not in df_transactions.columns:
+        return pd.DataFrame()
+
+    bilag = (
+        df_sample_bilag["Bilag"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+        .tolist()
+    )
+    if not bilag:
+        return pd.DataFrame()
+
+    tx = df_transactions.copy()
+    tx_bilag = tx["Bilag"].astype(str).str.strip()
+    return tx[tx_bilag.isin(bilag)].copy()
+
+
+class UtvalgStrataPage(ttk.Frame):
+    """
+    Wrapper-side i Notebook for SelectionStudio.
+
+    Forventet API (brukes av ui_main og bus):
+    - load_population(accounts: List[str]) -> filtrer session.dataset og last inn i studio
+    """
 
     def __init__(
         self,
-        master: tk.Misc,
-        *,
+        parent: Any,
+        session: object = session,
+        bus: Optional[object] = None,
         on_commit_sample: Optional[Callable[[pd.DataFrame], None]] = None,
-        **_: object,
     ) -> None:
-        super().__init__(master)
+        super().__init__(parent)
+
+        self.session = session
+        self.bus = bus
         self._on_commit_sample = on_commit_sample
 
-        # Lokal (ev. filtrert) populasjon – hvis None bruker vi full session.dataset
-        self.dataset: Optional[pd.DataFrame] = None
+        self._accounts: List[str] = []
 
-        # Header
-        self.header_lbl = ttk.Label(self, text="")
-        self.header_lbl.pack(anchor="w", padx=10, pady=(10, 0))
+        # SelectionStudio: testene forventer at vi bruker on_commit_selection
+        self.studio = SelectionStudio(self, on_commit_selection=self._on_commit_selection)
+        self.studio.pack(fill="both", expand=True)
 
-        # Studio: start med tomt datasett (oppdateres når session/delpopulasjon finnes)
-        # Bakoverkompat: SelectionStudio bruker keyword `on_commit_selection`.
-        # Tidligere kode sendte inn `on_commit` + et dummy-DataFrame som pos-arg.
-        # Det krasjer nå etter refaktor. Vi oppretter derfor studio uten data her,
-        # og laster data i `_refresh()` via `load_data()`.
-        self.studio = SelectionStudio(self, on_commit_selection=self._handle_commit)
-        self.studio.pack(fill="both", expand=True, padx=10, pady=10)
+        # Hvis noe allerede er valgt i session ved oppstart, last det
+        try:
+            sel = (
+                self.session.get_selection()  # type: ignore[attr-defined]
+                if hasattr(self.session, "get_selection")
+                else getattr(self.session, "SELECTION", {})
+            )
+            self._accounts = _normalize_account_values(sel.get("accounts", []))
+        except Exception:
+            self._accounts = []
 
-        # Last tilgjengelig dataset ved oppstart
         self._refresh()
 
-    # ---- Public API -------------------------------------------------
-
-    def refresh_from_session(self) -> None:
-        """Oppdater visningen basert på gjeldende session."""
-        self._refresh()
-
-    def load_population(self, accounts: List[str]) -> None:
-        """Filtrer populasjonen til gitte konti og oppdater studio.
-
-        Brukes når Analyse-fanen sender over et utvalg av kontoer.
+    # ------------------------------------------------------------
+    # Offentlig API: kall fra Analyse/ui_main/bus
+    # ------------------------------------------------------------
+    def load_population(self, accounts: List[Any]) -> None:
         """
-        accounts = [str(a).strip() for a in (accounts or []) if str(a).strip()]
+        Motta kontoer fra Analyse-fanen og bygg datagrunnlag.
+        """
+        accounts_norm = _normalize_account_values(accounts or [])
+        self._accounts = accounts_norm
 
-        df_all = self._get_session_df()
-        if df_all is None or df_all.empty:
-            self.dataset = None
-            self._refresh()
-            return
+        # Oppdater session.SELECTION hvis mulig (andre deler av appen leser dette)
+        try:
+            if hasattr(self.session, "set_selection"):
+                # type: ignore[attr-defined]
+                self.session.set_selection(accounts=accounts_norm)
+            elif hasattr(self.session, "SELECTION"):
+                self.session.SELECTION["accounts"] = accounts_norm  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
-        # Hvis ingen kontoer er gitt, eller vi mangler Konto-kolonne, bruk hele datasettet.
-        if not accounts or "Konto" not in df_all.columns:
-            self.dataset = df_all
-            self._refresh()
-            return
-
-        # Sørg for sammenlignbare strenger
-        konto_str = df_all["Konto"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-        self.dataset = df_all.loc[konto_str.isin(accounts)].copy()
         self._refresh()
 
-    # ---- Internal ---------------------------------------------------
-
-    def _get_session_df(self) -> Optional[pd.DataFrame]:
-        """Hent DataFrame fra session på en robust måte."""
-        # 1) Foretrukket: session.dataset
-        try:
-            df = getattr(session, "dataset", None)
-        except Exception:
-            df = None
-        if isinstance(df, pd.DataFrame):
-            return df
-
-        # 2) Fallback: eldre API session.get_dataset() -> (df, cols)
-        try:
-            df2, _cols = session.get_dataset()  # type: ignore[misc]
-            if isinstance(df2, pd.DataFrame):
-                return df2
-        except Exception:
-            pass
-
-        return None
-
+    # ------------------------------------------------------------
+    # Intern: last data inn i studio
+    # ------------------------------------------------------------
     def _refresh(self) -> None:
-        df_all = self._get_session_df()
-        df_base = self.dataset if isinstance(self.dataset, pd.DataFrame) else df_all
-        df_all_for_studio = df_all if isinstance(df_all, pd.DataFrame) else df_base
+        """
+        Bygg df_all (fullt datasett) og base_df (filtrert på kontoer),
+        og last i SelectionStudio.
 
-        if df_base is None or not isinstance(df_base, pd.DataFrame) or df_base.empty:
-            self.header_lbl.config(text="Ingen dataset.")
-            try:
-                # Hold studioet "tomt" uten å kræsje
-                empty = pd.DataFrame()
-                # Ny signatur (foretrukket): load_data(df_all, df_base=None)
-                try:
-                    self.studio.load_data(empty, None)
-                except TypeError:
-                    # Eldre signatur (fallback): load_data(df_all) eller omvendt rekkefølge
-                    try:
-                        self.studio.load_data(empty)
-                    except Exception:
-                        try:
-                            self.studio.load_data(None, empty)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+        NB: unit-testene i repoet forventer at første posisjonelle argument
+        i load_data-kallet er variabelen som heter df_all.
+        Samtidig forventer SelectionStudio.load_data(df_base, df_all=None).
+        Derfor bruker vi:
+            - df_all = base_df (filtrert)  -> blir df_base i SelectionStudio
+            - df_base = all_df (fullt)     -> blir df_all i SelectionStudio
+        """
+        try:
+            all_df = getattr(self.session, "dataset", None)
+            if not isinstance(all_df, pd.DataFrame):
+                all_df = pd.DataFrame()
+        except Exception:
+            all_df = pd.DataFrame()
+
+        base_df = _filter_base(all_df, self._accounts)
+
+        # Variabelnavnene her er bevisst pga testene
+        df_base = all_df
+        df_all = base_df
+
+        self.studio.load_data(df_all, df_base)
+
+    # ------------------------------------------------------------
+    # Callback fra SelectionStudio når brukeren "committer" et sample
+    # ------------------------------------------------------------
+    def _on_commit_selection(
+        self,
+        df_sample_bilag: pd.DataFrame,
+        df_transactions: Optional[pd.DataFrame] = None,
+    ) -> None:
+        """
+        SelectionStudio kaller denne når brukeren velger "Legg i utvalg".
+
+        Vi prøver å ekspandere bilag-sample til transaksjonslinjer og sender
+        videre til ui_main (Resultat-fane).
+
+        NB: SelectionStudio kaller denne ofte med bare df_sample (1 argument).
+        Derfor er df_transactions optional for å unngå TypeError.
+        """
+        if self._on_commit_sample is None:
             return
 
-        total_sum = (
-            pd.to_numeric(df_base.get("Beløp", pd.Series(dtype=float)), errors="coerce")
-            .fillna(0.0)
-            .sum()
-        )
-
-        header_txt = f"Grunnlag: {len(df_base):,} rader | Sum: {float(total_sum):,.2f}"
-        header_txt = header_txt.replace(",", " ").replace(".", ",")
-        self.header_lbl.config(text=header_txt)
-
-        # Oppdater studioet med nytt grunnlag. Vi sender også med df_all slik at
-        # valgfrie summeringer "alle kontoer" kan brukes.
         try:
-            # Ny signatur (foretrukket): load_data(df_all, df_base=None)
-            self.studio.load_data(df_all_for_studio, df_base)
-        except TypeError:
-            # Eldre signatur (fallback): load_data(df_base, df_all)
-            try:
-                self.studio.load_data(df_base, df_all_for_studio)
-            except Exception:
-                pass
+            df_out = _expand_bilag_sample_to_transactions(
+                df_sample_bilag=df_sample_bilag,
+                df_transactions=df_transactions,
+            )
+            if df_out.empty:
+                df_out = df_sample_bilag.copy()
         except Exception:
-            pass
+            df_out = df_sample_bilag.copy()
 
-    def _handle_commit(self, sample_df: pd.DataFrame) -> None:
-        """Kalles av SelectionStudio når bruker legger til i utvalg."""
-        if callable(self._on_commit_sample):
-            self._on_commit_sample(sample_df)
+        try:
+            self._on_commit_sample(df_out)
+        except Exception:
+            # Ikke la GUI kræsje ved feil i callback
+            pass

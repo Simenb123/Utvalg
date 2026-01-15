@@ -9,6 +9,7 @@ from selection_studio_helpers import (
     fmt_amount_no,
     fmt_int_no,
     format_amount_no,
+    format_amount_input_no,
     format_interval_no,
     parse_amount,
     suggest_sample_size,
@@ -30,6 +31,12 @@ def test_parse_and_format_amount_no():
 
     assert format_amount_no(1234.5) == "1 234,50"
     assert fmt_amount_no(1234.5) == "1 234,50"
+
+
+def test_format_amount_input_no_removes_decimals_and_keeps_thousand_separators():
+    assert format_amount_input_no(1234) == "1 234"
+    assert format_amount_input_no("250000") == "250 000"
+    assert format_amount_input_no("250 000") == "250 000"
 
 
 def test_format_int_no():

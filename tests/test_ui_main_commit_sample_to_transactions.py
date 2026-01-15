@@ -42,6 +42,15 @@ def test_expand_bilag_sample_to_transactions_filters_and_merges_meta() -> None:
     assert grp_by_bilag[1].tolist() == [2]
     assert grp_by_bilag[3].tolist() == [1]
 
+    # Intervall og sum fra sample skal også mappes korrekt per bilag
+    intervall_by_bilag = out.groupby("Bilag")["Utvalg_Intervall"].unique().to_dict()
+    assert intervall_by_bilag[1].tolist() == ["[0, 100]"]
+    assert intervall_by_bilag[3].tolist() == ["[100, 200]"]
+
+    sum_by_bilag = out.groupby("Bilag")["Utvalg_SumBilag"].unique().to_dict()
+    assert sum_by_bilag[1].tolist() == [0.0]
+    assert sum_by_bilag[3].tolist() == [30.0]
+
 
 def test_expand_bilag_sample_to_transactions_empty_sample_returns_empty() -> None:
     df_all = pd.DataFrame(

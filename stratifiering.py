@@ -1,4 +1,7 @@
+import math
 import random
+from typing import Any, Optional
+
 import pandas as pd
 
 
@@ -14,7 +17,9 @@ def beregn_strata(df: pd.DataFrame, k: int = 5, mode: str = "quantile", abs_belo
       interval_map: dict gruppe -> interval string (kan brukes til visning)
     """
     if df is None or df.empty:
-        summary = pd.DataFrame(columns=["Gruppe", "Antall_bilag", "SumBeløp", "Min_Beløp", "Median_Beløp", "Max_Beløp", "Intervall"])
+        summary = pd.DataFrame(
+            columns=["Gruppe", "Antall_bilag", "SumBeløp", "Min_Beløp", "Median_Beløp", "Max_Beløp", "Intervall"]
+        )
         bilag_df = pd.DataFrame(columns=["Bilag", "SumBeløp", "__grp__"])
         return summary, bilag_df, {}
 
@@ -245,7 +250,9 @@ def summer_per_bilag(df_base: pd.DataFrame, df_all: pd.DataFrame | None, bilag_l
 
     if df_all is not None and not df_all.empty:
         all_df = df_all[df_all["Bilag"].isin(bilag_list)].copy()
-        all_sum = all_df.groupby("Bilag")["Beløp"].sum().reset_index().rename(columns={"Beløp": "Sum bilag (alle kontoer)"})
+        all_sum = (
+            all_df.groupby("Bilag")["Beløp"].sum().reset_index().rename(columns={"Beløp": "Sum bilag (alle kontoer)"})
+        )
         out = out.merge(all_sum, on="Bilag", how="left")
     else:
         out["Sum bilag (alle kontoer)"] = out["Sum bilag (kontointervallet)"]
@@ -253,3 +260,136 @@ def summer_per_bilag(df_base: pd.DataFrame, df_all: pd.DataFrame | None, bilag_l
     # fyll NaN
     out["Sum bilag (alle kontoer)"] = out["Sum bilag (alle kontoer)"].fillna(out["Sum bilag (kontointervallet)"])
     return out
+
+
+def stratify_quantiles(
+    df: pd.DataFrame,
+    *,
+    amount_column: str = "SumBeløp",
+    k: int = 5,
+    use_abs: bool = True,
+    amount_col: Optional[str] = None,
+) -> pd.Series:
+    """Lager kvantil-strata (1..k) for df. Returnerer Serie alignet til df.index."""
+
+    if amount_col is not None:
+        amount_column = amount_col
+
+    if df is None or df.empty:
+        return pd.Series(dtype=int)
+
+    if amount_column not in df.columns:
+        raise KeyError(f"Kolonne '{amount_column}' finnes ikke i DataFrame.")
+
+    k = int(k) if k is not None else 1
+    if k < 1:
+        k = 1
+    k = min(k, len(df)) if len(df) > 0 else 1
+
+    values = pd.to_numeric(df[amount_column], errors="coerce").fillna(0.0)
+    if use_abs:
+        values = values.abs()
+
+    # qcut kan feile ved mange duplikater. Rank(method="first") gjør serien strengt økende.
+    ranked = values.rank(method="first")
+    try:
+        labels = pd.qcut(ranked, q=k, labels=False, duplicates="drop")
+        if labels.isna().any():
+            labels = labels.fillna(0)
+        labels = labels.astype(int) + 1
+    except Exception:
+        labels = pd.Series(1, index=df.index)
+
+    labels.index = df.index
+    return labels.astype(int)
+
+
+def sample_stratified(
+    df: pd.DataFrame,
+    strata: pd.Series,
+    n_total: int,
+    *,
+    rng: Optional[random.Random] = None,
+) -> pd.DataFrame:
+    """Trekk et stratifisert, tilfeldig utvalg fra df (kompatibilitet)."""
+
+    if df is None or df.empty or n_total is None:
+        return pd.DataFrame(columns=(df.columns if isinstance(df, pd.DataFrame) else None))
+
+    n_total = int(n_total)
+    if n_total <= 0:
+        return df.head(0).copy()
+
+    n_total = min(n_total, len(df))
+
+    if rng is None:
+        rng = random.Random(42)
+
+    # Align strata to df
+    strata = strata.reindex(df.index)
+    if strata.isna().any():
+        strata = strata.fillna(0)
+
+    # Build index lists per stratum
+    groups = []
+    for label in sorted(strata.unique()):
+        idxs = list(df.index[strata == label])
+        if not idxs:
+            continue
+        rng.shuffle(idxs)
+        groups.append((label, idxs))
+
+    if not groups:
+        # Fallback: simple random sample
+        idxs = list(df.index)
+        rng.shuffle(idxs)
+        return df.loc[idxs[:n_total]].copy()
+
+    # Initial allocation: 1 per group if possible
+    alloc = {label: 0 for label, _idxs in groups}
+    if n_total >= len(groups):
+        for label, idxs in groups:
+            alloc[label] = 1 if len(idxs) > 0 else 0
+
+    remaining_to_allocate = n_total - sum(alloc.values())
+    if remaining_to_allocate > 0:
+        capacities = {label: max(len(idxs) - alloc[label], 0) for label, idxs in groups}
+        total_cap = sum(capacities.values())
+        if total_cap > 0:
+            fractions = {label: remaining_to_allocate * (cap / total_cap) for label, cap in capacities.items()}
+            adds = {label: int(math.floor(f)) for label, f in fractions.items()}
+            for label in adds:
+                adds[label] = min(adds[label], capacities[label])
+
+            remainder = remaining_to_allocate - sum(adds.values())
+            order = sorted(
+                capacities.keys(),
+                key=lambda l: (fractions[l] - adds[l], capacities[l]),
+                reverse=True,
+            )
+            for label in order:
+                if remainder <= 0:
+                    break
+                if adds[label] < capacities[label]:
+                    adds[label] += 1
+                    remainder -= 1
+
+            for label in adds:
+                alloc[label] += adds[label]
+
+    selected_idx: list[Any] = []
+    for label, idxs in groups:
+        take = min(alloc.get(label, 0), len(idxs))
+        if take > 0:
+            selected_idx.extend(idxs[:take])
+
+    # Fill hvis vi mangler rader (pga kapasitet/avrunding)
+    if len(selected_idx) < n_total:
+        remaining_idx = [i for i in df.index if i not in set(selected_idx)]
+        rng.shuffle(remaining_idx)
+        selected_idx.extend(remaining_idx[: n_total - len(selected_idx)])
+
+    if len(selected_idx) > n_total:
+        selected_idx = selected_idx[:n_total]
+
+    return df.loc[selected_idx].copy()
