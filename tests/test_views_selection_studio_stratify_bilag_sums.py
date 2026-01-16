@@ -2,6 +2,8 @@ import pandas as pd
 
 from views_selection_studio_ui import stratify_bilag_sums
 
+from selection_studio_bilag import _format_interval_no, _format_number_no
+
 
 def _assert_masks_cover_all(groups, index):
     combined = pd.Series(False, index=index)
@@ -58,3 +60,13 @@ def test_stratify_bilag_sums_quantile_all_equal_falls_back_to_one_group():
     assert mask.all()
     assert interval_map.get("1")
     assert stats_df["Antall"].iloc[0] == 3
+
+
+def test_format_number_no_uses_thousand_separators_and_decimal_comma():
+    assert _format_number_no(1403999) == "1 403 999,00"
+    assert _format_number_no(-1403999.5) == "-1 403 999,50"
+
+
+def test_format_interval_no_orders_bounds_when_given_reversed_values():
+    # Defensive: if code accidentally provides lo > hi, we still want a sane interval.
+    assert _format_interval_no(10, -5) == "-5,00 – 10,00"

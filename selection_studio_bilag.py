@@ -1,4 +1,23 @@
 # -*- coding: utf-8 -*-
+"""Utvalg.selection_studio_bilag
+
+Denne modulen inneholder ren (GUI-fri) logikk for å jobbe på **bilagsnivå**:
+
+- Bygge bilag-dataframe fra transaksjonslinjer.
+- Stratifikasjon av bilag etter sum-beløp.
+- Lage en enkel intervalltekst til bruk i GUI.
+
+Målet er å være robust og bakoverkompatibel:
+- Aksepterer både "Beløp" og "Belop".
+- Returnerer samme struktur som eksisterende tester forventer.
+
+Norsk formatering:
+- tusenskille: vanlig mellomrom
+- desimal: komma
+- intervall: en-dash (–)
+
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple, Union
@@ -9,33 +28,99 @@ import pandas as pd
 __all__ = ["build_bilag_dataframe", "stratify_bilag_sums"]
 
 
+# -------------------------
+# Interne hjelpefunksjoner
+# -------------------------
+
+
 def _is_nan(x: Any) -> bool:
     try:
-        return math.isnan(float(x))
+        return bool(pd.isna(x))
     except Exception:
         return False
 
 
-def _format_number_no(value: Any, *, decimals: int = 1) -> str:
+try:
+    # Gjenbruk robust parsing (norsk/internasjonal) hvis tilgjengelig.
+    from selection_studio_helpers import parse_amount as _parse_amount  # type: ignore
+except Exception:  # pragma: no cover
+    _parse_amount = None
+
+
+def _to_float(value: Any) -> float | None:
+    """Konverter til float på en robust måte.
+
+    - None/NaN -> None
+    - int/float -> float (men filtrerer bort inf/nan)
+    - ellers: prøv selection_studio_helpers.parse_amount hvis tilgjengelig
     """
-    Norsk tallformat:
-      - alltid 1 desimal (default)
-      - desimalkomma
-    """
-    if value is None:
-        return ""
-    try:
+
+    if value is None or _is_nan(value):
+        return None
+
+    if isinstance(value, (int, float)):
         f = float(value)
+        if not math.isfinite(f):
+            return None
+        return f
+
+    if _parse_amount is not None:
+        try:
+            f = _parse_amount(value)
+        except Exception:
+            f = None
+        if f is None:
+            return None
+        f2 = float(f)
+        return f2 if math.isfinite(f2) else None
+
+    # Fallback: enkel float-konvertering
+    try:
+        f = float(str(value).strip())
     except Exception:
-        return ""
-    if _is_nan(f):
-        return ""
-    return f"{f:.{decimals}f}".replace(".", ",")
+        return None
+    return f if math.isfinite(f) else None
 
 
-def _format_interval_no(lo: Any, hi: Any) -> str:
-    # En-dash (U+2013) er viktig – testene sjekker for "–"
-    return f"{_format_number_no(lo)} – {_format_number_no(hi)}"
+def _format_number_no(value: Any, *, decimals: int = 2) -> str:
+    """Norsk tallformat: "1 234,56"."""
+
+    f = _to_float(value)
+    if f is None:
+        return ""
+
+    s = f"{f:,.{decimals}f}"
+    # Python bruker , for tusen og . for desimal
+    s = s.replace(",", " ").replace(".", ",")
+    return s
+
+
+def _format_interval_no(lo: Any, hi: Any, *, decimals: int = 2) -> str:
+    """Formatér intervall "lo – hi" i norsk format.
+
+    Viktig: Dersom grensene kommer i feil rekkefølge (lo > hi), byttes de.
+    Det gjør GUI-visningen mer robust dersom en upstream-funksjon gir max/min i feil rekkefølge.
+    """
+
+    lo_f = _to_float(lo)
+    hi_f = _to_float(hi)
+
+    if lo_f is None and hi_f is None:
+        return ""
+
+    if lo_f is not None and hi_f is not None and lo_f > hi_f:
+        lo_f, hi_f = hi_f, lo_f
+
+    lo_txt = _format_number_no(lo_f, decimals=decimals) if lo_f is not None else ""
+    hi_txt = _format_number_no(hi_f, decimals=decimals) if hi_f is not None else ""
+
+    # En-dash (U+2013) er viktig – enkelte tester sjekker for "–"
+    return f"{lo_txt} – {hi_txt}".strip()
+
+
+# -------------------------
+# Bilag-DataFrame
+# -------------------------
 
 
 def build_bilag_dataframe(
@@ -46,8 +131,7 @@ def build_bilag_dataframe(
     date_col: str = "Dato",
     text_col: str = "Tekst",
 ) -> pd.DataFrame:
-    """
-    Bygg et bilag-nivå DataFrame fra transaksjonslinjer.
+    """Bygg et bilag-nivå DataFrame fra transaksjonslinjer.
 
     Aksepterer enten:
       - transaksjonslinjer med (Bilag + Beløp/Belop)
@@ -59,6 +143,7 @@ def build_bilag_dataframe(
       - Tekst (alltid med, fylles med "" hvis ikke finnes)
       - SumBeløp
     """
+
     cols_out = [bilag_col, date_col, text_col, "SumBeløp"]
 
     if df is None or df.empty:
@@ -104,6 +189,11 @@ def build_bilag_dataframe(
     return out
 
 
+# -------------------------
+# Stratifikasjon (bilag)
+# -------------------------
+
+
 def _stratify_series(
     s: pd.Series,
     *,
@@ -111,13 +201,13 @@ def _stratify_series(
     k: int = 5,
     use_abs: bool = False,
 ) -> Tuple[List[Tuple[int, pd.Series]], Dict[str, str], pd.DataFrame]:
-    """
-    Series-path: returnerer (groups, interval_map, stats_df)
+    """Series-path: returnerer (groups, interval_map, stats_df).
 
     groups: List[(gruppe_id:int, mask:pd.Series[bool])]
     interval_map: Dict[str(gruppe_id) -> "min – max" (norsk format)]
     stats_df: DataFrame med Gruppe(int), Antall, Sum, Min, Max
     """
+
     stats_cols = ["Gruppe", "Antall", "Sum", "Min", "Max"]
 
     if s is None or len(s) == 0:
@@ -169,8 +259,8 @@ def _stratify_series(
         mask = grp_ids == lab
         groups.append((lab, mask))
 
-        g_vals = vals[mask]              # original (signert)
-        g_strat = strat_vals[mask]       # brukt til grense/min/max (abs hvis use_abs)
+        g_vals = vals[mask]  # original (signert)
+        g_strat = strat_vals[mask]  # brukt til grense/min/max (abs hvis use_abs)
 
         antall = int(mask.sum())
         sum_ = float(g_vals.sum()) if antall else 0.0
@@ -195,15 +285,16 @@ def stratify_bilag_sums(
     bilag_col: str = "Bilag",
     sum_col: str = "SumBeløp",
 ) -> Any:
-    """
-    Overload:
-      - Series inn -> (groups, interval_map(str->str), stats_df)
-      - DataFrame inn -> (summary_df, bilag_out_df, interval_map(int->str))
+    """Overload:
 
-    Dette matcher testene:
-      - interval_map keys i Series-path: {"1","2",...}
-      - interval_map keys i DF-path: {1,2,...}
+    - Series inn -> (groups, interval_map(str->str), stats_df)
+    - DataFrame inn -> (summary_df, bilag_out_df, interval_map(int->str))
+
+    Matcher testene:
+    - interval_map keys i Series-path: {"1","2",...}
+    - interval_map keys i DF-path: {1,2,...}
     """
+
     if isinstance(data, pd.DataFrame):
         df = data.copy()
 
