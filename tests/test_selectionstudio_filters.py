@@ -99,3 +99,52 @@ def test_filter_selectionstudio_handles_norwegian_numbers_and_empty():
     # abs-beløp mellom 100 og 300 → bilag 1, 3 og 4
     assert set(df["Bilag"].tolist()) == {1, 3, 4}
     assert summary["N"] == 3
+
+
+def test_selectionstudio_filters_summary_includes_abs_removed_by_amount():
+    """When using absolute amount filtering, we want net+abs sums for what is filtered out."""
+
+    df = pd.DataFrame(
+        {
+            "Dato": ["2025-01-01", "2025-01-01", "2025-01-01"],
+            "Beløp": [-50.0, 50.0, 200.0],
+        }
+    )
+
+    df_f, summary = filter_selectionstudio_dataframe(
+        df,
+        direction="Alle",
+        min_value="100",
+        max_value="",
+        use_abs=True,
+    )
+
+    assert df_f["Beløp"].tolist() == [200.0]
+    assert summary["amount_filter_active"] is True
+    assert summary["removed_by_amount_rows"] == 2
+    # Net sum cancels out, but abs sum shows actual magnitude removed
+    assert summary["removed_by_amount_sum_net"] == 0.0
+    assert summary["removed_by_amount_sum_abs"] == 100.0
+
+
+def test_selectionstudio_filters_date_range_filter():
+    df = pd.DataFrame(
+        {
+            "Dato": ["2025-01-15", "2025-02-15", "2025-03-15"],
+            "Beløp": [10.0, 20.0, 30.0],
+        }
+    )
+
+    df_f, summary = filter_selectionstudio_dataframe(
+        df,
+        direction="Alle",
+        min_value="",
+        max_value="",
+        use_abs=True,
+        date_from="01.02.2025",
+        date_to="28.02.2025",
+    )
+
+    assert df_f["Beløp"].tolist() == [20.0]
+    assert summary["date_filter_active"] is True
+    assert summary["removed_by_date_rows"] == 2

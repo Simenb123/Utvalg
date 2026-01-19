@@ -23,7 +23,6 @@ Business rules
 from __future__ import annotations
 
 import math
-import re
 import inspect
 import os
 from datetime import datetime
@@ -32,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional
 
 import random
+import re
 
 import pandas as pd
 import tkinter as tk
@@ -190,144 +190,224 @@ def format_amount_input_no(value: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# UI helpers: unngå linjeskift i tusenskiller
+# Text/format helpers (unit-testable)
 # ---------------------------------------------------------------------------
-
-_NO_BREAK_SPACE = "\u00A0"
-_RE_SPACE_BETWEEN_DIGITS = re.compile(r"(?<=\d) (?=\d)")
 
 
 def no_break_spaces_in_numbers(text: str) -> str:
-    """Erstatt vanlige mellomrom *mellom siffer* med non‑breaking space.
+    """Replace normal spaces between digits with non-breaking spaces.
 
-    Hvorfor:
-      - I UI (Label med wraplength) kan Tk bryte linjen på vanlige mellomrom.
-      - Norske tusenskiller er mellomrom, så tall som "13 851 272" kan bli delt i to linjer.
-      - Ved å bruke NBSP mellom sifre holdes tallet samlet, men øvrige ord kan fortsatt wrappe.
-
-    NB: Dette brukes **kun** for visningstekst (ikke for lagring/Excel).
+    This is mainly for UI labels/treeviews so that "1 234 567" doesn't break
+    across lines, while still keeping spaces elsewhere (e.g. "1 000 kr").
     """
+
     if text is None:
         return ""
-    if not isinstance(text, str):
-        text = str(text)
-    if not text:
-        return ""
-    return _RE_SPACE_BETWEEN_DIGITS.sub(_NO_BREAK_SPACE, text)
 
-# --- custom strata boundaries (manual) -----------------------------------------
+    import re
 
-_CUSTOM_SPLIT_RE = re.compile(r"[;\n]+")
+    return re.sub(r"(?<=\d) (?=\d)", " ", str(text))
 
 
-def parse_custom_strata_bounds(text: str) -> list[float]:
-    """Parse en liste med strata-grenser fra tekst.
+def parse_custom_strata_bounds(spec: str) -> list[float]:
+    """Parse a semicolon-separated list of bounds.
 
-    Bruker semikolon og/eller linjeskift som skilletegn, f.eks.:
-        "100 000; 500 000; 1 000 000"
+    Supports Norwegian formatting (space/NBSP as thousand separator, comma as
+    decimal separator). Returns sorted unique float bounds.
 
-    Returnerer sortert, unike, positive grenser (float). Ugyldige tokens ignoreres.
+    Examples:
+        "100; 200; 300" -> [100.0, 200.0, 300.0]
+        "1 000; 2 500" -> [1000.0, 2500.0]
     """
-    raw = (text or "").strip()
+
+    if spec is None:
+        return []
+
+    raw = str(spec).strip()
     if not raw:
         return []
 
-    parts = [p.strip() for p in _CUSTOM_SPLIT_RE.split(raw) if p.strip()]
+    import re
+
+    parts = [p.strip() for p in re.split(r"[;\n]+", raw) if p.strip()]
     bounds: list[float] = []
+
     for p in parts:
-        f = parse_amount(p)
-        if f is None:
-            continue
+        norm = p.replace(" ", " ").replace(" ", "").replace(",", ".")
         try:
-            bounds.append(float(abs(f)))
-        except Exception:
+            bounds.append(float(norm))
+        except ValueError:
             continue
 
-    # Sorter og fjern duplikater
-    bounds_sorted = sorted({b for b in bounds if math.isfinite(b)})
-    return bounds_sorted
-
-
-def format_custom_strata_bounds(bounds: list[float]) -> str:
-    """Formater en liste med strata-grenser til et lesbart input-format."""
-    if not bounds:
-        return ""
-    return "; ".join(fmt_amount_no(b, decimals=0) for b in bounds)
+    return [float(x) for x in sorted(set(bounds))]
 
 
 def stratify_values_custom_bounds(
     values: pd.Series,
-    *,
     bounds: list[float],
 ) -> tuple[list[tuple[int, pd.Series]], dict[str, str], pd.DataFrame]:
-    """Stratifiserer en numerisk serie basert på manuelle grenser.
+    """Stratify values using custom (user-defined) bounds.
 
-    - values forventes å være et beløpsmål som allerede er valgt (typisk |SumBeløp|).
-    - bounds er sortert, unike grenser (positiv verdi), f.eks. [100_000, 500_000].
-
-    Returnerer (grupper, intervall_map, stats_df) kompatibelt med eksisterende UI:
-      - grupper: [(1, mask_series), (2, mask_series), ...]
-      - intervall_map: {"1": "0 – 100 000", "2": "100 000 – 500 000", "3": ">= 500 000"}
-      - stats_df: kolonner [Gruppe, Antall, Sum, Min, Max]
+    Returns:
+        groups: list of (group_id, mask)
+        interval_map: dict mapping group_id (as str) -> interval label
+        stats_df: DataFrame with columns ["Gruppe", "Antall"]
     """
-    stats_cols = ["Gruppe", "Antall", "Sum", "Min", "Max"]
 
-    if values is None or len(values) == 0:
-        return [], {}, pd.DataFrame(columns=stats_cols)
+    ser = pd.to_numeric(values, errors="coerce")
+    bounds_sorted = sorted(set(float(b) for b in (bounds or [])))
 
-    s = pd.to_numeric(values, errors="coerce").fillna(0.0)
-
-    b = sorted({float(abs(x)) for x in (bounds or []) if x is not None and math.isfinite(float(x))})
-
-    # 1 gruppe hvis ingen grenser
-    if not b:
-        antall = int(len(s))
-        sum_ = float(s.sum()) if antall else 0.0
-        min_ = float(s.min()) if antall else float("nan")
-        max_ = float(s.max()) if antall else float("nan")
-        interval = f"{fmt_amount_no(min_, decimals=0)} – {fmt_amount_no(max_, decimals=0)}" if antall else ""
-        groups = [(1, pd.Series([True] * len(s), index=s.index))]
-        interval_map = {"1": interval}
-        stats_df = pd.DataFrame(
-            [{"Gruppe": 1, "Antall": antall, "Sum": sum_, "Min": min_, "Max": max_}],
-            columns=stats_cols,
-        )
+    # Edge case: no bounds -> single group
+    if not bounds_sorted:
+        mask = pd.Series(True, index=ser.index)
+        groups = [(1, mask)]
+        interval_map = {"1": "Alle"}
+        stats_df = pd.DataFrame([{"Gruppe": 1, "Antall": int(mask.sum())}])
         return groups, interval_map, stats_df
 
-    bins = [float("-inf"), *b, float("inf")]
-    cut = pd.cut(s, bins=bins, include_lowest=True, right=True)
+    bins = [-float("inf")] + bounds_sorted + [float("inf")]
+    # right=False => [a, b)
+    cat = pd.cut(ser, bins=bins, right=False, labels=False, include_lowest=True)
+    group_ids = (cat + 1).astype("Int64")
+
+    def fmt_bound(x: float) -> str:
+        if x == float("inf"):
+            return "∞"
+        if x == -float("inf"):
+            return "–∞"
+        # Prefer the existing Norwegian input formatter
+        try:
+            return format_amount_input_no(x)
+        except Exception:
+            return str(x)
+
+    interval_map: dict[str, str] = {}
+    for i in range(1, len(bins)):
+        left = bins[i - 1]
+        right = bins[i]
+        interval_map[str(i)] = f"{fmt_bound(left)} – {fmt_bound(right)}"
 
     groups: list[tuple[int, pd.Series]] = []
-    interval_map: dict[str, str] = {}
-    rows: list[dict[str, Any]] = []
-
-    num_groups = len(b) + 1
-    for i in range(1, num_groups + 1):
-        mask = cut.cat.codes == (i - 1)
-        mask = pd.Series(mask, index=s.index)
-
-        gvals = s.loc[mask]
-        antall = int(mask.sum())
-        sum_ = float(gvals.sum()) if antall else 0.0
-        min_ = float(gvals.min()) if antall else float("nan")
-        max_ = float(gvals.max()) if antall else float("nan")
-
+    rows = []
+    for i in range(1, len(bins)):
+        mask = group_ids == i
         groups.append((i, mask))
-        rows.append({"Gruppe": i, "Antall": antall, "Sum": sum_, "Min": min_, "Max": max_})
+        rows.append({"Gruppe": i, "Antall": int(mask.sum())})
 
-        if i == 1:
-            interval_txt = f"0 – {fmt_amount_no(b[0], decimals=0)}"
-        elif i == num_groups:
-            interval_txt = f">= {fmt_amount_no(b[-1], decimals=0)}"
-        else:
-            lo = b[i - 2]
-            hi = b[i - 1]
-            interval_txt = f"{fmt_amount_no(lo, decimals=0)} – {fmt_amount_no(hi, decimals=0)}"
-
-        interval_map[str(i)] = interval_txt
-
-    stats_df = pd.DataFrame(rows, columns=stats_cols)
+    stats_df = pd.DataFrame(rows)
     return groups, interval_map, stats_df
+
+
+def recommend_random_sample_size_net_basis(
+    population_value_net: float,
+    population_count: int,
+    tolerable_error: float,
+    confidence_factor: float,
+) -> int:
+    """A small deterministic sample size helper based on *net* population value.
+
+    Formula (MUS-style):
+        n = ceil((abs(net) / tolerable_error) * confidence_factor)
+
+    Clamped to [0, population_count]. Returns 0 when:
+      - population_value_net is 0
+      - population_count is 0
+      - tolerable_error is 0 (undefined basis)
+    """
+
+    pop_n = int(population_count or 0)
+    basis = abs(float(population_value_net or 0.0))
+    tol = float(tolerable_error or 0.0)
+    cf = float(confidence_factor or 0.0)
+
+    if pop_n <= 0 or basis <= 0.0 or tol <= 0.0:
+        return 0
+
+    import math
+
+    n = int(math.ceil((basis / tol) * cf))
+    if n < 0:
+        n = 0
+    if n > pop_n:
+        n = pop_n
+    return n
+
+
+def compute_net_basis_recommendation(
+    bilag_df: pd.DataFrame,
+    tolerable_error: float,
+    confidence_factor: float,
+    *,
+    bilag_col: str = "Bilag",
+    amount_col: str = "Beløp",
+    threshold_ratio: float = 0.9,
+) -> dict[str, object]:
+    """Compute a net-basis recommendation for *remaining* population after specific selection.
+
+    Behaviour (aligned with unit tests):
+      - Specific selection uses absolute bilag amount (|beløp| >= tolerable_error)
+      - Remaining population uses *net* (signed) sum for the random sample basis
+
+    Returns a dict with keys:
+      - n_specific: number of bilag in specific selection
+      - remaining_net: signed net value of remaining population
+      - n_random: recommended random sample size for the remaining population
+      - n_total: n_specific + n_random
+
+    Additional diagnostics included:
+      - ratio_net_to_abs (overall population)
+      - recommend_net_basis (overall population, based on ratio)
+    """
+
+    if bilag_df is None or bilag_df.empty:
+        return {
+            "n_specific": 0,
+            "remaining_net": 0.0,
+            "n_random": 0,
+            "n_total": 0,
+            "ratio_net_to_abs": 1.0,
+            "recommend_net_basis": False,
+        }
+
+    if bilag_col not in bilag_df.columns:
+        raise KeyError(f"bilag_df must contain '{bilag_col}'")
+    if amount_col not in bilag_df.columns:
+        raise KeyError(f"bilag_df must contain '{amount_col}'")
+
+    # Aggregate to bilag-level sums (works for both transaction-level and already-aggregated input)
+    bilag_sums = bilag_df.groupby(bilag_col)[amount_col].sum()
+
+    # Overall ratio (diagnostic): |net| / abs
+    pop_net = float(bilag_sums.sum())
+    pop_abs = float(bilag_sums.abs().sum())
+    ratio = abs(pop_net) / pop_abs if pop_abs > 0 else 1.0
+    recommend_net = bool(ratio < float(threshold_ratio))
+
+    # Specific selection based on absolute bilag amount
+    tol = float(tolerable_error or 0.0)
+    specific_mask = bilag_sums.abs() >= tol if tol > 0 else pd.Series(False, index=bilag_sums.index)
+
+    n_specific = int(specific_mask.sum())
+
+    remaining_sums = bilag_sums[~specific_mask]
+    remaining_net = float(remaining_sums.sum())
+    remaining_count = int(remaining_sums.shape[0])
+
+    n_random = recommend_random_sample_size_net_basis(
+        population_value_net=remaining_net,
+        population_count=remaining_count,
+        tolerable_error=tol,
+        confidence_factor=float(confidence_factor or 0.0),
+    )
+
+    return {
+        "n_specific": n_specific,
+        "remaining_net": remaining_net,
+        "n_random": n_random,
+        "n_total": n_specific + n_random,
+        "ratio_net_to_abs": ratio,
+        "recommend_net_basis": recommend_net,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -612,113 +692,6 @@ def compute_specific_selection_recommendation(
         remaining_df=remaining_df,
     )
 
-def recommend_random_sample_size_net_basis(
-    population_value_net: float,
-    population_count: int,
-    *,
-    tolerable_error: float,
-    confidence_factor: float,
-) -> int:
-    """Anbefal størrelse på tilfeldig trekk basert på netto (signert) populasjonsverdi.
-
-    Dette er logikken som brukes i SelectionStudio når vi har tatt ut "spesifikk utvalg"
-    (bilag der |beløp| >= tolererbar feil) og skal anbefale antall bilag i tilfeldig trekk.
-
-    Prinsipp:
-      - Populasjonsverdi = netto sum (signert). Kreditposter (f.eks. salgsinntekter) er ofte negative.
-      - Formelen bruker |netto| for å få positiv størrelse i beregningen.
-      - Returnerer 0 når grunnlaget ikke gir mening (tom populasjon, tolererbar feil <= 0, eller netto = 0).
-      - Resultatet clamps til [1, population_count] når beregningen gir > 0.
-
-    Parametre:
-        population_value_net: netto (signert) bokført verdi
-        population_count: antall bilag i populasjonen (rest etter spesifikk)
-        tolerable_error: tolererbar feil (>0)
-        confidence_factor: konfidensfaktor (f.eks. 1.6)
-
-    """
-    try:
-        n = int(population_count or 0)
-    except Exception:
-        n = 0
-    if n <= 0:
-        return 0
-
-    tol = abs(float(tolerable_error or 0.0))
-    if tol <= 0.0:
-        return 0
-
-    basis_value = abs(float(population_value_net or 0.0))
-    if basis_value <= 0.0:
-        return 0
-
-    try:
-        cf = float(confidence_factor)
-    except Exception:
-        cf = 1.0
-
-    suggested = int(math.ceil((basis_value / tol) * cf))
-    return min(max(suggested, 1), n)
-
-
-def compute_net_basis_recommendation(
-    bilag_df: pd.DataFrame,
-    *,
-    tolerable_error: float,
-    confidence_factor: float,
-    amount_col: str = "SumBeløp",
-) -> dict[str, Any]:
-    """Pure helper: beregn anbefaling (spesifikk + tilfeldig) uten GUI-avhengigheter.
-
-    - Spesifikk: |beløp| >= tolererbar feil
-    - Restverdi: netto (signert) sum av beløp i restpopulasjonen
-    - Tilfeldig n: basert på |netto rest| og konfidensfaktor
-
-    Returnerer dict med:
-      n_specific, n_random, n_total, remaining_net, remaining_df
-    """
-    if bilag_df is None or bilag_df.empty:
-        return {
-            "n_specific": 0,
-            "n_random": 0,
-            "n_total": 0,
-            "remaining_net": 0.0,
-            "remaining_df": pd.DataFrame(),
-        }
-
-    # Spesifikk utvelgelse basert på absolutt verdi (uavhengig av fortegn)
-    spec_info = compute_specific_selection_recommendation(
-        bilag_df,
-        tolerable_error,
-        use_abs=True,
-        amount_column=amount_col,
-    )
-    n_specific = int(spec_info["n_specific"] or 0)
-    remaining_df = spec_info.get("remaining_df", None)
-    if remaining_df is None:
-        remaining_df = pd.DataFrame()
-
-    if remaining_df.empty or amount_col not in remaining_df.columns:
-        remaining_net = 0.0
-    else:
-        remaining_net = float(pd.to_numeric(remaining_df[amount_col], errors="coerce").fillna(0.0).sum())
-
-    n_random = recommend_random_sample_size_net_basis(
-        remaining_net,
-        int(len(remaining_df)),
-        tolerable_error=tolerable_error,
-        confidence_factor=confidence_factor,
-    )
-    n_total = int(n_specific + n_random)
-
-    return {
-        "n_specific": n_specific,
-        "n_random": int(n_random),
-        "n_total": int(n_total),
-        "remaining_net": float(remaining_net),
-        "remaining_df": remaining_df,
-    }
-
 def build_bilag_dataframe(
     df: pd.DataFrame,
     *,
@@ -906,38 +879,16 @@ class SelectionStudio(ttk.Frame):
         self._rng = random.Random(42)  # deterministic for repeatability
 
         # UI vars
-        # Retning: i revisjon er "Alle" (netto) default. Vi tilbyr to enkle
-        # av/på-filter i stedet for en rullgardin, for å redusere risiko for feilvalg.
-        self.var_only_debit = tk.BooleanVar(value=False)
-        self.var_only_credit = tk.BooleanVar(value=False)
-
-        # Backwards compatible: behold var_direction for eldre kode/tester som leser den.
         self.var_direction = tk.StringVar(value="Alle")
-
         self.var_min_amount = tk.StringVar(value="")
         self.var_max_amount = tk.StringVar(value="")
-
-        # Bruk absolutt beløp var tidligere en bruker-toggle. I revisjon er netto
-        # standard, og vi skjuler derfor denne fra UI. Den beholdes kun for
-        # bakoverkompatibilitet, men brukes ikke i filter-/beregningslogikk.
-        self.var_use_abs = tk.BooleanVar(value=False)  # Kandidat til fjerning – ubrukt i UI
-
-        # Intern guard for å unngå rekursjon når vi synkroniserer checkbokser -> var_direction
-        self._dir_sync_guard = False
-        self.var_only_debit.trace_add("write", lambda *_: self._on_direction_checkbox_changed("debit"))
-        self.var_only_credit.trace_add("write", lambda *_: self._on_direction_checkbox_changed("credit"))
+        self.var_use_abs = tk.BooleanVar(value=False)
 
         self.var_risk = tk.StringVar(value="Middels")
         self.var_confidence = tk.StringVar(value="90%")
         self.var_tolerable_error = tk.StringVar(value="")
         self.var_method = tk.StringVar(value="quantile")
-        self.var_k = tk.IntVar(value=3)
-
-        # Manuelle strata-grenser (brukes kun når metode = 'custom')
-        self.var_custom_bounds = tk.StringVar(value="")
-        self.var_custom_bounds_hint = tk.StringVar(value="")
-        self._custom_bounds_sync_guard = False
-
+        self.var_k = tk.IntVar(value=1)
         self.var_sample_n = tk.IntVar(value=0)  # 0 = auto
 
         self.var_recommendation = tk.StringVar(value="")
@@ -945,22 +896,17 @@ class SelectionStudio(ttk.Frame):
 
         self._build_ui()
 
-        # Vis/skjul kontroller for manuelle strata-grenser
-        self.var_method.trace_add("write", lambda *_: self._update_method_controls())
-        self.var_custom_bounds.trace_add("write", lambda *_: self._update_method_controls())
-        self._update_method_controls()
-
         # Bindings to keep recommendation up to date
         for v in (
             self.var_direction,
             self.var_min_amount,
             self.var_max_amount,
+            self.var_use_abs,
             self.var_risk,
             self.var_confidence,
             self.var_tolerable_error,
             self.var_method,
             self.var_k,
-            self.var_custom_bounds,
         ):
             v.trace_add("write", lambda *_: self._schedule_refresh())
 
@@ -1011,20 +957,11 @@ class SelectionStudio(ttk.Frame):
         self._df_all = df_all.copy()
         self._df_sample = pd.DataFrame()
 
-        # Sensible default tolerable error if empty: 5% of population book value (rounded).
-        # I praksis er tolererbar feil en input fra revisjonsplanleggingen, men dette gir
-        # et "ikke-null" forslag når brukeren ikke har fylt inn noe.
+        # Sensible default tolerable error if empty: 5% of abs sum (rounded)
         if not (self.var_tolerable_error.get() or "").strip() and not self._df_base.empty:
             try:
-                metrics = compute_population_metrics(self._df_base)
-
-                # Netto er standard i revisjon, men dersom netto summerer til ~0 (f.eks. clearing),
-                # faller vi tilbake til absolutt-sum for å unngå et tomt forslag.
-                base_value = abs(float(getattr(metrics, "sum_net", 0.0) or 0.0))
-                if base_value <= 0.0:
-                    base_value = float(getattr(metrics, "sum_abs", 0.0) or 0.0)
-
-                default_tol = max(int(round(base_value * 0.05)), 0)
+                metrics = compute_population_metrics(self._df_base, abs_basis=self.var_use_abs.get())
+                default_tol = max(round(metrics.abs_sum * 0.05), 0)
                 if default_tol > 0:
                     self.var_tolerable_error.set(format_amount_input_no(default_tol))
             except Exception:
@@ -1053,14 +990,16 @@ class SelectionStudio(ttk.Frame):
         lf_filters.columnconfigure(1, weight=1)
 
         ttk.Label(lf_filters, text="Retning").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
-        frm_dir = ttk.Frame(lf_filters)
-        frm_dir.grid(row=0, column=1, sticky="w", padx=6, pady=(6, 2))
-        ttk.Checkbutton(frm_dir, text="Kun debet", variable=self.var_only_debit).grid(row=0, column=0, sticky="w")
-        ttk.Checkbutton(frm_dir, text="Kun kredit", variable=self.var_only_credit).grid(
-            row=0, column=1, sticky="w", padx=(12, 0)
+        cmb_dir = ttk.Combobox(
+            lf_filters,
+            textvariable=self.var_direction,
+            values=["Alle", "Debet", "Kredit"],
+            width=12,
+            state="readonly",
         )
+        cmb_dir.grid(row=0, column=1, sticky="ew", padx=6, pady=(6, 2))
 
-        ttk.Label(lf_filters, text="Beløp (netto) fra/til").grid(row=1, column=0, sticky="w", padx=6, pady=(6, 2))
+        ttk.Label(lf_filters, text="Beløp fra/til").grid(row=1, column=0, sticky="w", padx=6, pady=(6, 2))
         frm_amt = ttk.Frame(lf_filters)
         frm_amt.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 2))
         frm_amt.columnconfigure(0, weight=1)
@@ -1068,6 +1007,10 @@ class SelectionStudio(ttk.Frame):
         ttk.Entry(frm_amt, textvariable=self.var_min_amount, width=10).grid(row=0, column=0, sticky="ew")
         ttk.Label(frm_amt, text="til").grid(row=0, column=1, padx=4)
         ttk.Entry(frm_amt, textvariable=self.var_max_amount, width=10).grid(row=0, column=2, sticky="ew")
+
+        # Når dette er på, tolkes beløpsgrensen symmetrisk rundt 0 (± beløp).
+        chk_abs = ttk.Checkbutton(lf_filters, text="Bruk absolutt beløp", variable=self.var_use_abs)
+        chk_abs.grid(row=2, column=0, columnspan=2, sticky="w", padx=6, pady=(2, 6))
 
         # --- Selection section
         lf_sel = ttk.LabelFrame(left, text="Utvalg")
@@ -1103,44 +1046,23 @@ class SelectionStudio(ttk.Frame):
         cmb_method = ttk.Combobox(
             lf_sel,
             textvariable=self.var_method,
-            values=["quantile", "equal_width", "custom"],
+            values=["quantile", "equal_width"],
             state="readonly",
             width=12,
         )
         cmb_method.grid(row=3, column=1, sticky="ew", padx=6, pady=(6, 2))
 
-        ttk.Label(lf_sel, text="Antall grupper (k)").grid(row=4, column=0, sticky="w", padx=6, pady=2)
+        ttk.Label(lf_sel, text="Antall grupper (k)").grid(row=4, column=0, sticky="w", padx=6, pady=(6, 2))
         spn_k = ttk.Spinbox(lf_sel, from_=1, to=12, textvariable=self.var_k, width=6)
-        spn_k.grid(row=4, column=1, sticky="w", padx=6, pady=2)
-        self._spn_k = spn_k
+        spn_k.grid(row=4, column=1, sticky="w", padx=6, pady=(6, 2))
 
-        # Manuelle strata-grenser (kun når metode = 'custom')
-        self.frm_custom_bounds = ttk.Frame(lf_sel)
-        self.frm_custom_bounds.grid(row=5, column=0, columnspan=2, sticky="ew", padx=6, pady=(6, 2))
-        self.frm_custom_bounds.columnconfigure(1, weight=1)
-
-        ttk.Label(self.frm_custom_bounds, text="Strata-grenser").grid(row=0, column=0, sticky="w")
-        self.ent_custom_bounds = ttk.Entry(self.frm_custom_bounds, textvariable=self.var_custom_bounds)
-        self.ent_custom_bounds.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        self.ent_custom_bounds.bind("<FocusOut>", lambda _e: self._format_custom_bounds_entry())
-
-        self.lbl_custom_bounds_hint = ttk.Label(
-            self.frm_custom_bounds,
-            textvariable=self.var_custom_bounds_hint,
-            wraplength=260,
-        )
-        self.lbl_custom_bounds_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
-
-        ttk.Label(lf_sel, text="Utvalgsstørrelse").grid(row=6, column=0, sticky="w", padx=6, pady=2)
-        spn_n = ttk.Spinbox(
-            lf_sel, from_=0, to=9999, textvariable=self.var_sample_n, width=6, command=self._sample_size_touched
-        )
-        spn_n.grid(row=6, column=1, sticky="w", padx=6, pady=2)
+        ttk.Label(lf_sel, text="Utvalgsstørrelse").grid(row=5, column=0, sticky="w", padx=6, pady=(6, 2))
+        spn_n = ttk.Spinbox(lf_sel, from_=0, to=99999, textvariable=self.var_sample_n, width=8)
+        spn_n.grid(row=5, column=1, sticky="w", padx=6, pady=(6, 2))
         spn_n.bind("<KeyRelease>", lambda _e: self._sample_size_touched())
-        spn_n.bind("<FocusOut>", lambda _e: self._sample_size_touched())
 
-        lbl_rec = ttk.Label(lf_sel, textvariable=self.var_recommendation, wraplength=260, justify="left")
-        lbl_rec.grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 6))
+        lbl_rec = ttk.Label(lf_sel, textvariable=self.var_recommendation, wraplength=260)
+        lbl_rec.grid(row=6, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 6))
 
         # Buttons
         frm_btn = ttk.Frame(left)
@@ -1181,11 +1103,6 @@ class SelectionStudio(ttk.Frame):
 
         columns = ("Bilag", "Dato", "Tekst", "SumBeløp", "Gruppe", "Intervall")
         self.tree = ttk.Treeview(tab_utvalg, columns=columns, show="headings", height=18)
-        # Vis negative beløp (kredit) tydeligere
-        try:
-            self.tree.tag_configure("neg", foreground="red")
-        except Exception:
-            pass
         for c in columns:
             self.tree.heading(c, text=c)
             self.tree.column(c, anchor="w", width=120)
@@ -1219,133 +1136,6 @@ class SelectionStudio(ttk.Frame):
         self.tree_groups.grid(row=0, column=0, sticky="nsew")
         vsb2.grid(row=0, column=1, sticky="ns")
 
-    def _on_direction_checkbox_changed(self, changed: str) -> None:
-        """Synkroniser checkbokser (Kun debet/kun kredit) til var_direction.
-
-        * Ingen valgt  -> "Alle"
-        * Kun debet    -> "Debet"
-        * Kun kredit   -> "Kredit"
-
-        Boksene er gjensidig utelukkende for å unngå tvetydig filtrering.
-        """
-
-        if getattr(self, "_dir_sync_guard", False):
-            return
-
-        self._dir_sync_guard = True
-        try:
-            only_debit = bool(self.var_only_debit.get())
-            only_credit = bool(self.var_only_credit.get())
-
-            # Hvis bruker slår på én, slår vi av den andre
-            if changed == "debit" and only_debit:
-                if only_credit:
-                    self.var_only_credit.set(False)
-                self.var_direction.set("Debet")
-                return
-
-            if changed == "credit" and only_credit:
-                if only_debit:
-                    self.var_only_debit.set(False)
-                self.var_direction.set("Kredit")
-                return
-
-            # Hvis en boks ble slått av: sett retning basert på gjeldende state
-            only_debit = bool(self.var_only_debit.get())
-            only_credit = bool(self.var_only_credit.get())
-
-            if only_debit:
-                self.var_direction.set("Debet")
-            elif only_credit:
-                self.var_direction.set("Kredit")
-            else:
-                self.var_direction.set("Alle")
-        finally:
-            self._dir_sync_guard = False
-
-    # --- custom strata (manuelle grenser) --------------------------------------
-
-    def _update_method_controls(self) -> None:
-        """Vis/skjul felt for manuelle strata-grenser og aktiver/deaktiver k."""
-        method = (self.var_method.get() or "quantile").strip().lower()
-        is_custom = method == "custom"
-
-        # Vis/skjul frame
-        if hasattr(self, "frm_custom_bounds"):
-            try:
-                if is_custom:
-                    self.frm_custom_bounds.grid()
-                else:
-                    self.frm_custom_bounds.grid_remove()
-            except Exception:
-                pass
-
-        # Aktiver/deaktiver k
-        if hasattr(self, "_spn_k") and self._spn_k is not None:
-            try:
-                self._spn_k.configure(state="disabled" if is_custom else "normal")
-            except Exception:
-                pass
-
-        # Oppdater hint
-        if not hasattr(self, "var_custom_bounds_hint"):
-            return
-
-        if not is_custom:
-            self.var_custom_bounds_hint.set("")
-            return
-
-        raw = (self.var_custom_bounds.get() or "").strip()
-        if not raw:
-            self.var_custom_bounds_hint.set("Bruk ';' mellom grenser, f.eks. 100 000; 500 000")
-            return
-
-        bounds = parse_custom_strata_bounds(raw)
-        if not bounds:
-            self.var_custom_bounds_hint.set("Kunne ikke tolke grenser. Bruk ';' mellom tall, f.eks. 100 000; 500 000")
-            return
-
-        self.var_custom_bounds_hint.set(
-            no_break_spaces_in_numbers(f"{len(bounds)} grenser → {len(bounds) + 1} grupper")
-        )
-
-    def _format_custom_bounds_entry(self) -> None:
-        """Normaliser input (sorter, fjern duplikater) når feltet mister fokus."""
-        if getattr(self, "_custom_bounds_sync_guard", False):
-            return
-
-        raw = (self.var_custom_bounds.get() or "").strip()
-        if not raw:
-            return
-
-        bounds = parse_custom_strata_bounds(raw)
-        if not bounds:
-            return
-
-        normalized = format_custom_strata_bounds(bounds)
-        if normalized and normalized != raw:
-            try:
-                self._custom_bounds_sync_guard = True
-                self.var_custom_bounds.set(normalized)
-            finally:
-                self._custom_bounds_sync_guard = False
-
-    def _get_custom_bounds(self) -> list[float]:
-        """Hent manuelle strata-grenser fra UI."""
-        bounds = parse_custom_strata_bounds(self.var_custom_bounds.get())
-        return bounds
-
-    def _stratify_remaining_values(self, values: pd.Series) -> tuple[list[tuple[Any, pd.Series]], dict[str, str], pd.DataFrame]:
-        """Stratifiserer restpopulasjonen basert på valgt metode."""
-        method = (self.var_method.get() or "quantile").strip().lower()
-        if method == "custom":
-            bounds = self._get_custom_bounds()
-            return stratify_values_custom_bounds(values, bounds=bounds)
-
-        k = int(self.var_k.get() or 3)
-        return stratify_bilag_sums(values, method=method, k=k, use_abs=False)
-
-
     # --- refresh / recommendation -------------------------------------------------
 
     def _schedule_refresh(self, immediate: bool = False) -> None:
@@ -1366,25 +1156,92 @@ class SelectionStudio(ttk.Frame):
         self._df_filtered = self._apply_filters(self._df_base)
 
         try:
-            base_metrics = compute_population_metrics(self._df_base)
-            work_metrics = compute_population_metrics(self._df_filtered)
-            text = build_population_summary_text(base_metrics, work_metrics, abs_basis=False)
+            metrics = compute_population_metrics(self._df_filtered, abs_basis=self.var_use_abs.get())
+            text = build_population_summary_text(metrics)
+
+            # Vis hvor mye som filtreres bort av beløpsfilteret.
+            # Eksempel: dersom bruker setter "100" og krysser av for "Beløpsgrense gjelder ±",
+            # så er dette beløp i intervallet -100 til +100 (evt. 0..100 for debet / -100..0 for kredit).
+            try:
+                base_df = self._df_base if self._df_base is not None else pd.DataFrame()
+                # Avgjør beløpskolonne (noen datasett bruker "Beløp", andre "Belop")
+                amount_col = "Beløp" if "Beløp" in base_df.columns else ("Belop" if "Belop" in base_df.columns else None)
+
+                min_amount = parse_amount(self.var_min_amount.get())
+                max_amount = parse_amount(self.var_max_amount.get())
+                direction = (self.var_direction.get() or "").strip().lower()
+                use_abs = bool(self.var_use_abs.get())
+
+                extra_lines: list[str] = []
+
+                if amount_col and (min_amount is not None or max_amount is not None) and not base_df.empty:
+                    bel_all = pd.to_numeric(base_df[amount_col], errors="coerce").fillna(0.0)
+
+                    # Retningsfilter (debet/kredit) på samme måte som i filterfunksjonen.
+                    if direction == "debet":
+                        dir_mask = bel_all >= 0
+                    elif direction == "kredit":
+                        dir_mask = bel_all <= 0
+                    else:
+                        dir_mask = pd.Series(True, index=bel_all.index)
+
+                    bel = bel_all[dir_mask]
+                    bel_abs = bel.abs()
+                    bel_limit = bel_abs if use_abs else bel
+
+                    def _append_line(prefix: str, mask: pd.Series) -> None:
+                        removed_n = int(mask.sum())
+                        removed_sum = float(bel[mask].sum())
+                        removed_abs_sum = float(bel_abs[mask].sum())
+                        extra_lines.append(
+                            f"{prefix}: {fmt_amount_no(removed_sum)} (abs {fmt_amount_no(removed_abs_sum)}) | {removed_n} rader"
+                        )
+
+                    if min_amount is not None:
+                        below_min = bel_limit < min_amount
+                        if use_abs:
+                            if direction == "debet":
+                                interval_txt = f"0 til {fmt_amount_no(min_amount)}"
+                            elif direction == "kredit":
+                                interval_txt = f"{fmt_amount_no(-min_amount)} til 0"
+                            else:
+                                interval_txt = f"{fmt_amount_no(-min_amount)} til {fmt_amount_no(min_amount)}"
+                            _append_line(f"Beløp filtrert bort i intervallet {interval_txt}", below_min)
+                        else:
+                            _append_line(f"Beløp filtrert bort under {fmt_amount_no(min_amount)}", below_min)
+
+                    if max_amount is not None:
+                        above_max = bel_limit > max_amount
+                        if use_abs:
+                            _append_line(f"Beløp filtrert bort med absoluttverdi over {fmt_amount_no(max_amount)}", above_max)
+                        else:
+                            _append_line(f"Beløp filtrert bort over {fmt_amount_no(max_amount)}", above_max)
+
+                if extra_lines:
+                    text = text.rstrip() + "\n" + "\n".join(extra_lines)
+            except Exception:
+                # Ikke la ekstra info stoppe UI-oppdateringen.
+                pass
         except Exception:
             text = "Ingen data lastet."
         self.var_base_summary.set(text)
 
         rec = self._compute_recommendation()
         self._update_recommendation_text(rec)
-        # Vis en liten "spesifikk/rest" oppsummering under anbefalingen.
-        # Viktig: Spesifikk utvelgelse baseres på |SumBeløp| >= tolererbar feil,
-        # mens nettobeløp brukes som standard for populasjonsverdi.
+        # Add a compact split summary (spesifikk/rest) under anbefalingen.
+        # Must not break refresh if something goes wrong.
         try:
             tol_abs = self._get_tolerable_error_value()
             if getattr(self, "_bilag_df", None) is not None and not self._bilag_df.empty:
-                split_text = self._build_bilag_split_text(self._bilag_df, tolerable_error=tol_abs)
+                split = compute_bilag_split_summary(
+                    self._bilag_df,
+                    tolerable_error=tol_abs,
+                    use_abs=self.var_use_abs.get(),
+                )
+                split_text = build_bilag_split_summary_text(split)
                 if split_text:
                     current = self.var_recommendation.get()
-                    self.var_recommendation.set(no_break_spaces_in_numbers((current + "\n\n" + split_text).strip()))
+                    self.var_recommendation.set((current + "\n\n" + split_text).strip())
         except Exception:
             pass
 
@@ -1398,83 +1255,54 @@ class SelectionStudio(ttk.Frame):
         direction = (self.var_direction.get() or "Alle").strip()
         min_value = self.var_min_amount.get()
         max_value = self.var_max_amount.get()
+        use_abs = bool(self.var_use_abs.get())
 
-        # Beløp fra/til skal filtrere på netto (signert) – ikke absolutt.
         df_filtered, _summary = filter_selectionstudio_dataframe(
             df,
             direction=direction,
             min_value=min_value,
             max_value=max_value,
-            use_abs=False,
+            use_abs=use_abs,
         )
         return df_filtered
-
-    def _build_bilag_split_text(self, bilag_df: pd.DataFrame, *, tolerable_error: float) -> str:
-        """Bygg en kompakt tekst som viser populasjon/spesifikk/rest på bilag-nivå.
-
-        Viktige prinsipper:
-        - Spesifikk utvelgelse: |SumBeløp| >= tolererbar feil (alltid absolutt for terskel).
-        - Populasjonsverdi: netto (signert) er standard i revisjon.
-        - Utvalgsberegningen for tilfeldig trekk bruker |netto restpopulasjon|.
-        """
-
-        if bilag_df is None or bilag_df.empty or "SumBeløp" not in bilag_df.columns:
-            return ""
-
-        tol = abs(float(tolerable_error or 0.0))
-        amounts = pd.to_numeric(bilag_df["SumBeløp"], errors="coerce").fillna(0.0)
-
-        n_total = int(len(bilag_df))
-        net_total = float(amounts.sum())
-        abs_total = float(amounts.abs().sum())
-
-        if tol > 0.0:
-            mask_spec = amounts.abs() >= tol
-        else:
-            mask_spec = pd.Series([False] * len(bilag_df), index=bilag_df.index)
-
-        amounts_spec = amounts.loc[mask_spec]
-        amounts_rem = amounts.loc[~mask_spec]
-
-        n_spec = int(mask_spec.sum())
-        n_rem = int(n_total - n_spec)
-
-        net_spec = float(amounts_spec.sum()) if n_spec else 0.0
-        abs_spec = float(amounts_spec.abs().sum()) if n_spec else 0.0
-
-        net_rem = float(amounts_rem.sum()) if n_rem else 0.0
-        abs_rem = float(amounts_rem.abs().sum()) if n_rem else 0.0
-
-        tol_txt = fmt_amount_no(tol, decimals=0) if tol > 0 else "0"
-
-        return (
-            f"Populasjon (bilag): {fmt_int_no(n_total)} | Netto: {fmt_amount_no(net_total, decimals=0)} | Abs: {fmt_amount_no(abs_total, decimals=0)}\n"
-            f"Spesifikk (|beløp| >= {tol_txt}): {fmt_int_no(n_spec)} | Netto: {fmt_amount_no(net_spec, decimals=0)} | Abs: {fmt_amount_no(abs_spec, decimals=0)}\n"
-            f"Restpopulasjon: {fmt_int_no(n_rem)} | Netto: {fmt_amount_no(net_rem, decimals=0)} | Abs: {fmt_amount_no(abs_rem, decimals=0)}\n"
-            f"Beregning tilfeldig trekk bruker |netto rest|: {fmt_amount_no(abs(net_rem), decimals=0)}"
-        )
 
     def _compute_recommendation(self) -> _Recommendation:
         # Compute bilag-level df
         self._bilag_df = self._build_bilag_df(self._df_filtered)
 
         tol = self._get_tolerable_error_value()
+        use_abs = bool(self.var_use_abs.get())
+
+        # Specific selection
+        spec_info = compute_specific_selection_recommendation(self._bilag_df, tol, use_abs=use_abs)
+        n_specific = int(spec_info["n_specific"])
+        remaining_df: pd.DataFrame = spec_info["remaining_df"]
+
+        # Remaining population value (abs sum)
+        if remaining_df.empty:
+            remaining_value = 0.0
+        else:
+            amounts = pd.to_numeric(remaining_df["SumBeløp"], errors="coerce").fillna(0.0)
+            remaining_value = float(amounts.abs().sum() if use_abs else amounts.sum())
 
         # Confidence factor (risk + confidence)
         risk_level = (self.var_risk.get() or "Middels").strip().lower()
         conf_level = self._parse_confidence_percent(self.var_confidence.get())
         conf_factor = confidence_factor(risk_level=risk_level, confidence_level=conf_level)
 
-        rec_dict = compute_net_basis_recommendation(
-            self._bilag_df,
-            tolerable_error=tol,
-            confidence_factor=float(conf_factor),
-            amount_col="SumBeløp",
-        )
-        n_specific = int(rec_dict["n_specific"])
-        n_random = int(rec_dict["n_random"])
-        n_total = int(rec_dict["n_total"])
-        remaining_net = float(rec_dict["remaining_net"])
+        # Suggested random sample size based on remaining population value
+        n_random = 0
+        if tol > 0 and remaining_value > 0:
+            try:
+                cf = float(conf_factor)
+            except Exception:
+                cf = 1.0
+            n_random = int(math.ceil((remaining_value / tol) * cf))
+            # Clamp to available remaining bilag, but keep at least 1 if anything remains.
+            n_random = max(1, min(n_random, max(len(remaining_df), 1)))
+
+
+        n_total = int(n_specific + n_random)
 
         # Update the sample size spinbox default behavior
         current_n = int(self.var_sample_n.get() or 0)
@@ -1487,7 +1315,7 @@ class SelectionStudio(ttk.Frame):
             n_specific=n_specific,
             n_random_recommended=int(n_random),
             n_total_recommended=int(n_total),
-            population_value_remaining=float(remaining_net),
+            population_value_remaining=float(remaining_value),
         )
 
     def _update_recommendation_text(self, rec: _Recommendation) -> None:
@@ -1501,7 +1329,7 @@ class SelectionStudio(ttk.Frame):
             f"Forslag utvalg: {fmt_int_no(rec.n_total_recommended)} bilag"
             + (f" (inkl. {fmt_int_no(rec.n_specific)} spesifikk)" if rec.n_specific else "")
         )
-        self.var_recommendation.set(no_break_spaces_in_numbers("\n".join(parts)))
+        self.var_recommendation.set("\n".join(parts))
 
     def _refresh_groups_table(self) -> None:
         # Groups are shown for the remaining bilag (excluding specific)
@@ -1512,8 +1340,8 @@ class SelectionStudio(ttk.Frame):
             return
 
         tol = self._get_tolerable_error_value()
-        # Spesifikk utvelgelse baseres alltid på |SumBeløp| >= tolererbar feil.
-        spec, remaining = split_specific_selection_by_tolerable_error(self._bilag_df, tol, use_abs=True)
+        use_abs = bool(self.var_use_abs.get())
+        spec, remaining = split_specific_selection_by_tolerable_error(self._bilag_df, tol, use_abs=use_abs)
         if remaining.empty:
             # Only specific
             if not spec.empty:
@@ -1521,10 +1349,15 @@ class SelectionStudio(ttk.Frame):
                 self.tree_groups.insert("", "end", values=("Spesifikk", f">= {fmt_amount_no(tol, 0)}", len(spec), fmt_amount_no(sum_spec)))
             return
 
-        # Stratifisering gjøres på absolutt beløp (gir pene, positive intervaller)
-        values = pd.to_numeric(remaining["SumBeløp"], errors="coerce").fillna(0.0).abs()
+        values = pd.to_numeric(remaining["SumBeløp"], errors="coerce").fillna(0.0)
+        if use_abs:
+            values = values.abs()
+
+        method = (self.var_method.get() or "quantile").strip().lower()
+        k = max(int(self.var_k.get() or 1), 1)
+
         try:
-            groups, interval_map, stats_df = self._stratify_remaining_values(values)
+            groups, interval_map, stats_df = stratify_bilag_sums(values, method=method, k=k, use_abs=False)
         except Exception:
             return
 
@@ -1567,8 +1400,8 @@ class SelectionStudio(ttk.Frame):
                 return
 
             tol = self._get_tolerable_error_value()
-            # Spesifikk utvelgelse baseres alltid på |SumBeløp| >= tolererbar feil.
-            spec, remaining = split_specific_selection_by_tolerable_error(bilag_df, tol, use_abs=True)
+            use_abs = bool(self.var_use_abs.get())
+            spec, remaining = split_specific_selection_by_tolerable_error(bilag_df, tol, use_abs=use_abs)
 
             # Determine desired total sample size
             desired_total = int(self.var_sample_n.get() or 0)
@@ -1598,9 +1431,15 @@ class SelectionStudio(ttk.Frame):
 
             # Fill for random using stratification intervals
             if random_ids:
-                # Stratifisering gjøres på absolutt beløp (pene, positive intervaller)
-                rem_values = pd.to_numeric(remaining["SumBeløp"], errors="coerce").fillna(0.0).abs()
-                groups, interval_map, _stats = self._stratify_remaining_values(rem_values)
+                rem_values = pd.to_numeric(remaining["SumBeløp"], errors="coerce").fillna(0.0)
+                if use_abs:
+                    rem_values = rem_values.abs()
+                groups, interval_map, _stats = stratify_bilag_sums(
+                    rem_values,
+                    method=(self.var_method.get() or "quantile").strip().lower(),
+                    k=max(int(self.var_k.get() or 1), 1),
+                    use_abs=False,
+                )
                 # Map bilag -> group
                 group_by_idx = pd.Series(index=remaining.index, dtype=object)
                 for grp_label, mask in groups:
@@ -1632,11 +1471,15 @@ class SelectionStudio(ttk.Frame):
             return []
 
         n = min(n, len(remaining_bilag_df))
+        use_abs = bool(self.var_use_abs.get())
 
-        # Stratifisering gjøres på absolutt beløp (pene, positive intervaller)
-        values = pd.to_numeric(remaining_bilag_df["SumBeløp"], errors="coerce").fillna(0.0).abs()
+        values = pd.to_numeric(remaining_bilag_df["SumBeløp"], errors="coerce").fillna(0.0)
+        if use_abs:
+            values = values.abs()
 
-        groups, _interval_map, _stats = self._stratify_remaining_values(values)
+        method = (self.var_method.get() or "quantile").strip().lower()
+        k = max(int(self.var_k.get() or 1), 1)
+        groups, _interval_map, _stats = stratify_bilag_sums(values, method=method, k=k, use_abs=False)
 
         # Allocate n proportionally by stratum size
         sizes = [int(mask.sum()) for _g, mask in groups]
@@ -1687,19 +1530,6 @@ class SelectionStudio(ttk.Frame):
             sum_belop = row.get("SumBeløp", 0.0)
             gruppe = row.get("Gruppe", "")
             intervall = row.get("Intervall", "")
-
-            # Robust numerisk verdi + tag for negative beløp (kredit)
-            try:
-                sum_val = float(pd.to_numeric(sum_belop, errors="coerce"))
-            except Exception:
-                sum_val = 0.0
-            if pd.isna(sum_val):
-                sum_val = 0.0
-
-            tags: tuple[str, ...] = ()
-            if sum_val < 0:
-                tags = ("neg",)
-
             self.tree.insert(
                 "",
                 "end",
@@ -1707,11 +1537,10 @@ class SelectionStudio(ttk.Frame):
                     bilag,
                     str(dato)[:10] if pd.notna(dato) else "",
                     tekst,
-                    fmt_amount_no(sum_val),
+                    fmt_amount_no(float(sum_belop)),
                     gruppe,
                     intervall,
                 ),
-                tags=tags,
             )
 
     def _commit_selection(self) -> None:
@@ -1948,18 +1777,11 @@ __all__ = [
     "fmt_int_no",
     "format_interval_no",
     "parse_amount",
-    "no_break_spaces_in_numbers",
-    # manual strata helpers
-    "parse_custom_strata_bounds",
-    "format_custom_strata_bounds",
-    "stratify_values_custom_bounds",
     # legacy formatting aliases
     "format_amount_input_no",
     # new specific selection helpers
     "split_specific_selection_by_tolerable_error",
     "compute_specific_selection_recommendation",
-    "recommend_random_sample_size_net_basis",
-    "compute_net_basis_recommendation",
     "build_bilag_dataframe",
     "stratify_bilag_sums",
 ]
