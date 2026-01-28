@@ -279,6 +279,9 @@ def filter_selectionstudio_dataframe(
     summary["removed_by_amount_rows"] = removed_by_amount_count
     summary["removed_by_amount_net_sum"] = removed_by_amount_net
     summary["removed_by_amount_abs_sum"] = removed_by_amount_abs
+    # Alternative nøkkelnavn (noen tester bruker "sum_net/sum_abs")
+    summary["removed_by_amount_sum_net"] = removed_by_amount_net
+    summary["removed_by_amount_sum_abs"] = removed_by_amount_abs
 
     summary["date_filter_removed_count"] = removed_by_date_count
     summary["date_filter_removed_net_sum"] = removed_by_date_net
@@ -287,5 +290,7 @@ def filter_selectionstudio_dataframe(
     summary["removed_by_date_rows"] = removed_by_date_count
     summary["removed_by_date_net_sum"] = removed_by_date_net
     summary["removed_by_date_abs_sum"] = removed_by_date_abs
+    summary["removed_by_date_sum_net"] = removed_by_date_net
+    summary["removed_by_date_sum_abs"] = removed_by_date_abs
 
     return df_final, summary

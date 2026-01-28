@@ -2,56 +2,140 @@
 
 Analyse-fanen: konto-pivot (venstre) + transaksjonsliste (høyre).
 
-Mål (basert på bug-rapportene):
-- Vise akkumulerte beløp per konto (pivot)
-- Filtrere på kontoserier (1-9) ved avhuking
-- Vise transaksjoner for valgte kontoer
-- Riktig oppsummering: vis både antall/sum for viste rader og for hele seleksjonen
-- Kunne sende markerte kontoer til Utvalg-fanen
+Refaktorering (2026):
+- Mer av pandas-/databyggelogikk er flyttet til `analyse_viewdata.py`
+  slik at denne modulen i større grad kan fokusere på GUI.
+- Excel-eksport og motpost/bilagsdrill er fortsatt tilgjengelig via knapper.
 
-Denne implementasjonen holder seg til eksisterende modeller:
-- analyse_model.build_pivot_by_account
-- analysis_filters.filter_dataset
-
-Den er også robust i miljøer uten fungerende Tcl/Tk (CI):
-- Hvis ttk.Frame init feiler med TclError, bygges en "headless" variant som
-  fortsatt tilfredsstiller enhetstestene.
+Designmål:
+- Robust i headless/CI (Tk kan feile i linux uten display)
+- Best-effort: manglende kolonner => tomme visninger, ikke crash
+- Norske formater: dd.mm.yyyy, tusenskiller med mellomrom, desimal komma
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Callable, List, Optional
 
 try:
     import tkinter as tk
-    from tkinter import messagebox, ttk
+    from tkinter import filedialog, messagebox, ttk
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
+    filedialog = None  # type: ignore
 
 import pandas as pd
 
+import analyse_viewdata as av
 import formatting
 import session
 from analyse_model import build_pivot_by_account
-from analysis_filters import filter_dataset
+from analysis_filters import filter_dataset, parse_amount
+from controller_export import export_to_excel
 from konto_utils import konto_to_str
+from logger import get_logger
+from page_analyse_actions import open_motpost
 
-try:
+log = get_logger()
+
+
+# -----------------------------------------------------------------------------
+# Headless/test helpers
+# -----------------------------------------------------------------------------
+
+def _running_under_pytest() -> bool:
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def _safe_showinfo(title: str, msg: str) -> None:
+    if messagebox is None or _running_under_pytest():
+        return
+    try:
+        messagebox.showinfo(title, msg)
+    except Exception:
+        pass
+
+
+def _safe_showerror(title: str, msg: str) -> None:
+    if messagebox is None or _running_under_pytest():
+        return
+    try:
+        messagebox.showerror(title, msg)
+    except Exception:
+        pass
+
+
+# -----------------------------------------------------------------------------
+# Bilagsdrill dialog dependency (tests monkeypatcher denne)
+# -----------------------------------------------------------------------------
+
+try:  # pragma: no cover (importeres i runtime GUI)
     from selection_studio_drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
 except Exception:  # pragma: no cover
     _open_bilag_drill_dialog = None  # type: ignore
 
-try:
-    from views_motpost_konto import show_motpost_konto as _show_motpost_konto
+
+# -----------------------------------------------------------------------------
+# Optional: behold gamle helper-navn (kan være nyttig i eldre tester)
+# -----------------------------------------------------------------------------
+
+try:  # pragma: no cover
+    import ui_hotkeys as _ui_hotkeys  # type: ignore
 except Exception:  # pragma: no cover
-    _show_motpost_konto = None  # type: ignore
+    _ui_hotkeys = None  # type: ignore
 
 
+def _treeview_select_all(tree: object) -> None:
+    """Bakoverkompatibel wrapper (brukes av eldre tester)."""
+    if _ui_hotkeys is not None:
+        try:
+            _ui_hotkeys.treeview_select_all(tree)  # type: ignore[attr-defined]
+            return
+        except Exception:
+            pass
 
-@dataclass
+    # Minimal fallback
+    try:
+        children = tree.get_children()  # type: ignore[attr-defined]
+        tree.selection_set(children)  # type: ignore[attr-defined]
+    except Exception:
+        return
+
+
+def _treeview_selection_to_tsv(tree: object) -> str:
+    """Bakoverkompatibel wrapper (brukes av eldre tester)."""
+    if _ui_hotkeys is not None:
+        try:
+            return _ui_hotkeys.treeview_selection_to_tsv(tree)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    try:
+        cols = tree["columns"]  # type: ignore[index]
+        sel = tree.selection()  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+
+    lines: list[str] = []
+    lines.append("\t".join(str(c) for c in cols))
+    for item in sel:
+        try:
+            values = tree.item(item).get("values") or []  # type: ignore[attr-defined]
+        except Exception:
+            values = []
+        lines.append("\t".join(str(v) for v in values))
+    return "\n".join(lines)
+
+
+# -----------------------------------------------------------------------------
+# Retning / filtervalg
+# -----------------------------------------------------------------------------
+
+@dataclass(frozen=True)
 class _DirectionOpt:
     label: str
     value: Optional[str]  # None | "debet" | "kredit"
@@ -64,30 +148,46 @@ _DIR_OPTIONS: List[_DirectionOpt] = [
 ]
 
 
-class AnalysePage(ttk.Frame):  # type: ignore[misc]
+_BaseFrame = ttk.Frame if ttk is not None else object
+
+
+class AnalysePage(_BaseFrame):  # type: ignore[misc]
     """GUI-side for analyse."""
 
     PIVOT_COLS = ("Konto", "Kontonavn", "Sum", "Antall")
-    TX_COLS = ("Bilag", "Beløp", "Tekst", "Kunder", "Konto", "Kontonavn", "Dato")
+    TX_COLS = tuple(av.DEFAULT_TX_COLS)
 
     def __init__(self, master=None):
         # --- headless-friendly init ---
-        self._tk_ok = True
-        try:
-            super().__init__(master)
-        except Exception as e:  # TclError or other Tk init problems
-            # Fall back to a minimal object for test/CI.
-            self._tk_ok = False
-            self.dataset: Optional[pd.DataFrame] = None
-            self._df_filtered: Optional[pd.DataFrame] = None
-            self._utvalg_callback: Optional[Callable[[List[str]], None]] = None
-            self._init_error = e
-            return
+        self._tk_ok: bool = False
+        self._init_error: Optional[Exception] = None
 
-        # --- state ---
-        self.dataset: Optional[pd.DataFrame] = None
+        # Attributter som testene forventer at finnes
+        self.dataset: object | None = None
+        self._df_all: Optional[pd.DataFrame] = None
         self._df_filtered: Optional[pd.DataFrame] = None
         self._utvalg_callback: Optional[Callable[[List[str]], None]] = None
+
+        # GUI widgets (settes i _build_ui)
+        self._pivot_tree: Optional[ttk.Treeview] = None  # type: ignore[assignment]
+        self._tx_tree: Optional[ttk.Treeview] = None  # type: ignore[assignment]
+        self._lbl_tx_summary: Optional[ttk.Label] = None  # type: ignore[assignment]
+
+        # Siste pivot (for eksport)
+        self._pivot_df_last: Optional[pd.DataFrame] = None
+
+        if tk is None or ttk is None:
+            # Tkinter ikke tilgjengelig i dette miljøet
+            self._tk_ok = False
+            return
+
+        try:
+            super().__init__(master)
+            self._tk_ok = True
+        except Exception as e:  # TclError / display-problemer
+            self._tk_ok = False
+            self._init_error = e
+            return
 
         # --- vars ---
         self._var_search = tk.StringVar(value="")
@@ -96,11 +196,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._var_max = tk.StringVar(value="")
         self._var_max_rows = tk.IntVar(value=200)
         self._series_vars = [tk.IntVar(value=0) for _ in range(10)]
-
-        # --- UI ---
-        self._pivot_tree: Optional[ttk.Treeview] = None
-        self._tx_tree: Optional[ttk.Treeview] = None
-        self._lbl_tx_summary: Optional[ttk.Label] = None
 
         self._build_ui()
 
@@ -117,90 +212,79 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         Viktig: Vi beholder råverdien i self.dataset (ikke bare DataFrame),
         slik at headless-tester kan sette dummy-verdier og verifisere at
         metoden faktisk oppdaterer feltet.
-        GUI-logikken sjekker isinstance(..., pd.DataFrame) før den opererer.
         """
         df = getattr(sess, "dataset", None)
 
         # Behold råverdien på self.dataset (gir enklere testing/headless).
-        # GUI-logikken bruker isinstance(..., pd.DataFrame) før den opererer på data.
         self.dataset = df  # type: ignore[assignment]
+
+        if isinstance(df, pd.DataFrame):
+            self._df_all = df
+        else:
+            self._df_all = None
 
         self._apply_filters_and_refresh()
 
     # ---------------------------------------------------------------------
-    # UI build
+    # UI building
     # ---------------------------------------------------------------------
 
     def _build_ui(self) -> None:
         if not self._tk_ok:
             return
 
-        # Filters (top)
+        # Filter row
         filter_frame = ttk.Frame(self)
-        filter_frame.pack(fill="x", padx=8, pady=6)
+        filter_frame.pack(fill="x", padx=8, pady=8)
 
         ttk.Label(filter_frame, text="Søk:").grid(row=0, column=0, sticky="w")
         ent_search = ttk.Entry(filter_frame, textvariable=self._var_search, width=18)
         ent_search.grid(row=0, column=1, sticky="w", padx=(4, 12))
 
-        ttk.Label(filter_frame, text="Retning:").grid(row=0, column=2, sticky="w")
-        cmb_dir = ttk.Combobox(
-            filter_frame,
-            textvariable=self._var_direction,
-            values=[o.label for o in _DIR_OPTIONS],
-            width=10,
-            state="readonly",
-        )
-        cmb_dir.grid(row=0, column=3, sticky="w", padx=(4, 12))
+        ttk.Label(filter_frame, text="Retning:").grid(row=0, column=2, sticky="e")
+        opt = ttk.OptionMenu(filter_frame, self._var_direction, self._var_direction.get(), *[o.label for o in _DIR_OPTIONS])
+        opt.grid(row=0, column=3, sticky="w", padx=(4, 12))
 
-        # Konto series checkboxes
+        ttk.Label(filter_frame, text="Kontoserier:").grid(row=0, column=4, sticky="e")
         series_frame = ttk.Frame(filter_frame)
-        series_frame.grid(row=0, column=4, sticky="w")
-        ttk.Label(series_frame, text="Kontoserier:").pack(side="left")
+        series_frame.grid(row=0, column=5, sticky="w", padx=(4, 12))
         for d in range(10):
             cb = ttk.Checkbutton(
                 series_frame,
                 text=str(d),
                 variable=self._series_vars[d],
-                command=self._apply_filters_and_refresh,
             )
             cb.pack(side="left", padx=(2, 0))
 
-        # Max rows
-        ttk.Label(filter_frame, text="Vis:").grid(row=0, column=5, sticky="e", padx=(12, 0))
-        spn_rows = ttk.Spinbox(
-            filter_frame, from_=50, to=5000, increment=50, textvariable=self._var_max_rows, width=6
-        )
-        spn_rows.grid(row=0, column=6, sticky="w", padx=(4, 12))
+        ttk.Label(filter_frame, text="Vis:").grid(row=0, column=6, sticky="e", padx=(12, 0))
+        spn_rows = ttk.Spinbox(filter_frame, from_=50, to=5000, increment=50, textvariable=self._var_max_rows, width=6)
+        spn_rows.grid(row=0, column=7, sticky="w", padx=(4, 12))
 
-        # Min/Max amount
-        ttk.Label(filter_frame, text="Min beløp:").grid(row=0, column=7, sticky="e")
+        ttk.Label(filter_frame, text="Min beløp:").grid(row=0, column=8, sticky="e")
         ent_min = ttk.Entry(filter_frame, textvariable=self._var_min, width=10)
-        ent_min.grid(row=0, column=8, sticky="w", padx=(4, 8))
+        ent_min.grid(row=0, column=9, sticky="w", padx=(4, 8))
 
-        ttk.Label(filter_frame, text="Maks beløp:").grid(row=0, column=9, sticky="e")
+        ttk.Label(filter_frame, text="Maks beløp:").grid(row=0, column=10, sticky="e")
         ent_max = ttk.Entry(filter_frame, textvariable=self._var_max, width=10)
-        ent_max.grid(row=0, column=10, sticky="w", padx=(4, 12))
+        ent_max.grid(row=0, column=11, sticky="w", padx=(4, 12))
 
-        # Buttons
         btn_reset = ttk.Button(filter_frame, text="Nullstill", command=self._reset_filters)
-        btn_reset.grid(row=0, column=11, sticky="e")
+        btn_reset.grid(row=0, column=12, sticky="e")
 
         btn_apply = ttk.Button(filter_frame, text="Bruk filtre", command=self._apply_filters_and_refresh)
-        btn_apply.grid(row=0, column=12, sticky="e", padx=(6, 0))
+        btn_apply.grid(row=0, column=13, sticky="e", padx=(6, 0))
 
         btn_all = ttk.Button(filter_frame, text="Marker alle", command=self._select_all_accounts)
-        btn_all.grid(row=0, column=13, sticky="e", padx=(12, 0))
+        btn_all.grid(row=0, column=14, sticky="e", padx=(12, 0))
 
         btn_to_utvalg = ttk.Button(filter_frame, text="Til utvalg", command=self._send_selected_to_utvalg)
-        btn_to_utvalg.grid(row=0, column=14, sticky="e", padx=(6, 0))
-
+        btn_to_utvalg.grid(row=0, column=15, sticky="e", padx=(6, 0))
 
         btn_motpost = ttk.Button(filter_frame, text="Motpost", command=self._open_motpost)
-        btn_motpost.grid(row=0, column=15, sticky="e", padx=(6, 0))
+        btn_motpost.grid(row=0, column=16, sticky="e", padx=(6, 0))
 
         # allow the right side to expand
-        filter_frame.grid_columnconfigure(15, weight=1)
+        filter_frame.grid_columnconfigure(16, weight=1)
 
         # Main split
         main = ttk.Frame(self)
@@ -209,24 +293,35 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         main.grid_columnconfigure(1, weight=2)
         main.grid_rowconfigure(1, weight=1)
 
-        ttk.Label(main, text="Pivot pr. konto").grid(row=0, column=0, sticky="w", pady=(0, 4))
-        ttk.Label(main, text="Transaksjoner").grid(row=0, column=1, sticky="w", pady=(0, 4))
-
-        # Pivot tree
+        # Pivot side
         pivot_frame = ttk.Frame(main)
         pivot_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
-        pivot_frame.grid_rowconfigure(0, weight=1)
+        pivot_frame.grid_rowconfigure(1, weight=1)
         pivot_frame.grid_columnconfigure(0, weight=1)
 
-        self._pivot_tree = ttk.Treeview(pivot_frame, columns=self.PIVOT_COLS, show="headings", selectmode="extended")
+        hdr_pivot = ttk.Frame(pivot_frame)
+        hdr_pivot.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        hdr_pivot.grid_columnconfigure(0, weight=1)
+
+        ttk.Label(hdr_pivot, text="Pivot pr konto").grid(row=0, column=0, sticky="w")
+        ttk.Button(hdr_pivot, text="Eksporter", command=self._export_pivot_to_excel).grid(
+            row=0, column=1, sticky="e", padx=(6, 0)
+        )
+
+        self._pivot_tree = ttk.Treeview(
+            pivot_frame,
+            columns=self.PIVOT_COLS,
+            show="headings",
+            selectmode="extended",
+        )
         for col, w in zip(self.PIVOT_COLS, (90, 220, 110, 70)):
             anchor = "e" if col in ("Sum", "Antall") else "w"
             self._pivot_tree.heading(col, text=col)
             self._pivot_tree.column(col, width=w, anchor=anchor)
-        self._pivot_tree.grid(row=0, column=0, sticky="nsew")
+        self._pivot_tree.grid(row=1, column=0, sticky="nsew")
 
         sb_pivot = ttk.Scrollbar(pivot_frame, orient="vertical", command=self._pivot_tree.yview)
-        sb_pivot.grid(row=0, column=1, sticky="ns")
+        sb_pivot.grid(row=1, column=1, sticky="ns")
         self._pivot_tree.configure(yscrollcommand=sb_pivot.set)
 
         # Transactions side
@@ -242,12 +337,12 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._lbl_tx_summary = ttk.Label(hdr_tx, text="Oppsummering: (ingen rader)")
         self._lbl_tx_summary.grid(row=0, column=0, sticky="w")
 
-        ttk.Button(
-            hdr_tx,
-            text="Bilagsdrill",
-            command=self._open_bilag_drilldown_from_tx_selection,
-        ).grid(row=0, column=1, sticky="e", padx=(6, 0))
-
+        ttk.Button(hdr_tx, text="Bilagsdrill", command=self._open_bilag_drilldown_from_tx_selection).grid(
+            row=0, column=1, sticky="e", padx=(6, 0)
+        )
+        ttk.Button(hdr_tx, text="Eksporter", command=self._export_transactions_to_excel).grid(
+            row=0, column=2, sticky="e", padx=(6, 0)
+        )
 
         self._tx_tree = ttk.Treeview(tx_frame, columns=self.TX_COLS, show="headings")
         col_widths = {
@@ -301,66 +396,114 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._apply_filters_and_refresh()
 
     def _apply_filters_and_refresh(self) -> None:
-        # Headless: just keep dataset pointer updated.
         if not self._tk_ok:
             return
 
-        if self.dataset is None or not isinstance(self.dataset, pd.DataFrame):
+        # Finn DataFrame
+        df_raw = self.dataset
+        if not isinstance(df_raw, pd.DataFrame):
             self._df_filtered = None
+            self._pivot_df_last = None
             self._clear_tree(self._pivot_tree)
             self._clear_tree(self._tx_tree)
             if self._lbl_tx_summary is not None:
                 self._lbl_tx_summary.config(text="Oppsummering: (ingen rader)")
             return
 
-        search = (self._var_search.get() or "").strip()
-        direction_label = self._var_direction.get()
-        direction = next((o.value for o in _DIR_OPTIONS if o.label == direction_label), None)
-        min_amount = self._safe_float(self._var_min.get())
-        max_amount = self._safe_float(self._var_max.get())
+        self._df_all = df_raw
 
-        # kontoserier: if none selected => no kontoserie-filter
-        kontoserier = [i for i, v in enumerate(self._series_vars) if v.get()]
-        kontoserier_arg = kontoserier if kontoserier else None
+        # Parse filter inputs
+        search = str(self._var_search.get() or "")
+        direction_label = str(self._var_direction.get() or "Alle")
+        min_val = parse_amount(self._var_min.get())
+        max_val = parse_amount(self._var_max.get())
 
-        df_f = filter_dataset(
-            self.dataset,
-            search=search,
-            direction=direction,
-            min_amount=min_amount,
-            max_amount=max_amount,
-            abs_amount=False,
-            kontoserier=kontoserier_arg,
-        )
+        kontoserier = [i for i, v in enumerate(self._series_vars) if int(v.get() or 0) == 1]
 
-        # Normalise Konto for safe selection/filtering.
-        if "Konto" in df_f.columns:
-            df_f = df_f.copy()
-            df_f["Konto"] = df_f["Konto"].map(konto_to_str)
+        try:
+            df_f = filter_dataset(
+                df_raw,
+                search=search,
+                direction=direction_label,
+                min_amount=min_val,
+                max_amount=max_val,
+                kontoserier=kontoserier,
+            )
+        except Exception as e:
+            log.exception("Filterfeil")
+            _safe_showerror("Analyse", f"Kunne ikke filtrere datasettet.\n\n{e}")
+            df_f = df_raw.copy()
+
+        # Normaliser Konto til streng (for stabil UI/utvalg)
+        if isinstance(df_f, pd.DataFrame) and not df_f.empty and "Konto" in df_f.columns:
+            try:
+                df_f = df_f.copy()
+                df_f["Konto"] = df_f["Konto"].map(konto_to_str)
+            except Exception:
+                pass
 
         self._df_filtered = df_f
+
         self._refresh_pivot()
         self._refresh_transactions_view()
 
-    @staticmethod
-    def _safe_float(s: str) -> Optional[float]:
-        try:
-            s2 = (s or "").strip()
-            if not s2:
-                return None
-            return float(s2.replace(" ", "").replace(",", "."))
-        except Exception:
-            return None
-
-    @staticmethod
-    def _clear_tree(tree: Optional[ttk.Treeview]) -> None:
+    def _clear_tree(self, tree: Optional[ttk.Treeview]) -> None:
         if tree is None:
             return
-        for item in tree.get_children(""):
-            tree.delete(item)
+        try:
+            for item in tree.get_children():
+                tree.delete(item)
+        except Exception:
+            pass
 
     # ---------------------------------------------------------------------
-    # Pivot + transactions
+    # Pivot: selection helpers
+    # ---------------------------------------------------------------------
+
+    def _select_all_accounts(self) -> None:
+        if self._pivot_tree is None:
+            return
+        try:
+            children = self._pivot_tree.get_children()
+            self._pivot_tree.selection_set(children)
+        except Exception:
+            return
+        self._refresh_transactions_view()
+
+    def _get_selected_accounts(self) -> List[str]:
+        if self._pivot_tree is None:
+            return []
+
+        try:
+            sel = self._pivot_tree.selection()
+        except Exception:
+            sel = ()
+
+        # Hvis ingenting er valgt: returner alle kontoer i pivoten (brukervennlig)
+        items = list(sel) if sel else list(self._pivot_tree.get_children())
+
+        accounts: list[str] = []
+        for item in items:
+            konto = ""
+            try:
+                konto = str(self._pivot_tree.set(item, "Konto") or "")
+            except Exception:
+                konto = ""
+            konto = konto_to_str(konto)
+            if konto:
+                accounts.append(konto)
+
+        # dedupe, behold rekkefølge
+        seen: set[str] = set()
+        unique: list[str] = []
+        for a in accounts:
+            if a not in seen:
+                unique.append(a)
+                seen.add(a)
+        return unique
+
+    # ---------------------------------------------------------------------
+    # Pivot: refresh
     # ---------------------------------------------------------------------
 
     def _refresh_pivot(self) -> None:
@@ -368,51 +511,64 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             return
 
         self._clear_tree(self._pivot_tree)
+        self._pivot_df_last = None
+
         if self._df_filtered is None or self._df_filtered.empty:
             return
 
-        pivot_df = build_pivot_by_account(self._df_filtered)
-        # Expect columns: Konto, Kontonavn, Sum beløp, Antall bilag
-        for _, row in pivot_df.iterrows():
-            konto = konto_to_str(row.get("Konto", ""))
-            navn = str(row.get("Kontonavn", "") or "")
-            sum_val = row.get("Sum beløp", 0.0)
-            cnt_val = row.get("Antall bilag", 0)
-
-            sum_txt = formatting.fmt_amount(sum_val)
-            cnt_txt = formatting.format_int_no(cnt_val)
-
-            self._pivot_tree.insert("", "end", values=(konto, navn, sum_txt, cnt_txt))
-
-    def _select_all_accounts(self) -> None:
-        if self._pivot_tree is None:
+        if "Konto" not in self._df_filtered.columns:
             return
-        items = self._pivot_tree.get_children("")
-        self._pivot_tree.selection_set(items)
-        self._refresh_transactions_view()
 
-    def _get_selected_accounts(self) -> List[str]:
-        if self._pivot_tree is None:
-            return []
-        accounts: List[str] = []
-        # Brukeren forventer ofte at "Til utvalg" tar med alle synlige konti når
-        # det ikke er gjort eksplisitt rad-markering.
-        selected = self._pivot_tree.selection()
-        if not selected:
-            selected = self._pivot_tree.get_children()
+        try:
+            pivot = build_pivot_by_account(self._df_filtered)
+        except Exception as e:
+            log.exception("Pivotfeil")
+            _safe_showerror("Analyse", f"Kunne ikke bygge pivot.\n\n{e}")
+            return
 
-        for item in selected:
-            konto = konto_to_str(self._pivot_tree.set(item, "Konto"))
-            if konto:
-                accounts.append(konto)
-        # de-dupe while preserving order
-        seen = set()
-        unique: List[str] = []
-        for a in accounts:
-            if a not in seen:
-                unique.append(a)
-                seen.add(a)
-        return unique
+        if pivot is None or pivot.empty:
+            return
+
+        self._pivot_df_last = pivot.copy()
+
+        # Velg hvilke kolonnenavn som finnes i pivot
+        sum_col = "Sum beløp" if "Sum beløp" in pivot.columns else ("Sum" if "Sum" in pivot.columns else None)
+        cnt_col = "Antall bilag" if "Antall bilag" in pivot.columns else ("Antall" if "Antall" in pivot.columns else None)
+
+        for row in pivot.itertuples(index=False):
+            # itertuples gir attributtnavn som kolonnenavn; fallback med getattr
+            konto = konto_to_str(getattr(row, "Konto", ""))
+            kontonavn = getattr(row, "Kontonavn", "") if hasattr(row, "Kontonavn") else ""
+
+            sum_val = getattr(row, sum_col.replace(" ", "_") if sum_col else "", 0.0) if sum_col else 0.0
+            cnt_val = getattr(row, cnt_col.replace(" ", "_") if cnt_col else "", "") if cnt_col else ""
+
+            # Robust fallback: hvis itertuples ikke ga forventet navn
+            if sum_col and (sum_val == 0.0 or sum_val == ""):
+                try:
+                    sum_val = float(pivot.loc[pivot["Konto"] == konto, sum_col].iloc[0])
+                except Exception:
+                    sum_val = 0.0
+            if cnt_col and (cnt_val == "" or cnt_val is None):
+                try:
+                    cnt_val = int(pivot.loc[pivot["Konto"] == konto, cnt_col].iloc[0])
+                except Exception:
+                    cnt_val = ""
+
+            self._pivot_tree.insert(
+                "",
+                "end",
+                values=(
+                    konto,
+                    str(kontonavn or ""),
+                    formatting.fmt_amount(sum_val),
+                    formatting.fmt_int(cnt_val),
+                ),
+            )
+
+    # ---------------------------------------------------------------------
+    # Transactions: refresh
+    # ---------------------------------------------------------------------
 
     def _refresh_transactions_view(self) -> None:
         if self._tx_tree is None or self._lbl_tx_summary is None:
@@ -429,22 +585,24 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._lbl_tx_summary.config(text="Oppsummering: (ingen rader)")
             return
 
-        if "Konto" not in self._df_filtered.columns:
-            self._lbl_tx_summary.config(text="Oppsummering: (mangler Konto-kolonne)")
+        max_rows = 200
+        try:
+            max_rows = int(self._var_max_rows.get() or 200)
+        except Exception:
+            max_rows = 200
+
+        df_all, df_show = av.compute_selected_transactions(self._df_filtered, sel_accounts, max_rows=max_rows)
+
+        if df_all is None or df_all.empty:
+            self._lbl_tx_summary.config(text="Oppsummering: (ingen rader)")
             return
 
-        df_sel_all = self._df_filtered[self._df_filtered["Konto"].isin(sel_accounts)].copy()
-
         # Totals for full selection
-        bel_all = pd.to_numeric(df_sel_all.get("Beløp", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
-        total_rows = len(df_sel_all)
+        bel_all = pd.to_numeric(df_all.get("Beløp", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+        total_rows = len(df_all)
         total_sum = float(bel_all.sum())
 
         # Display subset
-        max_rows = int(self._var_max_rows.get() or 200)
-        if max_rows <= 0:
-            max_rows = 200
-        df_show = df_sel_all.head(max_rows)
         shown_rows = len(df_show)
         bel_show = pd.to_numeric(df_show.get("Beløp", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
         shown_sum = float(bel_show.sum())
@@ -461,36 +619,31 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 )
             )
 
-        # Column fallbacks
-        def _get_kunder(r: pd.Series) -> str:
-            for c in ("Kunder", "Kundenavn", "Kunde", "Leverandør", "Motpart"):
-                if c in r.index:
-                    v = r.get(c)
-                    if v is not None and str(v).strip() != "":
-                        return str(v)
-            return ""
+        # Bygg visnings-DF (renser Kunder, formaterer Dato)
+        df_view = av.build_transactions_view_df(df_show, tx_cols=self.TX_COLS)
 
-        for _, row in df_show.iterrows():
-            bilag = konto_to_str(row.get("Bilag", ""))
-            belop_val = row.get("Beløp", "")
-            belop_txt = formatting.fmt_amount(belop_val)
-            tekst = str(row.get("Tekst", "") or "")
-            kunder = _get_kunder(row)
-            konto = konto_to_str(row.get("Konto", ""))
-            kontonavn = str(row.get("Kontonavn", "") or "")
-            dato_txt = formatting.fmt_date(row.get("Dato", ""))
-
-            tags = ()
+        # Sett inn rader
+        for row in df_view.itertuples(index=False):
+            belop_val = getattr(row, "Beløp", 0.0)
             try:
-                if float(pd.to_numeric(belop_val, errors="coerce")) < 0:
-                    tags = ("neg",)
+                bel_float = float(belop_val)
             except Exception:
-                pass
+                bel_float = 0.0
+
+            tags = ("neg",) if bel_float < 0 else ()
 
             self._tx_tree.insert(
                 "",
                 "end",
-                values=(bilag, belop_txt, tekst, kunder, konto, kontonavn, dato_txt),
+                values=(
+                    getattr(row, "Bilag", ""),
+                    formatting.fmt_amount(bel_float),
+                    getattr(row, "Tekst", ""),
+                    getattr(row, "Kunder", ""),
+                    getattr(row, "Konto", ""),
+                    getattr(row, "Kontonavn", ""),
+                    getattr(row, "Dato", ""),
+                ),
                 tags=tags,
             )
 
@@ -511,7 +664,6 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         item = sel[0]
 
         bilag = ""
-        # Prefer Treeview-set på kolonnenavn
         try:
             bilag = str(self._tx_tree.set(item, "Bilag") or "")
         except Exception:
@@ -528,178 +680,49 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         return str(bilag).strip()
 
     def _open_bilag_drilldown_from_tx_selection(self) -> None:
-        """Åpne bilagsdrill basert på valgt transaksjon i listen."""
         bilag = self._get_selected_bilag_from_tx_tree()
         if not bilag:
-            if messagebox is not None:
-                try:
-                    messagebox.showinfo("Bilagsdrill", "Velg en transaksjon i listen først.")
-                except Exception:
-                    pass
+            _safe_showinfo("Bilagsdrill", "Velg en transaksjon i listen først.")
             return
         self._open_bilag_drilldown_for_bilag(bilag)
 
+    def _resolve_df_all(self) -> Optional[pd.DataFrame]:
+        """Hent "alle transaksjoner" (grunnlag for drilldown/motpost).
 
-    # ---------------------------------------------------------------------
-    # Motpostanalyse (Analyse -> Motpost)
-    # ---------------------------------------------------------------------
-
-    def _open_motpost(self) -> None:
-        """Åpne en enkel motpostanalyse for valgte kontoer.
-
-        Prinsipp:
-        - Bruk *gjeldende filter* for å finne hvilke bilag som inngår (scope)
-        - Når bilagene er identifisert, hentes alle linjer for disse bilagene
-          fra full datasett slik at motposter alltid blir med.
+        NB: Enkelte tester bruker AnalysePage.__new__ og setter bare noen felter
+        manuelt. Derfor må denne metoden bruke getattr og tåle at _df_all ikke finnes.
         """
-
-        accounts = self._get_selected_accounts()
-        if not accounts:
-            if messagebox is not None:
-                try:
-                    messagebox.showinfo("Motpost", "Velg minst én konto i pivot-listen først.")
-                except Exception:
-                    pass
-            return
-
-        # Fullt datasett
-        df_all: Optional[pd.DataFrame] = None
+        df_self = getattr(self, "_df_all", None)
+        if isinstance(df_self, pd.DataFrame):
+            return df_self
         if isinstance(getattr(self, "dataset", None), pd.DataFrame):
-            df_all = self.dataset
-        if df_all is None or df_all.empty:
-            if isinstance(getattr(session, "dataset", None), pd.DataFrame):
-                df_all = session.dataset
-
-        if df_all is None or df_all.empty:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror("Motpost", "Fant ingen datasett (dataset) å analysere.")
-                except Exception:
-                    pass
-            return
-
-        # Minimumskrav
-        required_cols = {"Bilag", "Konto", "Beløp"}
-        missing = [c for c in required_cols if c not in df_all.columns]
-        if missing:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror(
-                        "Motpost",
-                        "Datasettet mangler nødvendige kolonner: " + ", ".join(missing),
-                    )
-                except Exception:
-                    pass
-            return
-
-        df_filtered = self._df_filtered if isinstance(getattr(self, "_df_filtered", None), pd.DataFrame) else None
-        df_scope_source = df_filtered if df_filtered is not None and not df_filtered.empty else df_all
-
-        accounts_set = set(accounts)
-        konto_norm = df_scope_source["Konto"].map(konto_to_str)
-        mask_sel = konto_norm.isin(accounts_set)
-
-        bilag_keys = (
-            df_scope_source.loc[mask_sel, "Bilag"]
-            .astype(str)
-            .str.strip()
-            .str.replace(r"\.0$", "", regex=True)
-            .replace({"nan": "", "None": ""})
-        )
-        bilag_list = [b for b in bilag_keys.unique().tolist() if b]
-
-        if not bilag_list:
-            if messagebox is not None:
-                try:
-                    messagebox.showinfo(
-                        "Motpost",
-                        "Fant ingen bilag for valgte kontoer i gjeldende filter.",
-                    )
-                except Exception:
-                    pass
-            return
-
-        # Scope-datasett: alle linjer for scope-bilagene fra full datasett
-        bilag_all = (
-            df_all["Bilag"]
-            .astype(str)
-            .str.strip()
-            .str.replace(r"\.0$", "", regex=True)
-            .replace({"nan": "", "None": ""})
-        )
-        df_scope = df_all.loc[bilag_all.isin(set(bilag_list))].copy()
-
-        if df_scope.empty:
-            if messagebox is not None:
-                try:
-                    messagebox.showinfo("Motpost", "Fant ingen transaksjoner i scope for valgt(e) bilag.")
-                except Exception:
-                    pass
-            return
-
-        if _show_motpost_konto is None:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror("Motpost", "Motpostanalyse er ikke tilgjengelig (mangler GUI-støtte).")
-                except Exception:
-                    pass
-            return
-
-        try:
-            _show_motpost_konto(master=self, df_transactions=df_scope, konto_list=accounts)
-        except Exception as e:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror("Motpost", f"Kunne ikke åpne motpostanalyse.\n\n{e}")
-                except Exception:
-                    pass
-
+            return getattr(self, "dataset")  # type: ignore[return-value]
+        # fallback: global session.dataset
+        df = getattr(session, "dataset", None)
+        return df if isinstance(df, pd.DataFrame) else None
 
     def _open_bilag_drilldown_for_bilag(self, bilag_value: str) -> None:
-        """Åpne bilagsdrill for gitt bilag.
+        df_all = self._resolve_df_all()
+        df_base = self._df_filtered if isinstance(self._df_filtered, pd.DataFrame) else df_all
 
-        - df_base: transaksjoner for valgte kontoer (markeres som "I kontoutvalg")
-        - df_all: hele datasettet (slik at motposter kommer med)
-        """
+        if df_all is None or df_base is None:
+            _safe_showerror("Bilagsdrill", "Ingen datagrunnlag tilgjengelig.")
+            return
+
+        # Scope df_base til valgte kontoer (tests forventer dette)
+        accounts = self._get_selected_accounts()
+        if accounts and "Konto" in df_base.columns:
+            try:
+                konto_norm = df_base["Konto"].map(konto_to_str)
+                df_base = df_base.loc[konto_norm.isin(set(accounts))].copy()
+            except Exception:
+                pass
+
         if _open_bilag_drill_dialog is None:
-            if messagebox is not None:
-                try:
-                    messagebox.showinfo(
-                        "Bilagsdrill",
-                        "Bilagsdrill er ikke tilgjengelig (mangler selection_studio_drill).",
-                    )
-                except Exception:
-                    pass
+            _safe_showerror("Bilagsdrill", "Bilagsdrill-modul er ikke tilgjengelig.")
             return
 
-        df_all = self.dataset if isinstance(self.dataset, pd.DataFrame) else None
-        df_filtered = self._df_filtered if isinstance(self._df_filtered, pd.DataFrame) else None
-
-        if df_all is None:
-            df_all = df_filtered
-        if df_filtered is None:
-            df_filtered = df_all
-
-        if df_all is None or df_filtered is None or not isinstance(df_all, pd.DataFrame) or df_all.empty:
-            if messagebox is not None:
-                try:
-                    messagebox.showinfo("Bilagsdrill", "Ingen data tilgjengelig for drilldown.")
-                except Exception:
-                    pass
-            return
-
-        df_base = df_filtered
-        try:
-            sel_accounts = self._get_selected_accounts()
-        except Exception:
-            sel_accounts = []
-
-        if sel_accounts and "Konto" in df_filtered.columns:
-            df_base = df_filtered[df_filtered["Konto"].isin(sel_accounts)].copy()
-            if df_base.empty:
-                df_base = df_filtered
-
-        # Kjør dialogen – robust mot flere signaturvarianter (bakoverkompat)
+        # Foretrekk signatur med keyword args
         try:
             _open_bilag_drill_dialog(
                 self,
@@ -712,14 +735,10 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         except TypeError:
             pass
         except Exception as e:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror("Bilagsdrill", f"Kunne ikke åpne bilagsdrill.\n\n{e}")
-                except Exception:
-                    pass
+            _safe_showerror("Bilagsdrill", f"Kunne ikke åpne bilagsdrill.\n\n{e}")
             return
 
-        # Eldre aliaser (historiske kall)
+        # Backwards compatible alias
         try:
             _open_bilag_drill_dialog(
                 self,
@@ -732,29 +751,101 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         except TypeError:
             pass
         except Exception as e:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror("Bilagsdrill", f"Kunne ikke åpne bilagsdrill.\n\n{e}")
-                except Exception:
-                    pass
+            _safe_showerror("Bilagsdrill", f"Kunne ikke åpne bilagsdrill.\n\n{e}")
             return
 
-        # Eldste signatur (posisjonelle)
+        # Eldre signatur (positional)
         try:
             _open_bilag_drill_dialog(self, df_base, df_all, bilag_value)
         except Exception as e:
-            if messagebox is not None:
-                try:
-                    messagebox.showerror("Bilagsdrill", f"Kunne ikke åpne bilagsdrill.\n\n{e}")
-                except Exception:
-                    pass
+            _safe_showerror("Bilagsdrill", f"Kunne ikke åpne bilagsdrill.\n\n{e}")
 
     # ---------------------------------------------------------------------
-    # Selection -> Utvalg
+    # Motpostanalyse (Analyse -> Motpost)
+    # ---------------------------------------------------------------------
+
+    def _open_motpost(self) -> None:
+        open_motpost(
+            parent=self,
+            df_filtered=self._df_filtered,
+            df_all=self._resolve_df_all(),
+            selected_accounts=self._get_selected_accounts(),
+            dataset=self.dataset,
+        )
+
+    # ---------------------------------------------------------------------
+    # Excel export
+    # ---------------------------------------------------------------------
+
+    def _ask_save_path(self, *, title: str, suggested_name: str) -> str:
+        if filedialog is None or _running_under_pytest():
+            return ""
+        try:
+            return filedialog.asksaveasfilename(
+                title=title,
+                defaultextension=".xlsx",
+                initialfile=suggested_name,
+                filetypes=[("Excel", "*.xlsx")],
+            )
+        except Exception:
+            return ""
+
+    def _prepare_pivot_export_sheets(self) -> dict[str, pd.DataFrame]:
+        return av.prepare_pivot_export_sheets(self._df_filtered, pivot_df=self._pivot_df_last)
+
+    def _prepare_transactions_export_sheets(self) -> dict[str, pd.DataFrame]:
+        max_rows = 200
+        try:
+            max_rows = int(self._var_max_rows.get() or 200)
+        except Exception:
+            max_rows = 200
+
+        return av.prepare_transactions_export_sheets(
+            self._df_filtered,
+            selected_accounts=self._get_selected_accounts(),
+            max_rows=max_rows,
+            tx_cols=self.TX_COLS,
+        )
+
+    def _export_pivot_to_excel(self) -> None:
+        sheets = self._prepare_pivot_export_sheets()
+        if not sheets:
+            _safe_showinfo("Eksport", "Ingen data å eksportere.")
+            return
+
+        path = self._ask_save_path(title="Eksporter pivot", suggested_name="pivot.xlsx")
+        if not path:
+            return
+
+        try:
+            export_to_excel(path, sheets)
+            _safe_showinfo("Eksport", f"Eksportert til:\n{path}")
+        except Exception as e:
+            log.exception("Eksportfeil")
+            _safe_showerror("Eksport", f"Kunne ikke eksportere.\n\n{e}")
+
+    def _export_transactions_to_excel(self) -> None:
+        sheets = self._prepare_transactions_export_sheets()
+        if not sheets:
+            _safe_showinfo("Eksport", "Ingen transaksjoner å eksportere.")
+            return
+
+        path = self._ask_save_path(title="Eksporter transaksjoner", suggested_name="transaksjoner.xlsx")
+        if not path:
+            return
+
+        try:
+            export_to_excel(path, sheets)
+            _safe_showinfo("Eksport", f"Eksportert til:\n{path}")
+        except Exception as e:
+            log.exception("Eksportfeil")
+            _safe_showerror("Eksport", f"Kunne ikke eksportere.\n\n{e}")
+
+    # ---------------------------------------------------------------------
+    # Utvalg callback
     # ---------------------------------------------------------------------
 
     def _send_to_selection(self, accounts: List[str]) -> None:
-        """Internal helper for tests + callback-based wiring."""
         if self._utvalg_callback is not None:
             self._utvalg_callback(accounts)
 
