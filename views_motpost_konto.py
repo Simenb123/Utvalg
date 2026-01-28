@@ -3,22 +3,18 @@
 Tkinter-visning for motpostanalyse.
 
 Kjerne-/eksport-logikk ligger i :mod:`motpost_konto_core` (pandas/openpyxl).
-
-NB: `page_analyse_actions.open_motpost()` prøver flere signaturer for
-bakoverkompatibilitet. Derfor er `show_motpost_konto()` implementert tolerant.
 """
 
-from __future__ import annotations
-
 import os
-from datetime import datetime
-from typing import Any, Iterable, Optional
+from pathlib import Path
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import ttk, messagebox, filedialog
 
 from formatting import fmt_amount
+from konto_utils import konto_to_str
 
 from motpost_combinations_popup import show_motkonto_combinations_popup
 from motpost_combinations import (
@@ -30,21 +26,31 @@ from motpost_konto_core import (
     build_bilag_details,
     build_motpost_data,
     build_motpost_excel_workbook,
+    _konto_str,
     _fmt_date_ddmmyyyy,
     _fmt_percent_points,
-    _konto_str,
 )
 
 
 class MotpostKontoView(tk.Toplevel):
-    def __init__(self, master: tk.Misc, df_transactions: pd.DataFrame, konto_list: Iterable[str]):
+    def __init__(
+        self,
+        master: tk.Misc,
+        df_transactions: pd.DataFrame,
+        konto_list: list[str] | set[str] | tuple[str, ...],
+        konto_name_map: Optional[dict[str, str]] = None,
+    ):
         super().__init__(master)
         self.title("Motpostanalyse")
         self.geometry("1100x700")
 
         self._df_all = df_transactions
-        self._selected_accounts = {_konto_str(k) for k in (konto_list or [])}
-        self._data: MotpostData = build_motpost_data(self._df_all, self._selected_accounts)
+        # Optional mapping {konto -> kontonavn} for bedre info-tekst (best effort)
+        self._konto_name_map: dict[str, str] = {
+            _konto_str(k): str(v) for k, v in (konto_name_map or {}).items() if str(k).strip()
+        }
+        self._selected_accounts = {_konto_str(k) for k in konto_list}
+        self._data = build_motpost_data(self._df_all, self._selected_accounts)
 
         self._outliers: set[str] = set()
         self._selected_motkonto: Optional[str] = None
@@ -54,13 +60,30 @@ class MotpostKontoView(tk.Toplevel):
         self._build_ui()
         self._render_summary()
 
-    # --- UI ---
+    def _format_selected_accounts(self) -> str:
+        """Formater valgte kontoer for visning i topp-tekst.
+
+        Hvis vi har konto->navn mapping, viser vi "<konto> <navn>".
+        Ellers viser vi kun kontonummer.
+        """
+        if not getattr(self, "_konto_name_map", None):
+            return ", ".join(self._data.selected_accounts)
+        parts: list[str] = []
+        for k in self._data.selected_accounts:
+            name = self._konto_name_map.get(_konto_str(k))
+            if name:
+                parts.append(f"{k} {name}")
+            else:
+                parts.append(k)
+        return ", ".join(parts)
+
+    # --- UI bygging ---
     def _build_ui(self) -> None:
         top = ttk.Frame(self)
         top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=8)
 
         info = (
-            f"Valgte kontoer: {', '.join(self._data.selected_accounts)}  |  "
+            f"Valgte kontoer: {self._format_selected_accounts()}  |  "
             f"Bilag i grunnlag: {self._data.bilag_count}  |  "
             f"Sum valgte kontoer (netto): {fmt_amount(self._data.selected_sum)}  |  "
             f"Kontroll (valgt + mot): {fmt_amount(self._data.control_sum)}"
@@ -71,9 +94,12 @@ class MotpostKontoView(tk.Toplevel):
         btn_frame = ttk.Frame(top)
         btn_frame.pack(side=tk.RIGHT)
 
-        ttk.Button(btn_frame, text="Kombinasjoner", command=self._show_combinations).pack(
-            side=tk.LEFT, padx=(0, 12)
-        )
+        ttk.Button(
+            btn_frame,
+            text="Kombinasjoner",
+            command=self._show_combinations,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+
         ttk.Button(btn_frame, text="Merk outlier", command=self._mark_outlier).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="Nullstill outliers", command=self._clear_outliers).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(btn_frame, text="Eksporter Excel", command=self._export_excel).pack(side=tk.LEFT, padx=(0, 6))
@@ -89,7 +115,7 @@ class MotpostKontoView(tk.Toplevel):
         self._tree_summary = ttk.Treeview(mid, columns=columns, show="headings", selectmode="extended")
         for c in columns:
             self._tree_summary.heading(c, text=c)
-            self._tree_summary.column(c, width=120, anchor=tk.W)
+            self._tree_summary.column(c, width=120 if c != "Tekst" else 300, anchor=tk.W)
 
         self._tree_summary.column("Sum", anchor=tk.E, width=140)
         self._tree_summary.column("% andel", anchor=tk.E, width=90)
@@ -115,24 +141,21 @@ class MotpostKontoView(tk.Toplevel):
 
         ttk.Label(header, text="Bilag for valgt motkonto").pack(side=tk.LEFT)
         ttk.Label(header, text="Vis:").pack(side=tk.LEFT, padx=(10, 2))
-        ttk.Spinbox(
-            header,
-            from_=50,
-            to=5000,
-            increment=50,
-            width=7,
-            textvariable=self._details_limit_var,
-            command=self._refresh_details,
-        ).pack(side=tk.LEFT)
+        sp = ttk.Spinbox(header, from_=50, to=5000, increment=50, width=7, textvariable=self._details_limit_var, command=self._refresh_details)
+        sp.pack(side=tk.LEFT)
 
         ttk.Button(header, text="Drilldown", command=self._drilldown).pack(side=tk.RIGHT)
 
-        detail_cols = ("Bilag", "Dato", "Tekst", "Sum valgt", "Sum mot", "Diff")
-        self._tree_details = ttk.Treeview(bottom, columns=detail_cols, show="headings", selectmode="browse")
-        for c in detail_cols:
+        columns2 = ("Bilag", "Dato", "Tekst", "Beløp (valgte kontoer)", "Motbeløp", "Kontoer i bilag")
+        self._tree_details = ttk.Treeview(bottom, columns=columns2, show="headings", selectmode="extended")
+        for c in columns2:
             self._tree_details.heading(c, text=c)
-            anchor = tk.E if c in {"Sum valgt", "Sum mot", "Diff"} else tk.W
-            self._tree_details.column(c, width=130 if c != "Tekst" else 420, anchor=anchor)
+            self._tree_details.column(c, width=120, anchor=tk.W)
+
+        self._tree_details.column("Tekst", width=350)
+        self._tree_details.column("Beløp (valgte kontoer)", anchor=tk.E, width=160)
+        self._tree_details.column("Motbeløp", anchor=tk.E, width=120)
+        self._tree_details.column("Kontoer i bilag", width=180)
 
         yscroll2 = ttk.Scrollbar(bottom, orient=tk.VERTICAL, command=self._tree_details.yview)
         self._tree_details.configure(yscrollcommand=yscroll2.set)
@@ -141,6 +164,10 @@ class MotpostKontoView(tk.Toplevel):
         yscroll2.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._tree_details.tag_configure("neg", foreground="red")
+
+        # Aktiver multiselect + dobbelklikk/Enter for drilldown på bilag-listen
+        configure_bilag_details_tree(self._tree_details, open_bilag_callback=self._open_bilag_drilldown)
+
 
     # --- Rendering ---
     def _render_summary(self) -> None:
@@ -177,8 +204,6 @@ class MotpostKontoView(tk.Toplevel):
         if not self._selected_motkonto:
             return
 
-        # build_bilag_details har signatur (data, motkonto). Bruk posisjonelle
-        # argumenter for å unngå "unexpected keyword" ved refaktor.
         df_b = build_bilag_details(self._data, self._selected_motkonto)
         if df_b is None or df_b.empty:
             return
@@ -190,18 +215,18 @@ class MotpostKontoView(tk.Toplevel):
             bilag = row.get("Bilag", "")
             dato = _fmt_date_ddmmyyyy(row.get("Dato"))
             tekst = row.get("Tekst", "")
-            sum_valgt = float(row.get("Beløp (valgte kontoer)", 0.0))
-            sum_mot = float(row.get("Motbeløp", 0.0))
-            diff = sum_valgt + sum_mot
+            bel_sel = float(row.get("Beløp (valgte kontoer)", 0.0))
+            motb = float(row.get("Motbeløp", 0.0))
+            kontoer = row.get("Kontoer i bilag", "")
 
             tags: list[str] = []
-            if sum_valgt < 0 or sum_mot < 0 or diff < 0:
+            if bel_sel < 0 or motb < 0:
                 tags.append("neg")
 
             self._tree_details.insert(
                 "",
                 tk.END,
-                values=(bilag, dato, tekst, fmt_amount(sum_valgt), fmt_amount(sum_mot), fmt_amount(diff)),
+                values=(bilag, dato, tekst, fmt_amount(bel_sel), fmt_amount(motb), kontoer),
                 tags=tuple(tags),
             )
 
@@ -212,6 +237,7 @@ class MotpostKontoView(tk.Toplevel):
             self._selected_motkonto = None
             self._refresh_details()
             return
+        # Bruk første valgte som "aktiv" motkonto for bilagsvisning
         item = sel[0]
         motkonto = self._tree_summary.item(item, "values")[0]
         self._selected_motkonto = _konto_str(motkonto)
@@ -233,19 +259,22 @@ class MotpostKontoView(tk.Toplevel):
 
     def _show_combinations(self) -> None:
         """Vis en enkel oversikt over motkonto-kombinasjoner (popup)."""
-
         try:
             df_scope = self._data.df_scope
             if df_scope is None or df_scope.empty:
                 messagebox.showinfo("Kombinasjoner", "Ingen data i grunnlaget.")
                 return
 
-            selected_set = {str(k) for k in self._data.selected_accounts if str(k).strip()}
+            df_combo = build_motkonto_combinations(
+                df_scope,
+                self._data.selected_accounts,
+                outlier_motkonto=self._outliers,
+            )
 
-            # build_motkonto_combinations forventer (df_scope, selected_accounts, ...)
-            df_combo = build_motkonto_combinations(df_scope, selected_set, outlier_motkonto=self._outliers)
             df_combo_per = build_motkonto_combinations_per_selected_account(
-                df_scope, selected_set, outlier_motkonto=self._outliers
+                df_scope,
+                self._data.selected_accounts,
+                outlier_motkonto=self._outliers,
             )
 
             bilag_total = int(df_scope["Bilag"].astype(str).nunique()) if "Bilag" in df_scope.columns else 0
@@ -266,7 +295,7 @@ class MotpostKontoView(tk.Toplevel):
             messagebox.showerror("Kombinasjoner", f"Kunne ikke vise kombinasjoner:\n{e}")
 
     def _export_excel(self) -> None:
-        default_name = f"motpostanalyse_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.xlsx"
+        default_name = "motpostanalyse.xlsx"
         path = filedialog.asksaveasfilename(
             parent=self,
             title="Lagre Excel",
@@ -285,8 +314,9 @@ class MotpostKontoView(tk.Toplevel):
             wb.save(path)
             messagebox.showinfo("Motpostanalyse", f"Eksportert til Excel:\n{path}")
 
-            # Åpne filen automatisk etter eksport (best-effort)
+            # Aapne filen automatisk etter eksport (plattformsikkert)
             try:
+                import os
                 import sys
                 import subprocess
 
@@ -297,16 +327,13 @@ class MotpostKontoView(tk.Toplevel):
                 else:
                     subprocess.Popen(["xdg-open", path])
             except Exception:
+                # Ikke kritisk om dette feiler (f.eks. i testmiljo)
                 pass
         except Exception as e:
             messagebox.showerror("Motpostanalyse", f"Kunne ikke eksportere til Excel:\n{e}")
 
-    def _drilldown(self) -> None:
-        sel = self._tree_details.selection()
-        if not sel:
-            messagebox.showinfo("Motpostanalyse", "Velg et bilag i listen for å åpne drilldown.")
-            return
-        bilag = self._tree_details.item(sel[0], "values")[0]
+    def _open_bilag_drilldown(self, bilag: str) -> None:
+        """Åpner bilagsdrilldown for ett bilag."""
         bilag = _konto_str(bilag)
         try:
             from views_bilag_drill import BilagDrillDialog
@@ -316,79 +343,143 @@ class MotpostKontoView(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Motpostanalyse", f"Kunne ikke åpne drilldown:\n{e}")
 
+    def _drilldown(self) -> None:
+        bilag = treeview_first_selected_value(self._tree_details, col_index=0, value_transform=_konto_str)
+        if not bilag:
+            messagebox.showinfo("Motpostanalyse", "Velg et bilag i listen for å åpne drilldown.")
+            return
+        self._open_bilag_drilldown(bilag)
+
+
+def treeview_value_from_iid(tree: Any, iid: Any, *, col_index: int = 0, value_transform: Callable[[Any], str] | None = None) -> Optional[str]:
+    """Hent en verdi fra Treeview.item(iid, 'values')[col_index]."""
+    if iid is None:
+        return None
+    try:
+        values = tree.item(iid, "values")
+    except Exception:
+        return None
+    if not values or len(values) <= col_index:
+        return None
+    raw = values[col_index]
+    try:
+        return value_transform(raw) if value_transform else str(raw)
+    except Exception:
+        return str(raw)
+
+
+def treeview_first_selected_value(tree: Any, *, col_index: int = 0, value_transform: Callable[[Any], str] | None = None) -> Optional[str]:
+    """Hent verdi fra første markerte rad i Treeview."""
+    try:
+        sel = list(tree.selection())
+    except Exception:
+        return None
+    if not sel:
+        return None
+    return treeview_value_from_iid(tree, sel[0], col_index=col_index, value_transform=value_transform)
+
+
+def _on_tree_double_click_open_value(event: Any, tree: Any, open_value_callback: Callable[[str], None], *, col_index: int = 0) -> str:
+    """Dobbelklikk: identifiser raden under mus og åpne drilldown."""
+    try:
+        iid = tree.identify_row(event.y)
+    except Exception:
+        iid = None
+    if iid:
+        try:
+            tree.selection_set(iid)
+        except Exception:
+            pass
+        value = treeview_value_from_iid(tree, iid, col_index=col_index, value_transform=_konto_str)
+        if value:
+            open_value_callback(value)
+    return "break"
+
+
+def _on_tree_enter_open_first_selected(_event: Any, tree: Any, open_value_callback: Callable[[str], None], *, col_index: int = 0) -> str:
+    value = treeview_first_selected_value(tree, col_index=col_index, value_transform=_konto_str)
+    if value:
+        open_value_callback(value)
+    return "break"
+
+
+def configure_bilag_details_tree(tree: Any, *, open_bilag_callback: Callable[[str], None]) -> None:
+    """Fellesoppsett for bilag-listen i motpostanalyse:
+    - Multiselect (extended)
+    - Dobbelklikk åpner drilldown for bilaget
+    - Enter åpner drilldown for første markerte bilag
+
+    (Duck typing slik at dette kan testes uten Tk.)
+    """
+    try:
+        tree.configure(selectmode="extended")
+    except Exception:
+        pass
+    # Bind både med og uten 'add' for å støtte dummy-trær i tester
+    try:
+        tree.bind("<Double-1>", lambda e: _on_tree_double_click_open_value(e, tree, open_bilag_callback, col_index=0), add="+")
+        tree.bind("<Return>", lambda e: _on_tree_enter_open_first_selected(e, tree, open_bilag_callback, col_index=0), add="+")
+        return
+    except Exception:
+        pass
+    try:
+        tree.bind("<Double-1>", lambda e: _on_tree_double_click_open_value(e, tree, open_bilag_callback, col_index=0))
+        tree.bind("<Return>", lambda e: _on_tree_enter_open_first_selected(e, tree, open_bilag_callback, col_index=0))
+    except Exception:
+        pass
 
 def show_motpost_konto(
-    master: tk.Misc,
+    master: Any,
     df_transactions: Optional[pd.DataFrame] = None,
-    konto_list: Optional[Iterable[str]] = None,
-    *args: Any,
-    **kwargs: Any,
+    konto_list: Optional[Sequence[str]] = None,
+    konto_name_map: Optional[dict[str, str]] = None,
+    *,
+    # Vanlige alias brukt i andre deler av kodebasen / eldre caller-signaturer
+    df_all: Optional[pd.DataFrame] = None,
+    selected_accounts: Optional[Sequence[str]] = None,
+    selected_kontoer: Optional[Sequence[str]] = None,
+    accounts: Optional[Sequence[str]] = None,
+    **_: Any,
 ) -> None:
-    """Entry-point brukt fra Analyse-fanen (tolerant signatur).
+    """Entry-point brukt fra Analyse-fanen.
 
-    Kallere kan sende:
-      - (master, df, accounts)
-      - (master, df_all=df, selected_accounts=accounts, konto_name_map=...)
-      - (master, df, accounts, konto_name_map)  # eldre fallback
+    Denne funksjonen er med vilje *bakoverkompatibel* og godtar flere signaturer:
+
+    - show_motpost_konto(master, df, konto_list)
+    - show_motpost_konto(master, df, konto_list, konto_name_map)
+    - show_motpost_konto(master=..., df_all=df, selected_accounts=[...], konto_name_map={...})
+
+    UI-klassen :class:`MotpostKontoView` forventer et DataFrame med transaksjoner og
+    en liste med valgte kontoer. Konto-navn mapping er "best effort".
     """
 
-    df = df_transactions if isinstance(df_transactions, pd.DataFrame) else None
+    df = df_transactions if df_transactions is not None else df_all
     if df is None:
-        for k in ("df_all", "df_base", "df_transactions"):
-            v = kwargs.get(k)
-            if isinstance(v, pd.DataFrame):
-                df = v
-                break
-
-    accounts_obj: Any = konto_list
-    if accounts_obj is None:
-        for k in ("konto_list", "selected_accounts", "accounts"):
-            v = kwargs.get(k)
-            if v is not None:
-                accounts_obj = v
-                break
-
-    if accounts_obj is None and args:
-        cand = args[0]
-        if not isinstance(cand, dict):
-            accounts_obj = cand
-
-    if isinstance(accounts_obj, dict):
-        accounts_obj = None
-
-    accounts: list[str] = []
-    if accounts_obj is not None:
-        if isinstance(accounts_obj, (str, int, float)):
-            accounts = [_konto_str(accounts_obj)]
-        else:
-            try:
-                for a in accounts_obj:
-                    s = _konto_str(a).strip()
-                    if s and s not in accounts:
-                        accounts.append(s)
-            except TypeError:
-                s = _konto_str(accounts_obj).strip()
-                if s:
-                    accounts = [s]
-
-    if df is None or df.empty:
-        if "PYTEST_CURRENT_TEST" not in os.environ:
-            try:
-                messagebox.showerror("Motpostanalyse", "Kunne ikke åpne motpostanalyse: mangler datagrunnlag.")
-            except Exception:
-                pass
+        # Best effort: ikke krasj – ingen data å vise
         return
 
-    if not accounts:
-        if "PYTEST_CURRENT_TEST" not in os.environ:
-            try:
-                messagebox.showerror("Motpostanalyse", "Kunne ikke åpne motpostanalyse: ingen kontoer valgt.")
-            except Exception:
-                pass
+    sel = konto_list or selected_accounts or selected_kontoer or accounts
+    if not sel:
+        # Typisk feiltilfelle: kall uten kontoer -> ikke åpne vindu
         return
 
-    MotpostKontoView(master, df, accounts)
+    konto_norm = [_konto_str(k) for k in sel if str(k).strip()]
+    if not konto_norm:
+        return
 
+    # Robust opprettelse: støtte både keyword og positional mapping i DummyView/tester
+    try:
+        MotpostKontoView(master, df, list(konto_norm), konto_name_map=konto_name_map)
+        return
+    except TypeError:
+        pass
+    try:
+        MotpostKontoView(master, df, list(konto_norm), konto_name_map)
+        return
+    except TypeError:
+        pass
+
+    MotpostKontoView(master, df, list(konto_norm))
 
 # Bakoverkompatibilitet (noen steder kan ha importert underscorenavnet)
 _show_motpost_konto = show_motpost_konto

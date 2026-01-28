@@ -35,7 +35,11 @@ class DummyTree:
         return tuple(self._selection)
 
     def selection_set(self, items):
-        self._selection = list(items)
+        # ttk.Treeview lar både enkelt-iid og liste; vi støtter begge.
+        if isinstance(items, (list, tuple)):
+            self._selection = list(items)
+        else:
+            self._selection = [items]
 
 
 class DummyListbox:
@@ -100,7 +104,7 @@ def test_treeview_selection_sums_parses_norwegian_numbers() -> None:
     assert abs(float(sums["Beløp"]) - (1234.50 - 200.00 - 34.50)) < 1e-9
 
 
-def test_treeview_selection_to_tsv_includes_header_and_rows() -> None:
+def test_treeview_selection_to_tsv_default_has_no_header() -> None:
     tree = DummyTree(
         columns=["Konto", "Sum"],
         values={
@@ -110,9 +114,23 @@ def test_treeview_selection_to_tsv_includes_header_and_rows() -> None:
     )
     tree.selection_set(["a", "b"])
     tsv = ui_hotkeys.treeview_selection_to_tsv(tree)
-    assert tsv.splitlines()[0] == "Konto\tSum"
-    assert "1000\t10" in tsv
-    assert "2000\t20" in tsv
+    lines = tsv.splitlines()
+    assert lines[0] == "1000\t10"
+    assert "2000\t20" in lines
+
+
+def test_treeview_selection_to_tsv_can_include_header() -> None:
+    tree = DummyTree(
+        columns=["Konto", "Sum"],
+        values={
+            "a": {"Konto": "1000", "Sum": "10"},
+        },
+    )
+    tree.selection_set(["a"])
+    tsv = ui_hotkeys.treeview_selection_to_tsv(tree, include_headers=True)
+    lines = tsv.splitlines()
+    assert lines[0] == "Konto\tSum"
+    assert lines[1] == "1000\t10"
 
 
 def test_install_global_hotkeys_ctrl_a_ctrl_c_and_selection_summary() -> None:
@@ -139,9 +157,15 @@ def test_install_global_hotkeys_ctrl_a_ctrl_c_and_selection_summary() -> None:
     root.bindings["<Control-a>"][0](ev)
     assert set(tree.selection()) == {"i1", "i2"}
 
-    # Ctrl+C copies TSV to clipboard
+    # Ctrl+C copies TSV to clipboard (uten header)
     root.bindings["<Control-c>"][0](ev)
-    assert root.clipboard.startswith("Bilag\tBeløp")
+    assert "1\t100" in root.clipboard
+    assert "2\t200" in root.clipboard
+    assert not root.clipboard.splitlines()[0].startswith("Bilag\t")
+
+    # Ctrl+Shift+C copies TSV med header
+    root.bindings["<Control-C>"][0](ev)
+    assert root.clipboard.splitlines()[0] == "Bilag\tBeløp"
     assert "1\t100" in root.clipboard
 
     # Selection summary updates status
@@ -162,4 +186,4 @@ def test_listbox_select_all_and_copy_lines() -> None:
     assert lb.curselection() == (0, 1, 2)
 
     root.bindings["<Control-c>"][0](ev)
-    assert root.clipboard == "a\nb\nc"
+    assert root.clipboard.splitlines() == ["a", "b", "c"]

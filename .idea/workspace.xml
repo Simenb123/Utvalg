@@ -5,29 +5,13 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/analyse_viewdata.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost_combinations.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost_combinations_popup.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost_excel.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost_konto_core.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_actions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio_ui_builder.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio_ui_logic.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_analyse_viewdata.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_viewdata_integration.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_ui_hotkeys.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_views_motpost_konto_entrypoint.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_views_motpost_konto_smoke.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ui_hotkeys.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ui_selection_summary.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_views_motpost_konto_interactions.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/selectionstudio_filters.py" beforeDir="false" afterPath="$PROJECT_DIR$/selectionstudio_filters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ui_hotkeys.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_hotkeys.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_hotkeys.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_hotkeys.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_selection_summary.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_selection_summary.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views_motpost_konto.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_motpost_konto.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_selection_studio_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio_ui.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -89,8 +73,8 @@
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc\README_ARCHIVE" />
     </key>
@@ -338,7 +322,14 @@
       <option name="presentableId" value="LOCAL−00026" />
       <updated>1768863437436</updated>
     </task>
-    <option name="localTasksCounter" value="27" />
+    <task id="LOCAL−00027" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1769610778189</created>
+      <option name="number" value="LOCAL−00027" />
+      <option name="presentableId" value="LOCAL−00027" />
+      <updated>1769610778189</updated>
+    </task>
+    <option name="localTasksCounter" value="28" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

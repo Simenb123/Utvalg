@@ -4,7 +4,10 @@ Globale hotkeys + kopiering til clipboard + (valgfritt) selection-summary.
 
 Hotkeys:
   - Ctrl+A: marker alle rader i aktiv Treeview/Listbox
-  - Ctrl+C: kopier markerte rader til clipboard (Treeview -> TSV, Listbox -> linjer)
+  - Ctrl+C: kopier markerte rader til clipboard
+      - Treeview: TSV *uten* header (Excel-vennlig ved liming i forhåndsmarkert område)
+      - Listbox: én linje per element
+  - Ctrl+Shift+C: kopier Treeview *med* header (kolonnenavn)
 
 Selection summary:
   - Valgfritt, men default ON.
@@ -13,6 +16,8 @@ Selection summary:
 Design:
 - Duck typing: fungerer i pytest uten Tk-vindu.
 - Idempotent install: kan kalles flere ganger.
+- Ikke “stjel” Ctrl+A/C i tekstfelt: vi returnerer kun "break" når vi faktisk håndterer
+  Treeview/Listbox, ellers lar vi default oppførsel fungere (Entry/Text).
 """
 
 from __future__ import annotations
@@ -48,6 +53,21 @@ def _tree_get_heading_text(tree: Any, col_id: str) -> str:
         return str(txt) if txt else str(col_id)
     except Exception:
         return str(col_id)
+
+
+def _sanitize_cell_text(v: Any) -> str:
+    """Saniter celler slik at TSV blir rektangulær og Excel-vennlig.
+
+    - Tabulatorer og linjeskift i celler vil ellers gi ekstra kolonner/rader.
+    """
+    if v is None:
+        return ""
+    s = str(v)
+    # Standardiser NBSP og fjern tab/linjeskift
+    s = s.replace("\u00A0", " ")
+    s = s.replace("\t", " ")
+    s = s.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return s
 
 
 # --------------------------------------------------------------------------------------
@@ -86,7 +106,7 @@ def listbox_select_all(listbox: Any) -> int:
 # Clipboard copy
 # --------------------------------------------------------------------------------------
 
-def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = True) -> str:
+def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = False) -> str:
     """Kopier markerte rader i Treeview som TSV (Excel-vennlig)."""
     if not _tree_is_treeview(tree):
         return ""
@@ -97,12 +117,12 @@ def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = True) -> str
         selected = []
 
     cols = _tree_get_columns(tree)
-    if not cols:
+    if not cols or not selected:
         return ""
 
     lines: list[str] = []
     if include_headers:
-        headers = [_tree_get_heading_text(tree, c) for c in cols]
+        headers = [_sanitize_cell_text(_tree_get_heading_text(tree, c)) for c in cols]
         lines.append("\t".join(headers))
 
     for iid in selected:
@@ -112,10 +132,11 @@ def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = True) -> str
                 v = tree.set(iid, c)
             except Exception:
                 v = ""
-            row.append("" if v is None else str(v))
+            row.append(_sanitize_cell_text(v))
         lines.append("\t".join(row))
 
-    return "\n".join(lines)
+    # Excel på Windows liker CRLF best, men splitlines() håndterer begge i tester.
+    return "\r\n".join(lines)
 
 
 def listbox_selection_to_lines(listbox: Any) -> str:
@@ -128,13 +149,17 @@ def listbox_selection_to_lines(listbox: Any) -> str:
     except Exception:
         idxs = []
 
+    if not idxs:
+        return ""
+
     lines: list[str] = []
     for i in idxs:
         try:
-            lines.append(str(listbox.get(i)))
+            lines.append(_sanitize_cell_text(listbox.get(i)))
         except Exception:
             continue
-    return "\n".join(lines)
+
+    return "\r\n".join(lines)
 
 
 # --------------------------------------------------------------------------------------
@@ -145,31 +170,50 @@ def listbox_selection_to_lines(listbox: Any) -> str:
 class GlobalHotkeyHandler:
     root: Any
 
-    def on_ctrl_a(self, _event: Any) -> str:
+    def on_ctrl_a(self, _event: Any) -> str | None:
         target = getattr(self.root, "focus_get", lambda: None)()
         if _tree_is_treeview(target):
             treeview_select_all(target)
-        elif _listbox_is_listbox(target):
+            return "break"
+        if _listbox_is_listbox(target):
             listbox_select_all(target)
-        return "break"
+            return "break"
+        # Ikke en liste-widget: la standard Ctrl+A oppførsel (f.eks. Entry) fungere.
+        return None
 
-    def on_ctrl_c(self, _event: Any) -> str:
+    def _copy_to_clipboard(self, txt: str) -> None:
+        if not txt:
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(txt)
+        except Exception:
+            # Clipboard kan feile i enkelte test-/CI-miljøer.
+            pass
+
+    def on_ctrl_c(self, _event: Any) -> str | None:
+        """Ctrl+C: kopier uten header."""
         target = getattr(self.root, "focus_get", lambda: None)()
 
         if _tree_is_treeview(target):
-            txt = treeview_selection_to_tsv(target)
+            txt = treeview_selection_to_tsv(target, include_headers=False)
         elif _listbox_is_listbox(target):
             txt = listbox_selection_to_lines(target)
         else:
-            txt = ""
+            # Ikke en liste-widget: la standard Ctrl+C (kopier tekst i Entry/Text) fungere.
+            return None
 
-        if txt:
-            try:
-                self.root.clipboard_clear()
-                self.root.clipboard_append(txt)
-            except Exception:
-                pass
+        self._copy_to_clipboard(txt)
         return "break"
+
+    def on_ctrl_shift_c(self, _event: Any) -> str | None:
+        """Ctrl+Shift+C: kopier med header (Treeview)."""
+        target = getattr(self.root, "focus_get", lambda: None)()
+        if _tree_is_treeview(target):
+            txt = treeview_selection_to_tsv(target, include_headers=True)
+            self._copy_to_clipboard(txt)
+            return "break"
+        return None
 
 
 @dataclass
@@ -200,7 +244,7 @@ def install_global_hotkeys(
 ) -> Optional[GlobalHotkeyHandler]:
     """Installer globale hotkeys (idempotent).
 
-    `status_setter` er nytt og brukes av selection-summary for å skrive tekst et sted.
+    `status_setter` brukes av selection-summary for å skrive tekst et sted.
     Vi aksepterer også **_ignored for å være robust mot gamle parametre i kall.
 
     Returnerer handler (for testing), eller eksisterende handler hvis allerede installert.
@@ -221,8 +265,10 @@ def install_global_hotkeys(
 
         if enable_ctrl_c:
             try:
+                # Ctrl+C (uten shift) -> uten header
                 root.bind_all("<Control-c>", st.handler.on_ctrl_c, add="+")
-                root.bind_all("<Control-C>", st.handler.on_ctrl_c, add="+")
+                # Ctrl+Shift+C -> med header
+                root.bind_all("<Control-C>", st.handler.on_ctrl_shift_c, add="+")
             except Exception:
                 pass
 
