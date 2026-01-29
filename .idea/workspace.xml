@@ -5,13 +5,22 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_views_motpost_konto_interactions.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/doc/overstyring_handover.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/override_check_registry.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/override_checks.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/checks_amounts.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/checks_duplicates.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/checks_risk.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/core.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/registry.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/ui.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/ui_entrypoint.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/ui_panel.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/overstyring/ui_params.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_overstyring_checks.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/views_override_checks.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_ui_hotkeys.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ui_hotkeys.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui_hotkeys.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_hotkeys.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui_selection_summary.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_selection_summary.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_motpost_konto.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_motpost_konto.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -73,9 +82,10 @@
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\overstyring" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc\README_ARCHIVE" />
     </key>
   </component>
@@ -329,7 +339,14 @@
       <option name="presentableId" value="LOCAL−00027" />
       <updated>1769610778189</updated>
     </task>
-    <option name="localTasksCounter" value="28" />
+    <task id="LOCAL−00028" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1769628578000</created>
+      <option name="number" value="LOCAL−00028" />
+      <option name="presentableId" value="LOCAL−00028" />
+      <updated>1769628578001</updated>
+    </task>
+    <option name="localTasksCounter" value="29" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

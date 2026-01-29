@@ -464,13 +464,14 @@ class SelectionStudio(ttk.Frame):
         min_value = self.var_min_amount.get()
         max_value = self.var_max_amount.get()
 
-        # Beløp fra/til skal filtrere på netto (signert) – ikke absolutt.
+        # Beløp fra/til: når retning=Alle er det mest intuitivt å filtrere på abs(netto).
+        # For Kun debet/kredit bruker vi signert filter, siden retning allerede avgrenser fortegn.
         df_filtered, _summary = filter_selectionstudio_dataframe(
             df,
             direction=direction,
             min_value=min_value,
             max_value=max_value,
-            use_abs=False,
+            use_abs=(direction == "Alle"),
         )
         return df_filtered
 
