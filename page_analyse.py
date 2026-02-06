@@ -33,6 +33,7 @@ except Exception:  # pragma: no cover
 
 import pandas as pd
 
+import analyse_viewdata
 import formatting
 import session
 from analyse_model import build_pivot_by_account
@@ -436,18 +437,20 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._lbl_tx_summary.config(text="Oppsummering: (mangler Konto-kolonne)")
             return
 
-        df_sel_all = self._df_filtered[self._df_filtered["Konto"].isin(sel_accounts)].copy()
+        # Display subset
+        max_rows = int(self._var_max_rows.get() or 200)
+        if max_rows <= 0:
+            max_rows = 200
+
+        df_sel_all, df_show = analyse_viewdata.compute_selected_transactions(
+            self._df_filtered, sel_accounts, max_rows=max_rows
+        )
 
         # Totals for full selection
         bel_all = pd.to_numeric(df_sel_all.get("Beløp", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
         total_rows = len(df_sel_all)
         total_sum = float(bel_all.sum())
 
-        # Display subset
-        max_rows = int(self._var_max_rows.get() or 200)
-        if max_rows <= 0:
-            max_rows = 200
-        df_show = df_sel_all.head(max_rows)
         shown_rows = len(df_show)
         bel_show = pd.to_numeric(df_show.get("Beløp", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
         shown_sum = float(bel_show.sum())
@@ -464,28 +467,16 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 )
             )
 
-        # Column fallbacks
-        def _get_kunder(r: pd.Series) -> str:
-            for c in ("Kunder", "Kundenavn", "Kunde", "Leverandør", "Motpart"):
-                if c in r.index:
-                    v = r.get(c)
-                    if v is not None and str(v).strip() != "":
-                        return str(v)
-            return ""
+        # Bygg visnings-DF med kanoniske kolonner + ryddige strenger
+        df_show_view = analyse_viewdata.build_transactions_view_df(df_show, tx_cols=self.TX_COLS)
 
-        for _, row in df_show.iterrows():
-            bilag = konto_to_str(row.get("Bilag", ""))
-            belop_val = row.get("Beløp", "")
+        for r in df_show_view.itertuples(index=False):
+            belop_val = getattr(r, "Beløp", 0.0)
             belop_txt = formatting.fmt_amount(belop_val)
-            tekst = str(row.get("Tekst", "") or "")
-            kunder = _get_kunder(row)
-            konto = konto_to_str(row.get("Konto", ""))
-            kontonavn = str(row.get("Kontonavn", "") or "")
-            dato_txt = formatting.fmt_date(row.get("Dato", ""))
 
             tags = ()
             try:
-                if float(pd.to_numeric(belop_val, errors="coerce")) < 0:
+                if float(belop_val) < 0:
                     tags = ("neg",)
             except Exception:
                 pass
@@ -493,7 +484,15 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._tx_tree.insert(
                 "",
                 "end",
-                values=(bilag, belop_txt, tekst, kunder, konto, kontonavn, dato_txt),
+                values=(
+                    getattr(r, "Bilag", ""),
+                    belop_txt,
+                    getattr(r, "Tekst", ""),
+                    getattr(r, "Kunder", ""),
+                    getattr(r, "Konto", ""),
+                    getattr(r, "Kontonavn", ""),
+                    getattr(r, "Dato", ""),
+                ),
                 tags=tags,
             )
 
@@ -649,7 +648,12 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             return
 
         try:
-            _show_motpost_konto(master=self, df_transactions=df_scope, konto_list=accounts)
+            _show_motpost_konto(
+                master=self,
+                df_transactions=df_scope,
+                konto_list=accounts,
+                selected_direction=self._var_direction.get(),
+            )
         except Exception as e:
             if messagebox is not None:
                 try:

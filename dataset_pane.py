@@ -23,6 +23,7 @@ og `bus` på en trygg måte.
 
 from __future__ import annotations
 import os
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Dict, Optional, Callable
@@ -61,6 +62,15 @@ except Exception:
 from ml_map_utils import load_ml_map, suggest_mapping, update_ml_map
 from dataset_build_fast import build_from_file
 
+# SAF‑T integration (optional). If `saft_importer.py` is present, users can
+# select a SAF‑T .zip/.xml file directly and Utvalg will cache a generated
+# transactions CSV and load that instead.
+try:
+    from saft_importer import ensure_transactions_csv, is_saft_file
+except Exception:  # pragma: no cover
+    ensure_transactions_csv = None  # type: ignore[assignment]
+    is_saft_file = None  # type: ignore[assignment]
+
 CANON = [
     "Konto", "Kontonavn", "Bilag", "Beløp", "Dato", "Tekst",
     "Kundenr", "Kundenavn", "Leverandørnr", "Leverandørnavn",
@@ -77,6 +87,10 @@ class DatasetPane(ttk.Frame):
         super().__init__(master, **kwargs)
         self.loading = LoadingOverlay(self)
         self.path_var = tk.StringVar(value="")
+        # If the user selects a SAF‑T file we convert it to a cached
+        # transactions CSV. Keep the original path in the UI and store the
+        # resolved CSV path here.
+        self._resolved_path: str | None = None
         self.headers: List[str] = []
         self.combos: Dict[str, ttk.Combobox] = {}
         self._build_ui()
@@ -116,11 +130,19 @@ class DatasetPane(ttk.Frame):
     def _choose_file(self) -> None:
         p = filedialog.askopenfilename(
             title="Velg fil",
-            filetypes=[("Regnskapsdata", "*.xlsx;*.xls;*.csv;*.txt"), ("Alle", "*.*")],
+            # Viktig: default filter (første element) bør være "Alle filer" slik at
+            # SAF‑T ZIP/XML ikke blir skjult når brukeren browser.
+            filetypes=[
+                ("Alle filer", "*.*"),
+                ("SAF-T (zip/xml)", "*.zip;*.xml"),
+                ("Regnskapsdata (xlsx/csv)", "*.xlsx;*.xls;*.csv;*.txt"),
+            ],
         )
         if not p:
             return
         self.path_var.set(p)
+        # Reset resolved CSV when the user picks a new source file
+        self._resolved_path = None
         self._load_headers()
 
     def _read_headers_only(self, path: str) -> List[str]:
@@ -146,8 +168,46 @@ class DatasetPane(ttk.Frame):
         if not p or not os.path.exists(p):
             messagebox.showwarning("Fil", "Velg gyldig fil først.")
             return
+        resolved_p = p
+        # SAF‑T (zip/xml): konverter til cached transactions-CSV før vi leser overskrifter.
+        # Dette kan ta tid på store filer, så vi kjører i bakgrunnstråd og lar GUI vise en tydelig indikator.
+        if is_saft_file is not None and is_saft_file(p):
+            if ensure_transactions_csv is None:
+                messagebox.showerror(
+                    "SAF-T",
+                    "SAF-T import er ikke tilgjengelig (saft_importer.py mangler eller feilet å importere).",
+                )
+                return
+
+            saft_p = Path(p)
+
+            def _done(csv_p: Path) -> None:
+                self._resolved_path = str(csv_p)
+                # Vis den genererte CSV-en i filfeltet, slik at bruker ser hva som faktisk lastes.
+                self.path_var.set(self._resolved_path)
+                # Start innlesing av overskrifter på nytt (nå fra CSV).
+                self.after(0, self._load_headers)
+
+            def _err(exc: BaseException, tb: str) -> None:
+                try:
+                    print(tb)
+                except Exception:
+                    pass
+                messagebox.showerror("SAF-T", f"Kunne ikke parse SAF-T-filen:\n{exc}")
+                try:
+                    self.status.configure(text="Klar.")
+                except Exception:
+                    pass
+
+            self.loading.run_async(
+                "Parser SAF-T…\nDette kan ta litt tid på store filer.",
+                work=lambda: ensure_transactions_csv(saft_p),
+                on_done=_done,
+                on_error=_err,
+            )
+            return
         with self.loading.busy("Leser overskrifter…"):
-            cols = self._read_headers_only(p)
+            cols = self._read_headers_only(resolved_p)
             self.headers = cols
             # Tilbakestill combobox-verdier og populér med nye kolonner
             for cb in self.combos.values():
@@ -163,9 +223,17 @@ class DatasetPane(ttk.Frame):
             num_hits = len([c for c in CANON if mapping.get(c)])
         # Oppdater status med både antall kolonner og antall felter som ble gjettet
         try:
-            self.status.configure(
-                text=f"Lest {len(self.headers)} kolonner. Fant {num_hits}/{len(CANON)} felt (ML/alias)."
-            )
+            if resolved_p != p:
+                self.status.configure(
+                    text=(
+                        f"SAF-T → CSV OK. Lest {len(self.headers)} kolonner. "
+                        f"Fant {num_hits}/{len(CANON)} felt (ML/alias)."
+                    )
+                )
+            else:
+                self.status.configure(
+                    text=f"Lest {len(self.headers)} kolonner. Fant {num_hits}/{len(CANON)} felt (ML/alias)."
+                )
         except Exception:
             self.status.configure(text=f"Lest {len(self.headers)} kolonner.")
 
@@ -192,6 +260,58 @@ class DatasetPane(ttk.Frame):
         if not p or not os.path.exists(p):
             messagebox.showwarning("Fil", "Velg gyldig fil først.")
             return
+
+        # SAF‑T (zip/xml): konverter til cached transactions-CSV før vi bygger datasett.
+        # Dette kan ta tid på store filer, så vi kjører i bakgrunnstråd og lar GUI vise en tydelig indikator.
+        if is_saft_file is not None and is_saft_file(p):
+            if ensure_transactions_csv is None:
+                messagebox.showerror(
+                    "SAF-T",
+                    "SAF-T import er ikke tilgjengelig (saft_importer.py mangler eller feilet å importere).",
+                )
+                return
+
+            # Allerede parslet i denne sesjonen? Bruk den genererte CSV-en direkte.
+            if self._resolved_path and os.path.exists(self._resolved_path):
+                self.path_var.set(self._resolved_path)
+                p = self._resolved_path
+            else:
+                saft_p = Path(p)
+
+                def _done(csv_p: Path) -> None:
+                    self._resolved_path = str(csv_p)
+                    self.path_var.set(self._resolved_path)
+                    try:
+                        self.status.configure(text="SAF-T → CSV OK. Bygger datasett …")
+                    except Exception:
+                        pass
+                    # Start bygging på nytt (nå fra CSV)
+                    self.after(0, self._build_dataset)
+
+                def _err(exc: BaseException, tb: str) -> None:
+                    try:
+                        print(tb)
+                    except Exception:
+                        pass
+                    messagebox.showerror("SAF-T", f"Kunne ikke parse SAF-T-filen:\n{exc}")
+                    try:
+                        self.status.configure(text="Klar.")
+                    except Exception:
+                        pass
+
+                self.loading.run_async(
+                    "Parser SAF-T…\nDette kan ta litt tid på store filer.",
+                    work=lambda: ensure_transactions_csv(saft_p),
+                    on_done=_done,
+                    on_error=_err,
+                )
+                return
+
+        # Hvis headers ikke er lastet inn ennå, last dem inn.
+        if not self.headers:
+            self._load_headers()
+            if not self.headers:
+                return
         # samle mapping
         mapping = {
             canon: self.combos[canon].get().strip()

@@ -143,8 +143,19 @@ class SelectionStudio(ttk.Frame):
         # Data
         self._df_base: pd.DataFrame = pd.DataFrame()
         self._df_all: pd.DataFrame = pd.DataFrame()
+
+        # NOTE:
+        # - _df_calc is the population used for *calculations* (recommendation/sample size).
+        #   Amount filter (min/max) must NOT affect this.
+        # - _df_filtered is the drawing frame used for *selection* (which bilag can be picked).
+        #   Amount filter (min/max) DOES affect this.
+        self._df_calc: pd.DataFrame = pd.DataFrame()
         self._df_filtered: pd.DataFrame = pd.DataFrame()
+
+        # Bilag-level aggregates
+        self._bilag_df_calc: pd.DataFrame = pd.DataFrame()
         self._bilag_df: pd.DataFrame = pd.DataFrame()
+
         self._df_sample: pd.DataFrame = pd.DataFrame()
 
         # Internal state
@@ -188,6 +199,13 @@ class SelectionStudio(ttk.Frame):
 
         self.var_recommendation = tk.StringVar(value="")
         self.var_base_summary = tk.StringVar(value="Ingen data lastet.")
+
+        # Alias for older/newer code paths (avoids runtime AttributeError)
+        self._var_base_summary = self.var_base_summary
+        # Backwards compatible aliases (older code/tests used underscored var names)
+        self._var_recommendation = self.var_recommendation
+        self._var_sample_text = self.var_recommendation
+        self._var_sample_n = self.var_sample_n
 
         self._build_ui()
 
@@ -426,43 +444,87 @@ class SelectionStudio(ttk.Frame):
                 pass
         self._refresh_after_id = self.after(200, self._refresh_all)
 
-    def _refresh_all(self) -> None:
-        # Apply filters and update base summary + recommendation
-        self._df_filtered = self._apply_filters(self._df_base)
+    def _refresh_all(self):
+        # We keep two versions of the dataset:
+        # - _df_calc: used for all calculations/recommendations (amount filter must NOT apply)
+        # - _df_filtered: used as drawing frame (amount filter DOES apply)
+        self._df_calc = self._apply_filters(self._df_base, apply_amount_filter=False)
+        self._df_filtered = self._apply_filters(self._df_base, apply_amount_filter=True)
 
-        try:
-            base_metrics = compute_population_metrics(self._df_base)
-            work_metrics = compute_population_metrics(self._df_filtered)
-            text = build_population_summary_text(base_metrics, work_metrics, abs_basis=False)
-        except Exception:
-            text = "Ingen data lastet."
-        self.var_base_summary.set(text)
+        # Summary at top: show calculation population, and (if amount filter is set) the drawing frame
+        base_metrics = compute_population_metrics(self._df_base)
+        calc_metrics = compute_population_metrics(self._df_calc)
+        draw_metrics = compute_population_metrics(self._df_filtered)
+
+        summary_text = build_population_summary_text(base_metrics, calc_metrics, abs_basis=False)
+
+        min_raw = (self.var_min_amount.get() or "").strip()
+        max_raw = (self.var_max_amount.get() or "").strip()
+        if min_raw or max_raw:
+            removed_rows = max(0, calc_metrics.n_rows - draw_metrics.n_rows)
+            removed_bilag = max(0, calc_metrics.n_bilag - draw_metrics.n_bilag)
+            removed_konto = max(0, calc_metrics.n_konto - draw_metrics.n_konto)
+
+            parts = [
+                f"Trekkgrunnlag (etter beløpsfilter): {fmt_int_no(draw_metrics.n_rows)} rader",
+                f"{fmt_int_no(draw_metrics.n_bilag)} bilag",
+                f"{fmt_int_no(draw_metrics.n_konto)} kontorer",
+            ]
+            extra = ""
+            if removed_rows or removed_bilag or removed_konto:
+                extra = (
+                    f" (fjernet {fmt_int_no(removed_rows)} rader | "
+                    f"{fmt_int_no(removed_bilag)} bilag | "
+                    f"{fmt_int_no(removed_konto)} kontorer)"
+                )
+            summary_text = summary_text + "\n" + " | ".join(parts) + extra
+
+        self.var_base_summary.set(summary_text)
 
         rec = self._compute_recommendation()
+        if rec:
+            self._var_sample_text.set(
+                build_sample_summary_text(
+                    rec.n_total_recommended,
+                    rec.n_specific,
+                    rec.n_random_recommended,
+                    rec.population_value_remaining,
+                )
+            )
+            self._var_sample_n.set(int(rec.n_total_recommended))
+        else:
+            self._var_sample_text.set(build_sample_summary_text(0, 0, 0, 0.0))
+            self._var_sample_n.set(0)
+
         self._update_recommendation_text(rec)
-        # Vis en liten "spesifikk/rest" oppsummering under anbefalingen.
-        # Viktig: Spesifikk utvelgelse baseres på |SumBeløp| >= tolererbar feil,
-        # mens nettobeløp brukes som standard for populasjonsverdi.
-        try:
-            tol_abs = self._get_tolerable_error_value()
-            if getattr(self, "_bilag_df", None) is not None and not self._bilag_df.empty:
-                split_text = self._build_bilag_split_text(self._bilag_df, tolerable_error=tol_abs)
-                if split_text:
-                    current = self.var_recommendation.get()
-                    self.var_recommendation.set(no_break_spaces_in_numbers((current + "\n\n" + split_text).strip()))
-        except Exception:
-            pass
+
+        # Split text is based on the calculation population (not the amount-filtered drawing frame)
+        split_text = self._build_bilag_split_text(
+            self._bilag_df_calc,
+            tolerable_error=self._get_tolerable_error_value(),
+        )
+
+        # Add a note if amount filter reduces the available bilag for drawing
+        if min_raw or max_raw:
+            available = 0 if self._bilag_df is None else int(len(self._bilag_df))
+            split_text += f"\n\nTrekkgrunnlag (bilag) etter beløpsfilter: {fmt_int_no(available)}"
+            if rec:
+                wanted = int(rec.n_total_recommended or 0)
+                if available and available < wanted:
+                    split_text += f" (OBS: færre enn foreslått utvalg {fmt_int_no(wanted)})"
+
+        self.var_recommendation.set(self.var_recommendation.get() + "\n\n" + split_text)
 
         self._refresh_groups_table()
 
-    def _apply_filters(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _apply_filters(self, df: pd.DataFrame, *, apply_amount_filter: bool = True) -> pd.DataFrame:
         """Bruk filter-parametre fra UI og returner filtrert DataFrame."""
         if df is None or df.empty:
             return pd.DataFrame()
 
         direction = (self.var_direction.get() or "Alle").strip()
-        min_value = self.var_min_amount.get()
-        max_value = self.var_max_amount.get()
+        min_value = self.var_min_amount.get() if apply_amount_filter else ""
+        max_value = self.var_max_amount.get() if apply_amount_filter else ""
 
         # Beløp fra/til: når retning=Alle er det mest intuitivt å filtrere på abs(netto).
         # For Kun debet/kredit bruker vi signert filter, siden retning allerede avgrenser fortegn.
@@ -520,9 +582,21 @@ class SelectionStudio(ttk.Frame):
             f"Beregning tilfeldig trekk bruker |netto rest|: {fmt_amount_no(abs(net_rem), decimals=0)}"
         )
 
-    def _compute_recommendation(self) -> _Recommendation:
-        # Compute bilag-level df
-        self._bilag_df = self._build_bilag_df(self._df_filtered)
+    def _compute_recommendation(self) -> _Recommendation | None:
+        # Build bilag-level df for drawing frame (used for grouping + selection)
+        if self._df_filtered is None or self._df_filtered.empty:
+            self._bilag_df = pd.DataFrame()
+        else:
+            self._bilag_df = self._build_bilag_df(self._df_filtered)
+
+        # Build bilag-level df for calculations (amount filter must NOT affect this)
+        if self._df_calc is None or self._df_calc.empty:
+            self._bilag_df_calc = pd.DataFrame()
+            return None
+
+        self._bilag_df_calc = self._build_bilag_df(self._df_calc)
+        if self._bilag_df_calc is None or self._bilag_df_calc.empty:
+            return None
 
         tol = self._get_tolerable_error_value()
 
@@ -532,7 +606,7 @@ class SelectionStudio(ttk.Frame):
         conf_factor = confidence_factor(risk_level=risk_level, confidence_level=conf_level)
 
         rec_dict = compute_net_basis_recommendation(
-            self._bilag_df,
+            self._bilag_df_calc,
             tolerable_error=tol,
             confidence_factor=float(conf_factor),
             amount_col="SumBeløp",
@@ -556,18 +630,36 @@ class SelectionStudio(ttk.Frame):
             population_value_remaining=float(remaining_net),
         )
 
-    def _update_recommendation_text(self, rec: _Recommendation) -> None:
+    def _update_recommendation_text(self, rec: Optional[_Recommendation]) -> None:
+
         tol = self._get_tolerable_error_value()
+
         parts: list[str] = []
+
         if tol > 0:
+
             parts.append(f"Tolererbar feil: {fmt_amount_no(tol, decimals=0)}")
+
+        if rec is None:
+
+            self.var_recommendation.set(no_break_spaces_in_numbers('\n'.join(parts)))
+
+            return
+
         if rec.conf_factor:
+
             parts.append(f"Konfidensfaktor: {str(rec.conf_factor).replace('.', ',')}")
+
         parts.append(
+
             f"Forslag utvalg: {fmt_int_no(rec.n_total_recommended)} bilag"
+
             + (f" (inkl. {fmt_int_no(rec.n_specific)} spesifikk)" if rec.n_specific else "")
+
         )
-        self.var_recommendation.set(no_break_spaces_in_numbers("\n".join(parts)))
+
+        self.var_recommendation.set(no_break_spaces_in_numbers('\n'.join(parts)))
+
 
     def _refresh_groups_table(self) -> None:
         # Groups are shown for the remaining bilag (excluding specific)
@@ -645,6 +737,15 @@ class SelectionStudio(ttk.Frame):
             # Always include specific
             specific_ids = list(spec["Bilag"].tolist()) if not spec.empty else []
             desired_total = max(desired_total, len(specific_ids))
+
+            available_total = int(len(bilag_df))
+            if desired_total > available_total:
+                messagebox.showwarning(
+                    "Utvalg",
+                    f"Beløpsfilter/filtrering gir bare {available_total} bilag i trekkgrunnlaget, "
+                    f"men ønsket utvalg er {desired_total}. Programmet vil trekke maks {available_total} bilag.",
+                )
+
 
             n_random = desired_total - len(specific_ids)
             random_ids: list[Any] = []

@@ -5,22 +5,54 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/doc/overstyring_handover.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/override_check_registry.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/override_checks.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/checks_amounts.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/checks_duplicates.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/checks_risk.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/core.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/registry.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/ui_entrypoint.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/ui_panel.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/overstyring/ui_params.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_overstyring_checks.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/views_override_checks.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/bilag_drilldialog.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/doc/ARCHITECTURE.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/motpost/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/motpost/combinations.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/motpost/combinations_popup.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/motpost/excel.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/motpost/konto_core.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/motpost/utils.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/saft_importer.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/adapters.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/bilag.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/drill.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/filters.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/helpers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/specific.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/ui_builder.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/selection_studio/ui_logic.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_compat_wrappers_pyinstaller.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_base_summary_var_alias.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_recommendation_var_alias.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_sample_vars_alias.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/ui_treeview_sort.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_build_fast.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_build_fast.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/motpost_combinations.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost_combinations.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/motpost_combinations_popup.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost_combinations_popup.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/motpost_excel.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost_excel.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/motpost_konto_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost_konto_core.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/motpost_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_adapters.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_adapters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_bilag.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_bilag.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_drill.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_drill.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_specific.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_specific.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_ui_builder.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_ui_builder.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selection_studio_ui_logic.py" beforeDir="false" afterPath="$PROJECT_DIR$/selection_studio_ui_logic.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/selectionstudio_filters.py" beforeDir="false" afterPath="$PROJECT_DIR$/selectionstudio_filters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_motpost_analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_motpost_analysis.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_selectionstudio_filters.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_selectionstudio_filters.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ui_loading.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_loading.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views_bilag_drill.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_bilag_drill.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views_motpost_konto.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_motpost_konto.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views_selection_studio_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio_ui.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -82,11 +114,11 @@
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\overstyring" />
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\motpost" />
       <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg" />
-      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc\README_ARCHIVE" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\tests" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\selection_studio" />
+      <recent name="C:\Users\ib91\Desktop\PyCharmProjects\Utvalg\doc" />
     </key>
   </component>
   <component name="RunManager" selected="Python.python app.py">
@@ -346,7 +378,14 @@
       <option name="presentableId" value="LOCAL−00028" />
       <updated>1769628578001</updated>
     </task>
-    <option name="localTasksCounter" value="29" />
+    <task id="LOCAL−00029" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1769712802466</created>
+      <option name="number" value="LOCAL−00029" />
+      <option name="presentableId" value="LOCAL−00029" />
+      <updated>1769712802466</updated>
+    </task>
+    <option name="localTasksCounter" value="30" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -363,5 +402,16 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Utvalg" />
     <option name="LAST_COMMIT_MESSAGE" value="Utvalg" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/analyse_viewdata.py</url>
+          <line>367</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
 </project>

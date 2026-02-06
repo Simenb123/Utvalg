@@ -89,7 +89,7 @@ ALIASES: Dict[str, set[str]] = {
     # Dato: dato for bilag, postering eller transaksjon
     "Dato": {
         "dato", "bilagsdato", "posteringsdato", "transaksjonsdato",
-        "date", "posting date", "document date"
+        "date", "posting date", "postingdate", "transaction date", "transactiondate", "document date"
     },
     # Tekst: posteringstekst eller beskrivelse
     "Tekst": {

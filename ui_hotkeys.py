@@ -5,9 +5,9 @@ Globale hotkeys + kopiering til clipboard + (valgfritt) selection-summary.
 Hotkeys:
   - Ctrl+A: marker alle rader i aktiv Treeview/Listbox
   - Ctrl+C: kopier markerte rader til clipboard
-      - Treeview: TSV *uten* header (Excel-vennlig ved liming i forhåndsmarkert område)
+      - Treeview: TSV *med* header (Excel-vennlig ved liming til tomt område)
       - Listbox: én linje per element
-  - Ctrl+Shift+C: kopier Treeview *med* header (kolonnenavn)
+  - Ctrl+Shift+C: kopier markerte rader til clipboard (samme som Ctrl+C)
 
 Selection summary:
   - Valgfritt, men default ON.
@@ -23,6 +23,7 @@ Design:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Callable, Optional
 
 import ui_selection_summary
@@ -62,12 +63,22 @@ def _sanitize_cell_text(v: Any) -> str:
     """
     if v is None:
         return ""
+
+    # Treat NaN/NA-like as empty (common when Treeview is populated from pandas)
+    try:
+        if isinstance(v, float) and math.isnan(v):
+            return ""
+    except Exception:
+        pass
+
     s = str(v)
+    if s.strip().lower() in {"nan", "none", "null", "na", "nat"}:
+        return ""
     # Standardiser NBSP og fjern tab/linjeskift
     s = s.replace("\u00A0", " ")
     s = s.replace("\t", " ")
     s = s.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
-    return s
+    return s.strip()
 
 
 # --------------------------------------------------------------------------------------
@@ -106,8 +117,8 @@ def listbox_select_all(listbox: Any) -> int:
 # Clipboard copy
 # --------------------------------------------------------------------------------------
 
-def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = False) -> str:
-    """Kopier markerte rader i Treeview som TSV (Excel-vennlig)."""
+def treeview_selection_to_tsv(tree: Any) -> str:
+    """Kopier markerte rader i Treeview som TSV (Excel-vennlig), alltid med header."""
     if not _tree_is_treeview(tree):
         return ""
 
@@ -121,9 +132,9 @@ def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = False) -> st
         return ""
 
     lines: list[str] = []
-    if include_headers:
-        headers = [_sanitize_cell_text(_tree_get_heading_text(tree, c)) for c in cols]
-        lines.append("\t".join(headers))
+
+    headers = [_sanitize_cell_text(_tree_get_heading_text(tree, c)) for c in cols]
+    lines.append("\t".join(headers))
 
     for iid in selected:
         row = []
@@ -135,8 +146,10 @@ def treeview_selection_to_tsv(tree: Any, *, include_headers: bool = False) -> st
             row.append(_sanitize_cell_text(v))
         lines.append("\t".join(row))
 
-    # Excel på Windows liker CRLF best, men splitlines() håndterer begge i tester.
-    return "\r\n".join(lines)
+    # Viktig: Bruk kun LF (\n) i tekst vi legger på Tk-clipboard.
+    # På Windows kan Tk gjøre egen CRLF-normalisering. Hvis vi allerede har CRLF kan
+    # det i praksis ende opp som CRCRLF og gi "tomme rader" ved liming i Excel.
+    return "\n".join(lines)
 
 
 def listbox_selection_to_lines(listbox: Any) -> str:
@@ -159,7 +172,7 @@ def listbox_selection_to_lines(listbox: Any) -> str:
         except Exception:
             continue
 
-    return "\r\n".join(lines)
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------------------
@@ -184,6 +197,10 @@ class GlobalHotkeyHandler:
     def _copy_to_clipboard(self, txt: str) -> None:
         if not txt:
             return
+
+        # Normaliser linjeskift for å unngå blanklinjer ved liming i Excel (Windows)
+        txt = str(txt).replace("\r\n", "\n").replace("\r", "\n")
+
         try:
             self.root.clipboard_clear()
             self.root.clipboard_append(txt)
@@ -192,11 +209,11 @@ class GlobalHotkeyHandler:
             pass
 
     def on_ctrl_c(self, _event: Any) -> str | None:
-        """Ctrl+C: kopier uten header."""
+        """Ctrl+C (og Ctrl+Shift+C): kopier med header (Treeview)."""
         target = getattr(self.root, "focus_get", lambda: None)()
 
         if _tree_is_treeview(target):
-            txt = treeview_selection_to_tsv(target, include_headers=False)
+            txt = treeview_selection_to_tsv(target)
         elif _listbox_is_listbox(target):
             txt = listbox_selection_to_lines(target)
         else:
@@ -206,14 +223,6 @@ class GlobalHotkeyHandler:
         self._copy_to_clipboard(txt)
         return "break"
 
-    def on_ctrl_shift_c(self, _event: Any) -> str | None:
-        """Ctrl+Shift+C: kopier med header (Treeview)."""
-        target = getattr(self.root, "focus_get", lambda: None)()
-        if _tree_is_treeview(target):
-            txt = treeview_selection_to_tsv(target, include_headers=True)
-            self._copy_to_clipboard(txt)
-            return "break"
-        return None
 
 
 @dataclass
@@ -265,10 +274,9 @@ def install_global_hotkeys(
 
         if enable_ctrl_c:
             try:
-                # Ctrl+C (uten shift) -> uten header
+                # Ctrl+C / Ctrl+Shift+C -> kopier med header
                 root.bind_all("<Control-c>", st.handler.on_ctrl_c, add="+")
-                # Ctrl+Shift+C -> med header
-                root.bind_all("<Control-C>", st.handler.on_ctrl_shift_c, add="+")
+                root.bind_all("<Control-C>", st.handler.on_ctrl_c, add="+")
             except Exception:
                 pass
 

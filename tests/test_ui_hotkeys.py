@@ -104,7 +104,7 @@ def test_treeview_selection_sums_parses_norwegian_numbers() -> None:
     assert abs(float(sums["Beløp"]) - (1234.50 - 200.00 - 34.50)) < 1e-9
 
 
-def test_treeview_selection_to_tsv_default_has_no_header() -> None:
+def test_treeview_selection_to_tsv_default_has_header() -> None:
     tree = DummyTree(
         columns=["Konto", "Sum"],
         values={
@@ -115,22 +115,43 @@ def test_treeview_selection_to_tsv_default_has_no_header() -> None:
     tree.selection_set(["a", "b"])
     tsv = ui_hotkeys.treeview_selection_to_tsv(tree)
     lines = tsv.splitlines()
-    assert lines[0] == "1000\t10"
+    assert lines[0] == "Konto\tSum"
+    assert "1000\t10" in lines
     assert "2000\t20" in lines
+    assert "\r" not in tsv
+    assert "" not in lines
 
 
-def test_treeview_selection_to_tsv_can_include_header() -> None:
+def test_treeview_selection_to_tsv_has_no_blank_lines_between_rows() -> None:
     tree = DummyTree(
         columns=["Konto", "Sum"],
         values={
             "a": {"Konto": "1000", "Sum": "10"},
+            "b": {"Konto": "2000", "Sum": "20"},
         },
     )
-    tree.selection_set(["a"])
-    tsv = ui_hotkeys.treeview_selection_to_tsv(tree, include_headers=True)
+    tree.selection_set(["a", "b"])
+    tsv = ui_hotkeys.treeview_selection_to_tsv(tree)
+    parts = tsv.split("\n")
+    assert len(parts) == 3  # header + 2 rader
+    assert all(p != "" for p in parts)
+
+
+def test_treeview_selection_to_tsv_sanitizes_nan_tokens_to_empty_cells() -> None:
+    tree = DummyTree(
+        columns=["Bilag", "Tekst", "Kunder"],
+        values={
+            "i1": {"Bilag": "1", "Tekst": float("nan"), "Kunder": "nan"},
+        },
+    )
+    tree.selection_set(["i1"])
+
+    tsv = ui_hotkeys.treeview_selection_to_tsv(tree)
     lines = tsv.splitlines()
-    assert lines[0] == "Konto\tSum"
-    assert lines[1] == "1000\t10"
+
+    assert lines[0] == "Bilag\tTekst\tKunder"
+    # Empty cells -> consecutive tabs
+    assert lines[1] == "1\t\t"
 
 
 def test_install_global_hotkeys_ctrl_a_ctrl_c_and_selection_summary() -> None:
@@ -157,16 +178,18 @@ def test_install_global_hotkeys_ctrl_a_ctrl_c_and_selection_summary() -> None:
     root.bindings["<Control-a>"][0](ev)
     assert set(tree.selection()) == {"i1", "i2"}
 
-    # Ctrl+C copies TSV to clipboard (uten header)
+    # Ctrl+C copies TSV to clipboard (med header)
     root.bindings["<Control-c>"][0](ev)
+    assert root.clipboard.splitlines()[0] == "Bilag\tBeløp"
     assert "1\t100" in root.clipboard
     assert "2\t200" in root.clipboard
-    assert not root.clipboard.splitlines()[0].startswith("Bilag\t")
 
-    # Ctrl+Shift+C copies TSV med header
+    # Ctrl+Shift+C copies TSV til clipboard (samme som Ctrl+C)
     root.bindings["<Control-C>"][0](ev)
     assert root.clipboard.splitlines()[0] == "Bilag\tBeløp"
     assert "1\t100" in root.clipboard
+    assert "2\t200" in root.clipboard
+    assert "\r" not in root.clipboard
 
     # Selection summary updates status
     root.bindings["<<TreeviewSelect>>"][0](ev)

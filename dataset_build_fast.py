@@ -43,6 +43,11 @@ def _to_date_no(series: pd.Series) -> pd.Series:
 
 def _read_with_usecols(path: str, usecols: Optional[List[str]] = None) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
+    # SAF-T (.xml/.zip) -> extract to canonical CSV and reuse the normal CSV pipeline
+    if ext in (".xml", ".zip"):
+        from saft_importer import ensure_general_ledger_csv
+        extracted = ensure_general_ledger_csv(path)
+        return _read_with_usecols(str(extracted), usecols=usecols)
     if ext in (".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"):
         try:
             return pd.read_excel(path, engine="openpyxl", usecols=usecols)
