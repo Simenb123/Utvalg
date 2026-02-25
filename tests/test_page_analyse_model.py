@@ -92,3 +92,17 @@ def test_load_state_from_analysis_pkg_uses_df_from_module(monkeypatch) -> None:
     assert len(state.df) == len(df)
     # Ikke krav om .equals, men vi forventer i praksis en kopi
     assert state.df["Konto"].tolist() == df["Konto"].tolist()
+
+
+def test_build_pivot_by_account_counts_unique_bilag_when_duplicates() -> None:
+    df = pd.DataFrame(
+        {
+            "Konto": ["3000", "3000", "3000"],
+            "Kontonavn": ["Salg"] * 3,
+            "Bilag": [1, 1, 2],
+            "Beløp": [100.0, 200.0, -50.0],
+        }
+    )
+
+    pivot = model.build_pivot_by_account(df)
+    assert pivot.loc[0, "Antall bilag"] == 2

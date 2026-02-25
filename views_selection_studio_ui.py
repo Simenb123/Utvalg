@@ -18,27 +18,21 @@ Business rules
 * The recommended sample size is computed on the *remaining* population after
   removing the specific selection (so the recommendation is reduced by the
   automatic picks).
+
+Refactor note
+-------------
+This file is intentionally kept small. Most logic has been moved into the
+`selection_studio.ui_widget_*` modules.
 """
 
 from __future__ import annotations
 
-import math
-import re
-import inspect
-import os
-from datetime import datetime
-
-from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Optional
-
 import random
+from typing import Any, Callable, Optional
 
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-
-from controller_export import export_to_excel
-from selectionstudio_filters import filter_selectionstudio_dataframe
+from tkinter import ttk
 
 from selection_studio_helpers import (
     PopulationMetrics,
@@ -81,13 +75,11 @@ from selection_studio_ui_logic import (
 
 from selection_studio_ui_builder import build_ui as _build_selection_studio_ui
 
-@dataclass
-class _Recommendation:
-    conf_factor: float
-    n_specific: int
-    n_random_recommended: int
-    n_total_recommended: int
-    population_value_remaining: float
+# Refactor: extracted UI logic
+from selection_studio import ui_widget_actions as _actions
+from selection_studio import ui_widget_filters as _filters
+from selection_studio import ui_widget_refresh as _refresh
+from selection_studio import ui_widget_selection as _selection
 
 
 class SelectionStudio(ttk.Frame):
@@ -103,8 +95,6 @@ class SelectionStudio(ttk.Frame):
     * ``SelectionStudio(master, df_base=pd.DataFrame(), on_commit_selection=...)``
     * ``SelectionStudio(master, on_commit_selection=...)`` (data loaded later)
     """
-
-    # --- constructor / public API -------------------------------------------------
 
     def __init__(self, master: tk.Misc, *args: Any, **kwargs: Any) -> None:
         # Parse legacy positional arguments
@@ -162,9 +152,7 @@ class SelectionStudio(ttk.Frame):
         self._last_suggested_n: Optional[int] = None
         self._rng = random.Random(42)  # deterministic for repeatability
 
-        # UI vars
-        # Retning: i revisjon er "Alle" (netto) default. Vi tilbyr to enkle
-        # av/på-filter i stedet for en rullgardin, for å redusere risiko for feilvalg.
+        # --- UI vars ----------------------------------------------------------
         self.var_only_debit = tk.BooleanVar(value=False)
         self.var_only_credit = tk.BooleanVar(value=False)
 
@@ -174,10 +162,8 @@ class SelectionStudio(ttk.Frame):
         self.var_min_amount = tk.StringVar(value="")
         self.var_max_amount = tk.StringVar(value="")
 
-        # Bruk absolutt beløp var tidligere en bruker-toggle. I revisjon er netto
-        # standard, og vi skjuler derfor denne fra UI. Den beholdes kun for
-        # bakoverkompatibilitet, men brukes ikke i filter-/beregningslogikk.
-        self.var_use_abs = tk.BooleanVar(value=False)  # Kandidat til fjerning – ubrukt i UI
+        # Kandidat til fjerning – ubrukt i UI (beholdes for bakoverkompatibilitet)
+        self.var_use_abs = tk.BooleanVar(value=False)
 
         # Intern guard for å unngå rekursjon når vi synkroniserer checkbokser -> var_direction
         self._dir_sync_guard = False
@@ -207,9 +193,10 @@ class SelectionStudio(ttk.Frame):
         self._var_sample_text = self.var_recommendation
         self._var_sample_n = self.var_sample_n
 
+        # Build UI (delegated)
         self._build_ui()
 
-        # Vis/skjul kontroller for manuelle strata-grenser
+        # Custom strata controls (future-proof; UI builder may or may not include these widgets)
         self.var_method.trace_add("write", lambda *_: self._update_method_controls())
         self.var_custom_bounds.trace_add("write", lambda *_: self._update_method_controls())
         self._update_method_controls()
@@ -234,6 +221,8 @@ class SelectionStudio(ttk.Frame):
         elif df_all is not None and not df_all.empty:
             # Some callers provide only df_all
             self.load_data(df_base=df_all, df_all=df_all)
+
+    # --- public API -------------------------------------------------------------
 
     def load_data(self, *args: Any, **kwargs: Any) -> None:
         """Load/replace the dataset used for selection.
@@ -276,14 +265,11 @@ class SelectionStudio(ttk.Frame):
         self._df_sample = pd.DataFrame()
 
         # Sensible default tolerable error if empty: 5% of population book value (rounded).
-        # I praksis er tolererbar feil en input fra revisjonsplanleggingen, men dette gir
-        # et "ikke-null" forslag når brukeren ikke har fylt inn noe.
         if not (self.var_tolerable_error.get() or "").strip() and not self._df_base.empty:
             try:
                 metrics = compute_population_metrics(self._df_base)
 
-                # Netto er standard i revisjon, men dersom netto summerer til ~0 (f.eks. clearing),
-                # faller vi tilbake til absolutt-sum for å unngå et tomt forslag.
+                # Netto is standard; if net is ~0, fall back to absolute sum.
                 base_value = abs(float(getattr(metrics, "sum_net", 0.0) or 0.0))
                 if base_value <= 0.0:
                     base_value = float(getattr(metrics, "sum_abs", 0.0) or 0.0)
@@ -296,833 +282,109 @@ class SelectionStudio(ttk.Frame):
 
         self._schedule_refresh(immediate=True)
 
-    # --- UI ----------------------------------------------------------------------
+    # --- UI --------------------------------------------------------------------
 
     def _build_ui(self) -> None:
         """Bygger GUI-elementer (delegert til selection_studio_ui_builder)."""
+
         _build_selection_studio_ui(self)
 
+    # --- thin wrappers: keep names stable --------------------------------------
+
     def _on_direction_checkbox_changed(self, changed: str) -> None:
-        """Synkroniser checkbokser (Kun debet/kun kredit) til var_direction.
-
-        * Ingen valgt  -> "Alle"
-        * Kun debet    -> "Debet"
-        * Kun kredit   -> "Kredit"
-
-        Boksene er gjensidig utelukkende for å unngå tvetydig filtrering.
-        """
-
-        if getattr(self, "_dir_sync_guard", False):
-            return
-
-        self._dir_sync_guard = True
-        try:
-            only_debit = bool(self.var_only_debit.get())
-            only_credit = bool(self.var_only_credit.get())
-
-            # Hvis bruker slår på én, slår vi av den andre
-            if changed == "debit" and only_debit:
-                if only_credit:
-                    self.var_only_credit.set(False)
-                self.var_direction.set("Debet")
-                return
-
-            if changed == "credit" and only_credit:
-                if only_debit:
-                    self.var_only_debit.set(False)
-                self.var_direction.set("Kredit")
-                return
-
-            # Hvis en boks ble slått av: sett retning basert på gjeldende state
-            only_debit = bool(self.var_only_debit.get())
-            only_credit = bool(self.var_only_credit.get())
-
-            if only_debit:
-                self.var_direction.set("Debet")
-            elif only_credit:
-                self.var_direction.set("Kredit")
-            else:
-                self.var_direction.set("Alle")
-        finally:
-            self._dir_sync_guard = False
-
-    # --- custom strata (manuelle grenser) --------------------------------------
+        _filters.on_direction_checkbox_changed(self, changed)
 
     def _update_method_controls(self) -> None:
-        """Vis/skjul felt for manuelle strata-grenser og aktiver/deaktiver k."""
-        method = (self.var_method.get() or "quantile").strip().lower()
-        is_custom = method == "custom"
-
-        # Vis/skjul frame
-        if hasattr(self, "frm_custom_bounds"):
-            try:
-                if is_custom:
-                    self.frm_custom_bounds.grid()
-                else:
-                    self.frm_custom_bounds.grid_remove()
-            except Exception:
-                pass
-
-        # Aktiver/deaktiver k
-        if hasattr(self, "_spn_k") and self._spn_k is not None:
-            try:
-                self._spn_k.configure(state="disabled" if is_custom else "normal")
-            except Exception:
-                pass
-
-        # Oppdater hint
-        if not hasattr(self, "var_custom_bounds_hint"):
-            return
-
-        if not is_custom:
-            self.var_custom_bounds_hint.set("")
-            return
-
-        raw = (self.var_custom_bounds.get() or "").strip()
-        if not raw:
-            self.var_custom_bounds_hint.set("Bruk ';' mellom grenser, f.eks. 100 000; 500 000")
-            return
-
-        bounds = parse_custom_strata_bounds(raw)
-        if not bounds:
-            self.var_custom_bounds_hint.set("Kunne ikke tolke grenser. Bruk ';' mellom tall, f.eks. 100 000; 500 000")
-            return
-
-        self.var_custom_bounds_hint.set(
-            no_break_spaces_in_numbers(f"{len(bounds)} grenser → {len(bounds) + 1} grupper")
-        )
+        _filters.update_method_controls(self)
 
     def _format_custom_bounds_entry(self) -> None:
-        """Normaliser input (sorter, fjern duplikater) når feltet mister fokus."""
-        if getattr(self, "_custom_bounds_sync_guard", False):
-            return
-
-        raw = (self.var_custom_bounds.get() or "").strip()
-        if not raw:
-            return
-
-        bounds = parse_custom_strata_bounds(raw)
-        if not bounds:
-            return
-
-        normalized = format_custom_strata_bounds(bounds)
-        if normalized and normalized != raw:
-            try:
-                self._custom_bounds_sync_guard = True
-                self.var_custom_bounds.set(normalized)
-            finally:
-                self._custom_bounds_sync_guard = False
+        _filters.format_custom_bounds_entry(self)
 
     def _get_custom_bounds(self) -> list[float]:
-        """Hent manuelle strata-grenser fra UI."""
-        bounds = parse_custom_strata_bounds(self.var_custom_bounds.get())
-        return bounds
+        return _filters.get_custom_bounds(self)
 
-    def _stratify_remaining_values(self, values: pd.Series) -> tuple[list[tuple[Any, pd.Series]], dict[str, str], pd.DataFrame]:
-        """Stratifiserer restpopulasjonen basert på valgt metode."""
-        method = (self.var_method.get() or "quantile").strip().lower()
-        if method == "custom":
-            bounds = self._get_custom_bounds()
-            return stratify_values_custom_bounds(values, bounds=bounds)
-
-        k = int(self.var_k.get() or 1)
-        return stratify_bilag_sums(values, method=method, k=k, use_abs=False)
-
-
-    # --- refresh / recommendation -------------------------------------------------
+    def _stratify_remaining_values(self, values: pd.Series):
+        return _filters.stratify_remaining_values(self, values)
 
     def _schedule_refresh(self, immediate: bool = False) -> None:
-        if immediate:
-            self._refresh_all()
-            return
+        _refresh.schedule_refresh(self, immediate=immediate)
 
-        # debounce
-        if hasattr(self, "_refresh_after_id") and self._refresh_after_id is not None:
-            try:
-                self.after_cancel(self._refresh_after_id)
-            except Exception:
-                pass
-        self._refresh_after_id = self.after(200, self._refresh_all)
-
-    def _refresh_all(self):
-        # We keep two versions of the dataset:
-        # - _df_calc: used for all calculations/recommendations (amount filter must NOT apply)
-        # - _df_filtered: used as drawing frame (amount filter DOES apply)
-        self._df_calc = self._apply_filters(self._df_base, apply_amount_filter=False)
-        self._df_filtered = self._apply_filters(self._df_base, apply_amount_filter=True)
-
-        # Summary at top: show calculation population, and (if amount filter is set) the drawing frame
-        base_metrics = compute_population_metrics(self._df_base)
-        calc_metrics = compute_population_metrics(self._df_calc)
-        draw_metrics = compute_population_metrics(self._df_filtered)
-
-        summary_text = build_population_summary_text(base_metrics, calc_metrics, abs_basis=False)
-
-        min_raw = (self.var_min_amount.get() or "").strip()
-        max_raw = (self.var_max_amount.get() or "").strip()
-        if min_raw or max_raw:
-            removed_rows = max(0, calc_metrics.n_rows - draw_metrics.n_rows)
-            removed_bilag = max(0, calc_metrics.n_bilag - draw_metrics.n_bilag)
-            removed_konto = max(0, calc_metrics.n_konto - draw_metrics.n_konto)
-
-            parts = [
-                f"Trekkgrunnlag (etter beløpsfilter): {fmt_int_no(draw_metrics.n_rows)} rader",
-                f"{fmt_int_no(draw_metrics.n_bilag)} bilag",
-                f"{fmt_int_no(draw_metrics.n_konto)} kontorer",
-            ]
-            extra = ""
-            if removed_rows or removed_bilag or removed_konto:
-                extra = (
-                    f" (fjernet {fmt_int_no(removed_rows)} rader | "
-                    f"{fmt_int_no(removed_bilag)} bilag | "
-                    f"{fmt_int_no(removed_konto)} kontorer)"
-                )
-            summary_text = summary_text + "\n" + " | ".join(parts) + extra
-
-        self.var_base_summary.set(summary_text)
-
-        rec = self._compute_recommendation()
-        if rec:
-            self._var_sample_text.set(
-                build_sample_summary_text(
-                    rec.n_total_recommended,
-                    rec.n_specific,
-                    rec.n_random_recommended,
-                    rec.population_value_remaining,
-                )
-            )
-            self._var_sample_n.set(int(rec.n_total_recommended))
-        else:
-            self._var_sample_text.set(build_sample_summary_text(0, 0, 0, 0.0))
-            self._var_sample_n.set(0)
-
-        self._update_recommendation_text(rec)
-
-        # Split text is based on the calculation population (not the amount-filtered drawing frame)
-        split_text = self._build_bilag_split_text(
-            self._bilag_df_calc,
-            tolerable_error=self._get_tolerable_error_value(),
-        )
-
-        # Add a note if amount filter reduces the available bilag for drawing
-        if min_raw or max_raw:
-            available = 0 if self._bilag_df is None else int(len(self._bilag_df))
-            split_text += f"\n\nTrekkgrunnlag (bilag) etter beløpsfilter: {fmt_int_no(available)}"
-            if rec:
-                wanted = int(rec.n_total_recommended or 0)
-                if available and available < wanted:
-                    split_text += f" (OBS: færre enn foreslått utvalg {fmt_int_no(wanted)})"
-
-        self.var_recommendation.set(self.var_recommendation.get() + "\n\n" + split_text)
-
-        self._refresh_groups_table()
+    def _refresh_all(self) -> None:
+        _refresh.refresh_all(self)
 
     def _apply_filters(self, df: pd.DataFrame, *, apply_amount_filter: bool = True) -> pd.DataFrame:
-        """Bruk filter-parametre fra UI og returner filtrert DataFrame."""
-        if df is None or df.empty:
-            return pd.DataFrame()
-
-        direction = (self.var_direction.get() or "Alle").strip()
-        min_value = self.var_min_amount.get() if apply_amount_filter else ""
-        max_value = self.var_max_amount.get() if apply_amount_filter else ""
-
-        # Beløp fra/til: når retning=Alle er det mest intuitivt å filtrere på abs(netto).
-        # For Kun debet/kredit bruker vi signert filter, siden retning allerede avgrenser fortegn.
-        df_filtered, _summary = filter_selectionstudio_dataframe(
-            df,
-            direction=direction,
-            min_value=min_value,
-            max_value=max_value,
-            use_abs=(direction == "Alle"),
-        )
-        return df_filtered
+        return _filters.apply_filters(self, df, apply_amount_filter=apply_amount_filter)
 
     def _build_bilag_split_text(self, bilag_df: pd.DataFrame, *, tolerable_error: float) -> str:
-        """Bygg en kompakt tekst som viser populasjon/spesifikk/rest på bilag-nivå.
+        return _refresh.build_bilag_split_text(bilag_df, tolerable_error=tolerable_error)
 
-        Viktige prinsipper:
-        - Spesifikk utvelgelse: |SumBeløp| >= tolererbar feil (alltid absolutt for terskel).
-        - Populasjonsverdi: netto (signert) er standard i revisjon.
-        - Utvalgsberegningen for tilfeldig trekk bruker |netto restpopulasjon|.
-        """
+    def _compute_recommendation(self):
+        return _refresh.compute_recommendation(self)
 
-        if bilag_df is None or bilag_df.empty or "SumBeløp" not in bilag_df.columns:
-            return ""
-
-        tol = abs(float(tolerable_error or 0.0))
-        amounts = pd.to_numeric(bilag_df["SumBeløp"], errors="coerce").fillna(0.0)
-
-        n_total = int(len(bilag_df))
-        net_total = float(amounts.sum())
-        abs_total = float(amounts.abs().sum())
-
-        if tol > 0.0:
-            mask_spec = amounts.abs() >= tol
-        else:
-            mask_spec = pd.Series([False] * len(bilag_df), index=bilag_df.index)
-
-        amounts_spec = amounts.loc[mask_spec]
-        amounts_rem = amounts.loc[~mask_spec]
-
-        n_spec = int(mask_spec.sum())
-        n_rem = int(n_total - n_spec)
-
-        net_spec = float(amounts_spec.sum()) if n_spec else 0.0
-        abs_spec = float(amounts_spec.abs().sum()) if n_spec else 0.0
-
-        net_rem = float(amounts_rem.sum()) if n_rem else 0.0
-        abs_rem = float(amounts_rem.abs().sum()) if n_rem else 0.0
-
-        tol_txt = fmt_amount_no(tol, decimals=0) if tol > 0 else "0"
-
-        return (
-            f"Populasjon (bilag): {fmt_int_no(n_total)} | Netto: {fmt_amount_no(net_total, decimals=0)} | Abs: {fmt_amount_no(abs_total, decimals=0)}\n"
-            f"Spesifikk (|beløp| >= {tol_txt}): {fmt_int_no(n_spec)} | Netto: {fmt_amount_no(net_spec, decimals=0)} | Abs: {fmt_amount_no(abs_spec, decimals=0)}\n"
-            f"Restpopulasjon: {fmt_int_no(n_rem)} | Netto: {fmt_amount_no(net_rem, decimals=0)} | Abs: {fmt_amount_no(abs_rem, decimals=0)}\n"
-            f"Beregning tilfeldig trekk bruker |netto rest|: {fmt_amount_no(abs(net_rem), decimals=0)}"
-        )
-
-    def _compute_recommendation(self) -> _Recommendation | None:
-        # Build bilag-level df for drawing frame (used for grouping + selection)
-        if self._df_filtered is None or self._df_filtered.empty:
-            self._bilag_df = pd.DataFrame()
-        else:
-            self._bilag_df = self._build_bilag_df(self._df_filtered)
-
-        # Build bilag-level df for calculations (amount filter must NOT affect this)
-        if self._df_calc is None or self._df_calc.empty:
-            self._bilag_df_calc = pd.DataFrame()
-            return None
-
-        self._bilag_df_calc = self._build_bilag_df(self._df_calc)
-        if self._bilag_df_calc is None or self._bilag_df_calc.empty:
-            return None
-
-        tol = self._get_tolerable_error_value()
-
-        # Confidence factor (risk + confidence)
-        risk_level = (self.var_risk.get() or "Middels").strip().lower()
-        conf_level = self._parse_confidence_percent(self.var_confidence.get())
-        conf_factor = confidence_factor(risk_level=risk_level, confidence_level=conf_level)
-
-        rec_dict = compute_net_basis_recommendation(
-            self._bilag_df_calc,
-            tolerable_error=tol,
-            confidence_factor=float(conf_factor),
-            amount_col="SumBeløp",
-        )
-        n_specific = int(rec_dict["n_specific"])
-        n_random = int(rec_dict["n_random"])
-        n_total = int(rec_dict["n_total"])
-        remaining_net = float(rec_dict["remaining_net"])
-
-        # Update the sample size spinbox default behavior
-        current_n = int(self.var_sample_n.get() or 0)
-        if current_n == 0 or (self._last_suggested_n is not None and current_n == self._last_suggested_n):
-            self.var_sample_n.set(n_total)
-        self._last_suggested_n = n_total
-
-        return _Recommendation(
-            conf_factor=float(conf_factor),
-            n_specific=n_specific,
-            n_random_recommended=int(n_random),
-            n_total_recommended=int(n_total),
-            population_value_remaining=float(remaining_net),
-        )
-
-    def _update_recommendation_text(self, rec: Optional[_Recommendation]) -> None:
-
-        tol = self._get_tolerable_error_value()
-
-        parts: list[str] = []
-
-        if tol > 0:
-
-            parts.append(f"Tolererbar feil: {fmt_amount_no(tol, decimals=0)}")
-
-        if rec is None:
-
-            self.var_recommendation.set(no_break_spaces_in_numbers('\n'.join(parts)))
-
-            return
-
-        if rec.conf_factor:
-
-            parts.append(f"Konfidensfaktor: {str(rec.conf_factor).replace('.', ',')}")
-
-        parts.append(
-
-            f"Forslag utvalg: {fmt_int_no(rec.n_total_recommended)} bilag"
-
-            + (f" (inkl. {fmt_int_no(rec.n_specific)} spesifikk)" if rec.n_specific else "")
-
-        )
-
-        self.var_recommendation.set(no_break_spaces_in_numbers('\n'.join(parts)))
-
+    def _update_recommendation_text(self, rec) -> None:
+        return _refresh.update_recommendation_text(self, rec)
 
     def _refresh_groups_table(self) -> None:
-        # Groups are shown for the remaining bilag (excluding specific)
-        for i in self.tree_groups.get_children():
-            self.tree_groups.delete(i)
-
-        if self._bilag_df is None or self._bilag_df.empty:
-            return
-
-        tol = self._get_tolerable_error_value()
-        # Spesifikk utvelgelse baseres alltid på |SumBeløp| >= tolererbar feil.
-        spec, remaining = split_specific_selection_by_tolerable_error(self._bilag_df, tol, use_abs=True)
-        if remaining.empty:
-            # Only specific
-            if not spec.empty:
-                sum_spec = float(pd.to_numeric(spec["SumBeløp"], errors="coerce").fillna(0.0).abs().sum())
-                self.tree_groups.insert("", "end", values=("Spesifikk", f">= {fmt_amount_no(tol, 0)}", len(spec), fmt_amount_no(sum_spec)))
-            return
-
-        # Stratifisering gjøres på absolutt beløp (gir pene, positive intervaller)
-        values = pd.to_numeric(remaining["SumBeløp"], errors="coerce").fillna(0.0).abs()
-        try:
-            groups, interval_map, stats_df = self._stratify_remaining_values(values)
-        except Exception:
-            return
-
-        # Insert optional specific group first
-        if not spec.empty:
-            sum_spec = float(pd.to_numeric(spec["SumBeløp"], errors="coerce").fillna(0.0).abs().sum())
-            self.tree_groups.insert(
-                "",
-                "end",
-                values=("Spesifikk", f">= {fmt_amount_no(tol, 0)}", len(spec), fmt_amount_no(sum_spec)),
-            )
-
-        # Stats per group
-        # stats_df columns: Gruppe, Antall, Sum, Min, Max
-        for _, row in stats_df.iterrows():
-            grp = row.get("Gruppe")
-            interval = interval_map.get(str(grp), "")
-            self.tree_groups.insert(
-                "",
-                "end",
-                values=(
-                    str(grp),
-                    interval,
-                    int(row.get("Antall", 0)),
-                    fmt_amount_no(float(row.get("Sum", 0.0))),
-                ),
-            )
-
-    # --- selection ----------------------------------------------------------------
+        return _refresh.refresh_groups_table(self)
 
     def _run_selection(self) -> None:
-        try:
-            if self._df_filtered is None or self._df_filtered.empty:
-                messagebox.showinfo("Utvalg", "Ingen data i grunnlaget. Velg konti/filtre først.")
-                return
+        _selection.run_selection(self)
 
-            bilag_df = self._bilag_df
-            if bilag_df is None or bilag_df.empty:
-                messagebox.showinfo("Utvalg", "Ingen bilag i grunnlaget.")
-                return
-
-            tol = self._get_tolerable_error_value()
-            # Spesifikk utvelgelse baseres alltid på |SumBeløp| >= tolererbar feil.
-            spec, remaining = split_specific_selection_by_tolerable_error(bilag_df, tol, use_abs=True)
-
-            # Determine desired total sample size
-            desired_total = int(self.var_sample_n.get() or 0)
-            if desired_total <= 0:
-                rec = self._compute_recommendation()
-                desired_total = rec.n_total_recommended
-
-            # Always include specific
-            specific_ids = list(spec["Bilag"].tolist()) if not spec.empty else []
-            desired_total = max(desired_total, len(specific_ids))
-
-            available_total = int(len(bilag_df))
-            if desired_total > available_total:
-                messagebox.showwarning(
-                    "Utvalg",
-                    f"Beløpsfilter/filtrering gir bare {available_total} bilag i trekkgrunnlaget, "
-                    f"men ønsket utvalg er {desired_total}. Programmet vil trekke maks {available_total} bilag.",
-                )
-
-
-            n_random = desired_total - len(specific_ids)
-            random_ids: list[Any] = []
-
-            if n_random > 0 and not remaining.empty:
-                random_ids = self._draw_stratified_sample(remaining, n_random)
-
-            sample_ids_set = set(specific_ids) | set(random_ids)
-            sample_df = bilag_df[bilag_df["Bilag"].isin(sample_ids_set)].copy()
-
-            # Annotate sample with group/interval
-            sample_df["Gruppe"] = ""
-            sample_df["Intervall"] = ""
-            if tol > 0 and not spec.empty:
-                sample_df.loc[sample_df["Bilag"].isin(specific_ids), "Gruppe"] = "Spesifikk"
-                sample_df.loc[sample_df["Bilag"].isin(specific_ids), "Intervall"] = f">= {fmt_amount_no(tol, 0)}"
-
-            # Fill for random using stratification intervals
-            if random_ids:
-                # Stratifisering gjøres på absolutt beløp (pene, positive intervaller)
-                rem_values = pd.to_numeric(remaining["SumBeløp"], errors="coerce").fillna(0.0).abs()
-                groups, interval_map, _stats = self._stratify_remaining_values(rem_values)
-                # Map bilag -> group
-                group_by_idx = pd.Series(index=remaining.index, dtype=object)
-                for grp_label, mask in groups:
-                    group_by_idx.loc[mask[mask].index] = grp_label
-                # Apply to sample
-                for idx, grp_label in group_by_idx.items():
-                    bilag_id = remaining.loc[idx, "Bilag"]
-                    if bilag_id in sample_ids_set and bilag_id not in specific_ids:
-                        sample_df.loc[sample_df["Bilag"] == bilag_id, "Gruppe"] = str(grp_label)
-                        sample_df.loc[sample_df["Bilag"] == bilag_id, "Intervall"] = interval_map.get(str(grp_label), "")
-
-            # Sort by abs sum amount desc
-            amounts_sort = pd.to_numeric(sample_df["SumBeløp"], errors="coerce").fillna(0.0)
-            sample_df = sample_df.assign(_abs_sort=amounts_sort.abs()).sort_values("_abs_sort", ascending=False).drop(
-                columns=["_abs_sort"]
-            )
-
-            self._df_sample = sample_df
-            self._populate_tree(sample_df)
-            self.nb.select(0)
-
-        except Exception as e:
-            messagebox.showerror("Utvalg", f"Kunne ikke kjøre utvalg.\n\n{e}")
-
-    def _draw_stratified_sample(self, remaining_bilag_df: pd.DataFrame, n: int) -> list[Any]:
-        """Draw a stratified sample of bilag IDs from remaining_bilag_df."""
-
-        if n <= 0 or remaining_bilag_df.empty:
-            return []
-
-        n = min(n, len(remaining_bilag_df))
-
-        # Stratifisering gjøres på absolutt beløp (pene, positive intervaller)
-        values = pd.to_numeric(remaining_bilag_df["SumBeløp"], errors="coerce").fillna(0.0).abs()
-
-        groups, _interval_map, _stats = self._stratify_remaining_values(values)
-
-        # Allocate n proportionally by stratum size
-        sizes = [int(mask.sum()) for _g, mask in groups]
-        total = sum(sizes) or 1
-        raw_alloc = [n * s / total for s in sizes]
-        alloc = [int(round(x)) for x in raw_alloc]
-
-        # Fix rounding drift
-        diff = n - sum(alloc)
-        while diff != 0:
-            # Adjust the largest strata first
-            idx = max(range(len(alloc)), key=lambda i: sizes[i])
-            if diff > 0:
-                alloc[idx] += 1
-                diff -= 1
-            else:
-                if alloc[idx] > 0:
-                    alloc[idx] -= 1
-                    diff += 1
-                else:
-                    break
-
-        chosen: list[Any] = []
-        for (grp_label, mask), take in zip(groups, alloc):
-            if take <= 0:
-                continue
-            idxs = list(mask[mask].index)
-            self._rng.shuffle(idxs)
-            chosen.extend(remaining_bilag_df.loc[idxs[:take], "Bilag"].tolist())
-        # If we still have too few due to empty strata, fill randomly
-        if len(chosen) < n:
-            remaining_ids = [x for x in remaining_bilag_df["Bilag"].tolist() if x not in set(chosen)]
-            self._rng.shuffle(remaining_ids)
-            chosen.extend(remaining_ids[: n - len(chosen)])
-        return chosen[:n]
+    def _draw_stratified_sample(self, remaining_bilag_df: pd.DataFrame, n: int):
+        return _selection.draw_stratified_sample(self, remaining_bilag_df, n)
 
     def _populate_tree(self, df: pd.DataFrame) -> None:
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-
-        if df is None or df.empty:
-            return
-
-        for _, row in df.iterrows():
-            bilag = row.get("Bilag", "")
-            dato = row.get("Dato", "")
-            tekst = row.get("Tekst", "")
-            sum_belop = row.get("SumBeløp", 0.0)
-            gruppe = row.get("Gruppe", "")
-            intervall = row.get("Intervall", "")
-
-            # Robust numerisk verdi + tag for negative beløp (kredit)
-            try:
-                sum_val = float(pd.to_numeric(sum_belop, errors="coerce"))
-            except Exception:
-                sum_val = 0.0
-            if pd.isna(sum_val):
-                sum_val = 0.0
-
-            tags: tuple[str, ...] = ()
-            if sum_val < 0:
-                tags = ("neg",)
-
-            self.tree.insert(
-                "",
-                "end",
-                values=(
-                    bilag,
-                    str(dato)[:10] if pd.notna(dato) else "",
-                    tekst,
-                    fmt_amount_no(sum_val),
-                    gruppe,
-                    intervall,
-                ),
-                tags=tags,
-            )
+        _selection.populate_tree(self, df)
 
     def _commit_selection(self) -> None:
-        if self._df_sample is None or self._df_sample.empty:
-            messagebox.showinfo("Utvalg", "Ingen utvalg å legge til.")
-            return
-
-        if self._on_commit_selection is None:
-            messagebox.showinfo("Utvalg", "Ingen mottaker for utvalg (on_commit).")
-            return
-
-        try:
-            self._on_commit_selection(self._df_sample.copy())
-        except Exception as e:
-            messagebox.showerror("Utvalg", f"Kunne ikke legge utvalg til.\n\n{e}")
+        _actions.commit_selection(self)
 
     def _export_excel(self) -> None:
-        if self._df_sample is None or self._df_sample.empty:
-            messagebox.showinfo("Eksporter", "Ingen utvalg å eksportere.")
-            return
-
-        # Fyll inn et fornuftig standard filnavn så brukeren slipper å skrive det selv.
-        default_name = f"Utvalg_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.xlsx"
-        initialdir = getattr(self, "_last_export_dir", "") or ""
-
-        path = filedialog.asksaveasfilename(
-            title="Lagre Excel",
-            defaultextension=".xlsx",
-            filetypes=[("Excel", "*.xlsx")],
-            initialfile=default_name,
-            initialdir=initialdir,
-        )
-        if not path:
-            return
-
-        # Husk sist brukte mappe (for neste eksport).
-        try:
-            self._last_export_dir = os.path.dirname(path)
-        except Exception:
-            pass
-
-        try:
-            export_to_excel(
-                path,
-                Utvalg=self._df_sample,
-                Grunnlag=self._df_filtered,
-            )
-            messagebox.showinfo("Eksporter", "Eksportert.")
-        except Exception as e:
-            messagebox.showerror("Eksporter", f"Kunne ikke eksportere.\n\n{e}")
+        _actions.export_excel(self)
 
     def _show_accounts(self) -> None:
-        """Vis en enkel kontosummering for nåværende (filtrerte) grunnlag."""
-
-        df = self._df_filtered
-        if df is None or df.empty:
-            messagebox.showinfo("Kontorer", "Ingen data å vise.")
-            return
-
-        if "Konto" not in df.columns:
-            messagebox.showinfo("Kontorer", "Datasettet mangler kolonnen 'Konto'.")
-            return
-
-        konto_col = "Konto"
-        navn_col = "Kontonavn" if "Kontonavn" in df.columns else None
-
-        gcols = [konto_col] + ([navn_col] if navn_col else [])
-        agg = {
-            "Rader": (konto_col, "size"),
-            "Bilag": ("Bilag", "nunique") if "Bilag" in df.columns else (konto_col, "size"),
-            "Sum": ("Beløp", "sum") if "Beløp" in df.columns else (konto_col, "size"),
-        }
-
-        try:
-            summary = df.groupby(gcols, dropna=False).agg(**agg).reset_index()
-        except Exception:
-            # Fallback for older pandas versions
-            summary = df.groupby(gcols, dropna=False).agg({
-                konto_col: "size",
-                "Bilag": "nunique" if "Bilag" in df.columns else "size",
-                "Beløp": "sum" if "Beløp" in df.columns else "size",
-            }).reset_index()
-            # Normalize column names
-            if konto_col in summary.columns:
-                summary = summary.rename(columns={konto_col: "Rader"})
-            if "Bilag" in df.columns and "Bilag" in summary.columns:
-                summary = summary.rename(columns={"Bilag": "Bilag"})
-            if "Beløp" in summary.columns:
-                summary = summary.rename(columns={"Beløp": "Sum"})
-
-        if "Sum" in summary.columns:
-            summary = summary.reindex(summary["Sum"].abs().sort_values(ascending=False).index)
-
-        win = tk.Toplevel(self)
-        win.title("Kontosummering")
-        win.geometry("700x400")
-
-        cols = ["Konto"]
-        if navn_col:
-            cols.append("Kontonavn")
-        cols += ["Rader", "Bilag", "Sum"]
-
-        tree = ttk.Treeview(win, columns=cols, show="headings")
-        for c in cols:
-            tree.heading(c, text=c)
-            tree.column(c, width=120, anchor=("w" if c in ("Konto", "Kontonavn") else "e"))
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        ys = ttk.Scrollbar(win, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=ys.set)
-        ys.pack(side=tk.RIGHT, fill=tk.Y)
-
-        for _, row in summary.iterrows():
-            konto = row.get(konto_col, "")
-            navn = row.get(navn_col, "") if navn_col else ""
-            rader = int(row.get("Rader", 0) or 0)
-            bilag = int(row.get("Bilag", 0) or 0)
-            s = float(row.get("Sum", 0.0) or 0.0)
-
-            values: List[Any] = [konto]
-            if navn_col:
-                values.append(navn)
-            values += [fmt_int_no(rader), fmt_int_no(bilag), fmt_amount_no(s, decimals=2)]
-            tree.insert("", tk.END, values=values)
+        _actions.show_accounts(self)
 
     def _open_drilldown(self) -> None:
-        if _open_bilag_drill_dialog is None:
-            messagebox.showinfo("Drilldown", "Drilldown er ikke tilgjengelig.")
-            return
-        selection = self.tree.selection()
-        if not selection:
-            messagebox.showinfo("Drilldown", "Velg et bilag i tabellen først.")
-            return
-
-        values = self.tree.item(selection[0], "values")
-        if not values:
-            return
-        bilag = values[0]
-
-        # Bakoverkompatibilitet: vi prøver å sende med et "forhåndsvalg" hvis API-et støtter det,
-        # men faller tilbake uten ekstra kwargs hvis signaturen ikke matcher.
-        try:
-            kwargs: dict[str, Any] = {
-                "df_all": self._df_all,
-                "bilag_col": "Bilag",
-            }
-
-            try:
-                params = inspect.signature(_open_bilag_drill_dialog).parameters
-                if "preset_bilag" in params:
-                    kwargs["preset_bilag"] = bilag
-                elif "bilag" in params:
-                    kwargs["bilag"] = bilag
-                elif "bilag_id" in params:
-                    kwargs["bilag_id"] = bilag
-                elif "selected_bilag" in params:
-                    kwargs["selected_bilag"] = bilag
-            except Exception:
-                # Klarte ikke å inspisere signaturen; kjør uten forhåndsvalg.
-                pass
-
-            _open_bilag_drill_dialog(self, **kwargs)
-        except TypeError:
-            # Typisk: "unexpected keyword argument ..." – prøv uten forhåndsvalg.
-            try:
-                _open_bilag_drill_dialog(self, df_all=self._df_all, bilag_col="Bilag")
-            except Exception as e:
-                messagebox.showerror("Drilldown", f"Kunne ikke åpne drilldown.\n\n{e}")
-        except Exception as e:
-            messagebox.showerror("Drilldown", f"Kunne ikke åpne drilldown.\n\n{e}")
+        _actions.open_drilldown(self, open_dialog=_open_bilag_drill_dialog)
 
     def _build_bilag_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Aggreger transaksjoner til bilag-nivå.
+        return _selection.build_bilag_df(df)
 
-        Dette er et tynt wrapper rundt `build_bilag_dataframe`, men gjør det enklere
-        å teste logikken separat.
-        """
-        return build_bilag_dataframe(df)
     def _parse_confidence_percent(self, s: str) -> float:
-        s = (s or "90%").strip().replace("%", "")
-        try:
-            return float(s) / 100.0
-        except Exception:
-            return 0.90
+        return _filters.parse_confidence_percent(s)
 
     def _get_tolerable_error_value(self) -> float:
-        """Return tolerable error as a number.
-
-        parse_amount(...) kan returnere None (f.eks. tom streng). GUI-logikken
-        forventer likevel et tall slik at vi kan sammenligne (>, <) uten å
-        kræsje.
-        """
-
-        try:
-            v = parse_amount(self.var_tolerable_error.get())
-        except Exception:
-            return 0.0
-        return float(v) if v is not None else 0.0
+        return _filters.get_tolerable_error_value(self)
 
     def _format_tolerable_error_entry(self) -> None:
-        raw = self.var_tolerable_error.get()
-        if not (raw or "").strip():
-            return
-        try:
-            n = parse_amount(raw)
-        except Exception:
-            return
-        # Keep it as integer-like
-        self.var_tolerable_error.set(format_amount_input_no(n))
+        _filters.format_tolerable_error_entry(self)
 
     def _sample_size_touched(self) -> None:
-        # If user manually sets an explicit number, stop auto-updating
-        try:
-            current = int(self.var_sample_n.get() or 0)
-        except Exception:
-            return
-        if self._last_suggested_n is not None and current != 0 and current != self._last_suggested_n:
-            # Keep user's choice; do not overwrite on refresh
-            pass
+        _actions.sample_size_touched(self)
 
 
 __all__ = [
-    # widget
     "SelectionStudio",
-    # helper re-exports
-    "compute_population_metrics",
+    # helpers re-exported for tests and other modules
     "PopulationMetrics",
+    "compute_population_metrics",
+    "build_population_summary_text",
     "build_sample_summary_text",
     "build_source_text",
-    "build_population_summary_text",
-    "suggest_sample_size",
+    "compute_bilag_split_summary",
     "confidence_factor",
+    "suggest_sample_size",
     "fmt_amount_no",
     "fmt_int_no",
     "format_interval_no",
     "parse_amount",
+    # selection_studio_ui_logic exports
+    "format_amount_input_no",
     "no_break_spaces_in_numbers",
-    # manual strata helpers
     "parse_custom_strata_bounds",
     "format_custom_strata_bounds",
     "stratify_values_custom_bounds",
-    # legacy formatting aliases
-    "format_amount_input_no",
-    # new specific selection helpers
     "split_specific_selection_by_tolerable_error",
     "compute_specific_selection_recommendation",
     "recommend_random_sample_size_net_basis",
@@ -1131,6 +393,5 @@ __all__ = [
     "stratify_bilag_sums",
 ]
 
-
-# --- extracted logic overrides (keep at end of module) ---
+# Ensure these names exist at module-level (some older code/tests import them from here).
 from selection_studio_bilag import build_bilag_dataframe, stratify_bilag_sums  # noqa: E402,F401

@@ -1,70 +1,102 @@
-# Utvalg – revisjonsverktøy
+# Utvalg
 
-Dette prosjektet er et GUI-verktøy (Tkinter) for analyse/utvalg av regnskapsdata, med støtte for bl.a. filtrering,
-kopiering til clipboard, Excel-eksport og motpostanalyse.
+Verktøy for å analysere hovedbok/saldobalanse i norsk revisjon (NGAAP).
 
-## Quickstart
+Repoet inneholder en Tkinter‑app med faner for **Dataset**, **Analyse**, osv.
 
-1. Opprett og aktiver virtuelt miljø (Windows):
+## Hurtigstart
+
+Eksempel for Windows (PowerShell) i prosjektmappen (samme nivå som `app.py`):
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
+.\.venv\Scripts\Activate.ps1
 
-2. Installer avhengigheter:
+python -m pip install -U pip
+pip install pandas openpyxl pytest
 
-```powershell
-pip install -r requirements.txt
-```
-
-3. Start appen:
-
-```powershell
 python app.py
 ```
 
+> Tips: Tkinter følger normalt med Python på Windows.
+
+## Datasetimport
+
+Dataset‑fanen bygger et standardisert datasett (pandas DataFrame) med norske
+feltnavn som **Konto**, **Bilag**, **Beløp**, osv.
+
+Støttede kilder:
+
+- **Excel**: `.xlsx`, `.xlsm`, `.xltx`, `.xltm`
+- **CSV**: `.csv`
+- **SAF‑T**: `.zip`, `.xml`, `.gz`, `.gzip` (konverteres til cachet `transactions.csv`)
+
+Typisk arbeidsflyt:
+
+1. Velg fil (**header/mapping lastes automatisk**)
+2. (Excel) Velg riktig **Ark** (header/mapping oppdateres automatisk)
+3. Juster **Header‑rad** (1‑indeksert) ved behov (Enter eller klikk ut av feltet)
+   - eller trykk **Gjett header** for å autodetektere
+4. Kontroller/juster mapping manuelt
+5. Trykk **Bygg datasett**
+
+### Hvorfor ny I/O‑vei for preview/header
+
+Noen Excel‑filer kan ha "forurenset used‑range" (f.eks. formatert langt ned i arket),
+som gjør enkelte bibliotekkall veldig trege. Preview og header‑lesing bruker derfor:
+
+- `openpyxl` i `read_only=True` streaming‑modus
+- alltid begrenset antall rader/kolonner
+
+Dette ligger i `dataset_pane_io.py`.
+
+### Robusthet ved Excel med feil ark/header
+
+Hvis ingen av de mappede kolonnene finnes på valgt header‑rad, behandles dette som
+en "hard fail" slik at `build_from_file()` kan falle tilbake til gjetting av ark/header.
+
+## Arkitektur
+
+Hovedkomponenter:
+
+- `app.py` – entrypoint
+- `ui_main.py` – hovedapp og faner
+- `page_dataset.py` – Dataset‑fane
+- `dataset_pane.py` – UI + mapping + async import
+- `dataset_pane_io.py` – bounded IO (preview/header)
+- `dataset_build_fast.py` – rask bygging av DataFrame fra fil
+
 ## Testing
 
-Kjør alle tester:
+Installer avhengigheter:
 
-```powershell
-pytest
+```bash
+python -m pip install -U pip
+pip install pandas openpyxl pytest
 ```
 
-Kjør med coverage-rapport:
+Kjør testene:
 
-```powershell
-pytest --cov
+```bash
+pytest -q
 ```
 
-## Arkitektur (høynivå)
+## Feilsøking
 
-- **GUI / views**: `views_*.py`, `ui_*.py`
-  - Tkinter/ttk widgets, event-binding, interaksjon og presentasjon
-- **Analyse / domene-logikk**: `*_core.py`, `*_utils.py`, `*_model.py`, `analysis_*.py`, `motpost_*.py`
-  - Beregninger, filtrering, transformasjoner av DataFrames, eksport
-- **Kontrollflyt**: `controller_*.py`, `page_*.py`
-  - Kobler UI sammen med modell/tilstand og aksjoner
+- **"Leser header…" står lenge**
+  - Sjekk at du har valgt riktig ark
+  - Bruk **Forhåndsvis** for å se rå data og velg riktig header‑rad
+  - `.xls` (gammel Excel) støttes ikke – konverter til `.xlsx`
+  - SAF‑T kan ta tid første gang (genererer cachet CSV)
 
-Mål: holde UI-kode og backend-logikk mest mulig adskilt.
+- **Mapping virker feil**
+  - Sjekk at header‑rad faktisk inneholder kolonnenavn
+  - Mapping foreslås automatisk når header leses – juster manuelt ved behov
 
-## Troubleshooting
+Se også **Logg**‑fanen for detaljer.
 
-- **Appen starter ikke i PyCharm**:
-  - Sjekk *Working directory* i Run Configuration – den skal peke på prosjektroten.
-  - Kjør gjerne fra terminal i prosjektroten: `python app.py`
+## TODO
 
-- **Clipboard/Excel liming**:
-  - `Ctrl+C` kopierer uten header (TSV), `Ctrl+Shift+C` kopierer med header.
-  - I Excel: klikk i *én* celle før du limer inn hvis du får “Copy area and paste area aren't the same size”.
-
-- **Bygge EXE (PyInstaller)**:
-  - Kjør fra prosjektroten: `python build_exe.py`
-  - Sørg for at `pyinstaller` er installert i venv.
-
-## TODO (kortliste)
-
-- Videre refaktorering: tydeligere pakkestruktur (`ui/`, `views/`, `domain/`, `services/`).
-- Mer gjenbruk av felles Treeview/Listbox-funksjonalitet (kopi, summering, eksport).
-- Flere integrasjonstester for viktige brukerflows (motpost/drilldown/utvalg).
+- Avbryt/timeout for svært store importer
+- Mer progress‑indikasjon (antall rader lest)
+- Flere enhetstester rundt SAF‑T‑flyten

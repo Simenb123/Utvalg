@@ -2,19 +2,54 @@
 
 Tkinter-visning for motpostanalyse.
 
-Kjerne-/eksport-logikk ligger i :mod:`motpost_konto_core` (pandas/openpyxl).
+Historikk:
+    Denne modulen har vokst over tid og inneholdt både:
+        - UI-bygging
+        - rendering (Treeview-populering)
+        - actions/callbacks
+        - Treeview-hjelpefunksjoner
+
+    For bedre vedlikeholdbarhet er den nå refaktorert til en "thin facade" som
+    delegerer til mindre moduler i :mod:`motpost`-pakken.
+
+Viktig:
+    Flere tester (og kallere) monkeypatcher navn i dette modulen. Derfor
+    beholder vi:
+        - samme klasse/entrypoint-navn
+        - re-exports av kjernefunksjoner og helpers
+        - metodenavn på MotpostKontoView
 """
 
-import os
-from pathlib import Path
-from typing import Any, Callable, Iterable, Optional, Sequence
+from __future__ import annotations
+
+from typing import Any, Optional
 
 import pandas as pd
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from formatting import fmt_amount
-from konto_utils import konto_to_str
+from motpost.view_konto_actions import (
+    clear_outliers,
+    drilldown,
+    export_excel,
+    mark_outlier,
+    on_select_motkonto,
+    open_bilag_drilldown,
+    show_combinations,
+)
+from motpost.view_konto_render import refresh_details, render_summary
+from motpost.view_konto_tree import (
+    configure_bilag_details_tree,
+    treeview_first_selected_value,
+    treeview_value_from_iid,
+)
+from motpost.view_konto_ui import (
+    bind_entry_select_all,
+    build_motpost_header_metrics_text,
+    build_motpost_selected_accounts_label,
+    build_motpost_selected_accounts_value,
+    build_ui,
+)
 
 from motpost_combinations_popup import show_motkonto_combinations_popup
 from motpost_combinations import (
@@ -27,10 +62,7 @@ from motpost_konto_core import (
     build_motpost_data,
     build_motpost_excel_workbook,
     _konto_str,
-    _fmt_date_ddmmyyyy,
-    _fmt_percent_points,
 )
-from motpost.combo_workflow import STATUS_OUTLIER, normalize_combo_status
 
 from ui_treeview_sort import enable_treeview_sorting
 
@@ -60,12 +92,9 @@ class MotpostKontoView(tk.Toplevel):
         )
 
         self._outliers: set[str] = set()
-        # Status per kombinasjon (UI-workflow): kombinasjon -> 'expected' | 'outlier' | ''
-        # Deler referanse med kombinasjons-popup slik at markeringer overlever refresh/sortering.
-        self._combo_status_map: dict[str, str] = {}
-        # Legacy/backwards: outlier-sett (kombinasjoner) – holdes i sync med status_map.
+        # Outliers på kombinasjonsnivå ("1500, 2700" osv.).
+        # Muteres fra kombinasjons-popup (settet deles som referanse).
         self._outlier_combinations: set[str] = set()
-        self._selected_motkonto: Optional[str] = None
         self._selected_motkonto: Optional[str] = None
 
         self._details_limit_var = tk.IntVar(value=200)
@@ -75,441 +104,87 @@ class MotpostKontoView(tk.Toplevel):
 
     # --- UI bygging ---
     def _build_ui(self) -> None:
-        top = ttk.Frame(self)
-        top.pack(side=tk.TOP, fill=tk.X, padx=10, pady=8)
-
-        dir_label = self._data.selected_direction
-        sum_label = "Sum valgte kontoer" if dir_label == "Alle" else f"Sum valgte kontoer ({dir_label.lower()})"
-        info = (
-            f"Valgte kontoer: {', '.join(self._data.selected_accounts)}  |  "
-            f"Bilag i grunnlag: {self._data.bilag_count}  |  "
-            f"{sum_label}: {fmt_amount(self._data.selected_sum)}  |  "
-            f"Kontroll (valgt + mot): {fmt_amount(self._data.control_sum)}"
+        build_ui(
+            self,
+            enable_treeview_sorting_fn=enable_treeview_sorting,
+            configure_bilag_details_tree_fn=configure_bilag_details_tree,
         )
-        self._info_label = ttk.Label(top, text=info)
-        self._info_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        btn_frame = ttk.Frame(top)
-        btn_frame.pack(side=tk.RIGHT)
-
-        ttk.Button(
-            btn_frame,
-            text="Kombinasjoner",
-            command=self._show_combinations,
-        ).pack(side=tk.LEFT, padx=(0, 12))
-
-        ttk.Button(btn_frame, text="Merk outlier", command=self._mark_outlier).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btn_frame, text="Nullstill outliers", command=self._clear_outliers).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btn_frame, text="Eksporter Excel", command=self._export_excel).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(btn_frame, text="Lukk", command=self.destroy).pack(side=tk.LEFT)
-
-        # Mid: motkonto pivot
-        mid = ttk.Frame(self)
-        mid.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10)
-
-        ttk.Label(mid, text="Motkonto (pivot)").pack(anchor=tk.W)
-
-        columns = ("Motkonto", "Kontonavn", "Sum", "% andel", "Antall bilag", "Outlier")
-        self._tree_summary = ttk.Treeview(mid, columns=columns, show="headings", selectmode="extended")
-        for c in columns:
-            self._tree_summary.heading(c, text=c)
-            self._tree_summary.column(c, width=120 if c != "Tekst" else 300, anchor=tk.W)
-
-        self._tree_summary.column("Sum", anchor=tk.E, width=140)
-        self._tree_summary.column("% andel", anchor=tk.E, width=90)
-        self._tree_summary.column("Antall bilag", anchor=tk.E, width=90)
-        self._tree_summary.column("Outlier", anchor=tk.W, width=70)
-
-        # Klikk på kolonneheader for å sortere
-        enable_treeview_sorting(self._tree_summary)
-
-        yscroll = ttk.Scrollbar(mid, orient=tk.VERTICAL, command=self._tree_summary.yview)
-        self._tree_summary.configure(yscrollcommand=yscroll.set)
-
-        self._tree_summary.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        yscroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self._tree_summary.tag_configure("neg", foreground="red")
-        self._tree_summary.tag_configure("outlier", background="#FFF2CC")
-        self._tree_summary.bind("<<TreeviewSelect>>", self._on_select_motkonto)
-
-        # Bottom: bilag-liste for valgt motkonto
-        bottom = ttk.Frame(self)
-        bottom.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(8, 10))
-
-        header = ttk.Frame(bottom)
-        header.pack(side=tk.TOP, fill=tk.X)
-
-        ttk.Label(header, text="Bilag for valgt motkonto").pack(side=tk.LEFT)
-        ttk.Label(header, text="Vis:").pack(side=tk.LEFT, padx=(10, 2))
-        sp = ttk.Spinbox(header, from_=50, to=5000, increment=50, width=7, textvariable=self._details_limit_var, command=self._refresh_details)
-        sp.pack(side=tk.LEFT)
-
-        ttk.Button(header, text="Drilldown", command=self._drilldown).pack(side=tk.RIGHT)
-
-        columns2 = ("Bilag", "Dato", "Tekst", "Beløp (valgte kontoer)", "Motbeløp", "Kontoer i bilag")
-        self._tree_details = ttk.Treeview(bottom, columns=columns2, show="headings", selectmode="extended")
-        for c in columns2:
-            self._tree_details.heading(c, text=c)
-            self._tree_details.column(c, width=120, anchor=tk.W)
-
-        self._tree_details.column("Tekst", width=350)
-        self._tree_details.column("Beløp (valgte kontoer)", anchor=tk.E, width=160)
-        self._tree_details.column("Motbeløp", anchor=tk.E, width=120)
-        self._tree_details.column("Kontoer i bilag", width=180)
-
-        # Klikk på kolonneheader for å sortere
-        enable_treeview_sorting(self._tree_details)
-
-        yscroll2 = ttk.Scrollbar(bottom, orient=tk.VERTICAL, command=self._tree_details.yview)
-        self._tree_details.configure(yscrollcommand=yscroll2.set)
-
-        self._tree_details.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        yscroll2.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self._tree_details.tag_configure("neg", foreground="red")
-
-        # Aktiver multiselect + dobbelklikk/Enter for drilldown på bilag-listen
-        configure_bilag_details_tree(self._tree_details, open_bilag_callback=self._open_bilag_drilldown)
-
 
     # --- Rendering ---
     def _render_summary(self) -> None:
-        self._tree_summary.delete(*self._tree_summary.get_children())
-
-        df = self._data.df_motkonto
-        if df is None or df.empty:
-            return
-
-        for _, row in df.iterrows():
-            motkonto = _konto_str(row.get("Motkonto"))
-            kontonavn = row.get("Kontonavn", "")
-            s = float(row.get("Sum", 0.0))
-            share = float(row.get("% andel", 0.0))
-            cnt = int(row.get("Antall bilag", 0))
-            out = "Ja" if motkonto in self._outliers else ""
-
-            tags: list[str] = []
-            if s < 0:
-                tags.append("neg")
-            if motkonto in self._outliers:
-                tags.append("outlier")
-
-            self._tree_summary.insert(
-                "",
-                tk.END,
-                values=(motkonto, kontonavn, fmt_amount(s), _fmt_percent_points(share), cnt, out),
-                tags=tuple(tags),
-            )
+        render_summary(self)
 
     def _refresh_details(self) -> None:
-        self._tree_details.delete(*self._tree_details.get_children())
-
-        if not self._selected_motkonto:
-            return
-
-        df_b = build_bilag_details(self._data, self._selected_motkonto)
-        if df_b is None or df_b.empty:
-            return
-
-        limit = int(self._details_limit_var.get() or 200)
-        df_b = df_b.head(limit)
-
-        for _, row in df_b.iterrows():
-            bilag = row.get("Bilag", "")
-            dato = _fmt_date_ddmmyyyy(row.get("Dato"))
-            tekst = row.get("Tekst", "")
-            bel_sel = float(row.get("Beløp (valgte kontoer)", 0.0))
-            motb = float(row.get("Motbeløp", 0.0))
-            kontoer = row.get("Kontoer i bilag", "")
-
-            tags: list[str] = []
-            if bel_sel < 0 or motb < 0:
-                tags.append("neg")
-
-            self._tree_details.insert(
-                "",
-                tk.END,
-                values=(bilag, dato, tekst, fmt_amount(bel_sel), fmt_amount(motb), kontoer),
-                tags=tuple(tags),
-            )
+        # Viktig: testene monkeypatcher build_bilag_details i *dette* modulen.
+        refresh_details(self, build_bilag_details_fn=build_bilag_details)
 
     # --- Events / actions ---
     def _on_select_motkonto(self, _event=None) -> None:
-        sel = self._tree_summary.selection()
-        if not sel:
-            self._selected_motkonto = None
-            self._refresh_details()
-            return
-        # Bruk første valgte som "aktiv" motkonto for bilagsvisning
-        item = sel[0]
-        motkonto = self._tree_summary.item(item, "values")[0]
-        self._selected_motkonto = _konto_str(motkonto)
-        self._refresh_details()
+        on_select_motkonto(self, konto_str_fn=_konto_str)
 
     def _mark_outlier(self) -> None:
-        sel = self._tree_summary.selection()
-        if not sel:
-            messagebox.showinfo("Motpostanalyse", "Velg en eller flere motkontoer for å markere som outlier.")
-            return
-        for item in sel:
-            motkonto = self._tree_summary.item(item, "values")[0]
-            self._outliers.add(_konto_str(motkonto))
-        self._render_summary()
+        mark_outlier(self, messagebox_mod=messagebox, konto_str_fn=_konto_str)
 
     def _clear_outliers(self) -> None:
-        self._outliers.clear()
-        self._render_summary()
+        clear_outliers(self)
 
     def _show_combinations(self) -> None:
-        """Vis en oversikt over motkonto-kombinasjoner (popup)."""
-        try:
-            df_scope = getattr(self._data, "df_scope", None)
-            if df_scope is None or getattr(df_scope, "empty", False):
-                messagebox.showinfo("Kombinasjoner", "Ingen data i grunnlaget.")
-                return
-
-            selected_accounts = getattr(self._data, "selected_accounts", ())
-            if not selected_accounts:
-                messagebox.showinfo("Kombinasjoner", "Ingen valgte kontoer.")
-                return
-
-            selected_direction = getattr(self._data, "selected_direction", "Alle")
-            konto_navn_map = getattr(self, "_konto_name_map", None)
-
-            # Nyere builders aksepterer selected_direction; eldre stubs/tests gjør ikke.
-            try:
-                df_combo = build_motkonto_combinations(
-                    df_scope,
-                    selected_accounts,
-                    selected_direction=selected_direction,
-                    outlier_motkonto=self._outliers,
-                    konto_navn_map=konto_navn_map,
-                )
-            except TypeError:
-                df_combo = build_motkonto_combinations(
-                    df_scope,
-                    selected_accounts,
-                    outlier_motkonto=self._outliers,
-                    konto_navn_map=konto_navn_map,
-                )
-
-            try:
-                df_combo_per = build_motkonto_combinations_per_selected_account(
-                    df_scope,
-                    selected_accounts,
-                    selected_direction=selected_direction,
-                    outlier_motkonto=self._outliers,
-                    konto_navn_map=konto_navn_map,
-                )
-            except TypeError:
-                df_combo_per = build_motkonto_combinations_per_selected_account(
-                    df_scope,
-                    selected_accounts,
-                    outlier_motkonto=self._outliers,
-                    konto_navn_map=konto_navn_map,
-                )
-
-            bilag_total = int(df_scope["Bilag"].astype(str).nunique()) if "Bilag" in df_scope.columns else 0
-            summary = f"Antall kombinasjoner: {len(df_combo)} | Bilag i grunnlag: {bilag_total} | Rader per konto: {len(df_combo_per)}"
-
-            combo_status_map = getattr(self, "_combo_status_map", None)
-            if combo_status_map is None:
-                combo_status_map = {}
-                self._combo_status_map = combo_status_map
-
-            outlier_combos = getattr(self, "_outlier_combinations", set())
-            self._outlier_combinations = outlier_combos  # sikre attributtet (tester/__new__)
-
-            # Hold outlier-sett i sync med status_map (status == outlier)
-            outlier_combos.clear()
-            outlier_combos.update({k for k, v in combo_status_map.items() if normalize_combo_status(v) == STATUS_OUTLIER})
-
-            # Ny signatur (med drilldown/outliers). I tester kan funksjonen være monkeypatched
-            # med eldre signatur, så vi faller tilbake ved TypeError.
-            try:
-                show_motkonto_combinations_popup(
-                    self,
-                    df_combos=df_combo,
-                    df_combo_per_selected=df_combo_per,
-                    title="Motkonto-kombinasjoner",
-                    summary=summary,
-                    df_scope=df_scope,
-                    selected_accounts=selected_accounts,
-                    selected_direction=selected_direction,
-                    konto_navn_map=konto_navn_map,
-                    combo_status_map=combo_status_map,
-                    outlier_combinations=outlier_combos,
-                    on_export_excel=self._export_excel,
-                )
-            except TypeError:
-                show_motkonto_combinations_popup(
-                    self,
-                    df_combos=df_combo,
-                    df_combo_per_selected=df_combo_per,
-                    title="Motkonto-kombinasjoner",
-                    summary=summary,
-                )
-        except Exception as e:
-            messagebox.showerror("Kombinasjoner", f"Kunne ikke vise kombinasjoner:\n{e}")
-
-
-    def _export_excel(self, combo_status: object | None = None) -> None:
-        default_name = "motpostanalyse.xlsx"
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="Lagre Excel",
-            defaultextension=".xlsx",
-            initialfile=default_name,
-            filetypes=[("Excel", "*.xlsx")],
+        # Viktig: testene monkeypatcher build_motkonto_combinations / show_motkonto_combinations_popup
+        show_combinations(
+            self,
+            build_motkonto_combinations_fn=build_motkonto_combinations,
+            build_motkonto_combinations_per_selected_account_fn=build_motkonto_combinations_per_selected_account,
+            show_popup_fn=show_motkonto_combinations_popup,
+            messagebox_mod=messagebox,
         )
-        if not path:
-            return
-        try:
-            # combo_status kan være dict[str,str] (ny workflow) eller set[str] (legacy outliers)
-            if isinstance(combo_status, dict):
-                status_map = {str(k): str(v) for k, v in combo_status.items()}
-            elif isinstance(combo_status, set):
-                status_map = {str(k): "outlier" for k in combo_status}
+
+    def _export_excel(
+        self,
+        combo_status_map: object | None = None,
+        combo_comment_map: object | None = None,
+    ) -> None:
+        """Eksporter til Excel.
+
+        Backwards compatible:
+        - Eldre kallere sendte kun `outlier_combinations: set[str]`.
+        - Kombinasjons-popup (2026+) sender (status_map: dict, comment_map: dict).
+        """
+        outlier_combinations: set[str] | None = None
+        status_map: dict[str, str] | None = None
+        comment_map: dict[str, str] | None = None
+
+        if isinstance(combo_status_map, dict):
+            status_map = {str(k): str(v) for k, v in combo_status_map.items()}
+            if isinstance(combo_comment_map, dict):
+                comment_map = {str(k): ("" if v is None else str(v)) for k, v in combo_comment_map.items()}
             else:
-                status_map = dict(getattr(self, "_combo_status_map", {}) or {})
+                comment_map = {}
+        elif isinstance(combo_status_map, set):
+            # Legacy: første argument var outlier-sett
+            outlier_combinations = {str(x) for x in combo_status_map}
+        else:
+            outlier_combinations = None
 
-            # Sync legacy outlier-sett (brukes enkelte steder i UI)
-            outlier_set = getattr(self, "_outlier_combinations", set())
-            self._outlier_combinations = outlier_set
-            outlier_set.clear()
-            outlier_set.update({k for k, v in status_map.items() if normalize_combo_status(v) == STATUS_OUTLIER})
-
-            # Oppdater lagret status_map (best effort, bevarer referanser)
-            try:
-                self._combo_status_map.clear()
-                self._combo_status_map.update(status_map)
-            except Exception:
-                pass
-
-            wb = build_motpost_excel_workbook(
-                self._data,
-                outlier_motkonto=self._outliers,
-                selected_motkonto=self._selected_motkonto,
-                combo_status_map=status_map,
-                outlier_combinations=outlier_set,
-            )
-            wb.save(path)
-            messagebox.showinfo("Motpostanalyse", f"Eksportert til Excel:\n{path}")
-
-            # Aapne filen automatisk etter eksport (plattformsikkert)
-            try:
-                import os
-                import sys
-                import subprocess
-
-                if hasattr(os, "startfile"):
-                    os.startfile(path)  # type: ignore[attr-defined]
-                elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                else:
-                    subprocess.Popen(["xdg-open", path])
-            except Exception:
-                # Ikke kritisk om dette feiler (f.eks. i testmiljo)
-                pass
-        except Exception as e:
-            messagebox.showerror("Motpostanalyse", f"Kunne ikke eksportere til Excel:\n{e}")
+        export_excel(
+            self,
+            filedialog_mod=filedialog,
+            messagebox_mod=messagebox,
+            build_motpost_excel_workbook_fn=build_motpost_excel_workbook,
+            outlier_combinations=outlier_combinations,
+            combo_status_map=status_map,
+            combo_comment_map=comment_map,
+        )
 
     def _open_bilag_drilldown(self, bilag: str) -> None:
-        """Åpner bilagsdrilldown for ett bilag."""
-        bilag = _konto_str(bilag)
-        try:
-            from views_bilag_drill import BilagDrillDialog
-
-            dlg = BilagDrillDialog(self, self._df_all)
-            dlg.preset_and_show(bilag)
-        except Exception as e:
-            messagebox.showerror("Motpostanalyse", f"Kunne ikke åpne drilldown:\n{e}")
+        open_bilag_drilldown(self, bilag, konto_str_fn=_konto_str, messagebox_mod=messagebox)
 
     def _drilldown(self) -> None:
-        bilag = treeview_first_selected_value(self._tree_details, col_index=0, value_transform=_konto_str)
-        if not bilag:
-            messagebox.showinfo("Motpostanalyse", "Velg et bilag i listen for å åpne drilldown.")
-            return
-        self._open_bilag_drilldown(bilag)
-
-
-def treeview_value_from_iid(tree: Any, iid: Any, *, col_index: int = 0, value_transform: Callable[[Any], str] | None = None) -> Optional[str]:
-    """Hent en verdi fra Treeview.item(iid, 'values')[col_index]."""
-    if iid is None:
-        return None
-    try:
-        values = tree.item(iid, "values")
-    except Exception:
-        return None
-    if not values or len(values) <= col_index:
-        return None
-    raw = values[col_index]
-    try:
-        return value_transform(raw) if value_transform else str(raw)
-    except Exception:
-        return str(raw)
-
-
-def treeview_first_selected_value(tree: Any, *, col_index: int = 0, value_transform: Callable[[Any], str] | None = None) -> Optional[str]:
-    """Hent verdi fra første markerte rad i Treeview."""
-    try:
-        sel = list(tree.selection())
-    except Exception:
-        return None
-    if not sel:
-        return None
-    return treeview_value_from_iid(tree, sel[0], col_index=col_index, value_transform=value_transform)
-
-
-def _on_tree_double_click_open_value(event: Any, tree: Any, open_value_callback: Callable[[str], None], *, col_index: int = 0) -> str:
-    """Dobbelklikk: identifiser raden under mus og åpne drilldown."""
-    try:
-        iid = tree.identify_row(event.y)
-    except Exception:
-        iid = None
-    if iid:
-        try:
-            tree.selection_set(iid)
-        except Exception:
-            pass
-        value = treeview_value_from_iid(tree, iid, col_index=col_index, value_transform=_konto_str)
-        if value:
-            open_value_callback(value)
-    return "break"
-
-
-def _on_tree_enter_open_first_selected(_event: Any, tree: Any, open_value_callback: Callable[[str], None], *, col_index: int = 0) -> str:
-    value = treeview_first_selected_value(tree, col_index=col_index, value_transform=_konto_str)
-    if value:
-        open_value_callback(value)
-    return "break"
-
-
-def configure_bilag_details_tree(tree: Any, *, open_bilag_callback: Callable[[str], None]) -> None:
-    """Fellesoppsett for bilag-listen i motpostanalyse:
-    - Multiselect (extended)
-    - Dobbelklikk åpner drilldown for bilaget
-    - Enter åpner drilldown for første markerte bilag
-
-    (Duck typing slik at dette kan testes uten Tk.)
-    """
-    try:
-        tree.configure(selectmode="extended")
-    except Exception:
-        pass
-    # Bind både med og uten 'add' for å støtte dummy-trær i tester
-    try:
-        tree.bind("<Double-1>", lambda e: _on_tree_double_click_open_value(e, tree, open_bilag_callback, col_index=0), add="+")
-        tree.bind("<Return>", lambda e: _on_tree_enter_open_first_selected(e, tree, open_bilag_callback, col_index=0), add="+")
-        return
-    except Exception:
-        pass
-    try:
-        tree.bind("<Double-1>", lambda e: _on_tree_double_click_open_value(e, tree, open_bilag_callback, col_index=0))
-        tree.bind("<Return>", lambda e: _on_tree_enter_open_first_selected(e, tree, open_bilag_callback, col_index=0))
-    except Exception:
-        pass
+        drilldown(
+            self,
+            treeview_first_selected_value_fn=treeview_first_selected_value,
+            konto_str_fn=_konto_str,
+            messagebox_mod=messagebox,
+        )
 
 
 def show_motpost_konto(
@@ -532,8 +207,8 @@ def show_motpost_konto(
     """Entry-point brukt fra Analyse-fanen.
 
     Backwards compatible:
-    - Noen kallere bruker (master, df, konto_list)
-    - Noen bruker keywords: df_all=..., selected_accounts=..., konto_name_map=...
+        - Noen kallere bruker (master, df, konto_list)
+        - Noen bruker keywords: df_all=..., selected_accounts=..., konto_name_map=...
     """
 
     df = df_transactions if df_transactions is not None else df_all
@@ -580,3 +255,28 @@ def show_motpost_konto(
 
 # Bakoverkompatibilitet (noen steder kan ha importert underscorenavnet)
 _show_motpost_konto = show_motpost_konto
+
+
+__all__ = [
+    "MotpostKontoView",
+    "show_motpost_konto",
+    "_show_motpost_konto",
+    # Re-exports brukt av tester/andre moduler
+    "MotpostData",
+    "build_motpost_data",
+    "build_motpost_excel_workbook",
+    "build_bilag_details",
+    "_konto_str",
+    "build_motkonto_combinations",
+    "build_motkonto_combinations_per_selected_account",
+    "show_motkonto_combinations_popup",
+    # Tree helpers
+    "configure_bilag_details_tree",
+    "treeview_first_selected_value",
+    "treeview_value_from_iid",
+    # UI helpers (nyttig for tester og gjenbruk)
+    "build_motpost_header_metrics_text",
+    "build_motpost_selected_accounts_label",
+    "build_motpost_selected_accounts_value",
+    "bind_entry_select_all",
+]

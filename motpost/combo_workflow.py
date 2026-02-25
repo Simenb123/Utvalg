@@ -162,11 +162,26 @@ def status_sort_key(value: str | None) -> int:
 
 
 def _ensure_scope_columns(df_scope: pd.DataFrame) -> pd.DataFrame:
-    """Sikrer at vi har Bilag_str, Konto_str og numerisk Beløp i en kopi."""
+    """Sikrer at vi har Bilag_str, Konto_str og numerisk Beløp.
+
+    NB: For store datasett er `.copy()` dyrt. Vi kopierer bare når vi faktisk
+    må legge til/konvertere kolonner.
+    """
     if df_scope is None or df_scope.empty:
         return pd.DataFrame()
 
-    df = df_scope.copy()
+    if "Beløp" not in df_scope.columns:
+        raise KeyError("df_scope mangler kolonne 'Beløp'")
+
+    need_copy = False
+    if "Bilag_str" not in df_scope.columns:
+        need_copy = True
+    if "Konto_str" not in df_scope.columns:
+        need_copy = True
+    if not pd.api.types.is_numeric_dtype(df_scope["Beløp"]):
+        need_copy = True
+
+    df = df_scope.copy() if need_copy else df_scope
 
     if "Bilag_str" not in df.columns:
         if "Bilag" not in df.columns:
@@ -177,9 +192,6 @@ def _ensure_scope_columns(df_scope: pd.DataFrame) -> pd.DataFrame:
         if "Konto" not in df.columns:
             raise KeyError("df_scope mangler kolonne 'Konto'")
         df["Konto_str"] = df["Konto"].map(_konto_str)
-
-    if "Beløp" not in df.columns:
-        raise KeyError("df_scope mangler kolonne 'Beløp'")
 
     if not pd.api.types.is_numeric_dtype(df["Beløp"]):
         df["Beløp"] = df["Beløp"].map(_safe_float)
@@ -284,7 +296,9 @@ def build_combo_totals_df(
             by=["Antall bilag", "_abs_sum", "Kombinasjon"], ascending=[False, False, True]
         ).drop(columns=["_abs_sum"])
 
-    combo_agg.insert(0, "Kombinasjon #", range(1, len(combo_agg) + 1))
+    # Nummerering av kombinasjoner: bruk partall (2, 4, 6, ...) for å matche
+    # arbeidspapir-malen og gi rom for manuelle innslag hvis ønskelig.
+    combo_agg.insert(0, "Kombinasjon #", range(2, 2 * len(combo_agg) + 1, 2))
     return combo_agg
 
 
@@ -388,3 +402,89 @@ def extract_full_bilag_for_outlier_combos(
 
     df_out = df[df["Bilag_str"].isin(out_bilag)].copy()
     return df_out, bilag_to_combo, out_bilag, excluded_blank
+
+def compute_selected_net_sum_by_combo(
+    df_scope: pd.DataFrame,
+    selected_accounts: Sequence[str],
+    *,
+    bilag_to_combo: Mapping[str, str] | None = None,
+    selected_direction: str | None = None,
+    empty_label: str = "(ingen motkonto)",
+) -> dict[str, float]:
+    """Beregner netto (kredit+debet) på valgte kontoer per kombinasjon.
+
+    Dette er ment som et *supplerende* tall i UI/rapportering når
+    `selected_direction='Kredit'` (typisk 3xxx). Da kan noen bilag inneholde
+    debetlinjer på samme valgte kontoer (korrigeringer), og netto viser hvor mye
+    disse reduserer kredit-summen.
+
+    Viktig:
+    - Standard (selected_direction=None/"Alle"): netto på valgte kontoer (kredit+debet).
+    - selected_direction="Kredit": kun bilag der netto på valgte kontoer er kredit (netto < 0) bidrar.
+      Bilag med netto debet bidrar 0.
+    - selected_direction="Debet": kun bilag der netto på valgte kontoer er debet (netto > 0) bidrar.
+      Bilag med netto kredit bidrar 0.
+    - Bilag/kombinasjon er definert av motkonto-settet (kontoer i bilaget minus valgte kontoer),
+      på samme måte som i øvrig motpostanalyse.
+
+    Parametre
+    ---------
+    df_scope:
+        DataFrame med alle linjer i scope (alle kontoer, alle bilag).
+    selected_accounts:
+        Kontoer valgt i analysen (f.eks. 3xxx).
+    bilag_to_combo:
+        (Valgfri) mapping {Bilag_str -> Kombinasjon}. Dersom ikke oppgitt, bygges
+        den fra df_scope.
+    selected_direction:
+        (Valgfri) retning. Brukes til å ta kun "netto i valgt retning" (overvekt):
+        - Kredit: bilag med netto < 0 bidrar, øvrige blir 0
+        - Debet: bilag med netto > 0 bidrar, øvrige blir 0
+    empty_label:
+        Label for bilag som ikke har motkontoer utenfor valgte kontoer.
+
+    Returnerer
+    ---------
+    dict[str, float]:
+        mapping {kombinasjon -> netto sum på valgte kontoer}.
+    """
+    if df_scope is None or df_scope.empty:
+        return {}
+
+    df = _ensure_scope_columns(df_scope)
+
+    sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
+    if not sel_set:
+        raise ValueError("selected_accounts er tomt")
+
+    if bilag_to_combo is None:
+        bilag_to_combo = build_bilag_to_motkonto_combo(df, list(sel_set), empty_label=empty_label)
+
+    mask = df["Konto_str"].isin(sel_set)
+    if not bool(mask.any()):
+        return {}
+
+    # Netto per bilag (kun valgte kontoer, alle retninger)
+    by_bilag = df.loc[mask].groupby("Bilag_str")["Beløp"].sum()
+
+    # Når retning er angitt ønsker vi ofte "netto i valgt retning" (overvekt).
+    # Dette er spesielt nyttig for 3xxx med retning=Kredit der vi vil summere
+    # kun bilag som ender i netto kredit på valgte kontoer.
+    dir_norm = normalize_direction(selected_direction)
+    if dir_norm == "kredit":
+        by_bilag = by_bilag.where(by_bilag < 0, 0.0)
+    elif dir_norm == "debet":
+        by_bilag = by_bilag.where(by_bilag > 0, 0.0)
+
+    # Map bilag -> kombinasjon (vectorized reindex)
+    combo_for_bilag = pd.Series(bilag_to_combo).reindex(by_bilag.index).fillna(empty_label)
+
+    tmp = pd.DataFrame(
+        {
+            "Kombinasjon": combo_for_bilag.values.astype(str),
+            "Netto valgte kontoer": by_bilag.values.astype(float),
+        }
+    )
+
+    by_combo = tmp.groupby("Kombinasjon", dropna=False)["Netto valgte kontoer"].sum()
+    return {str(k): float(v) for k, v in by_combo.items()}

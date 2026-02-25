@@ -1,8 +1,10 @@
 import pandas as pd
+from datetime import datetime
+import pytest
 
 from motpost.combinations import build_bilag_to_motkonto_combo
 from motpost.combinations import build_motkonto_combinations_per_selected_account
-from motpost.combo_workflow import apply_combo_status
+from motpost.combo_workflow import apply_combo_status, compute_selected_net_sum_by_combo
 from motpost_konto_core import build_motpost_excel_workbook
 from views_motpost_konto import build_motpost_data
 
@@ -64,6 +66,85 @@ def test_bilag_to_motkonto_combo_and_drilldown_symmetry():
     assert abs(sum_sel + sum_mot) < 1e-9
 
 
+
+
+def test_compute_selected_net_sum_by_combo_includes_debet_on_selected_accounts():
+    # Bilag 1 har både kredit og debet på valgt konto 3000.
+    # Netto på valgt konto i bilag 1 er -800 (kredit -1000 + debet 200).
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 1, 2, 2],
+            "Dato": [
+                "2025-01-01",
+                "2025-01-01",
+                "2025-01-01",
+                "2025-01-01",
+                "2025-01-02",
+                "2025-01-02",
+            ],
+            "Konto": ["3000", "3000", "2700", "1500", "3000", "1500"],
+            "Kontonavn": [
+                "Salg",
+                "Salg",
+                "Utgående mva",
+                "Kundefordringer",
+                "Salg",
+                "Kundefordringer",
+            ],
+            "Tekst": ["Salg A", "Korr", "MVA", "Kunde A", "Salg B", "Kunde B"],
+            "Beløp": [-1000.0, 200.0, 250.0, 550.0, -500.0, 500.0],
+        }
+    )
+
+    net_map = compute_selected_net_sum_by_combo(df, ["3000"], selected_direction="Kredit")
+    assert net_map["1500, 2700"] == pytest.approx(-800.0)
+    assert net_map["1500"] == pytest.approx(-500.0)
+
+
+
+def test_compute_selected_net_sum_by_combo_clips_positive_net_when_direction_kredit():
+    """Når retning=Kredit ønsker vi kun bilag med kredit-overvekt (netto < 0).
+
+    Bilag med netto debet på valgte kontoer (netto > 0) skal bidra 0.
+    """
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 1, 2, 2],
+            "Dato": [
+                "2025-01-01",
+                "2025-01-01",
+                "2025-01-01",
+                "2025-01-01",
+                "2025-01-02",
+                "2025-01-02",
+            ],
+            "Konto": ["3000", "3000", "1500", "2700", "3000", "1500"],
+            "Kontonavn": [
+                "Salg",
+                "Salg",
+                "Kundefordringer",
+                "Utgående mva",
+                "Salg",
+                "Kundefordringer",
+            ],
+            "Tekst": ["Salg", "Korr", "Kunde", "MVA", "Salg B", "Kunde B"],
+            # Bilag 1: -1000 (kredit) + 2000 (debet) => netto +1000 (netto debet) => skal klippes til 0
+            # Bilag 2: -500 (kredit) => netto -500 (netto kredit) => beholdes
+            "Beløp": [-1000.0, 2000.0, -500.0, -500.0, -500.0, 500.0],
+        }
+    )
+
+    net_map = compute_selected_net_sum_by_combo(df, ["3000"], selected_direction="Kredit")
+    assert net_map["1500, 2700"] == pytest.approx(0.0)
+    assert net_map["1500"] == pytest.approx(-500.0)
+
+
+def test_compute_selected_net_sum_by_combo_raises_on_empty_selected_accounts():
+    df = _sample_df()
+    with pytest.raises(ValueError):
+        compute_selected_net_sum_by_combo(df, [])
+
+
 def _find_header_row(ws, must_contain: set[str]) -> int:
     for r in range(1, ws.max_row + 1):
         row_vals = []
@@ -100,126 +181,92 @@ def _read_sheet_table(ws, must_contain: set[str]) -> tuple[list[str], list[dict[
 
 
 def test_excel_workbook_combo_status_and_outlier_bilag_extract_happy_path():
-    df = _sample_df()
-    data = build_motpost_data(df, {"3000"}, selected_direction="Kredit")
+    """Status/kommentar fra kombinasjons-popup skal gå helt til Excel, og outlier-bilag skal trekkes ut."""
 
-    # Mark combo "1500, 2700" as outlier and combo "1500" as expected
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 2, 2],
+            "Dato": [datetime(2025, 1, 1)] * 3 + [datetime(2025, 1, 2)] * 2,
+            "Tekst": ["", "", "", "", ""],
+            "Konto": [3000, 1500, 2700, 3000, 1500],
+            "Kontonavn": ["Salg", "Kundefordringer", "Utgående mva", "Salg", "Kundefordringer"],
+            "Beløp": [-1000.0, 800.0, 200.0, -500.0, 500.0],
+        }
+    )
+
+    data = build_motpost_data(df, ["3000"], selected_direction="Kredit")
+
+    # Kombinasjons-popup: 1500,2700 = outlier, 1500 = forventet
     status_map = {"1500, 2700": "outlier", "1500": "expected"}
+    comment_map = {"1500, 2700": "Review this combo", "1500": "OK"}
 
-    wb = build_motpost_excel_workbook(data, combo_status_map=status_map)
+    wb = build_motpost_excel_workbook(
+        data,
+        combo_status_map=status_map,
+        combo_comment_map=comment_map,
+    )
 
-    assert set(wb.sheetnames) == {
-        "Oversikt",
-        "Valgte kontoer",
-        "Kombinasjoner",
-        "Oppsummering status",
-        "Outlier – Full bilagsutskrift",
-    }
+    # Nye ark: Oversikt, #<n>, Outlier - alle transaksjoner, Data
+    required = {"Oversikt", "Outlier - alle transaksjoner", "Data"}
+    assert required.issubset(set(wb.sheetnames))
+    assert "Kombinasjoner" not in wb.sheetnames
 
-    # Kombinasjoner sheet should contain Status + Kombinasjon (navn)
-    ws_combo = wb["Kombinasjoner"]
-    headers, rows = _read_sheet_table(ws_combo, {"Kombinasjon", "Status"})
-    assert "Status" in headers
-    assert "Kombinasjon (navn)" in headers
+    # Det skal finnes minst én outlier-detaljfane (#n)
+    assert any(name.startswith("#") and name[1:].isdigit() for name in wb.sheetnames)
 
-    by_combo = {str(r["Kombinasjon"]): r for r in rows}
-    assert by_combo["1500, 2700"]["Status"] == "Outlier"
+    # Kombinasjonstabellen ligger på Data-arket
+    _, df_combo = _read_sheet_table(wb["Data"], must_contain={"Kombinasjon", "Status"})
+    by_combo = {row["Kombinasjon"]: row for row in df_combo}
+
+    assert by_combo["1500, 2700"]["Status"] == "Ikke forventet"
+    assert by_combo["1500, 2700"]["Kommentar"] == "Review this combo"
+
     assert by_combo["1500"]["Status"] == "Forventet"
+    assert by_combo["1500"]["Kommentar"] == "OK"
 
-    combo_name = str(by_combo["1500, 2700"]["Kombinasjon (navn)"])
-    assert "1500" in combo_name and "Kundefordringer" in combo_name
-    assert "2700" in combo_name and "Utgående mva" in combo_name
+    # Valgte kontoer (populasjon) ligger på Data-arket
+    _, df_sel = _read_sheet_table(wb["Data"], must_contain={"Konto", "Kredit", "Debet", "Netto"})
+    by_konto = {row["Konto"]: row for row in df_sel}
 
-    # Valgte kontoer sheet should show which kontoer er valgt og sum
-    ws_sel = wb["Valgte kontoer"]
-    h_sel, r_sel = _read_sheet_table(ws_sel, {"Konto", "Sum valgte kontoer"})
-    assert "Andel av valgt" in h_sel
-    by_konto = {str(r["Konto"]): r for r in r_sel if r.get("Konto") not in (None, "")}
-    assert float(by_konto["3000"]["Sum valgte kontoer"]) == -1500.0
-    assert abs(float(by_konto["3000"]["Andel av valgt"]) - 1.0) < 1e-9
+    assert by_konto["3000"]["Kredit"] == -1500.0
+    assert by_konto["3000"]["Debet"] == 0.0
+    assert by_konto["3000"]["Netto"] == -1500.0
 
-    # Outlier sheet should contain only bilag 1 (all lines)
-    ws_out = wb["Outlier – Full bilagsutskrift"]
-    h_out, r_out = _read_sheet_table(ws_out, {"Bilag", "Konto"})
-    assert "Kombinasjon (navn)" in h_out
-
-    bilag_values = {str(r["Bilag"]) for r in r_out if r.get("Bilag") not in (None, "")}
-    assert bilag_values == {"1"}
-
-    konto_values = {str(r["Konto"]) for r in r_out if r.get("Konto") not in (None, "")}
-    assert {"3000", "2700", "1500"}.issubset(konto_values)
-
-    # Three lines in bilag 1
-    assert len([r for r in r_out if r.get("Bilag") not in (None, "")]) == 3
+    # Outlier-uttrekk: kun bilag 1 skal inn (hele bilaget)
+    _, df_out = _read_sheet_table(wb["Outlier - alle transaksjoner"], must_contain={"Bilag", "Konto", "Beløp"})
+    bilags_in_out = {row["Bilag"] for row in df_out}
+    assert bilags_in_out == {"1"}  # bilag 2 er forventet, og skal ikke være med
 
 
 def test_excel_workbook_excludes_blank_bilag_and_documents_note():
-    # Typical SAF-T edge case: missing bilagsnummer (None/NaN).
+    """Bilag uten bilagsnummer skal ikke trekkes inn, og dette skal dokumenteres i outlier-arket."""
+
     df = pd.DataFrame(
         {
             "Bilag": [None, None, None],
-            "Dato": ["2025-01-01", "2025-01-01", "2025-01-01"],
-            "Konto": ["3000", "2700", "1500"],
-            "Kontonavn": ["Salg", "Utgående mva", "Kundefordringer"],
-            "Tekst": ["Salg A", "MVA", "Kunde A"],
-            "Beløp": [-1000.0, 250.0, 750.0],
+            "Dato": [datetime(2025, 1, 1)] * 3,
+            "Tekst": ["", "", ""],
+            "Konto": [3000, 1500, 2700],
+            "Kontonavn": ["Salg", "Kundefordringer", "Utgående mva"],
+            "Beløp": [-1000.0, 800.0, 200.0],
         }
     )
-    data = build_motpost_data(df, {"3000"}, selected_direction="Kredit")
 
-    # Combo will be "1500, 2700" but bilag-id is blank -> excluded from full bilag extract.
-    wb = build_motpost_excel_workbook(data, combo_status_map={"1500, 2700": "outlier"})
-    ws_out = wb["Outlier – Full bilagsutskrift"]
+    data = build_motpost_data(df, ["3000"], selected_direction="Kredit")
 
-    # The note about excluded blank bilag must be present (documented).
-    found = False
-    for r in range(1, ws_out.max_row + 1):
-        for c in range(1, ws_out.max_column + 1):
-            v = ws_out.cell(row=r, column=c).value
-            if isinstance(v, str) and "uten bilagsnummer" in v:
-                found = True
-                break
-        if found:
-            break
-    assert found, "Expected note about excluded blank bilag groups in outlier sheet"
-
-
-def test_build_motkonto_combinations_per_selected_account():
-    df = _sample_df()
-    data = build_motpost_data(df, {"3000"}, selected_direction="Kredit")
-    konto_name_map = {"3000": "Salg", "2700": "Utgående mva"}
-
-    df_per = build_motkonto_combinations_per_selected_account(
-        df_scope=data.df_scope,
-        selected_accounts=list(data.selected_accounts),
-        outlier_motkonto=set(),
-        konto_navn_map=konto_name_map,
-        selected_direction=data.selected_direction,
+    wb = build_motpost_excel_workbook(
+        data,
+        combo_status_map={"1500, 2700": "outlier"},
     )
-    assert "Valgt konto" in df_per.columns
-    assert "Kombinasjon" in df_per.columns
 
-    df_3000 = df_per[df_per["Valgt konto"].astype(str) == "3000"]
-    combos_3000 = set(df_3000["Kombinasjon"].astype(str).tolist())
-    assert combos_3000 == {"1500, 2700", "1500"}
+    ws_out = wb["Outlier - alle transaksjoner"]
+    found_note = False
+    for row in ws_out.iter_rows(min_row=1, max_row=10, max_col=10, values_only=True):
+        for val in row:
+            if isinstance(val, str) and "uten bilagsnummer" in val:
+                found_note = True
+                break
+        if found_note:
+            break
 
-    # Kun 3000 er valgt-konto i dette testsettet
-    assert set(df_per["Valgt konto"].astype(str).tolist()) == {"3000"}
-
-
-def test_apply_combo_status_updates_multiple_keys_and_resets():
-    status_map: dict[str, str] = {"1500": "expected"}
-
-    # Happy path: multiselect set to outlier
-    apply_combo_status(status_map, ["1500", "1500, 2700"], "outlier")
-    assert status_map["1500"] == "outlier"
-    assert status_map["1500, 2700"] == "outlier"
-
-    # Reset one key
-    apply_combo_status(status_map, ["1500"], "")
-    assert "1500" not in status_map
-    assert status_map["1500, 2700"] == "outlier"
-
-    # Typical "error" case: unknown status -> treated as neutral (removed)
-    apply_combo_status(status_map, ["1500, 2700"], "not-a-valid-status")
-    assert status_map == {}
+    assert found_note

@@ -136,7 +136,7 @@ def build_pivot_by_account(df: pd.DataFrame) -> pd.DataFrame:
     if "Beløp" in df.columns:
         agg["Beløp"] = "sum"
     if "Bilag" in df.columns:
-        agg["Bilag"] = "count"
+        agg["Bilag"] = "nunique"
 
     if not agg:
         # Ingenting å aggregere på – returner bare unike kontoer

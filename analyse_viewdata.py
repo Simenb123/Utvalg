@@ -250,12 +250,124 @@ def build_transactions_view_df(
     else:
         out["Dato"] = ""
 
-    # Sikre kolonner i riktig rekkefølge
+
+    # --- Utvidede felter (valgfritt i UI) ---------------------------------
+
+    # MVA-kode
+    if "MVA-kode" in tx_cols:
+        if "MVA-kode" in df.columns:
+            out["MVA-kode"] = df["MVA-kode"].map(konto_to_str)
+        elif "mva-kode" in df.columns:
+            out["MVA-kode"] = df["mva-kode"].map(konto_to_str)
+        elif "Mva" in df.columns:
+            out["MVA-kode"] = df["Mva"].map(konto_to_str)
+        elif "mva" in df.columns:
+            out["MVA-kode"] = df["mva"].map(konto_to_str)
+        else:
+            out["MVA-kode"] = ""
+
+    # MVA-beløp
+    if "MVA-beløp" in tx_cols:
+        if "MVA-beløp" in df.columns:
+            out["MVA-beløp"] = pd.to_numeric(df["MVA-beløp"], errors="coerce")
+        elif "mva-beløp" in df.columns:
+            out["MVA-beløp"] = pd.to_numeric(df["mva-beløp"], errors="coerce")
+        else:
+            out["MVA-beløp"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+
+    # MVA-prosent
+    if "MVA-prosent" in tx_cols:
+        if "MVA-prosent" in df.columns:
+            out["MVA-prosent"] = pd.to_numeric(df["MVA-prosent"], errors="coerce")
+        elif "mva-prosent" in df.columns:
+            out["MVA-prosent"] = pd.to_numeric(df["mva-prosent"], errors="coerce")
+        else:
+            out["MVA-prosent"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+
+    # Valuta
+    if "Valuta" in tx_cols:
+        if "Valuta" in df.columns:
+            out["Valuta"] = _safe_str_series(df["Valuta"]).str.upper()
+        elif "valuta" in df.columns:
+            out["Valuta"] = _safe_str_series(df["valuta"]).str.upper()
+        else:
+            out["Valuta"] = ""
+
+    # Valutabeløp
+    if "Valutabeløp" in tx_cols:
+        if "Valutabeløp" in df.columns:
+            out["Valutabeløp"] = pd.to_numeric(df["Valutabeløp"], errors="coerce")
+        elif "valutabeløp" in df.columns:
+            out["Valutabeløp"] = pd.to_numeric(df["valutabeløp"], errors="coerce")
+        elif "Valutabelop" in df.columns:
+            out["Valutabeløp"] = pd.to_numeric(df["Valutabelop"], errors="coerce")
+        elif "valutabelop" in df.columns:
+            out["Valutabeløp"] = pd.to_numeric(df["valutabelop"], errors="coerce")
+        else:
+            out["Valutabeløp"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+
+    # Sikre kolonner i riktig rekkefølge.
+    #
+    # Merk: tx_cols kan inneholde *flere* kolonner enn de som er
+    # definert som kanoniske/valgfri-logikk over. For slike kolonner
+    # prøver vi å hente verdier direkte fra input-df hvis de finnes,
+    # ellers fyller vi med tom streng.
     for c in tx_cols:
-        if c not in out.columns:
+        if c in out.columns:
+            continue
+        if c in df.columns:
+            out[c] = _safe_str_series(df[c])
+        else:
             out[c] = ""
 
     return out[list(tx_cols)].reset_index(drop=True)
+
+
+def normalize_konto_series(series: pd.Series) -> pd.Series:
+    """Normaliser kontokolonnen (Konto) raskt.
+
+    Brukes for store datasett (millioner av rader) slik at filtrering kan gjøres med
+    vektorisert `.isin()` i stedet for treg per-rad `map(konto_to_str)`.
+
+    Regler:
+    - NaN/None/<NA> -> ""
+    - Trimmer whitespace (inkl. NBSP)
+    - Fjerner trailing ".0"/".00" når verdien ellers er et heltall (3000.0 -> 3000)
+    - Bevarer andre desimaler (f.eks. "1004.10")
+    - Fjerner tusenskiller i mønstre som "3 000" og "3.000" (men ikke desimalpunktum)
+    """
+
+    if series is None:
+        return pd.Series(dtype="object")
+
+    if series.empty:
+        return pd.Series([], dtype="object")
+
+    # Bruk pandas StringDtype for stabil NA-håndtering, men returner vanlige strenger.
+    s = series.astype("string").fillna("")
+
+    # Normaliser whitespace og trim
+    s = s.str.replace(" ", " ", regex=False).str.strip()
+
+    # Konto skal normalt ikke inneholde whitespace; fjern alle slike
+    s = s.str.replace(r"\s+", "", regex=True)
+
+    # Fjern trailing .0 (typisk Excel numeriske kontoer lagret som float)
+    # NB: Ikke endre f.eks. 1004.10
+    s = s.str.replace(r"^(-?\d+)\.0+$", r"\1", regex=True)
+
+    # Fjern tusenskiller i mønster som 12.345 eller -1.234.567
+    thousand_dot = s.str.match(r"^-?\d{1,3}(\.\d{3})+$", na=False)
+    if thousand_dot.any():
+        s.loc[thousand_dot] = s.loc[thousand_dot].str.replace(".", "", regex=False)
+
+    # Fjern tusenskiller i mønster som 12,345 eller -1,234,567
+    thousand_comma = s.str.match(r"^-?\d{1,3}(,\d{3})+$", na=False)
+    if thousand_comma.any():
+        s.loc[thousand_comma] = s.loc[thousand_comma].str.replace(",", "", regex=False)
+
+    return s.astype(str)
+
 
 
 def compute_selected_transactions(
@@ -268,11 +380,14 @@ def compute_selected_transactions(
 
     Returnerer (df_all_selected, df_shown), der df_shown er begrenset til max_rows.
 
-    Funksjonen er UI-uavhengig og tar imot en allerede filtrert df (fra analysefilter).
+    Ytelse:
+    - Normaliserer Konto kun én gang og cacher i kolonnen _KONTO_NORM.
+    - Lager ikke store .copy() av df_all (kun liten kopier for UI-visning).
     """
 
     if df_filtered is None or df_filtered.empty or "Konto" not in df_filtered.columns:
-        empty = pd.DataFrame(columns=df_filtered.columns if isinstance(df_filtered, pd.DataFrame) else None)
+        empty_cols = df_filtered.columns if isinstance(df_filtered, pd.DataFrame) else None
+        empty = pd.DataFrame(columns=empty_cols)
         return empty, empty
 
     wanted = [konto_to_str(a) for a in (selected_accounts or [])]
@@ -284,10 +399,26 @@ def compute_selected_transactions(
     if not isinstance(max_rows, int) or max_rows <= 0:
         max_rows = 200
 
-    konto_norm = df_filtered["Konto"].map(konto_to_str)
-    mask = konto_norm.isin(set(wanted))
+    # Cache normalisert konto for å unngå gjentatt map/apply på store datasett.
+    norm_col = "_KONTO_NORM"
+    if norm_col not in df_filtered.columns:
+        try:
+            df_filtered[norm_col] = normalize_konto_series(df_filtered["Konto"])
+        except Exception:
+            # Fallback (tregere, men robust)
+            df_filtered[norm_col] = df_filtered["Konto"].map(konto_to_str)
 
-    df_all = df_filtered.loc[mask].copy()
+    wanted_set = set(wanted)
+
+    # Bruk .isin direkte på cached string-serie (raskt)
+    mask = df_filtered[norm_col].isin(wanted_set)
+
+    # Ikke kopier hele df_all (kan være enormt). UI trenger kun første max_rows.
+    df_all = df_filtered.loc[mask]
+    if df_all.empty:
+        empty = pd.DataFrame(columns=df_filtered.columns)
+        return empty, empty
+
     df_show = df_all.head(max_rows).copy()
 
     return df_all, df_show

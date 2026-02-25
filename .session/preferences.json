@@ -10,8 +10,11 @@
         "Konto",
         "Kontonavn"
       ]
+    },
+    "client_store": {
+      "last_year": "2025"
     }
   },
   "clients": {},
-  "last_client": "ukjent"
+  "last_client": "Kelvin AS"
 }

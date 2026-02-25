@@ -1,441 +1,546 @@
+"""Excel-eksport for motpostanalyse.
+
+Denne eksporten er tilpasset en arbeidspapir-mal:
+- Oversikt (kort + lenker)
+- #<n> (én fane per outlier-kombinasjon)
+- Outlier - alle transaksjoner (full bilagsutskrift)
+- Data (tabeller for valgte kontoer / kombinasjoner / status)
+
+Eksporten støtter to kilder til status/kommentar:
+- Legacy: outlier_combinations=set[str]
+- Ny: combo_status_map=dict[combo->status], combo_comment_map=dict[combo->kommentar]
+
+Status normaliseres til: "outlier", "expected" eller "neutral".
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Optional, Set
+from typing import Any, Optional
 
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .combo_workflow import (
-    STATUS_OUTLIER,
     build_combo_totals_df,
     combo_display_name,
-    extract_full_bilag_for_outlier_combos,
+    compute_selected_net_sum_by_combo,
     infer_konto_navn_map,
-    normalize_combo_status,
-    status_label,
-    status_sort_key,
-    summarize_status_df,
 )
-from .utils import _bilag_str, _konto_str
-
-THIN_BORDER = Border(
-    left=Side(style="thin"),
-    right=Side(style="thin"),
-    top=Side(style="thin"),
-    bottom=Side(style="thin"),
+from .excel_sheets.sheet_data import write_data_sheet
+from .excel_sheets.sheet_outlier_full_bilag import (
+    build_outlier_frames,
+    write_outlier_detail_sheets,
+    write_outlier_transactions_sheet,
 )
+from .excel_sheets.sheet_oversikt import write_oversikt_sheet
+from .utils import _konto_str
 
 
-def _norm(s: str) -> str:
-    """Normaliser streng til alfanumerisk (Excel/Tabell-safe)."""
-    out = []
-    for ch in str(s):
-        if ch.isalnum():
-            out.append(ch)
-    return "".join(out) or "Sheet"
+DEFAULT_OUTLIER_SHEET_NAME = "Outlier - alle transaksjoner"
 
 
-def _safe_table_name(sheet_title: str) -> str:
-    """Excel Table displayName: må være alfanumerisk + starte med bokstav/underscore.
+def normalize_combo_status_map(status_map: Optional[dict[str, str]]) -> dict[str, str]:
+    """Normaliserer statusverdier fra GUI til {combo: outlier/expected/neutral}."""
 
-    Vi prefikser med 'T' og normaliserer til [A-Za-z0-9].
+    if not status_map:
+        return {}
+
+    out: dict[str, str] = {}
+    for combo, raw in status_map.items():
+        s = str(raw or "").strip().lower()
+        if s in {"outlier", "ikke forventet", "not_expected", "not expected"}:
+            out[str(combo)] = "outlier"
+        elif s in {"expected", "forventet"}:
+            out[str(combo)] = "expected"
+        elif s in {"", "neutral", "umerket", "unmarked"}:
+            out[str(combo)] = "neutral"
+        else:
+            # Ukjent -> behold som neutral
+            out[str(combo)] = "neutral"
+    return out
+
+
+def normalize_comment_map(comment_map: Optional[dict[str, str]]) -> dict[str, str]:
+    if not comment_map:
+        return {}
+    return {str(k): ("" if v is None else str(v)) for k, v in comment_map.items()}
+
+
+def _direction_norm(direction: str) -> str:
+    d = str(direction or "").strip().lower()
+    if d.startswith("k"):
+        return "kredit"
+    if d.startswith("d"):
+        return "debet"
+    return "alle"
+
+
+def sum_label(direction: str) -> str:
+    d = _direction_norm(direction)
+    if d == "kredit":
+        return "Sum valgte kontoer (Kredit)"
+    if d == "debet":
+        return "Sum valgte kontoer (Debet)"
+    return "Sum valgte kontoer"
+
+
+def population_label(direction: str) -> str:
+    """Display label for population on *Oversikt*.
+
+    The population is defined as postings on the selected accounts in the chosen direction
+    (i.e. the same basis as *Sum valgte kontoer (Kredit/Debet)*).
     """
-    base = _norm(sheet_title)
-    return f"T{base}"
+
+    d = direction.lower()
+    if d.startswith("kred"):
+        return "Populasjon (valgte kontoer - Kredit)"
+    if d.startswith("deb"):
+        return "Populasjon (valgte kontoer - Debet)"
+    return "Populasjon (valgte kontoer)"
 
 
-def _set_cell(ws, row: int, col: int, value, bold: bool = False, num_format: Optional[str] = None):
-    cell = ws.cell(row=row, column=col, value=value)
-    cell.border = THIN_BORDER
-    if bold:
-        cell.font = Font(bold=True)
-    if num_format:
-        cell.number_format = num_format
-    return cell
+def net_key_label(direction: str) -> str:
+    d = _direction_norm(direction)
+    if d == "kredit":
+        return "Netto kredit (valgte kontoer)"
+    if d == "debet":
+        return "Netto debet (valgte kontoer)"
+    return "Netto valgte kontoer"
 
 
-def _apply_table_style(ws, start_row: int, start_col: int, end_row: int, end_col: int):
-    """Opprett Excel Table med stil (båndrader) og num-format på relevante kolonner."""
-    if end_row <= start_row:
-        return
-
-    ref = f"{get_column_letter(start_col)}{start_row}:{get_column_letter(end_col)}{end_row}"
-    table = Table(displayName=_safe_table_name(ws.title), ref=ref)
-    style = TableStyleInfo(
-        name="TableStyleMedium9",
-        showFirstColumn=False,
-        showLastColumn=False,
-        showRowStripes=True,
-        showColumnStripes=False,
-    )
-    table.tableStyleInfo = style
-    ws.add_table(table)
-
-    header_row = start_row
-    headers = [ws.cell(row=header_row, column=c).value for c in range(start_col, end_col + 1)]
-
-    # Heuristikk for beløp og prosent-kolonner.
-    money_headers = {
-        "Sum",
-        "Beløp",
-        "Sum valgte kontoer",
-        "Sum motposter",
-        "Motbeløp",
-        "Differanse",
-        "Debet",
-        "Kredit",
-    }
-    percent_headers = {
-        "% andel",
-        "% andel bilag",
-        "Andel av total",
-        "Andel av valgt",
-    }
-
-    for idx, h in enumerate(headers, start=start_col):
-        h_str = str(h or "").strip()
-        if h_str in money_headers:
-            for r in range(start_row + 1, end_row + 1):
-                ws.cell(row=r, column=idx).number_format = "#,##0.00"
-        if h_str in percent_headers:
-            for r in range(start_row + 1, end_row + 1):
-                ws.cell(row=r, column=idx).number_format = "0.00%"
-
-    # Freeze header
-    ws.freeze_panes = ws.cell(row=start_row + 1, column=start_col)
+def net_status_header(direction: str) -> str:
+    d = _direction_norm(direction)
+    if d == "kredit":
+        return "Netto kredit"
+    if d == "debet":
+        return "Netto debet"
+    return "Netto"
 
 
-def _write_df_table(ws, df: pd.DataFrame, title: str, start_row: int = 1) -> int:
-    """Skriv en DF som en tabell med tittel."""
-    cur = start_row
-    _set_cell(ws, cur, 1, title, bold=True)
-    ws.cell(row=cur, column=1).font = Font(bold=True, size=14)
-    cur += 2
-
-    if df is None or df.empty:
-        _set_cell(ws, cur, 1, "(ingen rader)")
-        return cur + 2
-
-    # Headers
-    for j, col in enumerate(df.columns, start=1):
-        _set_cell(ws, cur, j, col, bold=True)
-    header_row = cur
-    cur += 1
-
-    # Rows
-    for _, row in df.iterrows():
-        for j, col in enumerate(df.columns, start=1):
-            val = row[col]
-            _set_cell(ws, cur, j, val)
-        cur += 1
-
-    end_row = cur - 1
-    _apply_table_style(ws, header_row, 1, end_row, len(df.columns))
-
-    # Auto width (best effort)
-    for j, col in enumerate(df.columns, start=1):
-        try:
-            max_len = max(len(str(col)), *(len(str(x)) for x in df[col].head(200).astype(str).tolist()))
-            ws.column_dimensions[get_column_letter(j)].width = min(max(10, max_len + 2), 60)
-        except Exception:
-            pass
-
-    return cur + 1
-
-
-def _write_kv_sheet(ws, title: str, kv: list[tuple[str, object]], start_row: int = 1) -> int:
-    cur = start_row
-    _set_cell(ws, cur, 1, title, bold=True)
-    ws.cell(row=cur, column=1).font = Font(bold=True, size=14)
-    cur += 2
-
-    for k, v in kv:
-        _set_cell(ws, cur, 1, k, bold=True)
-        c = _set_cell(ws, cur, 2, v)
-        c.alignment = Alignment(horizontal="left")
-        cur += 1
-
-    ws.column_dimensions["A"].width = 32
-    ws.column_dimensions["B"].width = 60
-    return cur + 1
-
-
-def _normalize_status_map(
-    combo_status_map: Optional[Mapping[str, str]],
-    outlier_combinations: Optional[Set[str]],
-) -> dict[str, str]:
-    """Kombiner ny status_map + legacy outlier-sett til en samlet mapping."""
-    merged: dict[str, str] = {}
-    if combo_status_map:
-        for k, v in combo_status_map.items():
-            ck = str(k).strip()
-            if not ck:
-                continue
-            merged[ck] = normalize_combo_status(v)
-    if outlier_combinations:
-        for c in outlier_combinations:
-            ck = str(c).strip()
-            if not ck:
-                continue
-            # Ikke overskriv forventet
-            if merged.get(ck) != "expected":
-                merged[ck] = STATUS_OUTLIER
-    return merged
-
-
-def build_motpost_excel_workbook(
-    data,
+def _build_valgte_kontoer_df(
+    df_scope: pd.DataFrame,
     *,
-    outlier_motkonto: Optional[Set[str]] = None,
-    selected_motkonto: Optional[str] = None,
-    df_details_view: Optional[pd.DataFrame] = None,
-    outlier_accounts: Optional[Set[str]] = None,
-    outlier_combinations: Optional[Set[str]] = None,
-    combo_status_map: Optional[Mapping[str, str]] = None,
-) -> Workbook:
-    """Bygg Excel-rapport for motpostanalyse (kompakt).
+    selected_accounts: list[str],
+    direction: str,
+) -> pd.DataFrame:
+    """Valgte kontoer (populasjon)"""
 
-    Ny workflow (2026-02):
-    - Kombinasjoner kan merkes som Forventet / Outlier / Umerket.
-    - Full bilagsutskrift tas kun for outlier-kombinasjoner for å holde rapporten liten.
+    s_label = sum_label(direction)
+    net_label = net_key_label(direction)
 
-    Parametre som ikke brukes lenger (outlier_motkonto, selected_motkonto, df_details_view, outlier_accounts)
-    beholdes for bakoverkompatibilitet, men rapporten fokuserer på kombinasjonsworkflow.
-    """
-    wb = Workbook()
-    # Fjern default-arket
-    if wb.sheetnames:
-        wb.remove(wb[wb.sheetnames[0]])
+    sel_set = {str(_konto_str(x)) for x in selected_accounts}
 
-    status_map = _normalize_status_map(combo_status_map, outlier_combinations)
+    if df_scope is None or df_scope.empty:
+        return pd.DataFrame(
+            columns=[
+                "Konto",
+                "Kontonavn",
+                s_label,
+                net_label,
+                "Kredit",
+                "Debet",
+                "Netto",
+                "Andel %",
+                "Antall bilag",
+            ]
+        )
 
-    # --- Oversikt ---
-    ws_over = wb.create_sheet("Oversikt")
-    selected_accounts_txt = ", ".join(getattr(data, "selected_accounts", []) or [])
-    df_scope = getattr(data, "df_scope", pd.DataFrame())
+    df_sel = df_scope[df_scope["Konto_str"].astype(str).isin(sel_set)].copy()
+    if df_sel.empty:
+        return pd.DataFrame(
+            columns=[
+                "Konto",
+                "Kontonavn",
+                s_label,
+                net_label,
+                "Kredit",
+                "Debet",
+                "Netto",
+                "Andel %",
+                "Antall bilag",
+            ]
+        )
+
+    amount = pd.to_numeric(df_sel["Beløp"], errors="coerce").fillna(0.0)
+
+    credit = amount.where(amount < 0, 0.0).groupby(df_sel["Konto_str"]).sum()
+    debet = amount.where(amount > 0, 0.0).groupby(df_sel["Konto_str"]).sum()
+    netto = amount.groupby(df_sel["Konto_str"]).sum()
+
+    dn = _direction_norm(direction)
+    if dn == "kredit":
+        sum_dir = credit
+        df_dir = df_sel.loc[amount < 0]
+    elif dn == "debet":
+        sum_dir = debet
+        df_dir = df_sel.loc[amount > 0]
+    else:
+        sum_dir = netto
+        df_dir = df_sel
+
+    ant_bilag = df_dir.groupby("Konto_str")["Bilag_str"].nunique()
+
+    kontonavn = df_sel.groupby("Konto_str")["Kontonavn"].first()
+
+    # Netto per konto: summer konto-beløp kun for bilag i "netto-retning".
+    bilag_net = amount.groupby(df_sel["Bilag_str"]).sum()
+    if dn == "kredit":
+        pop_bilag = set(bilag_net[bilag_net < 0].index.astype(str))
+    elif dn == "debet":
+        pop_bilag = set(bilag_net[bilag_net > 0].index.astype(str))
+    else:
+        pop_bilag = set(bilag_net.index.astype(str))
+
+    pop_net = amount[df_sel["Bilag_str"].astype(str).isin(pop_bilag)].groupby(df_sel["Konto_str"]).sum()
+
+    idx = pd.Index(sorted(sel_set), name="Konto")
+
+    df_out = pd.DataFrame(
+        {
+            "Konto": idx.astype(str),
+            "Kontonavn": kontonavn.reindex(idx).fillna(""),
+            s_label: sum_dir.reindex(idx).fillna(0.0),
+            net_label: pop_net.reindex(idx).fillna(0.0),
+            "Kredit": credit.reindex(idx).fillna(0.0),
+            "Debet": debet.reindex(idx).fillna(0.0),
+            "Netto": netto.reindex(idx).fillna(0.0),
+            "Antall bilag": ant_bilag.reindex(idx).fillna(0).astype(int),
+        }
+    )
+
+    total_abs = float(df_out[s_label].abs().sum())
+    if total_abs:
+        df_out["Andel %"] = df_out[s_label].abs() / total_abs
+    else:
+        df_out["Andel %"] = 0.0
+
+    # Sortér som i malen: størst andel først
+    df_out = df_out.sort_values(by=[s_label], key=lambda s: s.abs(), ascending=False).reset_index(drop=True)
+
+    # Reorder
+    df_out = df_out[
+        [
+            "Konto",
+            "Kontonavn",
+            s_label,
+            net_label,
+            "Kredit",
+            "Debet",
+            "Netto",
+            "Andel %",
+            "Antall bilag",
+        ]
+    ]
+
+    return df_out
+
+
+def _build_kombinasjoner_df(
+    df_scope: pd.DataFrame,
+    *,
+    selected_accounts: list[str],
+    direction: str,
+    status_map_norm: dict[str, str],
+    comment_map_norm: dict[str, str],
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Bygger tabellen "Kombinasjoner" og returnerer også combo_name_map."""
+
+    s_label = sum_label(direction)
+    net_label = net_key_label(direction)
+
     konto_navn_map = infer_konto_navn_map(df_scope)
 
-    # Kontroll/avstemming
-    selected_sum = float(getattr(data, "selected_sum", 0.0) or 0.0)
-    control_sum = float(getattr(data, "control_sum", 0.0) or 0.0)
-    bilag_count = int(getattr(data, "bilag_count", 0) or 0)
-    row_count = int(len(df_scope)) if df_scope is not None else 0
-    direction = str(getattr(data, "selected_direction", "Alle") or "Alle")
+    # Base: totals pr kombinasjon
+    df_combo = build_combo_totals_df(df_scope, selected_accounts, selected_direction=direction)
 
-    kv = [
-        ("Retning (valgte kontoer)", direction),
-        ("Valgte kontoer", selected_accounts_txt),
-        ("Antall bilag i scope", bilag_count),
-        ("Antall rader i scope", row_count),
-        ("Sum valgte kontoer (retning)", selected_sum),
-        ("Kontrollsum (sum alle linjer i scope)", control_sum),
-        ("Merknad", "Motposter beregnes som komplementet til valgte linjer i samme bilag."),
-    ]
-    _write_kv_sheet(ws_over, "Oversikt", kv)
-    # Number formats
-    for r in range(1, ws_over.max_row + 1):
-        k = ws_over.cell(row=r, column=1).value
-        if k in ("Sum valgte kontoer (retning)", "Kontrollsum (sum alle linjer i scope)"):
-            ws_over.cell(row=r, column=2).number_format = "#,##0.00"
+    # Netto per kombinasjon ("populasjon")
+    net_map = compute_selected_net_sum_by_combo(df_scope, selected_accounts, selected_direction=direction)
 
-    # --- Valgte kontoer (oversikt) ---
-    ws_sel = wb.create_sheet("Valgte kontoer")
-    df_selected = getattr(data, "df_selected", pd.DataFrame())
-    if df_selected is None:
-        df_selected = pd.DataFrame()
+    # Legg inn navn
+    df_combo["Kombinasjon (navn)"] = df_combo["Kombinasjon"].map(lambda c: combo_display_name(str(c), konto_navn_map))
 
-    df_sel_print = pd.DataFrame()
-    if not df_selected.empty:
-        df_sel_print = df_selected.copy()
-        # Standardiser kolonnenavn
-        if "Sum" in df_sel_print.columns:
-            df_sel_print = df_sel_print.rename(columns={"Sum": "Sum valgte kontoer"})
-        if "Kontonavn" not in df_sel_print.columns:
-            df_sel_print["Kontonavn"] = df_sel_print.get("Konto", "").map(lambda k: konto_navn_map.get(str(k), ""))
+    combo_name_map = {
+        str(c): str(n)
+        for c, n in zip(df_combo["Kombinasjon"].astype(str).tolist(), df_combo["Kombinasjon (navn)"].astype(str).tolist())
+    }
 
-        # Andel (0-1) basert på absolutt beløp
-        try:
-            total_abs = float(df_sel_print["Sum valgte kontoer"].astype(float).abs().sum())
-        except Exception:
-            total_abs = 0.0
-        if total_abs:
-            try:
-                df_sel_print["Andel av valgt"] = df_sel_print["Sum valgte kontoer"].astype(float).abs() / total_abs
-            except Exception:
-                df_sel_print["Andel av valgt"] = 0.0
-        else:
-            df_sel_print["Andel av valgt"] = 0.0
-
-        # Kolonneordre
-        keep = [c for c in ["Konto", "Kontonavn", "Sum valgte kontoer", "Andel av valgt", "Antall bilag"] if c in df_sel_print.columns]
-        df_sel_print = df_sel_print[keep]
-
-        # Sorter etter absolutt beløp
-        if "Sum valgte kontoer" in df_sel_print.columns:
-            df_sel_print = df_sel_print.sort_values(by="Sum valgte kontoer", key=lambda s: s.astype(float).abs(), ascending=False)
-
-    _write_df_table(ws_sel, df_sel_print, f"Valgte kontoer ({direction})")
-
-    # --- Kombinasjoner (med summer) ---
-    ws_combo = wb.create_sheet("Kombinasjoner")
-    df_combos = build_combo_totals_df(
-        df_scope,
-        list(getattr(data, "selected_accounts", []) or []),
-        selected_direction=direction,
+    # Rename/drop
+    df_combo = df_combo.rename(
+        columns={
+            "Kombinasjon #": "#",
+            "Sum valgte kontoer": s_label,
+            "% andel bilag": "% andel bilag",
+        }
     )
 
-    if not df_combos.empty:
-        df_combos = df_combos.copy()
+    # Populasjon-kolonne
+    df_combo[net_label] = df_combo["Kombinasjon"].map(lambda c: float(net_map.get(str(c), 0.0)))
 
-        # Legg til kontonavn for kombinasjonen (lesbarhet i revisjonsdokumentasjon)
-        try:
-            uniq = df_combos["Kombinasjon"].astype(str).fillna("").unique().tolist()
-            combo_name_map = {c: combo_display_name(c, konto_navn_map) for c in uniq if str(c).strip()}
-            df_combos.insert(
-                list(df_combos.columns).index("Kombinasjon") + 1,
-                "Kombinasjon (navn)",
-                df_combos["Kombinasjon"].astype(str).map(lambda c: combo_name_map.get(str(c).strip(), "")),
-            )
-        except Exception:
-            pass
-
-        df_combos["Status"] = df_combos["Kombinasjon"].map(lambda c: status_label(status_map.get(str(c), ""), neutral_label="Umerket"))
-
-        # Sorter så Outlier kommer først (stabil)
-        df_combos["_status_order"] = df_combos["Kombinasjon"].map(lambda c: status_sort_key(status_map.get(str(c), "")))
-        df_combos = df_combos.sort_values(
-            by=["_status_order", "Antall bilag", "Kombinasjon #"],
-            ascending=[True, False, True],
-        ).drop(columns=["_status_order"])
-
-    _write_df_table(ws_combo, df_combos, "Kombinasjoner")
-
-    # Fargekoding av rader i kombinasjonstabellen (best effort)
-    try:
-        if df_combos is not None and not df_combos.empty and "Status" in df_combos.columns:
-            status_col = list(df_combos.columns).index("Status") + 1
-            start_row = 4  # data starter etter tittel(1) + blank(2) + header(3)
-            end_row = start_row + len(df_combos) - 1
-            fill_expected = PatternFill("solid", fgColor="C6EFCE")
-            fill_outlier = PatternFill("solid", fgColor="FFF2CC")
-            for r in range(start_row, end_row + 1):
-                v = ws_combo.cell(row=r, column=status_col).value
-                if v == "Forventet":
-                    fill = fill_expected
-                elif v == "Outlier":
-                    fill = fill_outlier
-                else:
-                    continue
-                for c in range(1, len(df_combos.columns) + 1):
-                    ws_combo.cell(row=r, column=c).fill = fill
-    except Exception:
-        pass
-
-    # --- Oppsummering status ---
-    ws_stat = wb.create_sheet("Oppsummering status")
-    df_status = summarize_status_df(df_combos, status_map)
-    _write_df_table(ws_stat, df_status, "Oppsummering status")
-
-    # --- Outlier – Full bilagsutskrift ---
-    ws_out = wb.create_sheet("Outlier – Full bilagsutskrift")
-    outlier_combos_list = [c for c, v in status_map.items() if normalize_combo_status(v) == STATUS_OUTLIER]
-
-    df_out, bilag_to_combo, out_bilag, excluded_blank = extract_full_bilag_for_outlier_combos(
-        df_scope,
-        list(getattr(data, "selected_accounts", []) or []),
-        outlier_combos_list,
-        include_blank_bilag=False,
-    )
-
-    if df_out is None or df_out.empty:
-        _write_df_table(ws_out, pd.DataFrame(), "Outlier – Full bilagsutskrift")
-        note = "Ingen outlier-kombinasjoner er markert, eller ingen bilag kunne hentes."
-        _set_cell(ws_out, 4, 1, note)
-        if excluded_blank:
-            _set_cell(
-                ws_out,
-                6,
-                1,
-                f"NB: {excluded_blank} bilag-grupper uten bilagsnummer er ekskludert fra full bilagsutskrift.",
-            )
+    # % andel beløp (basert på populasjon)
+    total_pop = float(df_combo[net_label].sum())
+    if total_pop:
+        df_combo["% andel beløp"] = df_combo[net_label].abs() / abs(total_pop)
     else:
-        df_out = df_out.copy()
-        if "Bilag_str" not in df_out.columns and "Bilag" in df_out.columns:
-            df_out["Bilag_str"] = df_out["Bilag"].map(_bilag_str)
-        if "Konto_str" not in df_out.columns and "Konto" in df_out.columns:
-            df_out["Konto_str"] = df_out["Konto"].map(_konto_str)
+        df_combo["% andel beløp"] = 0.0
 
-        df_out["Kombinasjon"] = df_out["Bilag_str"].map(lambda b: bilag_to_combo.get(str(b), ""))
-        # Kontonavn pr kombinasjon (best effort – kan være tomt dersom navn ikke finnes)
-        try:
-            uniq2 = df_out["Kombinasjon"].astype(str).fillna("").unique().tolist()
-            combo_name_map2 = {c: combo_display_name(c, konto_navn_map) for c in uniq2 if str(c).strip()}
-            df_out["Kombinasjon (navn)"] = df_out["Kombinasjon"].astype(str).map(lambda c: combo_name_map2.get(str(c).strip(), ""))
-        except Exception:
-            df_out["Kombinasjon (navn)"] = ""
-        df_out["Status"] = "Outlier"
+    # Status + kommentar
+    def _status_label(combo: str) -> str:
+        s = status_map_norm.get(combo, "neutral")
+        if s == "outlier":
+            return "Ikke forventet"
+        if s == "expected":
+            return "Forventet"
+        return "Umerket"
 
-        belop = df_out["Beløp"].astype(float) if "Beløp" in df_out.columns else 0.0
-        if "Beløp" not in df_out.columns:
-            df_out["Beløp"] = belop
+    df_combo["Status"] = df_combo["Kombinasjon"].astype(str).map(_status_label)
+    df_combo["Kommentar"] = df_combo["Kombinasjon"].astype(str).map(lambda c: comment_map_norm.get(str(c), ""))
 
-        df_out["Debet"] = belop.where(belop > 0, 0.0)
-        df_out["Kredit"] = (-belop).where(belop < 0, 0.0)
-
-        # Velg kolonner (bruk det vi har)
-        cols = [
-            "Status",
+    # Behold kun kolonner fra malen
+    df_combo = df_combo[
+        [
+            "#",
             "Kombinasjon",
             "Kombinasjon (navn)",
-            "Bilag_str",
+            s_label,
+            net_label,
+            "Antall bilag",
+            "% andel bilag",
+            "% andel beløp",
+            "Status",
+            "Kommentar",
         ]
-        if "Dato" in df_out.columns:
-            cols.append("Dato")
-        if "Tekst" in df_out.columns:
-            cols.append("Tekst")
-        cols += [
-            "Konto_str",
-        ]
-        if "Kontonavn" in df_out.columns:
-            cols.append("Kontonavn")
-        cols += ["Debet", "Kredit", "Beløp"]
+    ]
 
-        df_print = df_out[cols].rename(
-            columns={
-                "Bilag_str": "Bilag",
-                "Konto_str": "Konto",
+    # Sortér: outlier -> forventet -> umerket, deretter #
+    sort_key = df_combo["Status"].map({"Ikke forventet": 0, "Forventet": 1, "Umerket": 2}).fillna(9)
+    df_combo = df_combo.assign(_status_sort=sort_key).sort_values(by=["_status_sort", "#"], kind="mergesort")
+    df_combo = df_combo.drop(columns=["_status_sort"]).reset_index(drop=True)
+
+    return df_combo, combo_name_map
+
+
+def _build_status_summary_df(
+    df_kombinasjoner: pd.DataFrame,
+    *,
+    direction: str,
+) -> pd.DataFrame:
+    """Bygger "Oversikt forventet / ikke forventet"."""
+
+    s_label = sum_label(direction)
+    net_label = net_key_label(direction)
+
+    net_header = net_status_header(direction)
+
+    if df_kombinasjoner is None or df_kombinasjoner.empty:
+        return pd.DataFrame(
+            columns=[
+                "Status",
+                "Sum valgte kontoer",
+                net_header,
+                "Antall kombinasjoner",
+                "Antall bilag",
+                "Andel av total",
+                "Kommentar",
+            ]
+        )
+
+    total_sum = float(df_kombinasjoner[s_label].sum())
+
+    def group_label(status: str) -> str:
+        s = str(status or "").strip().lower()
+        if s == "ikke forventet":
+            return "Outlier - ikke forventet"
+        if s == "forventet":
+            return "Forventet"
+        return "ikke vesentlig (ikke markert)"
+
+    grp = df_kombinasjoner.copy()
+    grp["_grp"] = grp["Status"].map(group_label)
+
+    agg = grp.groupby("_grp", dropna=False).agg(
+        sum_selected=(s_label, "sum"),
+        net=(net_label, "sum"),
+        antall_komb=("Kombinasjon", "count"),
+        antall_bilag=("Antall bilag", "sum"),
+    )
+
+    def _andel(x: float) -> float:
+        if not total_sum:
+            return 0.0
+        return abs(float(x)) / abs(total_sum)
+
+    rows: list[dict[str, Any]] = []
+    order = ["Outlier - ikke forventet", "Forventet", "ikke vesentlig (ikke markert)"]
+    comments = {
+        "Outlier - ikke forventet": "ikke forventede kombinasjoner forklart/revidert - se egne faner per kombinasjon",
+        "Forventet": "Forventet",
+        "ikke vesentlig (ikke markert)": "Sum ikke forklart - samlet sett ikke vesentlig",
+    }
+
+    for key in order:
+        if key not in agg.index:
+            rows.append(
+                {
+                    "Status": key,
+                    "Sum valgte kontoer": 0.0,
+                    net_header: 0.0,
+                    "Antall kombinasjoner": 0,
+                    "Antall bilag": 0,
+                    "Andel av total": 0.0,
+                    "Kommentar": comments.get(key, ""),
+                }
+            )
+            continue
+        rows.append(
+            {
+                "Status": key,
+                "Sum valgte kontoer": float(agg.loc[key, "sum_selected"]),
+                net_header: float(agg.loc[key, "net"]),
+                "Antall kombinasjoner": int(agg.loc[key, "antall_komb"]),
+                "Antall bilag": int(agg.loc[key, "antall_bilag"]),
+                "Andel av total": _andel(float(agg.loc[key, "sum_selected"])),
+                "Kommentar": comments.get(key, ""),
             }
         )
 
-        # Sortering
-        sort_cols = ["Bilag"]
-        if "Dato" in df_print.columns:
-            sort_cols.append("Dato")
-        sort_cols.append("Konto")
-        df_print = df_print.sort_values(sort_cols, ascending=True, kind="mergesort")
+    return pd.DataFrame(rows)
 
-        _write_df_table(ws_out, df_print, "Outlier – Full bilagsutskrift")
 
-        # Merknad om blank bilag (hvis ekskludert)
-        if excluded_blank:
-            # Find next empty row after table
-            r = ws_out.max_row + 2
-            _set_cell(
-                ws_out,
-                r,
-                1,
-                f"NB: {excluded_blank} bilag-grupper uten bilagsnummer er ekskludert fra full bilagsutskrift.",
-            )
+def _build_outlier_index_df(
+    df_kombinasjoner: pd.DataFrame,
+    *,
+    direction: str,
+) -> pd.DataFrame:
+    """Kort outlier-oversikt for Oversikt-arket."""
 
-        # Date format
-        if "Dato" in df_print.columns:
-            # Find column index
-            col_idx = list(df_print.columns).index("Dato") + 1
-            for r in range(4, ws_out.max_row + 1):
-                ws_out.cell(row=r, column=col_idx).number_format = "dd.mm.yyyy"
+    s_label = sum_label(direction)
+
+    if df_kombinasjoner is None or df_kombinasjoner.empty:
+        # Kun en kompakt indeks for outliers (lenker til egne faner).
+        return pd.DataFrame(columns=["#", "Kombinasjon", "Kombinasjon (navn)", s_label, "Antall bilag", "Fane"])
+
+    df_out = df_kombinasjoner[df_kombinasjoner["Status"].astype(str).str.lower().eq("ikke forventet")].copy()
+    if df_out.empty:
+        return pd.DataFrame(columns=["#", "Kombinasjon", "Kombinasjon (navn)", s_label, "Antall bilag", "Fane"])
+
+    # Hyperlink til fane
+    def _fane_link(num: Any) -> str:
+        try:
+            n = int(num)
+        except Exception:
+            n = str(num)
+        sheet = f"#{n}"
+        return f'=HYPERLINK("#\'{sheet}\'!A1","{sheet}")'
+
+    df_out["Fane"] = df_out["#"].map(_fane_link)
+
+    # Hold indeksen kort: ikke ta med "Kommentar" her, siden kommentarer/handling/resultat
+    # fylles ut i egne outlier-faner.
+    return df_out[["#", "Kombinasjon", "Kombinasjon (navn)", s_label, "Antall bilag", "Fane"]].reset_index(drop=True)
+
+
+def build_motpost_excel_workbook(
+    data: Any,
+    *,
+    outlier_motkonto: Optional[set[str]] = None,
+    selected_motkonto: Optional[str] = None,
+    outlier_combinations: Optional[set[str]] = None,
+    combo_status_map: Optional[dict[str, str]] = None,
+    combo_comment_map: Optional[dict[str, str]] = None,
+    include_outlier_transactions: bool = True,
+) -> Workbook:
+    """Bygg en Excel-workbook for motpostanalyse."""
+
+    df_scope: pd.DataFrame = getattr(data, "df_scope")
+    selected_accounts: list[str] = list(getattr(data, "selected_accounts"))
+    direction: str = str(getattr(data, "selected_direction", "Alle") or "Alle")
+
+    # Normaliser status/kommentar
+    status_norm = normalize_combo_status_map(combo_status_map)
+    comment_norm = normalize_comment_map(combo_comment_map)
+
+    # Legacy: outlier_combinations
+    if outlier_combinations and not status_norm:
+        status_norm = {str(c): "outlier" for c in outlier_combinations}
+
+    # Tabellgrunnlag
+    df_valgte_kontoer = _build_valgte_kontoer_df(df_scope, selected_accounts=selected_accounts, direction=direction)
+    df_kombinasjoner, combo_name_map = _build_kombinasjoner_df(
+        df_scope,
+        selected_accounts=selected_accounts,
+        direction=direction,
+        status_map_norm=status_norm,
+        comment_map_norm=comment_norm,
+    )
+    df_status = _build_status_summary_df(df_kombinasjoner, direction=direction)
+    df_outlier_index = _build_outlier_index_df(df_kombinasjoner, direction=direction)
+
+    # Summer for oversikt
+    s_label = sum_label(direction)
+    pop_label = population_label(direction)
+    net_label = net_key_label(direction)
+
+    selected_sum = float(getattr(data, "selected_sum", df_kombinasjoner[s_label].sum() if not df_kombinasjoner.empty else 0.0) or 0.0)
+    population_net = float(df_kombinasjoner[net_label].sum() if not df_kombinasjoner.empty else 0.0)
+
+    # Outlier combos
+    outlier_combos = df_kombinasjoner[df_kombinasjoner["Status"].astype(str).str.lower().eq("ikke forventet")]["Kombinasjon"].astype(str).tolist()
+
+    frames = build_outlier_frames(
+        df_scope,
+        selected_accounts=selected_accounts,
+        outlier_combos=outlier_combos,
+        combo_name_map=combo_name_map,
+        include_transactions=include_outlier_transactions,
+    )
+
+    # Workbook og ark-rekkefølge:
+    # Oversikt -> #n -> Outlier - alle transaksjoner -> Data
+    wb = Workbook()
+
+    ws_over = wb.active
+    ws_over.title = "Oversikt"
+
+    # Detaljfaner for outliers
+    write_outlier_detail_sheets(
+        wb,
+        df_kombinasjoner=df_kombinasjoner,
+        frames=frames,
+        df_scope=df_scope,
+        selected_accounts=selected_accounts,
+        direction=direction,
+        sum_label=s_label,
+        net_label=net_label,
+        outlier_sheet_name=DEFAULT_OUTLIER_SHEET_NAME,
+        include_outlier_transactions=include_outlier_transactions,
+    )
+
+    # Outlier - alle transaksjoner (alltid)
+    write_outlier_transactions_sheet(
+        wb,
+        frames=frames,
+        sheet_name=DEFAULT_OUTLIER_SHEET_NAME,
+    )
+
+    # Data (sist)
+    ws_data = wb.create_sheet("Data")
+    write_data_sheet(ws_data, df_valgte_kontoer=df_valgte_kontoer, df_kombinasjoner=df_kombinasjoner, df_status=df_status)
+
+    # Oversikt (til slutt, slik at vi kan bruke ferdige DF'er)
+    write_oversikt_sheet(
+        ws_over,
+        data=data,
+        direction=direction,
+        selected_accounts=selected_accounts,
+        selected_sum=selected_sum,
+        population_net=population_net,
+        df_status=df_status,
+        df_outlier_index=df_outlier_index,
+        outlier_sheet_name=DEFAULT_OUTLIER_SHEET_NAME,
+        sum_label=s_label,
+        population_label=pop_label,
+        net_label=net_label,
+    )
 
     return wb

@@ -11,6 +11,8 @@ import pandas as pd
 from bilag_drilldialog import BilagDrillDialog
 from motpost.combinations import build_bilag_to_motkonto_combo
 from formatting import fmt_amount, fmt_date
+from motpost.combinations_popup_helpers import build_bilag_rows, format_combo_df_for_display, truncate_text
+from motpost.combo_comment_workflow import edit_comment_for_focus, edit_comment_for_tree_item
 
 from motpost.combo_workflow import (
     STATUS_EXPECTED,
@@ -21,6 +23,7 @@ from motpost.combo_workflow import (
     normalize_combo_status,
     normalize_direction,
     status_label,
+    compute_selected_net_sum_by_combo,
 )
 from motpost.utils import _bilag_str, _clean_name, _konto_str, _safe_float
 from ui_treeview_sort import enable_treeview_sorting
@@ -47,8 +50,9 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         selected_direction: Optional[str] = None,
         outlier_combinations: Optional[Set[str]] = None,
         combo_status_map: Optional[dict[str, str]] = None,
+        combo_comment_map: Optional[dict[str, str]] = None,
         on_outlier_changed: Optional[Callable[[Set[str]], None]] = None,
-        on_export_excel: Optional[Callable[[object], None]] = None,
+        on_export_excel: Optional[Callable[..., None]] = None,
     ):
         super().__init__(parent)
 
@@ -61,6 +65,12 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         self._selected_accounts = [_konto_str(a) for a in (selected_accounts or []) if _konto_str(a)]
         self._selected_accounts_set = set(self._selected_accounts)
         self._selected_direction = normalize_direction(selected_direction)
+        if self._selected_direction == "kredit":
+            self._net_heading, self._net_label = "Netto kredit (valgte kontoer)", "Netto kredit"
+        elif self._selected_direction == "debet":
+            self._net_heading, self._net_label = "Netto debet (valgte kontoer)", "Netto debet"
+        else:
+            self._net_heading, self._net_label = "Netto valgte kontoer", "Netto"
 
         self._df_scope = df_scope.copy() if df_scope is not None else pd.DataFrame()
         if "Bilag_str" not in self._df_scope.columns and "Bilag" in self._df_scope.columns:
@@ -80,6 +90,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         # key: combo-string (samme som i kolonnen "Kombinasjon")
         # value: '', 'expected' eller 'outlier'
         self._combo_status_map: dict[str, str] = combo_status_map if combo_status_map is not None else {}
+        self._combo_comment_map: dict[str, str] = combo_comment_map if combo_comment_map is not None else {}
 
         # Backwards compatible: a set of outlier combos. If provided, keep it in sync with status_map.
         self._outlier_combinations_ref: Set[str] = outlier_combinations if outlier_combinations is not None else set()
@@ -110,8 +121,10 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
         # Cache for summering i tabeller (ikke parse formaterte strenger fra treeview)
         self._combo_sum_map: dict[str, float] = {}
+        self._combo_net_sum_map: dict[str, float] = {}
         self._combo_bilag_count_map: dict[str, int] = {}
         self._combo_total_sum: float = 0.0
+        self._combo_total_net_sum: float = 0.0
 
         # Layout
         self.geometry("1100x720")
@@ -195,15 +208,18 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
                 "Kombinasjon (navn)",
                 "Antall bilag",
                 "Sum valgte kontoer",
+                "Netto valgte kontoer",
                 "% andel bilag",
                 "Outlier",
                 "Status",
+                "Kommentar",
             ),
             show="headings",
             selectmode="extended",
         )
         for c in self._tree_all["columns"]:
-            self._tree_all.heading(c, text=c)
+            heading_text = self._net_heading if c == "Netto valgte kontoer" else c
+            self._tree_all.heading(c, text=heading_text)
             if c == "Kombinasjon":
                 w, anchor = 180, tk.W
             elif c == "Kombinasjon (navn)":
@@ -272,17 +288,23 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
                     except Exception:
                         self._combo_bilag_count_map[c0] = 0
             self._combo_total_sum = float(sum(self._combo_sum_map.values())) if self._combo_sum_map else 0.0
+            self._combo_net_sum_map = compute_selected_net_sum_by_combo(self._df_scope, self._selected_accounts, bilag_to_combo=self._bilag_to_combo, selected_direction=self._selected_direction)
+            self._combo_total_net_sum = float(sum(self._combo_net_sum_map.values())) if self._combo_net_sum_map else 0.0
         except Exception:
             self._combo_total_sum = 0.0
+            self._combo_net_sum_map = {}
+            self._combo_total_net_sum = 0.0
 
         # Populate all combos (display)
-        df_disp = _format_combo_df_for_display(df_combos)
+        df_disp = format_combo_df_for_display(df_combos)
         for _, r in df_disp.iterrows():
             combo = str(r.get("Kombinasjon", "") or "").strip()
             combo_name = combo_display_name(combo, self._konto_navn_map) if combo else ""
             status_code = normalize_combo_status(self._combo_status_map.get(combo, ""))
             status_txt = status_label(status_code)
-            row_dict = {**r.to_dict(), "Kombinasjon (navn)": combo_name, "Status": status_txt}
+            comment_full = str(self._combo_comment_map.get(combo, "") or "").strip()
+            comment_disp = truncate_text(comment_full, max_len=80) if comment_full else ""
+            row_dict = {**r.to_dict(), "Kombinasjon (navn)": combo_name, "Netto valgte kontoer": fmt_amount(float(self._combo_net_sum_map.get(combo, 0.0) or 0.0)), "Status": status_txt, "Kommentar": comment_disp}
             vals = [row_dict.get(c, "") for c in self._tree_all["columns"]]
             tags = ()
             if status_code == STATUS_EXPECTED:
@@ -573,6 +595,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
         n = len(combos)
         sum_marked = float(sum(self._combo_sum_map.get(c, 0.0) for c in combos)) if combos else 0.0
+        sum_marked_net = float(sum(self._combo_net_sum_map.get(c, 0.0) for c in combos)) if combos else 0.0
 
         # Statusfordeling blant de markerte
         expected_cnt = 0
@@ -585,8 +608,9 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
                 outlier_cnt += 1
 
         total = float(self._combo_total_sum or 0.0)
+        total_net = float(self._combo_total_net_sum or 0.0)
 
-        base = f"Markert: {n} rader | Sum valgte kontoer (markert): {fmt_amount(sum_marked)} | Total: {fmt_amount(total)}"
+        base = f"Markert: {n} rader | Sum valgte kontoer (markert): {fmt_amount(sum_marked)} | {self._net_label} (markert): {fmt_amount(sum_marked_net)} | Total: {fmt_amount(total)} | {self._net_label} total: {fmt_amount(total_net)}"
         if n:
             base += f" | Forventet: {expected_cnt} | Outlier: {outlier_cnt}"
 
@@ -675,11 +699,16 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         if not self._on_export_excel:
             return
         # Prefer status_map, but fall back to legacy set if caller has old signature.
-        payload = dict(self._combo_status_map)
+        payload_status = dict(self._combo_status_map)
+        payload_comments = dict(self._combo_comment_map)
         try:
-            self._on_export_excel(payload)
+            self._on_export_excel(payload_status, payload_comments)
         except TypeError:
-            self._on_export_excel(set(self._outlier_combinations_ref))
+            try:
+                self._on_export_excel(payload_status)
+            except TypeError:
+                # Legacy: kun outlier-sett
+                self._on_export_excel(set(self._outlier_combinations_ref))
 
     # ---- Event handlers ----
 
@@ -697,8 +726,31 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         if combo:
             self._update_drilldown(_ComboSelection(combo=combo))
 
-    def _on_combo_doubleclick(self, _event=None):
+    def _on_combo_doubleclick(self, event=None):
+        # Dobbeltklikk: åpne kommentar-dialog for raden under musepekeren.
+        item = None
+        try:
+            if event is not None:
+                item = self._tree_all.identify_row(getattr(event, 'y', 0))
+        except Exception:
+            item = None
+
+        if item:
+            try:
+                self._tree_all.focus(item)
+                sel = set(self._tree_all.selection())
+                if item not in sel:
+                    self._tree_all.selection_set(item)
+            except Exception:
+                pass
+
+        # Oppdater drilldown (som før)
         self._on_combo_selected()
+
+        # Åpne kommentarfelt for klikket rad
+        if item:
+            edit_comment_for_tree_item(self, self._tree_all, item, comment_map=self._combo_comment_map)
+
 
     def _on_per_selected_selected(self, _event=None):
         item = self._tree_per.focus()
@@ -777,7 +829,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         self._populate_account_sum_tree(self._tree_mot, df_mot, base_sum=sum_sel)
 
         # Bilag rows (cached) for list
-        self._bilag_rows_cache = self._build_bilag_rows(df_combo, df_sel, df_mot)
+        self._bilag_rows_cache = build_bilag_rows(df_combo, df_sel, df_mot)
         self._apply_bilag_limit()
 
     def _populate_account_sum_tree(
@@ -845,36 +897,6 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
             tree.insert("", tk.END, values=(k, name, fmt_amount(belop), pct_txt), tags=tags)
 
-    def _build_bilag_rows(self, df_combo: pd.DataFrame, df_sel: pd.DataFrame, df_mot: pd.DataFrame) -> pd.DataFrame:
-        """Build a per-bilag table for the current combo."""
-        # Selected sum per bilag (already direction filtered)
-        sel_by_bilag = df_sel.groupby("Bilag_str")["Beløp_num"].sum()
-
-        # Mot sum per bilag (net, all directions)
-        mot_by_bilag = df_mot.groupby("Bilag_str")["Beløp_num"].sum()
-
-        # Meta
-        has_date = "Dato" in df_combo.columns
-        has_text = "Tekst" in df_combo.columns
-        date_by_bilag = df_combo.groupby("Bilag_str")["Dato"].first() if has_date else None
-        text_by_bilag = df_combo.groupby("Bilag_str")["Tekst"].first() if has_text else None
-        konto_count = df_combo.groupby("Bilag_str")["Konto_str"].nunique()
-
-        idx = sorted(df_combo["Bilag_str"].dropna().unique().tolist())
-        df_rows = pd.DataFrame(index=idx)
-        df_rows["Bilag"] = df_rows.index
-        df_rows["Dato"] = date_by_bilag.reindex(idx) if date_by_bilag is not None else ""
-        df_rows["Tekst"] = text_by_bilag.reindex(idx) if text_by_bilag is not None else ""
-        df_rows["Beløp_valgt"] = sel_by_bilag.reindex(idx).fillna(0.0)
-        df_rows["Motbeløp"] = mot_by_bilag.reindex(idx).fillna(0.0)
-        df_rows["Kontoer"] = konto_count.reindex(idx).fillna(0).astype(int)
-
-        # Default order: largest absolute selected amount first
-        df_rows["_abs"] = df_rows["Beløp_valgt"].abs()
-        df_rows = df_rows.sort_values(["_abs", "Bilag"], ascending=[False, True])
-        df_rows = df_rows.drop(columns=["_abs"])
-        return df_rows
-
     def _apply_bilag_limit(self) -> None:
         # If no current drilldown, nothing to do
         if self._bilag_rows_cache is None:
@@ -934,28 +956,6 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             tree.delete(item)
 
 
-def _format_combo_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    """Format combo DF for display in treeview: numbers -> formatted strings."""
-    if df is None or df.empty:
-        return pd.DataFrame()
-    out = df.copy()
-
-    for col in ("Sum valgte kontoer",):
-        if col in out.columns:
-            out[col] = out[col].map(fmt_amount)
-
-    # percentage column might be float
-    if "% andel bilag" in out.columns:
-        out["% andel bilag"] = out["% andel bilag"].map(
-            lambda x: f"{float(x):.1f}%" if x is not None and str(x) != "" else ""
-        )
-
-    # Outlier columns: normalize
-    if "Outlier" in out.columns:
-        out["Outlier"] = out["Outlier"].fillna("")
-
-    return out
-
 
 def show_motkonto_combinations_popup(
     parent: tk.Misc,
@@ -971,8 +971,9 @@ def show_motkonto_combinations_popup(
     selected_direction: Optional[str] = None,
     outlier_combinations: Optional[Set[str]] = None,
     combo_status_map: Optional[dict[str, str]] = None,
+        combo_comment_map: Optional[dict[str, str]] = None,
     on_outlier_changed: Optional[Callable[[Set[str]], None]] = None,
-    on_export_excel: Optional[Callable[[object], None]] = None,
+    on_export_excel: Optional[Callable[..., None]] = None,
 ) -> _MotkontoCombinationsPopup:
     """Create and show the combinations popup."""
     win = _MotkontoCombinationsPopup(
@@ -988,6 +989,7 @@ def show_motkonto_combinations_popup(
         selected_direction=selected_direction,
         outlier_combinations=outlier_combinations,
         combo_status_map=combo_status_map,
+        combo_comment_map=combo_comment_map,
         on_outlier_changed=on_outlier_changed,
         on_export_excel=on_export_excel,
     )

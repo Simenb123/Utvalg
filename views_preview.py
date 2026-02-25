@@ -3,6 +3,9 @@ import tkinter as tk
 from tkinter import ttk
 import pandas as pd
 
+from header_detection import detect_header_row
+from preview_format import format_preview_value, infer_column_kinds
+
 
 def show_preview(parent, df_raw: pd.DataFrame, on_choose_header):
     """
@@ -15,14 +18,28 @@ def show_preview(parent, df_raw: pd.DataFrame, on_choose_header):
     ttk.Label(top, text="Dobbeltklikk på raden som er header. Den settes i 'Header-rad' i hovedvinduet.").pack(fill=tk.X, padx=8, pady=6)
 
     frame = ttk.Frame(top); frame.pack(fill=tk.BOTH, expand=True)
-    dfp = df_raw.head(150).fillna("")
+    dfp = df_raw.head(150)
     cols = [f"kol{i+1}" for i in range(dfp.shape[1])]
     tree = ttk.Treeview(frame, columns=cols, show="headings")
     for c in cols:
         tree.heading(c, text=c)
         tree.column(c, width=120, stretch=True)
+    # Best-effort: gjett header-rad for å velge bedre visningsformat.
+    rows_for_guess = [list(r) for r in dfp.itertuples(index=False, name=None)]
+    hdr_idx0 = None
+    try:
+        hdr_idx0 = detect_header_row(rows_for_guess)
+    except Exception:
+        hdr_idx0 = None
+
+    kinds = infer_column_kinds(rows_for_guess, header_row_idx0=hdr_idx0)
+    if len(kinds) < len(cols):
+        kinds = kinds + ["generic"] * (len(cols) - len(kinds))
+
     for i in range(len(dfp)):
-        tree.insert("", tk.END, iid=str(i), values=[str(v) for v in dfp.iloc[i].tolist()])
+        row = dfp.iloc[i].tolist()
+        values = [format_preview_value(v, kind=kinds[j] if j < len(kinds) else "") for j, v in enumerate(row)]
+        tree.insert("", tk.END, iid=str(i), values=values)
 
     vsb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     hsb = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)

@@ -72,3 +72,16 @@ def test_filter_by_accounts() -> None:
     out = filter_by_accounts(df, [100, "300"])
     # Skal inkludere rader der Konto er "100"/100 eller "300"
     assert list(out["Konto"]) == ["100", 100, "300"]
+
+def test_build_pivot_by_account_counts_unique_bilag_when_duplicates() -> None:
+    df = pd.DataFrame(
+        {
+            "Konto": ["3000", "3000", "3000"],
+            "Kontonavn": ["Salg"] * 3,
+            "Bilag": ["A", "A", "B"],
+            "Beløp": [10.0, -5.0, 2.0],
+        }
+    )
+
+    pivot = build_pivot_by_account(df)
+    assert pivot.loc[0, "Antall bilag"] == 2

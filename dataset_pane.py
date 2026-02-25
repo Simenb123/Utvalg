@@ -1,431 +1,423 @@
-# -*- coding: utf-8 -*-
-"""
-dataset_pane.py – R12f+hotfix+extensions
-----------------------------------------
-Denne modulen bygger brukergrensesnittet for å velge og mappe kolonner fra
-et datasett før det lastes inn i resten av applikasjonen. Koden er
-basert på den offisielle R12f+hotfix‑utgaven av Utvalg, men vi har
-gjort noen forbedringer:
-
-* **Utvidet combobox‑høyde:** Alle nedtrekksmenyer for kolonnekarting
-  (`ttk.Combobox`) settes nå opp med `height=15`. Dette gjør det lettere
-  å bla i lister med mange kolonnenavn, siden flere elementer vises
-  samtidig før brukeren må skrolle.
-* Ingen annen funksjonalitet er endret; modulen laster fortsatt inn
-  overskrifter, gjetter mapping basert på historikk og alias (via
-  `ml_map_utils.suggest_mapping`) og bygger datasett raskt med
-  `dataset_build_fast.build_from_file`.
-
-Modulen støtter en `on_dataset_ready`‑callback for å varsle andre
-komponenter når datasettet er bygd, og håndterer fravær av `session`
-og `bus` på en trygg måte.
-"""
-
 from __future__ import annotations
-import os
+
+import logging
 from pathlib import Path
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from typing import List, Dict, Optional, Callable
+from typing import Callable, Dict, Optional, Tuple
 
 import pandas as pd
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
 
-# session og bus er valgfrie; vi håndterer fravær trygt
-try:
-    import session  # type: ignore
-except Exception:
-    class session:  # type: ignore
-        dataset = None
+import bus
+import dataset_export
+import session
+from dataset_pane_build import BuildRequest, BuildResult, build_dataset, is_saft_path
+from dataset_pane_io import (
+    auto_detect_header_and_headers,
+    is_csv_path,
+    is_excel_path,
+    list_excel_sheets,
+    read_csv_header,
+    read_csv_rows,
+    read_excel_header,
+    read_excel_rows,
+)
+from dataset_pane_xls import list_xls_sheets, read_xls_header, read_xls_sample
+from dataset_pane_ui import build_ui
+from ml_map_utils import canonical_fields, load_ml_map, suggest_mapping, update_ml_map
+from models import Columns
+from ui_loading import LoadingOverlay
+from views_preview import show_preview
 
-try:
-    import bus  # type: ignore
-except Exception:
-    class bus:  # type: ignore
-        @staticmethod
-        def emit(_name, _payload=None) -> None:
-            return None
+logger = logging.getLogger(__name__)
 
-# loading overlay (fallback no-op om modulen ikke finnes)
-try:
-    from ui_loading import LoadingOverlay
-except Exception:
-    class LoadingOverlay:
-        def __init__(self, *_a, **_k) -> None:
-            pass
-        def busy(self, *_a, **_k):
-            class _C:
-                def __enter__(self_s) -> None: return None
-                def __exit__(self_s, *e) -> bool: return False
-            return _C()
+# Re-eksporter (tester / eksisterende kode forventer disse navnene herfra)
+__all__ = ["DatasetPane", "MAIN_FILETYPES", "is_saft_path"]
 
-# ML + rask bygging
-from ml_map_utils import load_ml_map, suggest_mapping, update_ml_map
-from dataset_build_fast import build_from_file
-
-# SAF‑T integration (optional). If `saft_importer.py` is present, users can
-# select a SAF‑T .zip/.xml file directly and Utvalg will cache a generated
-# transactions CSV and load that instead.
-try:
-    from saft_importer import ensure_transactions_csv, is_saft_file
-except Exception:  # pragma: no cover
-    ensure_transactions_csv = None  # type: ignore[assignment]
-    is_saft_file = None  # type: ignore[assignment]
-
-CANON = [
-    "Konto", "Kontonavn", "Bilag", "Beløp", "Dato", "Tekst",
-    "Kundenr", "Kundenavn", "Leverandørnr", "Leverandørnavn",
-    "MVA-kode", "MVA-beløp", "MVA-prosent", "Valuta", "Valutabeløp"
+MAIN_FILETYPES = [
+    ("Alle filer", "*.*"),
+    ("Excel", "*.xlsx;*.xls;*.xlsm"),
+    ("CSV", "*.csv;*.txt"),
+    ("SAF-T (zip/xml)", "*.zip;*.xml"),
 ]
 
+_REQUIRED = ("Konto", "Bilag", "Beløp")
+
+
 class DatasetPane(ttk.Frame):
-    def __init__(self, master, **kwargs) -> None:
-        # Ta ut våre egne kwargs FØR super().__init__ for å unngå TclError
-        self._on_ready: Optional[Callable[[pd.DataFrame], None]] = kwargs.pop("on_dataset_ready", None)
-        # Valgfri error-callback hvis noen har brukt det i UI (støttes stille)
-        self._on_error: Optional[Callable[[Exception], None]] = kwargs.pop("on_error", None)
-        # Viktig: ikke send ukjente kwargs videre til ttk.Frame
+    """Dataset-pane med sheet/header/mapping + valgfri klient/versjonsseksjon."""
+    def __init__(
+        self,
+        master: tk.Misc,
+        title: str = "Dataset",
+        *,
+        on_ready: Optional[Callable[[pd.DataFrame], None]] = None,
+        on_error: Optional[Callable[[Exception], None]] = None,
+        on_dataset_ready: Optional[Callable[[pd.DataFrame], None]] = None,
+        **kwargs,
+    ) -> None:
         super().__init__(master, **kwargs)
-        self.loading = LoadingOverlay(self)
+
+        self._title = title
+        self._on_ready = on_ready or on_dataset_ready
+        self._on_error = on_error
+
+        self._ml_map = load_ml_map()
+        self._headers: list[str] = []
+        self._last_build: Optional[Tuple[pd.DataFrame, Columns]] = None
+
         self.path_var = tk.StringVar(value="")
-        # If the user selects a SAF‑T file we convert it to a cached
-        # transactions CSV. Keep the original path in the UI and store the
-        # resolved CSV path here.
-        self._resolved_path: str | None = None
-        self.headers: List[str] = []
-        self.combos: Dict[str, ttk.Combobox] = {}
-        self._build_ui()
+        self.sheet_var = tk.StringVar(value="")
+        self.header_row_var = tk.StringVar(value="1")
 
-    # ---------- UI ----------
-    def _build_ui(self) -> None:
-        self.columnconfigure(0, weight=1)
-        # Filrad
-        rowf = ttk.Frame(self)
-        rowf.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
-        ttk.Label(rowf, text="Fil:").pack(side="left")
-        ttk.Entry(rowf, textvariable=self.path_var, width=70).pack(side="left", padx=(4, 8))
-        ttk.Button(rowf, text="Bla…", command=self._choose_file).pack(side="left")
-        ttk.Button(rowf, text="Last inn header", command=self._load_headers).pack(side="left", padx=(6, 0))
-        # Mapping
-        frm = ttk.LabelFrame(self, text="Kolonnemapping")
-        frm.grid(row=1, column=0, sticky="ew", padx=8, pady=8)
-        frm.columnconfigure(1, weight=1)
-        r = 0
-        for canon in CANON:
-            ttk.Label(frm, text=f"{canon}:").grid(row=r, column=0, sticky="w", padx=6, pady=2)
-            # her er forbedringen: height=15 gjør listen dypere
-            cb = ttk.Combobox(frm, values=[], state="readonly", width=50, height=15)
-            cb.grid(row=r, column=1, sticky="ew", padx=6, pady=2)
-            self.combos[canon] = cb
-            r += 1
-        # Knapper
-        rowb = ttk.Frame(self)
-        rowb.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 8))
-        ttk.Button(rowb, text="Gjett mapping", command=self._guess).pack(side="left")
-        ttk.Button(rowb, text="Bygg datasett", command=self._build_dataset).pack(side="left", padx=(8, 0))
-        # Status
-        self.status = ttk.Label(self, text="Klar.")
-        self.status.grid(row=3, column=0, sticky="w", padx=8, pady=(0, 8))
+        self.loading = LoadingOverlay(self)
 
-    # ---------- Actions ----------
-    def _choose_file(self) -> None:
-        p = filedialog.askopenfilename(
-            title="Velg fil",
-            # Viktig: default filter (første element) bør være "Alle filer" slik at
-            # SAF‑T ZIP/XML ikke blir skjult når brukeren browser.
-            filetypes=[
-                ("Alle filer", "*.*"),
-                ("SAF-T (zip/xml)", "*.zip;*.xml"),
-                ("Regnskapsdata (xlsx/csv)", "*.xlsx;*.xls;*.csv;*.txt"),
-            ],
+        # Container for klient/versjon-seksjon (egen container → unngår pack/grid-konflikt)
+        self._store_container = ttk.Frame(self)
+        self._store_container.pack(fill="x", padx=8, pady=(8, 0))
+
+        # Bygg resten av UI
+        self.sheet_combo, self.status_lbl, self.combo_vars, self.combo_widgets = build_ui(
+            self, title=self._title, canon_fields=canonical_fields()
         )
+
+        # Valgfri klient/versjonsseksjon
+        self._store_section = self._try_mount_store_section()
+
+        # Eksportknappen ligger i PageDataset (for å unngå duplikate knapper).
+
+        self._set_status("Klar.")
+
+    # ---- legacy/kompat API ----
+    @property
+    def frm(self) -> ttk.Frame:
+        return self
+    def get_last_build(self) -> Tuple[Optional[pd.DataFrame], Optional[Columns]]:
+        if self._last_build is None:
+            return None, None
+        return self._last_build
+    def build_dataset(self) -> Tuple[pd.DataFrame, Columns]:
+        req = self._gather_build_request()
+        res = build_dataset(req)
+        self._apply_build_result(res, update_ml=True, show_message=True)
+        return res.df, res.cols
+
+    # ---- callbacks fra UI-builder ----
+    def _choose_file(self) -> None:
+        path = filedialog.askopenfilename(title="Velg fil (Excel/CSV/SAF-T)", filetypes=MAIN_FILETYPES)
+        if not path:
+            return
+        self._set_path(path, refresh_headers=True, refresh_sheet=True)
+    def _preview(self) -> None:
+        p = self._get_path_or_warn()
+        if p is None:
+            return
+
+        if is_saft_path(p):
+            messagebox.showinfo("Forhåndsvisning", "SAF-T forhåndsvises ikke her (velg fil og bygg datasett).")
+            return
+
+        sheet = self._sheet_name_or_none()
+        try:
+            if p.suffix.lower() == ".xls":
+                df_raw = read_xls_sample(p, nrows=200)
+            elif p.suffix.lower() in {".xlsx", ".xlsm"}:
+                rows = read_excel_rows(
+                    p,
+                    sheet_name=sheet,
+                    start_row=1,
+                    max_rows=200,
+                    max_cols=60,
+                )
+                df_raw = pd.DataFrame(rows)
+            else:
+                rows = read_csv_rows(
+                    p,
+                    start_row=1,
+                    max_rows=200,
+                    max_cols=60,
+                )
+                df_raw = pd.DataFrame(rows)
+        except Exception:
+            logger.exception("Preview failed")
+            messagebox.showerror("Forhåndsvisning", "Kunne ikke lese data for forhåndsvisning.")
+            return
+
+        def _on_choose_header(idx_1based: int) -> None:
+            self.header_row_var.set(str(idx_1based))
+            self._load_headers()
+            self._guess_mapping(force=True)
+
+        show_preview(self.winfo_toplevel(), df_raw=df_raw, on_choose_header=_on_choose_header)
+    def _on_sheet_selected(self) -> None:
+        self._load_headers()
+        self._guess_mapping(force=False)
+    def _autodetect_header(self) -> None:
+        self._load_headers(auto_detect=True)
+        self._guess_mapping(force=True)
+    def _load_headers(self, auto_detect: bool = False) -> None:
+        p = self._get_path_or_warn()
+        if p is None:
+            return
+
+        if is_saft_path(p):
+            headers = canonical_fields()
+            self._headers = headers
+            self._apply_headers_to_mapping_widgets(headers, saft_mode=True)
+            self._guess_mapping(force=True)
+            self._set_status("SAF-T valgt (sheet/header er ikke relevant).")
+            return
+
+        self._refresh_sheet_choices(p)
+
+        header_row = self._parse_header_row()
+        sheet = self._sheet_name_or_none()
+
+        try:
+            if auto_detect and p.suffix.lower() != ".xls":
+                header_row, headers = auto_detect_header_and_headers(p, sheet_name=sheet)
+                self.header_row_var.set(str(header_row))
+            else:
+                if is_excel_path(p):
+                    headers = read_excel_header(p, sheet_name=sheet, header_row=header_row)
+                elif p.suffix.lower() == ".xls":
+                    headers = read_xls_header(p, header_row=header_row, sheet_name=sheet)
+                elif is_csv_path(p):
+                    headers = read_csv_header(p, header_row=header_row)
+                else:
+                    raise ValueError(f"Ukjent filtype: {p.suffix}")
+        except Exception as e:
+            logger.exception("Header read failed")
+            messagebox.showerror("Header", f"Kunne ikke lese header:\n{e}")
+            return
+
+        self._headers = headers
+        self._apply_headers_to_mapping_widgets(headers, saft_mode=False)
+
+        found = sum(1 for v in self.combo_vars.values() if v.get().strip())
+        self._set_status(f"Lest {len(headers)} kolonner. Fant {found}/{len(self.combo_vars)} felt (ML/alias).")
+    def _guess_mapping(self, force: bool = True) -> None:
+        p = self.path_var.get().strip()
         if not p:
             return
-        self.path_var.set(p)
-        # Reset resolved CSV when the user picks a new source file
-        self._resolved_path = None
-        self._load_headers()
 
-    def _read_headers_only(self, path: str) -> List[str]:
-        ext = os.path.splitext(path)[1].lower()
-        if ext in (".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"):
-            try:
-                df0 = pd.read_excel(path, nrows=0, engine="openpyxl")
-                return list(df0.columns)
-            except Exception:
-                pass
-        try:
-            df0 = pd.read_csv(path, nrows=0, sep=None, engine="python")
-            return list(df0.columns)
-        except Exception:
-            try:
-                df0 = pd.read_csv(path, nrows=0, sep=";", encoding="utf-8")
-                return list(df0.columns)
-            except Exception:
-                return []
-
-    def _load_headers(self) -> None:
-        p = self.path_var.get().strip()
-        if not p or not os.path.exists(p):
-            messagebox.showwarning("Fil", "Velg gyldig fil først.")
+        if is_saft_path(p):
+            for field, var in self.combo_vars.items():
+                if force or not var.get().strip():
+                    var.set(field)
             return
-        resolved_p = p
-        # SAF‑T (zip/xml): konverter til cached transactions-CSV før vi leser overskrifter.
-        # Dette kan ta tid på store filer, så vi kjører i bakgrunnstråd og lar GUI vise en tydelig indikator.
-        if is_saft_file is not None and is_saft_file(p):
-            if ensure_transactions_csv is None:
-                messagebox.showerror(
-                    "SAF-T",
-                    "SAF-T import er ikke tilgjengelig (saft_importer.py mangler eller feilet å importere).",
-                )
-                return
 
-            saft_p = Path(p)
-
-            def _done(csv_p: Path) -> None:
-                self._resolved_path = str(csv_p)
-                # Vis den genererte CSV-en i filfeltet, slik at bruker ser hva som faktisk lastes.
-                self.path_var.set(self._resolved_path)
-                # Start innlesing av overskrifter på nytt (nå fra CSV).
-                self.after(0, self._load_headers)
-
-            def _err(exc: BaseException, tb: str) -> None:
-                try:
-                    print(tb)
-                except Exception:
-                    pass
-                messagebox.showerror("SAF-T", f"Kunne ikke parse SAF-T-filen:\n{exc}")
-                try:
-                    self.status.configure(text="Klar.")
-                except Exception:
-                    pass
-
-            self.loading.run_async(
-                "Parser SAF-T…\nDette kan ta litt tid på store filer.",
-                work=lambda: ensure_transactions_csv(saft_p),
-                on_done=_done,
-                on_error=_err,
-            )
+        if not self._headers:
             return
-        with self.loading.busy("Leser overskrifter…"):
-            cols = self._read_headers_only(resolved_p)
-            self.headers = cols
-            # Tilbakestill combobox-verdier og populér med nye kolonner
-            for cb in self.combos.values():
-                cb["values"] = cols
-                cb.set("")
-            # ML-foreslå mapping basert på historikk og alias
-            ml = load_ml_map()
-            mapping = suggest_mapping(cols, ml) or {}
-            for canon, src in mapping.items():
-                if canon in self.combos and src in cols:
-                    self.combos[canon].set(src)
-            # Beregn antall felter som ble truffet via ML/alias
-            num_hits = len([c for c in CANON if mapping.get(c)])
-        # Oppdater status med både antall kolonner og antall felter som ble gjettet
-        try:
-            if resolved_p != p:
-                self.status.configure(
-                    text=(
-                        f"SAF-T → CSV OK. Lest {len(self.headers)} kolonner. "
-                        f"Fant {num_hits}/{len(CANON)} felt (ML/alias)."
-                    )
-                )
-            else:
-                self.status.configure(
-                    text=f"Lest {len(self.headers)} kolonner. Fant {num_hits}/{len(CANON)} felt (ML/alias)."
-                )
-        except Exception:
-            self.status.configure(text=f"Lest {len(self.headers)} kolonner.")
 
-    def _guess(self) -> None:
-        if not self.headers:
-            self._load_headers()
-            if not self.headers:
-                return
-        ml = load_ml_map()
-        mapping = suggest_mapping(self.headers, ml) or {}
+        mapping = suggest_mapping(self._headers, ml=self._ml_map)
         for canon, src in mapping.items():
-            cb = self.combos.get(canon)
-            if cb and src in self.headers:
-                cb.set(src)
-        # Oppdater status med antall trufne felt
-        num_hits = len([c for c in CANON if mapping.get(c)])
+            if canon not in self.combo_vars:
+                continue
+            if (not force) and self.combo_vars[canon].get().strip():
+                continue
+            if src in self._headers:
+                self.combo_vars[canon].set(src)
+    def _build_dataset_clicked(self) -> None:
         try:
-            self.status.configure(text=f"Gjettet {num_hits}/{len(CANON)} felt (ML/alias).")
-        except Exception:
-            pass
-
-    def _build_dataset(self) -> None:
-        p = self.path_var.get().strip()
-        if not p or not os.path.exists(p):
-            messagebox.showwarning("Fil", "Velg gyldig fil først.")
-            return
-
-        # SAF‑T (zip/xml): konverter til cached transactions-CSV før vi bygger datasett.
-        # Dette kan ta tid på store filer, så vi kjører i bakgrunnstråd og lar GUI vise en tydelig indikator.
-        if is_saft_file is not None and is_saft_file(p):
-            if ensure_transactions_csv is None:
-                messagebox.showerror(
-                    "SAF-T",
-                    "SAF-T import er ikke tilgjengelig (saft_importer.py mangler eller feilet å importere).",
-                )
-                return
-
-            # Allerede parslet i denne sesjonen? Bruk den genererte CSV-en direkte.
-            if self._resolved_path and os.path.exists(self._resolved_path):
-                self.path_var.set(self._resolved_path)
-                p = self._resolved_path
-            else:
-                saft_p = Path(p)
-
-                def _done(csv_p: Path) -> None:
-                    self._resolved_path = str(csv_p)
-                    self.path_var.set(self._resolved_path)
-                    try:
-                        self.status.configure(text="SAF-T → CSV OK. Bygger datasett …")
-                    except Exception:
-                        pass
-                    # Start bygging på nytt (nå fra CSV)
-                    self.after(0, self._build_dataset)
-
-                def _err(exc: BaseException, tb: str) -> None:
-                    try:
-                        print(tb)
-                    except Exception:
-                        pass
-                    messagebox.showerror("SAF-T", f"Kunne ikke parse SAF-T-filen:\n{exc}")
-                    try:
-                        self.status.configure(text="Klar.")
-                    except Exception:
-                        pass
-
-                self.loading.run_async(
-                    "Parser SAF-T…\nDette kan ta litt tid på store filer.",
-                    work=lambda: ensure_transactions_csv(saft_p),
-                    on_done=_done,
-                    on_error=_err,
-                )
-                return
-
-        # Hvis headers ikke er lastet inn ennå, last dem inn.
-        if not self.headers:
-            self._load_headers()
-            if not self.headers:
-                return
-        # samle mapping
-        mapping = {
-            canon: self.combos[canon].get().strip()
-            for canon in CANON
-            if canon in self.combos and self.combos[canon].get().strip()
-        }
-        missing = [c for c in ["Konto", "Kontonavn", "Bilag", "Beløp"] if c not in mapping]
-        if missing:
-            messagebox.showwarning("Kolonner", f"Mangler påkrevde felter: {', '.join(missing)}")
-            return
-        df: Optional[pd.DataFrame] = None
-        try:
-            # Vis en dedikert Toplevel med fremdriftsindikator for å gjøre
-            # brukeropplevelsen tydelig. Selv om GUI kan fryse under
-            # innlesingen, vil dette vinduet gjøre det klart at noe skjer.
-            progress: Optional[tk.Toplevel] = tk.Toplevel(self)
-            try:
-                progress.title("Laster datasett")
-                # Gjør vinduet modal og transient til toppvinduet
-                root = self.winfo_toplevel()
-                progress.transient(root)
-                progress.grab_set()
-                progress.resizable(False, False)
-                # Senter vinduet på foreldrevinduet
-                root.update_idletasks()
-                w, h = 420, 140
-                rx, ry = root.winfo_rootx(), root.winfo_rooty()
-                rw, rh = root.winfo_width(), root.winfo_height()
-                x = rx + (rw - w) // 2
-                y = ry + (rh - h) // 2
-                progress.geometry(f"{w}x{h}+{x}+{y}")
-                # Tekst og progressbar
-                ttk.Label(progress, text="Laster datasett, vennligst vent…", padding=12).pack(anchor="center")
-                pb = ttk.Progressbar(progress, mode="indeterminate")
-                pb.pack(fill="x", padx=16, pady=(0, 16))
-                pb.start(10)
-                progress.update_idletasks()
-            except Exception:
-                progress = None
-            with self.loading.busy("Bygger datasett…"):
-                # Tving frem oppdatering av GUI slik at overlay og toppvindu vises
-                try:
-                    self.update_idletasks()
-                except Exception:
-                    pass
-                # Rask bygging
-                df = build_from_file(p, mapping=mapping)
-                # Lagre ML
-                try:
-                    ml = load_ml_map()
-                    update_ml_map(self.headers, mapping, ml)
-                except Exception:
-                    pass
-
-                # ---------------- FIX: lagre dataset konsistent ----------------
-                # Lagre i session (både ny og gammel API) + bus
-                try:
-                    from models import Columns  # type: ignore
-                except Exception:
-                    Columns = None  # type: ignore
-
-                try:
-                    if Columns is not None and hasattr(session, "set_dataset"):
-                        cols_obj = Columns(
-                            konto="Konto",
-                            kontonavn="Kontonavn",
-                            bilag="Bilag",
-                            belop="Beløp",
-                            dato="Dato" if isinstance(df, pd.DataFrame) and "Dato" in df.columns else "",
-                            tekst="Tekst" if isinstance(df, pd.DataFrame) and "Tekst" in df.columns else "",
-                        )
-                        # type: ignore[attr-defined]
-                        session.set_dataset(df, cols_obj)
-                    else:
-                        session.dataset = df
-                except Exception:
-                    # Fallback: aldri la dette knekke GUI
-                    session.dataset = df
-                # ---------------------------------------------------------------
-
-                try:
-                    bus.emit("DATASET_BUILT", df)
-                except Exception:
-                    pass
+            req = self._gather_build_request()
         except Exception as e:
-            # Lukk progresjonsvindu ved feil
-            try:
-                if progress is not None:
-                    progress.destroy()
-            except Exception:
-                pass
-            if callable(self._on_error):
-                try:
-                    self._on_error(e)
-                except Exception:
-                    pass
-            messagebox.showerror("Datasett", f"Feil ved bygging: {e}")
+            messagebox.showerror("Datasett", str(e))
             return
-        # Lukk progresjonsvindu etter vellykket bygging
+
+        def work() -> BuildResult:
+            return build_dataset(req)
+
+        def done(res: BuildResult) -> None:
+            self._apply_build_result(res, update_ml=True, show_message=True)
+
+        def err(ex: Exception) -> None:
+            logger.exception("Build dataset failed")
+            messagebox.showerror("Datasett", f"Kunne ikke bygge datasett:\n{ex}")
+            if self._on_error:
+                try:
+                    self._on_error(ex)
+                except Exception:
+                    logger.exception("on_error callback failed")
+
+        self.loading.run_async(
+            "Laster datasett, vennligst vent…",
+            work,
+            on_done=done,
+            on_error=err,
+        )
+
+    # ---- intern ----
+    def _try_mount_store_section(self):
         try:
-            if progress is not None:
-                progress.destroy()
+            from dataset_pane_store import ClientStoreSection
         except Exception:
-            pass
-        n = len(df) if isinstance(df, pd.DataFrame) else 0
-        k = len(df.columns) if isinstance(df, pd.DataFrame) else 0
-        self.status.configure(text=f"Datasett bygd: rader={n:,} kolonner={k}".replace(",", " "))
+            return None
+
+        def _on_path_selected(s: str) -> None:
+            self._set_path(s, refresh_headers=True, refresh_sheet=True)
+
+        def _get_current_path() -> str:
+            return self.path_var.get()
+
         try:
-            messagebox.showinfo("Datasett", f"Klar. Rader={n:,} | Kolonner={k}".replace(",", " "))
+            return ClientStoreSection.create(self._store_container, on_path_selected=_on_path_selected, get_current_path=_get_current_path)
         except Exception:
-            pass
-        # Varsle UI at datasett er klart
-        if callable(self._on_ready) and isinstance(df, pd.DataFrame):
+            logger.exception("Kunne ikke montere ClientStoreSection")
+            return None
+    def _set_path(self, path: str, *, refresh_headers: bool, refresh_sheet: bool) -> None:
+        self.path_var.set(path)
+        if refresh_sheet:
+            self._refresh_sheet_choices(Path(path))
+        if refresh_headers:
+            self._load_headers(auto_detect=False)
+            self._guess_mapping(force=True)
+    def _refresh_sheet_choices(self, p: Path) -> None:
+        sheets: list[str] = []
+
+        if is_excel_path(p):
             try:
-                self._on_ready(df)
+                sheets = list_excel_sheets(p)
             except Exception:
-                pass
+                logger.exception("Kunne ikke liste sheets")
+        elif p.suffix.lower() == ".xls":
+            sheets = list_xls_sheets(p)
+
+        if sheets:
+            self.sheet_combo.config(values=sheets, state="readonly")
+        else:
+            # Ikke excel / ingen ark → deaktiver arkvalg.
+            self.sheet_combo.config(values=[], state="disabled")
+            self.sheet_var.set("")
+            return
+
+        cur = self.sheet_var.get().strip()
+        if cur and cur in sheets:
+            return
+        self.sheet_var.set(sheets[0] if sheets else "")
+    def _apply_headers_to_mapping_widgets(self, headers: list[str], *, saft_mode: bool) -> None:
+        for canon, cb in self.combo_widgets.items():
+            cb.config(values=headers)
+            v = self.combo_vars[canon].get().strip()
+            if v and (v not in headers) and not saft_mode:
+                self.combo_vars[canon].set("")
+    def _get_path_or_warn(self) -> Optional[Path]:
+        s = self.path_var.get().strip()
+        if not s:
+            messagebox.showwarning("Fil", "Velg gyldig fil først.")
+            return None
+        p = Path(s)
+        if not p.exists():
+            messagebox.showwarning("Fil", "Velg gyldig fil først.")
+            return None
+        return p
+    def _parse_header_row(self) -> int:
+        s = self.header_row_var.get().strip()
+        try:
+            n = int(s)
+        except Exception:
+            n = 1
+        return max(1, n)
+    def _sheet_name_or_none(self) -> Optional[str]:
+        s = self.sheet_var.get().strip()
+        return s or None
+    def _gather_build_request(self) -> BuildRequest:
+        p = self._get_path_or_warn()
+        if p is None:
+            raise ValueError("Velg gyldig fil først.")
+
+        mapping: Dict[str, str] = {}
+        if not is_saft_path(p):
+            mapping = {k: v.get().strip() for k, v in self.combo_vars.items() if v.get().strip()}
+            missing = [r for r in _REQUIRED if not mapping.get(r)]
+            if missing:
+                raise ValueError("Mapping mangler påkrevde felt: " + ", ".join(missing))
+
+        store_client = None
+        store_year = None
+        store_version_id = None
+        if self._store_section is not None:
+            try:
+                store_client = (self._store_section.client_var.get() or "").strip() or None
+                store_year = (self._store_section.year_var.get() or "").strip() or None
+                store_version_id = self._store_section.get_current_version_id()
+            except Exception:
+                store_client = None
+                store_year = None
+                store_version_id = None
+
+        return BuildRequest(
+            path=p,
+            mapping=mapping,
+            sheet_name=self._sheet_name_or_none(),
+            header_row=self._parse_header_row(),
+            store_client=store_client,
+            store_year=store_year,
+            store_version_id=store_version_id,
+        )
+    def _apply_build_result(self, res: BuildResult, *, update_ml: bool, show_message: bool) -> None:
+        self._last_build = (res.df, res.cols)
+
+        try:
+            session.set_dataset(res.df, res.cols)
+        except Exception:
+            session.dataset = (res.df, res.cols)
+
+        try:
+            bus.emit("DATASET_BUILT", res.df)
+        except Exception:
+            pass
+
+        if update_ml and not is_saft_path(self.path_var.get()):
+            # NB: update_ml_map() har signatur (headers, mapping, ml=None, path=None)
+            # og returnerer oppdatert ML-map. Vi holder self._ml_map i sync.
+            try:
+                mapping = {k: v.get().strip() for k, v in self.combo_vars.items() if v.get().strip()}
+                if self._headers and mapping:
+                    self._ml_map = update_ml_map(headers=self._headers, mapping=mapping, ml=self._ml_map)
+            except Exception:
+                logger.exception("Kunne ikke oppdatere ML-map")
+
+        # Hvis filen ble lagret som versjon: oppdater dropdown (men ikke overskriv filfeltet).
+        if self._store_section is not None and res.stored_version_id:
+            try:
+                self._store_section.hb_var.set(res.stored_version_id)
+                self._store_section.refresh()
+            except Exception:
+                logger.exception("Kunne ikke oppdatere store UI etter auto-store")
+
+        try:
+            r, c = res.df.shape
+            if getattr(res, "loaded_from_cache", False):
+                self._set_status(f"Datasett lastet fra cache (SQL): rader={r:,} kolonner={c}".replace(",", " "))
+            else:
+                self._set_status(f"Datasett bygd: rader={r:,} kolonner={c}".replace(",", " "))
+        except Exception:
+            self._set_status("Datasett klart.")
+
+        if show_message:
+            messagebox.showinfo("Datasett", "Datasett er bygget og klart til analyse.")
+
+        if self._on_ready:
+            try:
+                self._on_ready(res.df)
+            except Exception:
+                logger.exception("on_ready callback failed")
+    def _set_status(self, text: str) -> None:
+        if self.status_lbl is None:
+            return
+        self.status_lbl.config(text=text)
+        try:
+            self.status_lbl.update_idletasks()
+        except Exception:
+            pass
+    def _export_hovedbok(self) -> None:
+        df, _cols = self.get_last_build()
+        if df is None:
+            messagebox.showwarning("Eksport", "Bygg datasett først.")
+            return
+        try:
+            dataset_export.export_hovedbok_to_excel(df)
+        except Exception as e:
+            logger.exception("Export failed")
+            messagebox.showerror("Eksport", f"Kunne ikke eksportere:\n{e}")

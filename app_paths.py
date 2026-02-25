@@ -21,6 +21,8 @@ Overstyring
 -----------
 - UTVALG_DATA_DIR: Sett eksplisitt data-mappe (for test/CI eller kundespesifikke
   oppsett). Hvis satt, brukes den også i frozen.
+- utvalg_data_dir.txt: Hvis filen finnes ved siden av prosjektet/.exe kan den
+  inneholde en sti som brukes som data-mappe (praktisk for fellesmappe på jobb).
 - UTVALG_PORTABLE=1: I frozen-modus, lagrer vi brukerdata ved siden av .exe
   (portable modus).
 """
@@ -34,6 +36,7 @@ from typing import Optional
 
 
 APP_NAME = "Utvalg"
+DATA_DIR_HINT_FILENAME = "utvalg_data_dir.txt"
 
 
 def is_frozen() -> bool:
@@ -53,6 +56,43 @@ def executable_dir() -> Path:
     except Exception:
         pass
     return Path(__file__).resolve().parent
+
+
+def data_dir_hint_file() -> Path:
+    """Sti til valgfri fil som kan overstyre data_dir.
+
+    Filen ligger ved siden av prosjektet i dev, og ved siden av .exe i frozen.
+    Innholdet skal være en sti (én linje), f.eks. en nettverksmappe.
+    """
+
+    return executable_dir() / DATA_DIR_HINT_FILENAME
+
+
+def read_data_dir_hint() -> Optional[Path]:
+    """Les data-dir hint fra ``utvalg_data_dir.txt`` hvis den finnes."""
+
+    try:
+        p = data_dir_hint_file()
+        if not p.exists() or not p.is_file():
+            return None
+        raw = p.read_text(encoding="utf-8", errors="ignore").strip()
+        if not raw:
+            return None
+        # Tillat anførselstegn rundt stien
+        raw = raw.strip().strip('"').strip("'").strip()
+        if not raw:
+            return None
+        return Path(raw).expanduser().resolve()
+    except Exception:
+        return None
+
+
+def write_data_dir_hint(path: str | Path) -> Path:
+    """Skriv/oppdater ``utvalg_data_dir.txt`` ved siden av prosjektet/.exe."""
+
+    p = data_dir_hint_file()
+    p.write_text(str(Path(path).expanduser()), encoding="utf-8")
+    return p
 
 
 def _truthy_env(name: str) -> bool:
@@ -94,6 +134,10 @@ def data_dir(app_name: str = APP_NAME) -> Path:
     override = os.getenv("UTVALG_DATA_DIR")
     if override and override.strip():
         return Path(override).expanduser().resolve()
+
+    hint = read_data_dir_hint()
+    if hint is not None:
+        return hint
 
     if is_frozen():
         if _truthy_env("UTVALG_PORTABLE"):
