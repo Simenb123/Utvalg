@@ -153,12 +153,11 @@ def fill_down_bilag_inplace(df: pd.DataFrame) -> int:
 
     s = df[col]
 
-    # Tom streng / whitespace -> NA (vanlig ved CSV/XLSX). Gjør dette uten å tvinge dtype.
+    # Tom streng -> NA (vanlig ved CSV/XLSX). Gjør dette uten å tvinge dtype.
     if s.dtype == object or pd.api.types.is_string_dtype(s):
         try:
-            s = s.replace(r"^\s*$", pd.NA, regex=True)
+            s = s.replace("", pd.NA)
         except Exception:
-            # Best-effort – ikke la rare dtypes stoppe hele byggingen.
             pass
 
     missing_before = int(s.isna().sum())
@@ -244,18 +243,7 @@ def save_cache(df: pd.DataFrame, db_path: Path, *, source_sha256: str, signature
         cur.execute("PRAGMA synchronous=NORMAL;")
         cur.execute("PRAGMA temp_store=MEMORY;")
 
-        # Viktig: `method="multi"` kan trigge "too many SQL variables".
-        # SQLite har en compile-time grense på antall bind-parametre per statement
-        # (ofte 999, men varierer). For å være robust på tvers av maskiner/bygger
-        # bruker vi standard executemany (method=None).
-        df_to_write.to_sql(
-            DATA_TABLE,
-            con,
-            if_exists="replace",
-            index=False,
-            chunksize=10_000,
-            method=None,
-        )
+        df_to_write.to_sql(DATA_TABLE, con, if_exists="replace", index=False, chunksize=50_000)
 
         cur.execute(f"DROP TABLE IF EXISTS {META_TABLE};")
         cur.execute(

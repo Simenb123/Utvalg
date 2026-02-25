@@ -5,129 +5,15 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/analyse_columns.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/client_store.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/client_store_import.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/column_names.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_cache_sqlite.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_build.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_io.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_store.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_store_import_ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_store_logic.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_store_section.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_store_ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dataset_pane_xls.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/excel_import_heuristics.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/excel_importer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/excel_sheet_guess.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/combinations_popup_helpers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/combo_comment_dialog.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/combo_comment_workflow.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/common.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/oversikt_nav.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_data.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_kombinasjoner.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_outlier_full_bilag.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_outlier_index.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_oversikt.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_valgte_kontoer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/view_konto_actions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/view_konto_render.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/view_konto_tree.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/view_konto_ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_actions_impl.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_export.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_filters_live.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_pivot.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_transactions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/page_analyse_ui.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/preview_format.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/saft_reader.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio/ui_widget_actions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio/ui_widget_filters.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio/ui_widget_models.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio/ui_widget_refresh.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/selection_studio/ui_widget_selection.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smart_mapping.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smart_mapping_scoring.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smart_mapping_stats.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_analyse_columns.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_analyse_viewdata_konto_norm.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_analyse_viewdata_optional_cols.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_analyse_viewdata_passthrough_columns.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_app_paths_data_dir_hint.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_client_store.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_client_store_create_version_period_params.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_client_store_import_client_list.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_build_fast_amount_vectorized.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_build_fast_blank_headers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_build_fast_excel_robust.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_build_fast_sheet_and_header.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_cache_sqlite.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_apply_build_result.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_filetypes.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_filetypes_constant.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_io.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_io_data_sample.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_legacy_api.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_saft_helpers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_store.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_store_autopath.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_store_client_filter.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_store_helpers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_excel_workbook_summary_rows.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_excel_export_options.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_excel_export_routing.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_excel_freeze_panes.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_excel_layout_autowidth.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_excel_tab_order_and_colors.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_outlier_detail_bilag_amounts.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_outlier_detail_finpuss.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_oversikt_finpuss.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_oversikt_outlier_compact.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_motpost_oversikt_workpaper_fields.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_autorefresh.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_bind_shortcuts_kwargs.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_live_filter_debounce.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_pivot_export_fallback.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_transactions_bilag_col_order.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_tx_sorting.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_ui_builder_signature.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_page_analyse_ui_regressions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_preview_format.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_saft_reader.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_selection_studio_accounts_summary.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_smart_mapping.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_ui_treeview_sort.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/test_views_motpost_konto_header_compact.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_dataset_pane_io_max_rows_alias.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.session/preferences.json" beforeDir="false" afterPath="$PROJECT_DIR$/.session/preferences.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/analyse_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/analyse_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/analyse_viewdata.py" beforeDir="false" afterPath="$PROJECT_DIR$/analyse_viewdata.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app_paths.py" beforeDir="false" afterPath="$PROJECT_DIR$/app_paths.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_build_fast.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_build_fast.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_cache_sqlite.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_cache_sqlite.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ml_map_utils.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/motpost/combinations.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/motpost/combinations_popup.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost/combinations_popup.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/motpost/combo_workflow.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost/combo_workflow.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/motpost/excel.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost/excel.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/page_analyse.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/page_analyse_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/page_analyse_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_analyse_model.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_analysis_filters.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_analyse_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_analyse_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_motpost_analysis.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_motpost_analysis.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_page_analyse_model.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_page_analyse_model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ui_treeview_sort.py" beforeDir="false" afterPath="$PROJECT_DIR$/ui_treeview_sort.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_motpost_konto.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_motpost_konto.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_preview.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_preview.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views_selection_studio_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_selection_studio_ui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane_io.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_io.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane_store_logic.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store_logic.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dataset_pane_store_section.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store_section.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -467,7 +353,14 @@
       <option name="presentableId" value="LOCAL−00030" />
       <updated>1770374507309</updated>
     </task>
-    <option name="localTasksCounter" value="31" />
+    <task id="LOCAL−00031" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1772017259905</created>
+      <option name="number" value="LOCAL−00031" />
+      <option name="presentableId" value="LOCAL−00031" />
+      <updated>1772017259905</updated>
+    </task>
+    <option name="localTasksCounter" value="32" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

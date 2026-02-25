@@ -71,9 +71,11 @@ def read_excel_rows(
     path: Path,
     sheet_name: str | None,
     *,
-    start_row: int,
-    nrows: int,
-    max_cols: int,
+    start_row: int = 1,
+    nrows: int = 20,
+    max_cols: int = 50,
+    # Bakoverkompatibilitet: noen kall bruker max_rows i stedet for nrows
+    max_rows: int | None = None,
 ) -> list[list[object]]:
     """Les et lite rektangel fra et Excel-ark.
 
@@ -84,6 +86,13 @@ def read_excel_rows(
 
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(str(path))
+
+    if max_rows is not None:
+        max_rows_i = max(1, int(max_rows))
+        # Hvis begge er satt, må de samsvare for å unngå stille feil.
+        if nrows != 20 and nrows != max_rows_i:
+            raise ValueError("Både nrows og max_rows er angitt, men de er ulike")
+        nrows = max_rows_i
 
     start_row = max(1, int(start_row))
     nrows = max(1, int(nrows))
@@ -193,7 +202,15 @@ def _trim_trailing_empty_columns(rows: list[list[str]]) -> list[list[str]]:
     return [r[:last_col] for r in rows]
 
 
-def read_csv_rows(path: Path, *, nrows: int, max_cols: int) -> list[list[object]]:
+def read_csv_rows(
+    path: Path,
+    *,
+    start_row: int = 1,
+    nrows: int = 20,
+    max_cols: int = 50,
+    # Bakoverkompatibilitet: noen kall bruker max_rows i stedet for nrows
+    max_rows: int | None = None,
+) -> list[list[object]]:
     """Les de første nrows radene fra CSV uten header (best effort).
 
     - Bruker csv-modulen for å tåle varierende kolonneantall per rad.
@@ -204,6 +221,13 @@ def read_csv_rows(path: Path, *, nrows: int, max_cols: int) -> list[list[object]
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(str(path))
 
+    if max_rows is not None:
+        max_rows_i = max(1, int(max_rows))
+        if nrows != 20 and nrows != max_rows_i:
+            raise ValueError("Både nrows og max_rows er angitt, men de er ulike")
+        nrows = max_rows_i
+
+    start_row = max(1, int(start_row))
     nrows = max(1, int(nrows))
     max_cols = max(1, int(max_cols))
 
@@ -212,7 +236,9 @@ def read_csv_rows(path: Path, *, nrows: int, max_cols: int) -> list[list[object]
     rows: list[list[str]] = []
     with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
         reader = csv.reader(f, dialect)
-        for _i, row in enumerate(reader):
+        for idx, row in enumerate(reader, start=1):
+            if idx < start_row:
+                continue
             if len(rows) >= nrows:
                 break
             r = ["" if v is None else str(v) for v in row]

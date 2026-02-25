@@ -35,7 +35,10 @@ logger = logging.getLogger(__name__)
 __all__ = ["DatasetPane", "MAIN_FILETYPES", "is_saft_path"]
 
 MAIN_FILETYPES = [
+    # NB: Første filter blir default i Windows-dialogen.
+    # Eksisterende tester forventer at "Alle filer" er default.
     ("Alle filer", "*.*"),
+    ("Excel/CSV/SAF-T", "*.xlsx;*.xls;*.xlsm;*.csv;*.txt;*.zip;*.xml"),
     ("Excel", "*.xlsx;*.xls;*.xlsm"),
     ("CSV", "*.csv;*.txt"),
     ("SAF-T (zip/xml)", "*.zip;*.xml"),
@@ -107,6 +110,14 @@ class DatasetPane(ttk.Frame):
         path = filedialog.askopenfilename(title="Velg fil (Excel/CSV/SAF-T)", filetypes=MAIN_FILETYPES)
         if not path:
             return
+        # Brukeren skal velge grunnlagsfil (Excel/CSV/SAF-T). SQLite brukes kun som
+        # intern cache for ferdig bygget datasett.
+        if str(path).lower().endswith(".sqlite"):
+            messagebox.showwarning(
+                "Datasett",
+                "Du valgte en SQLite-cache (.sqlite). Velg grunnlagsfilen (Excel/CSV/SAF-T) i stedet.",
+            )
+            return
         self._set_path(path, refresh_headers=True, refresh_sheet=True)
     def _preview(self) -> None:
         p = self._get_path_or_warn()
@@ -115,6 +126,13 @@ class DatasetPane(ttk.Frame):
 
         if is_saft_path(p):
             messagebox.showinfo("Forhåndsvisning", "SAF-T forhåndsvises ikke her (velg fil og bygg datasett).")
+            return
+
+        if p.suffix.lower() == ".sqlite":
+            messagebox.showwarning(
+                "Forhåndsvisning",
+                "Valgt fil er en SQLite-cache (.sqlite). Forhåndsvisning er kun for grunnlagsfiler (Excel/CSV/SAF-T).",
+            )
             return
 
         sheet = self._sheet_name_or_none()
@@ -184,6 +202,10 @@ class DatasetPane(ttk.Frame):
                     headers = read_xls_header(p, header_row=header_row, sheet_name=sheet)
                 elif is_csv_path(p):
                     headers = read_csv_header(p, header_row=header_row)
+                elif p.suffix.lower() == ".sqlite":
+                    raise ValueError(
+                        "Valgt fil er en SQLite-cache (.sqlite). Velg grunnlagsfil (Excel/CSV/SAF-T) for å hente header og mapping."
+                    )
                 else:
                     raise ValueError(f"Ukjent filtype: {p.suffix}")
         except Exception as e:
@@ -265,13 +287,43 @@ class DatasetPane(ttk.Frame):
         except Exception:
             logger.exception("Kunne ikke montere ClientStoreSection")
             return None
+
     def _set_path(self, path: str, *, refresh_headers: bool, refresh_sheet: bool) -> None:
+        path = (path or "").strip()
+        if not path:
+            # Clear UI when switching client/year with no active version.
+            self.path_var.set("")
+
+            # Disable sheet selector
+            try:
+                self.sheet_combo.config(values=[], state="disabled")
+            except Exception:
+                pass
+            self.sheet_var.set("")
+
+            # Clear headers + dropdowns
+            self._headers = []
+            try:
+                self._apply_headers_to_mapping_widgets([], saft_mode=False)
+            except Exception:
+                pass
+            for v in self.combo_vars.values():
+                try:
+                    v.set("")
+                except Exception:
+                    pass
+
+            if refresh_headers:
+                self.status_var.set("Velg fil.")
+            return
+
         self.path_var.set(path)
         if refresh_sheet:
             self._refresh_sheet_choices(Path(path))
         if refresh_headers:
             self._load_headers(auto_detect=False)
             self._guess_mapping(force=True)
+
     def _refresh_sheet_choices(self, p: Path) -> None:
         sheets: list[str] = []
 

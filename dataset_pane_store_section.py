@@ -162,6 +162,7 @@ class ClientStoreSection:
         w.cb_client.bind("<<ComboboxSelected>>", lambda _e: sec._debounced_refresh())
         w.cb_client.bind("<KeyRelease>", sec._on_client_keyrelease)
         w.cb_client.bind("<Return>", lambda _e: sec._debounced_refresh())
+        w.cb_client.bind("<FocusOut>", lambda _e: sec._debounced_refresh())
         w.cb_hb.bind("<<ComboboxSelected>>", lambda _e: sec._on_select_hb())
         w.ent_year.bind("<Return>", lambda _e: sec._debounced_refresh())
         w.ent_year.bind("<FocusOut>", lambda _e: sec._debounced_refresh())
@@ -309,6 +310,9 @@ class ClientStoreSection:
                     self.hb_var.set(act)
                 else:
                     self.hb_var.set(versions[0])
+
+        else:
+            self.hb_var.set("")
 
         _apply_active_version_to_path_if_needed(self)
         self._persist_prefs()
