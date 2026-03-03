@@ -60,13 +60,18 @@ def _bilag_str(value: Any) -> str:
         if isinstance(value, (int,)):
             return str(value)
         if isinstance(value, float):
+            # NaN/inf -> tom streng
+            if math.isnan(value) or math.isinf(value):
+                return ""
             if value.is_integer():
                 return str(int(value))
             return str(value)
     except Exception:
         pass
 
-    s=str(value).strip()
+    s = str(value).strip()
+    if s == "" or s.lower() in {"nan", "none"}:
+        return ""
     # "2501,0" -> "2501" (best effort)
     if s.endswith(",0") and s.replace(",",".").replace(".","",1).isdigit():
         s=s[:-2]

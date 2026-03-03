@@ -120,6 +120,10 @@ class ClientStoreSection:
     _all_clients: List[str] = field(default_factory=list, init=False, repr=False)
     _last_persisted_client: str = field(default="", init=False, repr=False)
     _last_persisted_year: str = field(default="", init=False, repr=False)
+    # Brukes for å kunne tvinge oppdatering av filsti når bruker faktisk bytter
+    # klient/år (uten å overskrive mens de bare skriver i søkefeltet).
+    _last_applied_client: str = field(default="", init=False, repr=False)
+    _last_applied_year: str = field(default="", init=False, repr=False)
     _refresh_after_id: str | None = field(default=None, init=False, repr=False)
 
     @staticmethod
@@ -138,6 +142,19 @@ class ClientStoreSection:
 
         w = build_client_store_widgets(parent, init_client=init_client, init_year=init_year)
 
+        # NOTE: The DatasetPane uses `grid`. Ensure the client-store frame is
+        # actually mounted; otherwise nothing will be visible.
+        # We keep a pack() fallback in case the parent uses pack.
+        try:
+            parent.columnconfigure(0, weight=1)
+            w.frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 0))
+        except Exception:
+            try:
+                w.frame.pack(fill="x", padx=5, pady=5)
+            except Exception:
+                pass
+
+
         sec = ClientStoreSection(
             frame=w.frame,
             client_var=w.client_var,
@@ -151,11 +168,9 @@ class ClientStoreSection:
         )
 
         # Bindings
-        w.btn_create.configure(command=sec._on_create_client)
-        w.btn_import_list.configure(command=sec._on_import_client_list)
-        w.btn_refresh.configure(command=sec.refresh)
-        w.btn_delete.configure(command=sec._on_delete_hb)
-        w.btn_pick.configure(command=sec._on_pick_storage)
+        w.btn_pick_client.configure(command=sec._on_pick_client)
+        w.btn_settings.configure(command=sec._on_open_settings)
+        w.btn_versions.configure(command=sec._on_open_versions_dialog)
 
         # NB: Full refresh kan være tregt hvis man blar fort i comboboxen.
         # Vi debounce'er refresh for bedre UX.
@@ -282,6 +297,14 @@ class ClientStoreSection:
         except Exception:
             self.cb_client["values"] = self._all_clients
 
+        # Hvis lagret klient ikke finnes lenger (f.eks. slettet), nullstill.
+        try:
+            cur_client = str(self.client_var.get() or "").strip()
+        except Exception:
+            cur_client = ""
+        if self._all_clients and cur_client and (cur_client not in self._all_clients):
+            self.client_var.set("")
+
         # Versjoner
         c = self._client()
         y = self._year()
@@ -314,7 +337,18 @@ class ClientStoreSection:
         else:
             self.hb_var.set("")
 
-        _apply_active_version_to_path_if_needed(self)
+        # Force apply when user has switched to a *valid* client/year.
+        force_apply = False
+        if c and (c in self._all_clients):
+            if c != self._last_applied_client or y != self._last_applied_year:
+                force_apply = True
+
+        _apply_active_version_to_path_if_needed(self, force=force_apply)
+
+        if force_apply:
+            self._last_applied_client = c
+            self._last_applied_year = y
+
         self._persist_prefs()
 
     def _on_create_client(self) -> None:
@@ -332,6 +366,51 @@ class ClientStoreSection:
             self.refresh()
         except Exception as e:
             messagebox.showerror("Klient", f"Kunne ikke opprette klient: {e}")
+
+    def _on_pick_client(self) -> None:
+        """Åpne en søkbar popup for rask klientbytte."""
+
+        if not _HAS_CLIENT_STORE or client_store is None:
+            messagebox.showwarning("Klient", "Klientlager er ikke tilgjengelig.")
+            return
+
+        # Bruk cached liste om mulig
+        try:
+            clients = list(self._all_clients) if self._all_clients else list(client_store.list_clients())
+        except Exception:
+            clients = []
+
+        if not clients:
+            messagebox.showinfo(
+                "Klient",
+                "Fant ingen klienter. Importer klientliste først (Importer liste…).",
+            )
+            return
+
+        try:
+            from client_picker_dialog import open_client_picker
+        except Exception as e:
+            messagebox.showerror("Klient", f"Kunne ikke åpne klientvelger: {e}")
+            return
+
+        # Start alltid med tomt søkefelt, men forhåndsmarkér gjeldende klient i lista.
+        current = str(self.client_var.get() or "")
+        chosen = open_client_picker(
+            self.frame,
+            clients,
+            initial_query="",
+            initial_selection=current,
+            title="Velg klient",
+        )
+
+        if chosen:
+            self.client_var.set(chosen)
+            # Direkte refresh: eksplisitt valgt av bruker.
+            self.refresh()
+            try:
+                self.cb_client.focus_set()
+            except Exception:
+                pass
 
     def _on_select_hb(self) -> None:
         c = self._client()
@@ -384,6 +463,67 @@ class ClientStoreSection:
         except Exception as e:
             messagebox.showerror("Slett", f"Kunne ikke slette: {e}")
 
+
+    def _on_open_versions_dialog(self) -> None:
+        # Åpner dialog for å administrere versjoner for valgt klient/år.
+        if not _HAS_CLIENT_STORE or client_store is None:
+            messagebox.showinfo("Versjoner", "Klientlager er ikke tilgjengelig i denne installasjonen.")
+            return
+
+        client = (self._client() or "").strip()
+        if not client:
+            messagebox.showinfo("Versjoner", "Velg klient først.")
+            return
+
+        year = (self._year() or "").strip() or DEFAULT_YEAR
+
+        try:
+            from version_overview_dialog import open_versions_dialog
+        except Exception as e:
+            messagebox.showerror("Versjoner", f"Kunne ikke åpne versjonsdialog: {e}")
+            return
+
+        def _use_version(version_id: str) -> None:
+            # Keep semantics identical to selecting from the combobox:
+            # set hb_var then run the existing handler.
+            self.hb_var.set(version_id)
+            self._on_select_hb()
+
+        open_versions_dialog(
+            self.frame,
+            client=client,
+            year=year,
+            dtype=self.dtype,
+            current_path_getter=self.get_current_path,
+            on_use_version=_use_version,
+            on_after_change=self.refresh,
+        )
+
+    def _on_open_settings(self) -> None:
+        """Åpne innstillinger (datamappe, klientliste, eksportvalg)."""
+
+        try:
+            import settings_entry
+        except Exception as e:
+            messagebox.showerror("Innstillinger", f"Kunne ikke åpne innstillinger: {e}", parent=self.frame)
+            return
+
+        root = self.frame.winfo_toplevel()
+
+        def _on_data_dir_changed() -> None:
+            try:
+                self.refresh()
+            except Exception:
+                pass
+
+        def _on_clients_changed() -> None:
+            try:
+                self.refresh()
+            except Exception:
+                pass
+
+        settings_entry.open_settings(root, on_data_dir_changed=_on_data_dir_changed, on_clients_changed=_on_clients_changed)
+
     def _on_pick_storage(self) -> None:
         """Velg datamappe (felles lagring)."""
 
@@ -421,9 +561,16 @@ class ClientStoreSection:
             found = (stats or {}).get("found", 0)
             created = (stats or {}).get("created", 0)
             skipped = (stats or {}).get("skipped_existing", 0)
+            renamed = (stats or {}).get("renamed", 0)
+            dups = (stats or {}).get("duplicates_in_file", 0)
+
             msg = f"Fant {found} klientnavn. Opprettet {created} nye."
             if skipped:
                 msg += f" ({skipped} eksisterte allerede.)"
+            if renamed:
+                msg += f" Oppdatert navn på {renamed}."
+            if dups:
+                msg += f" {dups} duplikater i filen ble ignorert."
             msg += extra
             messagebox.showinfo("Importer", msg)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -63,3 +64,35 @@ def test_import_clients_does_not_call_ensure_for_existing(tmp_path: Path, monkey
     stats = client_store_import.import_clients_from_file(csv_path)
     assert stats["found"] == 1
     assert stats["created"] == 0
+
+
+def test_import_clients_can_be_cancelled_mid_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancel event skal stoppe importen uten å henge."""
+
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
+
+    import client_store_import
+
+    csv_path = tmp_path / "clients.csv"
+    # 5 unike
+    csv_path.write_text(
+        "Klient\nA AS\nB AS\nC AS\nD AS\nE AS\n",
+        encoding="utf-8",
+    )
+
+    cancel = threading.Event()
+    calls: list[tuple[int, int, str]] = []
+
+    def progress(done: int, total: int, current: str) -> None:
+        calls.append((done, total, current))
+        if done == 1:
+            cancel.set()
+
+    stats = client_store_import.import_clients_from_file(
+        csv_path,
+        cancel_event=cancel,
+        progress_cb=progress,
+    )
+
+    assert stats.get("cancelled") is True
+    assert int(stats.get("created") or 0) <= 1

@@ -256,17 +256,42 @@ def _parse_transaction(trx: ET.Element, look: _Lookup) -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
 
-    for line in trx.findall(".//{*}DebitLine"):
+    debit_lines = trx.findall(".//{*}DebitLine")
+    credit_lines = trx.findall(".//{*}CreditLine")
+
+    for line in debit_lines:
         row = _parse_line(line, sign=1, tid=tid, tdate=tdate, tdesc=tdesc, look=look)
         if row is not None:
             out.append(row)
 
-    for line in trx.findall(".//{*}CreditLine"):
+    for line in credit_lines:
         row = _parse_line(line, sign=-1, tid=tid, tdate=tdate, tdesc=tdesc, look=look)
         if row is not None:
             out.append(row)
 
+    # Fallback: Noen SAF-T eksportører bruker <Line> med DebitAmount/CreditAmount
+    # (i stedet for DebitLine/CreditLine).
+    if not debit_lines and not credit_lines:
+        for line in trx.findall(".//{*}Line"):
+            sign = 1
+            if line.find(".//{*}CreditAmount") is not None or _txt(line.find(".//{*}CreditAmount/{*}Amount")):
+                sign = -1
+            elif line.find(".//{*}DebitAmount") is not None or _txt(line.find(".//{*}DebitAmount/{*}Amount")):
+                sign = 1
+            else:
+                ind = (
+                    _txt(line.find(".//{*}DebitCreditIndicator"))
+                    or _txt(line.find(".//{*}DebitCreditCode"))
+                    or ""
+                ).strip().upper()
+                if ind.startswith("C"):
+                    sign = -1
+            row = _parse_line(line, sign=sign, tid=tid, tdate=tdate, tdesc=tdesc, look=look)
+            if row is not None:
+                out.append(row)
+
     return out
+
 
 
 def _parse_line(

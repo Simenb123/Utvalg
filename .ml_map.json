@@ -1029,10 +1029,34 @@
         "Tekst": "Transaksjonsbeskrivelse",
         "Kundenr": "Kunde-/Leverandørnr.",
         "Kundenavn": "Kunde-/Leverandørnavn",
-        "MVA-kode": "Avgiftssats %",
+        "MVA-kode": "Avgiftskode",
         "MVA-beløp": "Avgiftspliktig beløp",
-        "MVA-prosent": "Beregnet avgiftssats %",
+        "MVA-prosent": "Avgiftssats %",
         "Valuta": "Valuta"
+      }
+    },
+    {
+      "fp": "##|ba|belop|bilagsdato|bilagsnr|firma/person|konto|kontonavn|periode|tekst",
+      "headers": [
+        "Konto",
+        "Kontonavn",
+        "Firma/person",
+        "Periode",
+        "Bilagsdato",
+        "BA",
+        "Bilagsnr",
+        "##",
+        "Tekst",
+        "Beløp"
+      ],
+      "mapping": {
+        "Konto": "Konto",
+        "Kontonavn": "Kontonavn",
+        "Bilag": "Bilagsnr",
+        "Beløp": "Beløp",
+        "Dato": "Bilagsdato",
+        "Tekst": "Tekst",
+        "Kundenr": "Firma/person"
       }
     }
   ]

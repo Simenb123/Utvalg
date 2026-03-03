@@ -17,6 +17,7 @@ klient/år/versjon.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Optional
 
 import logging
@@ -37,12 +38,32 @@ except Exception:
 
 def _clients_root() -> Optional[Path]:
     try:
-        return (app_paths.data_dir() / "clients").resolve()
+        # Ikke bruk resolve() her – det kan bli tregt på nettverksdisker.
+        return (app_paths.data_dir() / "clients").absolute()
     except Exception:
         return None
 
 
-def apply_active_version_to_path_if_needed(sec) -> None:  # noqa: ANN001
+def _norm_path(p: Path) -> str:
+    """Normaliser path for raske sammenligninger uten filsystem-oppslag.
+
+    Viktig: Ikke bruk resolve() – det kan trigge nettverksoppslag.
+    """
+    return os.path.normcase(os.path.normpath(str(p)))
+
+
+def _is_under(base: Path, p: Path) -> bool:
+    try:
+        base_n = _norm_path(base)
+        p_n = _norm_path(p)
+        common = os.path.commonpath([p_n, base_n])
+        return common == base_n
+    except Exception:
+        return False
+
+
+
+def apply_active_version_to_path_if_needed(sec, *, force: bool = False) -> None:  # noqa: ANN001
     """Oppdater filfeltet til aktiv HB-versjon når det gir mening.
 
     Bakgrunn:
@@ -58,6 +79,11 @@ def apply_active_version_to_path_if_needed(sec) -> None:  # noqa: ANN001
         - sett til aktiv path hvis finnes, ellers tøm feltet.
     - Hvis filfeltet peker på en fil utenfor clients-root (brukeren holder på å importere en ny fil):
         - ikke overstyr.
+
+    Parametere:
+        force: Brukes av UI når bruker bytter klient/år for å trigge en ny vurdering.
+               Foreløpig følger vi fortsatt reglene over (dvs. overskriver ikke en
+               gyldig, bruker-valgt fil utenfor clients-root).
     """
 
     if not _HAS_CLIENT_STORE or client_store is None:
@@ -74,7 +100,6 @@ def apply_active_version_to_path_if_needed(sec) -> None:  # noqa: ANN001
     # Current path (from dataset pane)
     cur_path_str = str(sec.get_current_path() or "").strip()
     cur_path = Path(cur_path_str).expanduser() if cur_path_str else None
-
     root = _clients_root()
     cur_exists = False
     cur_in_store = False
@@ -82,7 +107,7 @@ def apply_active_version_to_path_if_needed(sec) -> None:  # noqa: ANN001
         if cur_path is not None:
             cur_exists = cur_path.exists()
             if root is not None:
-                cur_in_store = root in cur_path.resolve().parents
+                cur_in_store = _is_under(root, cur_path)
     except Exception:
         cur_exists = False
         cur_in_store = False
@@ -122,7 +147,7 @@ def apply_active_version_to_path_if_needed(sec) -> None:  # noqa: ANN001
     # 3) Current exists and is inside store-root.
     if active_path is not None:
         try:
-            if cur_path is None or cur_path.resolve() != active_path.resolve():
+            if cur_path is None or _norm_path(cur_path) != _norm_path(active_path):
                 sec.on_path_selected(str(active_path))
         except Exception:
             try:
@@ -160,8 +185,8 @@ def auto_store_hb_from_path(sec, path: str, *, show_messages: bool = False) -> O
 
     # Hvis allerede lagret i client_store-mappen, gjør ingenting.
     try:
-        root = (app_paths.data_dir() / "clients").resolve()
-        if root in src.resolve().parents:
+        root = (app_paths.data_dir() / "clients").absolute()
+        if _is_under(root, src):
             return str(src)
     except Exception:
         pass

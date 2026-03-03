@@ -26,6 +26,32 @@ META_FILE = "meta.json"
 AUDIT_FILE = "audit_log.jsonl"
 INDEX_FILE = "versions_index.json"
 
+# Hurtigindeks for klienter (lagres i datamappen, ikke i clients-roten)
+# for å unngå at selve indeksfila påvirker mtime på clients-katalogen.
+CLIENTS_INDEX_FILE = "clients_index.json"
+
+CLIENTS_INDEX_STAMP_NAME = "clients_index.stamp"
+
+def _clients_index_stamp_path() -> Path:
+    return app_paths.data_dir() / CLIENTS_INDEX_STAMP_NAME
+
+def _clients_index_stamp_mtime_ns() -> int:
+    try:
+        return _clients_index_stamp_path().stat().st_mtime_ns
+    except Exception:
+        return 0
+
+def _touch_clients_index_stamp() -> int:
+    try:
+        p = _clients_index_stamp_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch(exist_ok=True)
+        return p.stat().st_mtime_ns
+    except Exception:
+        return 0
+
+CLIENTS_INDEX_SCHEMA = 1
+
 
 # --- Klient-index/cache -----------------------------------------------------
 #
@@ -37,7 +63,8 @@ INDEX_FILE = "versions_index.json"
 # Vi bygger derfor en enkel in-memory index som oppdateres ved behov.
 
 _CACHE_ROOT: Optional[Path] = None
-_CACHE_ROOT_MTIME: float = -1.0
+_CACHE_ROOT_MTIME: Optional[float] = None
+_CACHE_STAMP_NS: Optional[int] = None
 
 # Key: normalized name (display_name OR folder name) -> (display_name, dir)
 _CLIENT_CACHE: Dict[str, tuple[str, Path]] = {}
@@ -48,6 +75,141 @@ _CLIENT_LIST: List[str] = []
 
 def _norm_key(s: str) -> str:
     return (s or "").strip().casefold()
+
+
+def _clients_index_path() -> Path:
+    """Path til klientindeks (lagres i datamappen)."""
+
+    return app_paths.data_dir() / CLIENTS_INDEX_FILE
+
+
+def _clients_root_mtime_ns(root: Path) -> int:
+    try:
+        return int(root.stat().st_mtime_ns)
+    except Exception:
+        return 0
+
+
+def _write_clients_index_from_cache(root: Path) -> None:
+    """Write a stable on-disk clients index.
+
+    We store both the clients-root mtime (legacy) *and* a separate stamp mtime.
+    The stamp is what we prefer for validation, since directory mtimes on some
+    network shares can be noisy/unstable.
+    """
+
+    global _CLIENT_LIST, _CLIENT_CACHE, _CACHE_STAMP_NS
+
+    if not _CLIENT_LIST or not _CLIENT_CACHE:
+        return
+
+    path = _clients_index_path()
+
+    try:
+        mtime_ns = _clients_root_mtime_ns(root)
+        if mtime_ns <= 0:
+            return
+
+        stamp_ns = _touch_clients_index_stamp()
+        if stamp_ns:
+            _CACHE_STAMP_NS = stamp_ns
+
+        clients = []
+        for display in _CLIENT_LIST:
+            k = _norm_key(display)
+            if not k:
+                continue
+            disp2, cdir = _CLIENT_CACHE.get(k, (None, None))
+            if not disp2 or cdir is None:
+                continue
+            clients.append({"display_name": disp2, "dir": str(cdir.name)})
+
+        payload = {
+            "schema": CLIENTS_INDEX_SCHEMA,
+            "clients_root_mtime_ns": mtime_ns,
+            "clients_stamp_mtime_ns": stamp_ns,
+            "clients": clients,
+        }
+        _write_json_atomic(path, payload)
+    except Exception as e:
+        log.debug("Could not write clients index: %s", e)
+
+
+def _try_load_clients_index(root: Path) -> bool:
+    global _CACHE_ROOT, _CACHE_ROOT_MTIME, _CACHE_STAMP_NS, _CLIENT_CACHE, _CLIENT_LIST
+
+    try:
+        p = _clients_index_path()
+        if not p.exists():
+            return False
+        obj = _read_json(p)
+        if not isinstance(obj, dict):
+            return False
+        if int(obj.get("schema", -1) or -1) != CLIENTS_INDEX_SCHEMA:
+            return False
+
+        # Prefer stamp-based validation when available. This avoids needless rescans
+        # on some network shares where directory mtimes can be noisy/unstable.
+        try:
+            stored_stamp_ns = int(obj.get("clients_stamp_mtime_ns", 0) or 0)
+        except Exception:
+            stored_stamp_ns = 0
+        current_stamp_ns = _clients_index_stamp_mtime_ns()
+
+        if stored_stamp_ns and current_stamp_ns:
+            if stored_stamp_ns != current_stamp_ns:
+                return False
+        else:
+            # Legacy fallback: validate by clients root mtime.
+            try:
+                stored_ns = int(obj.get("clients_root_mtime_ns", 0) or 0)
+            except Exception:
+                return False
+            current_ns = _clients_root_mtime_ns(root)
+            if not stored_ns or not current_ns or stored_ns != current_ns:
+                return False
+
+        raw = obj.get("clients", [])
+        if not isinstance(raw, list) or not raw:
+            return False
+
+        cache: dict[str, tuple[str, Path]] = {}
+        display_by_norm: dict[str, str] = {}
+
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            display = str(item.get("display_name") or "").strip()
+            dir_name = str(item.get("dir") or "").strip()
+            if not display or not dir_name:
+                continue
+            d = root / dir_name
+
+            k_disp = _norm_key(display)
+            k_dir = _norm_key(dir_name)
+
+            if k_disp:
+                cache[k_disp] = (display, d)
+                display_by_norm.setdefault(k_disp, display)
+            if k_dir and k_dir not in cache:
+                cache[k_dir] = (display, d)
+
+        if not cache:
+            return False
+
+        _CACHE_ROOT = root
+        try:
+            _CACHE_ROOT_MTIME = float(root.stat().st_mtime)
+        except Exception:
+            _CACHE_ROOT_MTIME = -1.0
+
+        _CACHE_STAMP_NS = current_stamp_ns or stored_stamp_ns or None
+
+        _CLIENT_CACHE = cache
+        _CLIENT_LIST = sorted(display_by_norm.values(), key=lambda s: s.lower())
+        return True
+    except Exception:
+        return False
 
 
 def _rebuild_client_cache(root: Path) -> None:
@@ -69,6 +231,10 @@ def _rebuild_client_cache(root: Path) -> None:
 
     for d in dirs:
         if not d.is_dir():
+            continue
+
+        # Systemmapper (arkiv/trash, etc.) skal ikke vises som klienter
+        if d.name.startswith("_"):
             continue
 
         display = d.name
@@ -95,36 +261,68 @@ def _rebuild_client_cache(root: Path) -> None:
     _CLIENT_CACHE = cache
     _CLIENT_LIST = sorted(display_by_norm.values(), key=lambda s: (s or "").casefold())
 
+    # Lag en hurtigindeks for rask oppstart (best effort)
+    _write_clients_index_from_cache(root)
+
 
 def _ensure_client_cache(*, force: bool = False) -> None:
     """Sørg for at klientcache er bygget og oppdatert."""
 
     root = _root()
-    global _CACHE_ROOT, _CACHE_ROOT_MTIME
+    global _CACHE_ROOT, _CACHE_ROOT_MTIME, _CACHE_STAMP_NS
 
-    # Bytt data-dir (typisk i tester) → drop cache.
+    # På oppstart (eller ved bytte av datamappe) vil cachen være tom. Da prøver vi først
+    # å laste en hurtigindeks (clients_index.json). Hvis den ikke passer, faller vi
+    # tilbake til full scanning.
     if _CACHE_ROOT != root:
+        if (not force) and _try_load_clients_index(root):
+            return
         _rebuild_client_cache(root)
         return
 
     if force or not _CLIENT_CACHE:
+        if (not force) and _try_load_clients_index(root):
+            return
         _rebuild_client_cache(root)
         return
 
+    current_stamp_ns = _clients_index_stamp_mtime_ns()
     # Dersom root-mappen har endret mtime, rebuild (fanger nye mapper).
     try:
         mtime = float(root.stat().st_mtime)
     except Exception:
         mtime = -1.0
 
-    if mtime != _CACHE_ROOT_MTIME:
+    # Hvis stamp finnes og matcher, anser vi cachen som gyldig uavhengig av
+    # eventuell mtime-støy på nettverksdisk.
+    if current_stamp_ns and _CACHE_STAMP_NS and current_stamp_ns == _CACHE_STAMP_NS:
+        return
+
+    if (current_stamp_ns and _CACHE_STAMP_NS and current_stamp_ns != _CACHE_STAMP_NS) or (mtime != _CACHE_ROOT_MTIME):
+        if _try_load_clients_index(root):
+            return
         _rebuild_client_cache(root)
 
 
-def _cache_add_client(display_name: str, client_dir: Path) -> None:
-    """Oppdater cache med én klient (unngå full rescan)."""
 
-    _ensure_client_cache()
+def _cache_add_client(display_name: str, client_dir: Path) -> None:
+    """Oppdater cache med én klient (unngå full rescan).
+
+    Dette er kritisk for ytelse ved import: når vi lager mange klientmapper endres
+    mtime på clients-root for hver opprettelse. Uten inkrementell oppdatering vil
+    `_ensure_client_cache()` trigge full rescan for hver klient (O(n^2)), som på
+    nettverksdisk kan ta *mange* timer.
+    """
+
+    global _CLIENT_CACHE, _CLIENT_LIST, _CACHE_ROOT, _CACHE_ROOT_MTIME
+
+    root = _root()
+    if _CACHE_ROOT != root or _CLIENT_CACHE is None or _CLIENT_LIST is None:
+        _rebuild_client_cache(root)
+
+    assert _CLIENT_CACHE is not None
+    assert _CLIENT_LIST is not None
+
     dn = (display_name or "").strip()
     if not dn:
         return
@@ -141,10 +339,38 @@ def _cache_add_client(display_name: str, client_dir: Path) -> None:
         _CLIENT_LIST.append(dn)
         _CLIENT_LIST.sort(key=lambda s: (s or "").casefold())
 
-    # Oppdater mtime snapshot
-    global _CACHE_ROOT_MTIME
+    # Oppdater mtime snapshot slik at vi ikke trigget rescan på neste kall.
     try:
-        _CACHE_ROOT_MTIME = float(_root().stat().st_mtime)
+        _CACHE_ROOT_MTIME = float(root.stat().st_mtime)
+    except Exception:
+        pass
+
+
+def _cache_remove_client(display_name: str) -> None:
+    """Fjern klient fra in-memory cache (best effort)."""
+
+    global _CLIENT_CACHE, _CLIENT_LIST
+
+    if _CLIENT_CACHE is None or _CLIENT_LIST is None:
+        return
+
+    dn = (display_name or "").strip()
+    if not dn:
+        return
+
+    key = _norm_key(dn)
+    hit = _CLIENT_CACHE.pop(key, None)
+    if hit is None:
+        return
+
+    # Også fjern index på mappenavn.
+    try:
+        _CLIENT_CACHE.pop(_norm_key(hit[1].name), None)
+    except Exception:
+        pass
+
+    try:
+        _CLIENT_LIST.remove(hit[0])
     except Exception:
         pass
 
@@ -271,6 +497,50 @@ def list_clients() -> List[str]:
     _ensure_client_cache()
     return list(_CLIENT_LIST)
 
+
+def persist_clients_index() -> None:
+    """Skriv hurtigindeks (clients_index.json) basert på cache.
+
+    Dette er kun for ytelse (raskere oppstart på nettverksstasjoner).
+    Funksjonen er *best effort* og skal ikke kaste i normal bruk.
+    """
+
+    try:
+        if not _CLIENT_CACHE:
+            _ensure_client_cache()
+        _write_clients_index_from_cache(_root())
+    except Exception:
+        return
+
+
+
+def refresh_client_cache() -> None:
+    """Tving full refresh av klientcache.
+
+    Brukes hvis klientmapper endres manuelt på disk, eller når datamappe byttes.
+    """
+
+    global _CLIENT_CACHE, _CLIENT_LIST, _CACHE_ROOT, _CACHE_ROOT_MTIME, _CACHE_STAMP_NS
+
+    _CLIENT_CACHE = None
+    _CLIENT_LIST = None
+    _CACHE_ROOT = None
+    _CACHE_ROOT_MTIME = None
+    _CACHE_STAMP_NS = None
+
+    # Fjern hurtigindeks + stamp for å tvinge rescan.
+    try:
+        _clients_index_path().unlink()
+    except Exception:
+        pass
+    try:
+        _clients_index_stamp_path().unlink()
+    except Exception:
+        pass
+
+    _ensure_client_cache()
+
+
 def _find_client_dir(display_name: str) -> Optional[Path]:
     dn = (display_name or "").strip()
     if not dn:
@@ -294,21 +564,16 @@ def _find_client_dir(display_name: str) -> Optional[Path]:
     if hit is not None:
         return hit[1]
 
-    # Fallback scan (cache miss)
-    for d in root.iterdir() if root.exists() else []:
-        if not d.is_dir():
-            continue
-        meta_p = d / META_FILE
-        try:
-            if meta_p.exists() and (_read_json(meta_p).get("display_name") or "").strip() == dn:
-                _cache_add_client(dn, d)
-                return d
-        except Exception:
-            continue
-
+    # Cache miss: Som standard scanner vi *ikke* filsystemet her.
+    #
+    # Å iterere over alle klientmapper (og lese meta.json) ved hver lookup
+    # gir O(n^2) under import og kan bli ekstremt tregt på nettverksdisker.
+    #
+    # Hvis du mistenker at klienter er opprettet manuelt utenfor appen,
+    # kall refresh_client_cache() og forsøk igjen.
     return None
 
-def ensure_client(display_name: str) -> Path:
+def ensure_client(display_name: str, *, persist_index: bool = True) -> Path:
     dn = (display_name or "").strip()
     if not dn:
         raise ValueError("Tomt klientnavn")
@@ -329,6 +594,13 @@ def ensure_client(display_name: str) -> Path:
     _write_json_atomic(d / META_FILE, {"display_name": dn, "client_id": d.name, "created_at": _now()})
     _append_audit(d, {"action": "client_created", "client_display": dn, "client_id": d.name})
     _cache_add_client(dn, d)
+
+    if persist_index:
+        try:
+            persist_clients_index()
+        except Exception as e:
+            log.debug("Could not persist clients index after ensure_client: %s", e)
+
     return d
 
 @dataclass
@@ -357,6 +629,122 @@ def _vdir(display_name: str, *, year: str, dtype: str) -> Path:
 
 def versions_dir(display_name: str, *, year: str, dtype: str) -> Path:
     return _vdir(display_name, year=year, dtype=dtype)
+
+
+
+def update_client_display_name(old_display_name: str, new_display_name: str) -> bool:
+    """Oppdater display-navn for en eksisterende klient (ikke destruktivt).
+
+    Dette flytter *ikke* mapper og sletter ikke data. Kun meta.json og cache
+    oppdateres slik at klienten blir søkbar på nytt navn.
+    """
+    old_dn = (old_display_name or "").strip()
+    new_dn = (new_display_name or "").strip()
+    if not old_dn or not new_dn or old_dn == new_dn:
+        return False
+
+    d = _find_client_dir(old_dn)
+    if d is None:
+        return False
+
+    meta_p = d / META_FILE
+    meta: dict = {}
+    try:
+        if meta_p.exists():
+            meta = _read_json(meta_p)
+    except Exception:
+        meta = {}
+
+    meta["display_name"] = new_dn
+    meta["updated_at"] = _now_iso()
+    _write_json_atomic(meta_p, meta)
+
+    # Audit (best effort)
+    try:
+        _append_audit(d, {"event": "update_display_name", "from": old_dn, "to": new_dn})
+    except Exception:
+        pass
+
+    # Oppdater cache: fjern gammel key, legg til ny key
+    try:
+        _cache_remove_client(old_dn)
+    except Exception:
+        pass
+    _cache_add_client(new_dn, d)
+
+    # Oppdater hurtigindeks (ytelse; best effort)
+    try:
+        persist_clients_index()
+    except Exception:
+        pass
+
+    return True
+
+
+def delete_client(display_name: str, *, hard: bool = False) -> Path:
+    """Slett/arkiver en klient.
+
+    Standard (hard=False): klientmappen flyttes til <clients_root>/_deleted_clients/
+    slik at det kan angres manuelt. Returnerer ny plassering.
+
+    hard=True: sletter mappen permanent (shutil.rmtree). Bruk med forsiktighet.
+    """
+
+    dn = str(display_name or "").strip()
+    if not dn:
+        raise ValueError("Tomt klientnavn")
+
+    d = _find_client_dir(dn)
+    if d is None or (not d.exists()):
+        raise FileNotFoundError(f"Fant ikke klient: {dn}")
+
+    # Audit før flytting (soft delete)
+    if not hard:
+        try:
+            _append_audit(d, {"action": "client_deleted", "display_name": dn})
+        except Exception:
+            pass
+
+    if hard:
+        import shutil
+
+        shutil.rmtree(d)
+        deleted_to = d
+    else:
+        trash_root = _root() / "_deleted_clients"
+        trash_root.mkdir(parents=True, exist_ok=True)
+
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        target = trash_root / f"{d.name}__{ts}"
+        i = 2
+        while target.exists():
+            target = trash_root / f"{d.name}__{ts}_{i}"
+            i += 1
+
+        try:
+            d.rename(target)
+        except Exception:
+            import shutil
+
+            shutil.move(str(d), str(target))
+        deleted_to = target
+
+    _cache_remove_client(dn)
+
+    # Oppdater root-mtime i cache (slik at vi ikke trigger full rebuild unødvendig)
+    global _CACHE_ROOT_MTIME
+    try:
+        _CACHE_ROOT_MTIME = float(_root().stat().st_mtime)
+    except Exception:
+        pass
+
+    # Oppdater hurtigindeks
+    try:
+        persist_clients_index()
+    except Exception:
+        pass
+
+    return deleted_to
 
 
 def years_dir(display_name: str, *, year: str) -> Path:
@@ -408,6 +796,17 @@ def get_active_version(display_name: str, *, year: str, dtype: str) -> Optional[
             except Exception:
                 return None
     return None
+
+
+def get_active_version_id(display_name: str, *, year: str, dtype: str) -> Optional[str]:
+    """Return the active version id (or None).
+
+    Backwards-compat helper used by some UI code.
+    The canonical API is `get_active_version()`.
+    """
+
+    v = get_active_version(display_name, year=year, dtype=dtype)
+    return v.id if v else None
 
 
 def get_version(display_name: str, *, year: str, dtype: str, version_id: str) -> Optional[VersionModel]:

@@ -290,6 +290,20 @@ class DatasetPane(ttk.Frame):
 
     def _set_path(self, path: str, *, refresh_headers: bool, refresh_sheet: bool) -> None:
         path = (path or "").strip()
+
+        # Guard: never allow internal SQLite cache files to be used as the
+        # *source* dataset file.
+        if path.lower().endswith((".sqlite", ".db")):
+            try:
+                messagebox.showerror(
+                    "Dataset",
+                    "SQLite-cache (.sqlite/.db) kan ikke velges som grunnlagsfil.\n"
+                    "Velg original Excel/CSV/SAF-T fil under 'Dataset'.",
+                )
+            except Exception:
+                pass
+            path = ""
+
         if not path:
             # Clear UI when switching client/year with no active version.
             self.path_var.set("")
@@ -348,8 +362,11 @@ class DatasetPane(ttk.Frame):
             return
         self.sheet_var.set(sheets[0] if sheets else "")
     def _apply_headers_to_mapping_widgets(self, headers: list[str], *, saft_mode: bool) -> None:
+        # SAF-T: mapping er forhåndsdefinert og brukes ikke som "fri" mapping i UI.
+        # Vi viser likevel feltene for transparens, men låser comboboxene.
         for canon, cb in self.combo_widgets.items():
             cb.config(values=headers)
+            cb.config(state="disabled" if saft_mode else "readonly")
             v = self.combo_vars[canon].get().strip()
             if v and (v not in headers) and not saft_mode:
                 self.combo_vars[canon].set("")

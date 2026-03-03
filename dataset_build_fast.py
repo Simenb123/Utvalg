@@ -391,19 +391,24 @@ def _coerce_int_like_series(series: pd.Series) -> pd.Series:
 
 
 def build_from_file(
-    path: Union[str, Path],
+    source: Union[str, Path, pd.DataFrame],
     mapping: Optional[Dict[str, str]] = None,
     *,
     sheet_name: Optional[Union[str, int]] = None,
     header_row: int = 1,
     include_lowercase_aliases: bool = True,
+    # Nyere GUI-kode (klient/versjonering + SAF-T) sender inn dette flagget.
+    # Vi aksepterer det for kompatibilitet; vi bygger likt uansett når vi
+    # allerede har et DataFrame.
+    is_saft: bool = False,
 ) -> pd.DataFrame:
     """Build a canonical dataset DataFrame.
 
     Parameters
     ----------
-    path:
-        File path to .xlsx/.xls/.csv/.txt
+    source:
+        Either a file path to .xlsx/.xls/.csv/.txt, or an already loaded
+        pandas DataFrame.
     mapping:
         Dict mapping canonical field name -> source column header.
     sheet_name:
@@ -421,26 +426,30 @@ def build_from_file(
         DataFrame with canonical column names (and optionally lowercase
         aliases).
     """
-    path = Path(path)
+    if isinstance(source, pd.DataFrame):
+        # Do not mutate caller DF
+        df = source.copy()
+    else:
+        path = Path(source)
 
-    # Normalise options
-    opts = _ReadOptions(sheet_name=sheet_name, header_row=_coerce_header_row(header_row))
+        # Normalise options
+        opts = _ReadOptions(sheet_name=sheet_name, header_row=_coerce_header_row(header_row))
 
-    usecols: Optional[list[str]] = list(mapping.values()) if mapping else None
+        usecols: Optional[list[str]] = list(mapping.values()) if mapping else None
 
-    # First try direct read with requested sheet/header
-    try:
-        df = _read_with_usecols(path, usecols=usecols, opts=opts)
-    except Exception:
-        # Only guess sheet/header if the user did not explicitly set sheet_name
-        if usecols and path.suffix.lower() in {".xlsx", ".xls"} and sheet_name is None:
-            guessed = _guess_excel_sheet_and_header(path, expected_cols=usecols)
-            if guessed is not None:
-                df = _read_with_usecols(path, usecols=usecols, opts=guessed)
+        # First try direct read with requested sheet/header
+        try:
+            df = _read_with_usecols(path, usecols=usecols, opts=opts)
+        except Exception:
+            # Only guess sheet/header if the user did not explicitly set sheet_name
+            if usecols and path.suffix.lower() in {".xlsx", ".xls"} and sheet_name is None:
+                guessed = _guess_excel_sheet_and_header(path, expected_cols=usecols)
+                if guessed is not None:
+                    df = _read_with_usecols(path, usecols=usecols, opts=guessed)
+                else:
+                    raise
             else:
                 raise
-        else:
-            raise
 
     # Clean/normalize column labels (inkl. blanke/"Unnamed" -> kolX)
     df.columns = make_safe_unique_column_names(list(df.columns), placeholder_prefix="kol")

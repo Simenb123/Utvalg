@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -203,8 +204,51 @@ def run_build(opts: BuildOptions) -> Path:
     else:
         subprocess.run(cmd, cwd=str(project_root), check=True)
 
+    # Kopier sidecar-filer til dist-mappen (ved siden av exe)
+    # slik at exe-en får riktig datamappe og dermed riktig klientliste/DB.
+    if not opts.dry_run:
+        _copy_sidecar_files(project_root=project_root, dist_dir=(project_root / opts.dist_dir))
+
     exe_path = (project_root / opts.dist_dir / f"{opts.name}.exe").resolve()
     return exe_path
+
+
+def _copy_sidecar_files(project_root: Path, dist_dir: Path) -> None:
+    """Kopier små konfigfiler som bør ligge ved siden av exe."""
+
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) Datamappe-hint: hvis den finnes i prosjektet, kopier til dist.
+    #    Dette er nøkkelen til at exe-en skal bruke samme datamappe som dev-kjøring.
+    hint_src = project_root / "utvalg_data_dir.txt"
+    hint_dst = dist_dir / "utvalg_data_dir.txt"
+
+    if hint_src.exists():
+        try:
+            shutil.copy2(hint_src, hint_dst)
+            log.info("Kopierte %s -> %s", hint_src.name, hint_dst)
+        except Exception as e:
+            log.warning("Klarte ikke kopiere %s: %s", hint_src.name, e)
+    else:
+        # Hvis ingen hintfil finnes, men env-var er satt ved build, skriv hintfil.
+        env = os.environ.get("UTVALG_DATA_DIR", "").strip()
+        if env:
+            try:
+                hint_dst.write_text(env, encoding="utf-8")
+                log.info("Skrev %s fra UTVALG_DATA_DIR -> %s", hint_dst.name, hint_dst)
+            except Exception as e:
+                log.warning("Klarte ikke skrive %s: %s", hint_dst.name, e)
+        else:
+            log.info(
+                "Fant ingen utvalg_data_dir.txt i prosjektet og UTVALG_DATA_DIR er ikke satt. "
+                "Exe vil derfor bruke default datamappe (typisk %%LOCALAPPDATA%%\\Utvalg). "
+                "Sett datamappe i Innstillinger i exe-en (eller lag utvalg_data_dir.txt ved siden av exe)."
+            )
+
+    # 2) Tidligere kopierte vi også ".ml_map.json" ved siden av exe.
+    # Det ga ekstra JSON-filer i exe-mappen (ofte en felles/"server"-mappe).
+    # I "frozen"-modus lagres ML-mappingen i datamappen (UTVALG_DATA_DIR),
+    # så vi lar være å kopiere den hit.
 
 
 def _parse_args(argv: Optional[Sequence[str]] = None) -> BuildOptions:

@@ -153,10 +153,13 @@ def fill_down_bilag_inplace(df: pd.DataFrame) -> int:
 
     s = df[col]
 
-    # Tom streng -> NA (vanlig ved CSV/XLSX). Gjør dette uten å tvinge dtype.
+    # Tom streng / whitespace -> NA (vanlig ved CSV/XLSX). Gjør dette uten å tvinge dtype.
+    # Også "nan" som tekst kan dukke opp når tall/tekst blandes.
     if s.dtype == object or pd.api.types.is_string_dtype(s):
         try:
-            s = s.replace("", pd.NA)
+            s = s.replace(r"^\s*$", pd.NA, regex=True)
+            s = s.replace("nan", pd.NA)
+            s = s.replace("NaN", pd.NA)
         except Exception:
             pass
 
