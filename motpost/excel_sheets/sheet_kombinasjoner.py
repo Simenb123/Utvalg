@@ -47,7 +47,7 @@ def build_and_write_kombinasjoner_sheet(
         selected_accounts,
         selected_direction=direction,
     )
-
+python
     if not df_combos.empty:
         df_combos = df_combos.copy()
 

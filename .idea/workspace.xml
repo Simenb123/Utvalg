@@ -5,26 +5,17 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0bad5fd8-2f15-462a-bc94-8c4a0675bd74" name="Changes" comment="Utvalg">
-      <change afterPath="$PROJECT_DIR$/client_picker_dialog.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/ml_map_utils.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/motpost/combinations.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/version_overview_dialog.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/regnskap_config.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/regnskap_mapping.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/saft_trial_balance.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_regnskap_config.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_regnskap_mapping.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/test_trial_balance_reader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/trial_balance_reader.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.ml_map.json" beforeDir="false" afterPath="$PROJECT_DIR$/.ml_map.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.session/preferences.json" beforeDir="false" afterPath="$PROJECT_DIR$/.session/preferences.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client_store.py" beforeDir="false" afterPath="$PROJECT_DIR$/client_store.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/client_store_import.py" beforeDir="false" afterPath="$PROJECT_DIR$/client_store_import.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_build_fast.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_build_fast.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_cache_sqlite.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_cache_sqlite.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane_store_import_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store_import_ui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane_store_logic.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store_logic.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane_store_section.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store_section.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_pane_store_ui.py" beforeDir="false" afterPath="$PROJECT_DIR$/dataset_pane_store_ui.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/motpost/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost/utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/saft_reader.py" beforeDir="false" afterPath="$PROJECT_DIR$/saft_reader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/settings_entry.py" beforeDir="false" afterPath="$PROJECT_DIR$/settings_entry.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/test_client_store_import_client_list.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_client_store_import_client_list.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/motpost/excel_sheets/sheet_kombinasjoner.py" beforeDir="false" afterPath="$PROJECT_DIR$/motpost/excel_sheets/sheet_kombinasjoner.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/version_overview_dialog.py" beforeDir="false" afterPath="$PROJECT_DIR$/version_overview_dialog.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views_settings.py" beforeDir="false" afterPath="$PROJECT_DIR$/views_settings.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -379,7 +370,21 @@
       <option name="presentableId" value="LOCAL−00032" />
       <updated>1772033220680</updated>
     </task>
-    <option name="localTasksCounter" value="33" />
+    <task id="LOCAL−00033" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1772524019386</created>
+      <option name="number" value="LOCAL−00033" />
+      <option name="presentableId" value="LOCAL−00033" />
+      <updated>1772524019387</updated>
+    </task>
+    <task id="LOCAL−00034" summary="Utvalg">
+      <option name="closed" value="true" />
+      <created>1772526347921</created>
+      <option name="number" value="LOCAL−00034" />
+      <option name="presentableId" value="LOCAL−00034" />
+      <updated>1772526347921</updated>
+    </task>
+    <option name="localTasksCounter" value="35" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">

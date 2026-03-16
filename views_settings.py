@@ -12,6 +12,21 @@ import app_paths
 import client_store
 import formatting  # for refresh_from_prefs()
 
+
+def _fmt_cfg_meta(meta: dict) -> str:
+    """Kort statuslinje for importert config."""
+
+    if not meta:
+        return "(ikke importert)"
+
+    fn = str(meta.get("filename") or "")
+    ts = str(meta.get("imported_at") or "")
+    sha = str(meta.get("sha256") or "")
+    sha_short = (sha[:10] + "…") if sha else ""
+
+    bits = [b for b in [fn, ts, sha_short] if b]
+    return " | ".join(bits) if bits else "(importert)"
+
 # preferences.py (eldre kode) eksponerer load()/save().
 # I nyere endringer ønsket vi mer eksplisitte navn (load_preferences/save_preferences).
 # For bakoverkompatibilitet støtter vi begge.
@@ -152,6 +167,25 @@ class SettingsView:
         self.ent_date.insert(0, str(_pref_get(self.p, "date_fmt", "%d.%m.%Y") or "%d.%m.%Y"))
         self.ent_date.grid(row=1, column=1, sticky="w", pady=(8, 0))
 
+        # --- Regnskap (mapping) ---
+        reg = ttk.LabelFrame(frm, text="Regnskap (mapping)", padding=8)
+        reg.pack(fill=tk.X, pady=(12, 0))
+        reg.columnconfigure(1, weight=1)
+
+        ttk.Label(reg, text="Regnskapslinjer:").grid(row=0, column=0, sticky="w")
+        self.lbl_regn = ttk.Label(reg, text="")
+        self.lbl_regn.grid(row=0, column=1, sticky="w", padx=(6, 0))
+        ttk.Button(reg, text="Importer…", command=self._import_regnskapslinjer).grid(row=0, column=2, sticky="e")
+
+        ttk.Label(reg, text="Kontoplan-mapping:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.lbl_map = ttk.Label(reg, text="")
+        self.lbl_map.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=(6, 0))
+        ttk.Button(reg, text="Importer…", command=self._import_kontoplan_mapping).grid(
+            row=1, column=2, sticky="e", pady=(6, 0)
+        )
+
+        self._refresh_regnskap_info()
+
         btn = ttk.Frame(frm)
         btn.pack(fill=tk.X, pady=(16, 0))
         ttk.Button(btn, text="Lagre", command=self._save).pack(side=tk.RIGHT)
@@ -198,6 +232,7 @@ class SettingsView:
             pass
 
         self._refresh_store_info()
+        self._refresh_regnskap_info()
         if self._on_data_dir_changed:
             try:
                 self._on_data_dir_changed()
@@ -273,6 +308,63 @@ class SettingsView:
                 self._on_clients_changed()
             except Exception:
                 pass
+
+    # ------------------ Regnskap-config ------------------
+
+    def _refresh_regnskap_info(self) -> None:
+        """Oppdater labels for regnskapslinjer + mapping."""
+
+        # Labels finnes først etter at __init__ har bygget UI.
+        if not hasattr(self, "lbl_regn"):
+            return
+
+        try:
+            import regnskap_config
+
+            st = regnskap_config.get_status()
+            self.lbl_regn.configure(text=_fmt_cfg_meta(st.regnskapslinjer_meta))
+            self.lbl_map.configure(text=_fmt_cfg_meta(st.kontoplan_mapping_meta))
+        except Exception:
+            self.lbl_regn.configure(text="(ukjent)")
+            self.lbl_map.configure(text="(ukjent)")
+
+    def _import_regnskapslinjer(self) -> None:
+        fn = filedialog.askopenfilename(
+            parent=self.win,
+            title="Importer Regnskapslinjer.xlsx",
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Alle filer", "*.*")],
+        )
+        if not fn:
+            return
+
+        try:
+            import regnskap_config
+
+            regnskap_config.import_regnskapslinjer(Path(fn))
+        except Exception as e:
+            messagebox.showerror("Regnskapslinjer", f"Kunne ikke importere: {e}", parent=self.win)
+            return
+
+        self._refresh_regnskap_info()
+
+    def _import_kontoplan_mapping(self) -> None:
+        fn = filedialog.askopenfilename(
+            parent=self.win,
+            title="Importer kontoplan-mapping.xlsx",
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Alle filer", "*.*")],
+        )
+        if not fn:
+            return
+
+        try:
+            import regnskap_config
+
+            regnskap_config.import_kontoplan_mapping(Path(fn))
+        except Exception as e:
+            messagebox.showerror("Kontoplan-mapping", f"Kunne ikke importere: {e}", parent=self.win)
+            return
+
+        self._refresh_regnskap_info()
 
     # ------------------ Preferences ------------------
 
