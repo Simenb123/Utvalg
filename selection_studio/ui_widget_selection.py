@@ -34,6 +34,12 @@ def run_selection(studio: Any) -> None:
     """Execute selection based on current UI state and populate result."""
 
     try:
+        # Force a synchronous refresh so the selection always uses the latest
+        # values from the UI, even if the user clicks "Kjør utvalg" before the
+        # debounced refresh has fired.
+        if hasattr(studio, "_refresh_all"):
+            studio._refresh_all()
+
         if studio._df_filtered is None or studio._df_filtered.empty:
             messagebox.showinfo("Utvalg", "Ingen data i grunnlaget. Velg konti/filtre først.")
             return

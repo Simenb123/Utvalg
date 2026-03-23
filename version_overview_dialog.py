@@ -50,6 +50,14 @@ def _fmt_ts(ts: float) -> str:
         return ""
 
 
+def _version_created_ts(version) -> float:
+    """Backwards-compatible timestamp accessor for version rows."""
+    try:
+        return float(getattr(version, "created_at", None) or getattr(version, "created_ts", None) or 0.0)
+    except Exception:
+        return 0.0
+
+
 def _open_path(path: Path) -> None:
     try:
         if os.name == "nt":
@@ -306,9 +314,9 @@ class _VersionsDialog:
             tree.delete(item)
 
         # Insert
-        for v in sorted(versions, key=lambda vv: vv.created_ts, reverse=True):
+        for v in sorted(versions, key=_version_created_ts, reverse=True):
             star = "*" if active_id and v.id == active_id else ""
-            tree.insert("", "end", iid=v.id, values=(star, Path(v.path).name, _fmt_ts(v.created_ts)))
+            tree.insert("", "end", iid=v.id, values=(star, Path(v.path).name, _fmt_ts(_version_created_ts(v))))
 
         # Select
         preferred = select_id or active_id

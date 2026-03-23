@@ -1,0 +1,7 @@
+pandas
+numpy
+openpyxl
+chardet
+lxml
+pytest
+pytest-cov

@@ -1,0 +1,32 @@
+# Python cache / build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Test / coverage artifacts
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+
+# IDE / editor
+.idea/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Local app/session/runtime data
+.session/
+clients/
+clients_index.json
+clients_index.stamp
+utvalg_data_dir.txt
+
+# OS cruft
+Thumbs.db
+Desktop.ini
