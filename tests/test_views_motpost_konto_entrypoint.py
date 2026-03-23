@@ -167,3 +167,42 @@ def test_show_combinations_uses_df_scope_positional_args(monkeypatch) -> None:
     assert calls["combo_per"] is not None
     assert calls["popup"] is not None
     assert calls["combo"]["sel"] == {"3000"}
+
+
+def test_export_excel_accepts_combo_status_and_comment_payloads(monkeypatch, tmp_path) -> None:
+    captured = {"kwargs": None, "saved_to": None, "info": []}
+
+    class _DummyWorkbook:
+        def save(self, path):
+            captured["saved_to"] = path
+
+    def _stub_build_workbook(data, **kwargs):
+        captured["kwargs"] = kwargs
+        return _DummyWorkbook()
+
+    filedialog_stub = SimpleNamespace(asksaveasfilename=lambda **_kwargs: str(tmp_path / "motpost.xlsx"))
+    messagebox_stub = SimpleNamespace(
+        showinfo=lambda *args, **kwargs: captured["info"].append((args, kwargs)),
+        showerror=lambda *args, **kwargs: None,
+    )
+
+    monkeypatch.setattr(views_motpost_konto, "filedialog", filedialog_stub)
+    monkeypatch.setattr(views_motpost_konto, "messagebox", messagebox_stub)
+    monkeypatch.setattr(views_motpost_konto, "build_motpost_excel_workbook", _stub_build_workbook)
+    monkeypatch.setattr("motpost.view_konto_actions._best_effort_open_file", lambda _path: None)
+
+    v = views_motpost_konto.MotpostKontoView.__new__(views_motpost_konto.MotpostKontoView)
+    v._data = SimpleNamespace(df_scope=pd.DataFrame(), selected_accounts=("3000",))
+    v._selected_motkonto = None
+    v._outliers = set()
+    v._outlier_combinations = set()
+
+    views_motpost_konto.MotpostKontoView._export_excel(
+        v,
+        {"1500, 2700": "outlier"},
+        {"1500, 2700": "Forklar kombinasjonen"},
+    )
+
+    assert captured["saved_to"] == str(tmp_path / "motpost.xlsx")
+    assert captured["kwargs"]["combo_status_map"] == {"1500, 2700": "outlier"}
+    assert captured["kwargs"]["combo_comment_map"] == {"1500, 2700": "Forklar kombinasjonen"}

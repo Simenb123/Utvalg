@@ -19,6 +19,8 @@ htmlcov/
 .vscode/*
 !.vscode/launch.json
 !.vscode/tasks.json
+!.vscode/settings.json
+!.vscode/extensions.json
 
 # Local app/session/runtime data
 .session/

@@ -166,6 +166,9 @@ def export_excel(
     filedialog_mod: Any,
     messagebox_mod: Any,
     build_motpost_excel_workbook_fn: Callable[..., Any],
+    outlier_combinations: Optional[set[str]] = None,
+    combo_status_map: Optional[dict[str, str]] = None,
+    combo_comment_map: Optional[dict[str, str]] = None,
 ) -> None:
     """Eksporterer motpostanalyse til Excel.
 
@@ -186,8 +189,11 @@ def export_excel(
         path = str(file_path)
 
         # Finn outlier-kombinasjoner. Statuskart (combo_status_map) har prioritet.
-        combo_status_map = getattr(view, "_combo_status_map", {}) or {}
-        outlier_combinations = getattr(view, "_outlier_combinations", set()) or set()
+        combo_status_map = combo_status_map if combo_status_map is not None else (getattr(view, "_combo_status_map", {}) or {})
+        outlier_combinations = (
+            outlier_combinations if outlier_combinations is not None else (getattr(view, "_outlier_combinations", set()) or set())
+        )
+        combo_comment_map = combo_comment_map if combo_comment_map is not None else (getattr(view, "_combo_comment_map", {}) or {})
 
         include_outlier_transactions = True
 
@@ -272,7 +278,7 @@ def export_excel(
                 outlier_motkonto=outlier_motkonto,
                 selected_motkonto=selected_motkonto,
                 combo_status_map=combo_status_map,
-                combo_comment_map=getattr(view, "_combo_comment_map", {}) or {},
+                combo_comment_map=combo_comment_map,
                 outlier_combinations=outlier_combinations,
                 include_outlier_transactions=include_outlier_transactions,
             )
@@ -283,7 +289,7 @@ def export_excel(
                 outlier_motkonto=outlier_motkonto,
                 selected_motkonto=selected_motkonto,
                 combo_status_map=combo_status_map,
-                combo_comment_map=getattr(view, "_combo_comment_map", {}) or {},
+                combo_comment_map=combo_comment_map,
                 outlier_combinations=outlier_combinations,
             )
 
