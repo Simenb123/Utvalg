@@ -18,8 +18,6 @@ import theme
 from page_dataset import DatasetPage
 from page_analyse import AnalysePage
 from page_a07 import A07Page
-from page_consolidation import ConsolidationPage
-from page_reskontro import ReskontroPage
 from page_utvalg_strata import UtvalgStrataPage
 
 # "Resultat" fanen i dette repoet er implementert via page_utvalg.UtvalgPage
@@ -161,8 +159,6 @@ class App(tk.Tk):
         self.page_dataset = DatasetPage(self.nb)
         self.page_analyse = AnalysePage(self.nb)
         self.page_a07 = A07Page(self.nb)
-        self.page_consolidation = ConsolidationPage(self.nb)
-        self.page_reskontro = ReskontroPage(self.nb)
         self.page_utvalg = UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample)
         self.page_resultat = UtvalgPage(self.nb)
         self.page_logg = LoggPage(self.nb)
@@ -170,8 +166,6 @@ class App(tk.Tk):
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
         self.nb.add(self.page_a07, text="A07")
-        self.nb.add(self.page_consolidation, text="Konsolidering")
-        self.nb.add(self.page_reskontro, text="Reskontro")
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
         self.nb.add(self.page_logg, text="Logg")
@@ -208,8 +202,6 @@ class App(tk.Tk):
 
         # Resten brukes ikke av testene, men vi setter dem for robusthet
         self.page_a07 = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
-        self.page_consolidation = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
-        self.page_reskontro = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
         self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
         self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
         self.page_logg = SimpleNamespace()  # type: ignore[assignment]
@@ -352,18 +344,6 @@ class App(tk.Tk):
         try:
             if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
                 self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self.page_consolidation, "refresh_from_session") and callable(getattr(self.page_consolidation, "refresh_from_session")):
-                self.page_consolidation.refresh_from_session(session)  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self.page_reskontro, "refresh_from_session") and callable(getattr(self.page_reskontro, "refresh_from_session")):
-                self.page_reskontro.refresh_from_session(session)  # type: ignore[attr-defined]
         except Exception:
             pass
 
