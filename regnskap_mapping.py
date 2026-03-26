@@ -69,6 +69,7 @@ def normalize_regnskapslinjer(df: "pd.DataFrame") -> "pd.DataFrame":
     """Normaliserer regnskapslinjer til kolonnene:
 
     regnr (int), regnskapslinje (str), sumpost (bool), formel (str|None)
+    samt evt. hierarkikolonner for del-/sum-linjer.
     """
 
     import pandas as pd
@@ -90,6 +91,11 @@ def normalize_regnskapslinjer(df: "pd.DataFrame") -> "pd.DataFrame":
     c_name = pick("regnskapslinje", "linje", "tekst", "name")
     c_sum = pick("sumpost", "sum", optional=True)
     c_formula = pick("formel", "formula", optional=True)
+    c_sumnivaa = pick("sumnivå", "sumnivaa", "sumnivaa", optional=True)
+    c_delsumnr = pick("delsumnr", optional=True)
+    c_sumnr = pick("sumnr", optional=True)
+    c_sumnr2 = pick("sumnr2", optional=True)
+    c_sluttsumnr = pick("sluttsumnr", optional=True)
 
     out = pd.DataFrame()
     out["regnr"] = df[c_nr].map(_to_int)
@@ -101,10 +107,20 @@ def normalize_regnskapslinjer(df: "pd.DataFrame") -> "pd.DataFrame":
         out["sumpost"] = False
 
     if c_formula:
-        out["formel"] = df[c_formula].astype(str).replace({"nan": ""}).map(lambda s: s.strip())
-        out.loc[out["formel"].eq(""), "formel"] = None
+        out["formel"] = (
+            df[c_formula]
+            .map(lambda v: None if pd.isna(v) else str(v).strip())
+            .astype(object)
+        )
+        out.loc[out["formel"].map(lambda v: str(v).strip().lower() if v is not None else "").isin({"", "nan", "none"}), "formel"] = None
     else:
         out["formel"] = None
+
+    out["sumnivaa"] = df[c_sumnivaa].map(_to_int) if c_sumnivaa else None
+    out["delsumnr"] = df[c_delsumnr].map(_to_int) if c_delsumnr else None
+    out["sumnr"] = df[c_sumnr].map(_to_int) if c_sumnr else None
+    out["sumnr2"] = df[c_sumnr2].map(_to_int) if c_sumnr2 else None
+    out["sluttsumnr"] = df[c_sluttsumnr].map(_to_int) if c_sluttsumnr else None
 
     out = out.dropna(subset=["regnr"]).copy()
     out["regnr"] = out["regnr"].astype(int)
@@ -159,6 +175,50 @@ def apply_interval_mapping(
     out["regnr"] = pd.Series(regnr, dtype="Int64")
     unmapped = out.loc[out["regnr"].isna(), konto_col].astype(str).unique().tolist()
     return MappingResult(mapped=out, unmapped_konto=sorted(unmapped))
+
+
+def apply_account_overrides(
+    tb_mapped: "pd.DataFrame",
+    overrides: Dict[str, int] | None,
+    *,
+    konto_col: str = "konto",
+    regnr_col: str = "regnr",
+) -> "pd.DataFrame":
+    """Overstyr regnr for eksplisitte kontoer."""
+
+    import pandas as pd
+
+    if tb_mapped is None:
+        return pd.DataFrame()
+    if tb_mapped.empty or not overrides:
+        return tb_mapped.copy()
+    if konto_col not in tb_mapped.columns:
+        raise ValueError(f"tb_mapped mangler kolonne '{konto_col}'")
+
+    clean: Dict[str, int] = {}
+    for konto, regnr in overrides.items():
+        konto_s = str(konto or "").strip()
+        if not konto_s:
+            continue
+        try:
+            clean[konto_s] = int(regnr)
+        except Exception:
+            continue
+
+    if not clean:
+        return tb_mapped.copy()
+
+    out = tb_mapped.copy()
+    forced = out[konto_col].astype(str).map(clean)
+    mask = forced.notna()
+    if not bool(mask.any()):
+        return out
+
+    if regnr_col not in out.columns:
+        out[regnr_col] = pd.Series([pd.NA] * len(out), dtype="Int64")
+
+    out.loc[mask, regnr_col] = forced.loc[mask].astype("Int64")
+    return out
 
 
 def aggregate_by_regnskapslinje(
@@ -231,6 +291,7 @@ def compute_sumlinjer(*, base_values: Dict[int, float], regnskapslinjer: "pd.Dat
         for r in regn.itertuples(index=False)
         if bool(r.sumpost)
     }
+    hierarchy_leafs = _build_sumline_leaf_descendants(regn)
 
     cache: Dict[int, float] = dict(base_values)
     visiting: set[int] = set()
@@ -242,15 +303,22 @@ def compute_sumlinjer(*, base_values: Dict[int, float], regnskapslinjer: "pd.Dat
             raise ValueError(f"Syklisk formel i regnskapslinjer: {regnr}")
 
         f = formulas.get(regnr)
+        if f:
+            visiting.add(regnr)
+            val = _eval_formula(f, get)
+            visiting.remove(regnr)
+            cache[regnr] = float(val)
+            return float(val)
+
+        leaves = hierarchy_leafs.get(regnr)
+        if leaves:
+            val = float(sum(float(cache.get(int(leaf), 0.0)) for leaf in leaves))
+            cache[regnr] = val
+            return val
+
         if not f:
             cache[regnr] = 0.0
             return 0.0
-
-        visiting.add(regnr)
-        val = _eval_formula(f, get)
-        visiting.remove(regnr)
-        cache[regnr] = float(val)
-        return float(val)
 
     # Beregn alle
     for regnr in list(formulas.keys()):
@@ -261,6 +329,116 @@ def compute_sumlinjer(*, base_values: Dict[int, float], regnskapslinjer: "pd.Dat
             cache[int(regnr)] = 0.0
 
     return cache
+
+
+def expand_regnskapslinje_selection(
+    *,
+    regnskapslinjer: "pd.DataFrame",
+    selected_regnr: Sequence[int],
+) -> List[int]:
+    """Utvid valgte regnskapslinjer til underliggende leaf-linjer.
+
+    Leaf-linjer returneres som seg selv. Sumposter utvides rekursivt via
+    formelreferansene sine. Ugyldige eller ukjente referanser ignoreres.
+    """
+
+    regn = normalize_regnskapslinjer(regnskapslinjer)
+    leaf_regnr = {int(v) for v in regn.loc[~regn["sumpost"], "regnr"].astype(int).tolist()}
+    formulas = {
+        int(r.regnr): (str(r.formel).strip() if r.formel else None)
+        for r in regn.itertuples(index=False)
+    }
+    hierarchy_leafs = _build_sumline_leaf_descendants(regn)
+
+    cache: Dict[int, set[int]] = {}
+    visiting: set[int] = set()
+
+    def expand_one(regnr: int) -> set[int]:
+        if regnr in cache:
+            return set(cache[regnr])
+        if regnr in visiting:
+            raise ValueError(f"Syklisk formel i regnskapslinjer: {regnr}")
+        if regnr in leaf_regnr:
+            cache[regnr] = {regnr}
+            return {regnr}
+
+        formula = formulas.get(regnr)
+        if not formula:
+            leaves = hierarchy_leafs.get(regnr)
+            if leaves:
+                cache[regnr] = set(leaves)
+                return set(leaves)
+            cache[regnr] = set()
+            return set()
+
+        if formula.startswith("="):
+            formula = formula[1:].strip()
+
+        refs = {int(v) for v in _INT_RE.findall(formula or "")}
+        if not refs:
+            cache[regnr] = set()
+            return set()
+
+        visiting.add(regnr)
+        expanded: set[int] = set()
+        for ref in refs:
+            try:
+                expanded.update(expand_one(int(ref)))
+            except Exception as exc:
+                log.warning("Kunne ikke utvide regnskapslinje %s via %s: %s", regnr, ref, exc)
+        visiting.remove(regnr)
+        cache[regnr] = set(expanded)
+        return set(expanded)
+
+    out: List[int] = []
+    seen: set[int] = set()
+    for raw in selected_regnr:
+        try:
+            regnr = int(raw)
+        except Exception:
+            continue
+        try:
+            expanded = expand_one(regnr)
+        except Exception as exc:
+            log.warning("Kunne ikke utvide valgt regnskapslinje %s: %s", regnr, exc)
+            expanded = {regnr} if regnr in leaf_regnr else set()
+        for leaf in sorted(expanded):
+            if leaf in seen:
+                continue
+            out.append(leaf)
+            seen.add(leaf)
+    return out
+
+
+def _build_sumline_leaf_descendants(regn: "pd.DataFrame") -> Dict[int, set[int]]:
+    import pandas as pd
+
+    if regn is None or regn.empty:
+        return {}
+
+    ref_cols = [c for c in ("delsumnr", "sumnr", "sumnr2", "sluttsumnr") if c in regn.columns]
+    if not ref_cols:
+        return {}
+
+    leaf = regn.loc[~regn["sumpost"], ["regnr", *ref_cols]].copy()
+    if leaf.empty:
+        return {}
+
+    descendants: Dict[int, set[int]] = {}
+    for row in leaf.itertuples(index=False):
+        try:
+            leaf_regnr = int(getattr(row, "regnr"))
+        except Exception:
+            continue
+        for col in ref_cols:
+            ref = getattr(row, col, None)
+            if ref is None or pd.isna(ref):
+                continue
+            try:
+                descendants.setdefault(int(ref), set()).add(leaf_regnr)
+            except Exception:
+                continue
+    return descendants
 
 
 def _eval_formula(formula: str, get_fn) -> float:

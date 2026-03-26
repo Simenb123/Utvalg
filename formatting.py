@@ -12,6 +12,7 @@ Mål/kontrakt:
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Optional
 
 import math
@@ -34,6 +35,12 @@ def _try_parse_float(x: Any) -> Optional[float]:
     # Ikke la bool gå via int/float
     if isinstance(x, bool):
         return None
+
+    if isinstance(x, Decimal):
+        try:
+            return float(x)
+        except Exception:
+            return None
 
     if isinstance(x, (int, float)) and not isinstance(x, bool):
         try:

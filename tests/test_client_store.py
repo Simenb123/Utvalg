@@ -107,3 +107,51 @@ def test_client_store_duplicate_content_raises_and_audits(tmp_path: Path, monkey
 
     events = _read_audit_jsonl(audit_p)
     assert any(e.get("action") == "version_duplicate_rejected" and e.get("existing_id") == v1.id for e in events)
+
+
+def test_set_dataset_cache_meta_updates_version_and_audits(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
+
+    import client_store
+
+    importlib.reload(client_store)
+
+    client_store.ensure_client("Demo AS")
+    audit_p = client_store.audit_log_path("Demo AS")
+
+    hb1 = _write(tmp_path / "hb.xlsx", "dummy-1")
+    version = client_store.create_version(
+        "Demo AS",
+        year="2024",
+        dtype="hb",
+        src_path=hb1,
+        make_active=True,
+    )
+
+    dataset_cache = {
+        "signature": "abc123",
+        "file": "dataset.parquet",
+        "built_at": "2026-03-24T12:00:00",
+        "rows": 42,
+        "cols": 7,
+        "schema_version": 1,
+        "extra": "ignored-in-audit",
+    }
+    client_store.set_dataset_cache_meta(
+        "Demo AS",
+        year="2024",
+        dtype="hb",
+        version_id=version.id,
+        dataset_cache=dataset_cache,
+    )
+
+    stored = client_store.get_dataset_cache_meta("Demo AS", year="2024", dtype="hb", version_id=version.id)
+    assert stored is not None
+    assert stored["signature"] == "abc123"
+    assert stored["rows"] == 42
+
+    events = _read_audit_jsonl(audit_p)
+    cache_events = [e for e in events if e.get("action") == "dataset_cache_set" and e.get("version_id") == version.id]
+    assert cache_events
+    assert cache_events[-1]["dataset_cache"]["signature"] == "abc123"
+    assert "extra" not in cache_events[-1]["dataset_cache"]

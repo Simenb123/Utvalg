@@ -17,7 +17,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -132,7 +132,7 @@ def _import_file(*, kind: str, src_path: Path, dst_path: Path) -> Path:
     sha = hashlib.sha256(data).hexdigest()
     meta = _read_meta()
     meta[kind] = {
-        "imported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "imported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "filename": src_path.name,
         "sha256": sha,
         "original_path": str(src_path),

@@ -23,6 +23,11 @@ _cols: Optional[Columns] = None
 # constructed.
 dataset: Optional[pd.DataFrame] = None
 
+# Active client and year – set by ui_main when a dataset is loaded.
+# Used by RL-pivot and other modules that need to know current context.
+client: Optional[str] = None
+year: Optional[str] = None
+
 # A mutable structure holding information about the current account selection.
 # Expected keys:
 #     ``accounts`` – a list of account identifiers (as strings)

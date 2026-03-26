@@ -33,6 +33,7 @@ FALLBACK_CANON_FIELDS: list[str] = [
     "Konto",
     "Kontonavn",
     "Bilag",
+    "Referanse",
     "Beløp",
     "Dato",
     "Tekst",
@@ -140,6 +141,117 @@ def _open_saft_stream(path: Path) -> tuple[IO[bytes], str]:
         return io.BytesIO(data), Path(chosen).name
 
 
+@dataclass(frozen=True)
+class SaftHeader:
+    """Metadata fra SAF-T Header."""
+    software_company: str = ""
+    software_id: str = ""
+    software_version: str = ""
+
+
+def read_saft_header(path: str | Path) -> SaftHeader:
+    """Les SAF-T Header og returner programvareinformasjon.
+
+    Streamer XML-en og stopper så snart Header er funnet, slik at vi
+    ikke trenger å parse hele filen.
+    """
+    p = Path(path)
+    if not p.exists():
+        return SaftHeader()
+
+    try:
+        stream, _display = _open_saft_stream(p)
+    except Exception:
+        return SaftHeader()
+
+    try:
+        return _read_header_from_stream(stream)
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+
+def _read_header_from_stream(stream: IO[bytes]) -> SaftHeader:
+    """Intern: les Header-elementer fra XML-stream."""
+    try:
+        context = ET.iterparse(stream, events=("end",))
+    except Exception:
+        return SaftHeader()
+
+    software_company = ""
+    software_id = ""
+    software_version = ""
+
+    for _event, elem in context:
+        tag = _local_name(elem.tag)
+
+        if tag == "SoftwareCompanyName":
+            software_company = _txt(elem)
+        elif tag == "SoftwareID":
+            software_id = _txt(elem)
+        elif tag == "SoftwareVersion":
+            software_version = _txt(elem)
+        elif tag == "Header":
+            # Vi har hele headeren — ingen grunn til å lese resten.
+            elem.clear()
+            break
+
+        # Dersom vi treffer MasterFiles/GeneralLedgerEntries betyr det
+        # at Header allerede er passert (eller ikke finnes).
+        if tag in ("MasterFiles", "GeneralLedgerEntries"):
+            elem.clear()
+            break
+
+    return SaftHeader(
+        software_company=software_company,
+        software_id=software_id,
+        software_version=software_version,
+    )
+
+
+def detect_accounting_system(header: SaftHeader) -> str:
+    """Forsøk å matche SAF-T header mot kjente regnskapssystemer.
+
+    Returnerer systemnavnet fra ACCOUNTING_SYSTEMS-listen, eller tom streng
+    dersom ingen match.
+    """
+    from mva_codes import ACCOUNTING_SYSTEMS
+
+    # Bygg en søkestreng fra header-feltene
+    search = f"{header.software_company} {header.software_id}".lower()
+    if not search.strip():
+        return ""
+
+    # Prøv direkte match mot kjente systemer (case-insensitive)
+    for system in ACCOUNTING_SYSTEMS:
+        if system == "Annet" or system == "SAF-T Standard":
+            continue
+        if system.lower() in search:
+            return system
+
+    # Noen systemer bruker varianter i SAF-T-eksporten
+    _ALIASES: dict[str, str] = {
+        "tripletex": "Tripletex",
+        "poweroffice": "PowerOffice GO",
+        "xledger": "Xledger",
+        "visma business": "Visma Business",
+        "visma eaccounting": "Visma eAccounting",
+        "visma global": "Visma Business",
+        "fiken": "Fiken",
+        "uni economy": "Uni Economy",
+        "uni micro": "Uni Economy",
+        "24sevenoffice": "24SevenOffice",
+        "24seven": "24SevenOffice",
+    }
+    for alias, system in _ALIASES.items():
+        if alias in search:
+            return system
+
+    return ""
+
+
 def read_saft_ledger(path: str | Path) -> pd.DataFrame:
     """Les SAF-T (Financial) og returner DataFrame med kanoniske kolonner."""
 
@@ -234,11 +346,12 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
         df["Dato"] = pd.to_datetime(df["Dato"], errors="coerce", dayfirst=False)
 
     # Konto/Bilag skal være str for konsistent oppførsel.
-    for col in ("Konto", "Bilag"):
+    for col in ("Konto", "Bilag", "Referanse"):
         if col in df.columns:
             df[col] = df[col].astype(str)
 
-    return df[canon]
+    extras = [col for col in df.columns if col not in canon]
+    return df[canon + extras]
 
 
 def _parse_transaction(trx: ET.Element, look: _Lookup) -> list[dict[str, Any]]:
@@ -253,6 +366,11 @@ def _parse_transaction(trx: ET.Element, look: _Lookup) -> list[dict[str, Any]]:
         or _txt(trx.find(".//{*}Period"))
     )
     tdesc = _txt(trx.find(".//{*}Description")) or _txt(trx.find(".//{*}TransactionDescription"))
+    tref = (
+        _txt(trx.find(".//{*}ReferenceNumber"))
+        or _txt(trx.find(".//{*}DocumentNumber"))
+        or _txt(trx.find(".//{*}DocumentNo"))
+    )
 
     out: list[dict[str, Any]] = []
 
@@ -262,11 +380,15 @@ def _parse_transaction(trx: ET.Element, look: _Lookup) -> list[dict[str, Any]]:
     for line in debit_lines:
         row = _parse_line(line, sign=1, tid=tid, tdate=tdate, tdesc=tdesc, look=look)
         if row is not None:
+            if not row.get("Referanse"):
+                row["Referanse"] = tref
             out.append(row)
 
     for line in credit_lines:
         row = _parse_line(line, sign=-1, tid=tid, tdate=tdate, tdesc=tdesc, look=look)
         if row is not None:
+            if not row.get("Referanse"):
+                row["Referanse"] = tref
             out.append(row)
 
     # Fallback: Noen SAF-T eksportører bruker <Line> med DebitAmount/CreditAmount
@@ -288,6 +410,8 @@ def _parse_transaction(trx: ET.Element, look: _Lookup) -> list[dict[str, Any]]:
                     sign = -1
             row = _parse_line(line, sign=sign, tid=tid, tdate=tdate, tdesc=tdesc, look=look)
             if row is not None:
+                if not row.get("Referanse"):
+                    row["Referanse"] = tref
                 out.append(row)
 
     return out
@@ -340,11 +464,17 @@ def _parse_line(
         line.find(".//{*}TaxAmount/{*}Amount")
     )
     tax_amt = _safe_float(tax_amt_text)
+    reference = (
+        _txt(line.find(".//{*}ReferenceNumber"))
+        or _txt(line.find(".//{*}DocumentNumber"))
+        or _txt(line.find(".//{*}DocumentNo"))
+    )
 
     return {
         "Konto": acc,
         "Kontonavn": look.accounts.get(acc, ""),
         "Bilag": tid,
+        "Referanse": reference,
         "Beløp": belop,
         "Dato": tdate,
         "Tekst": text,

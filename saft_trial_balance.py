@@ -54,18 +54,28 @@ def _find_child_text(elem: ET.Element, tag_suffix: str) -> str | None:
     return None
 
 
+def _local_tag(tag: str) -> str:
+    """Strip namespace prefix from an ElementTree tag."""
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
 def _iter_general_ledger_accounts(xml_stream) -> list[SaftTrialBalanceRow]:
     rows: list[SaftTrialBalanceRow] = []
 
-    # Stream parse; stop when MasterFiles ends.
+    # Stream-parse SAF-T for kontoplan.
+    # SAF-T-strukturen er: MasterFiles > GeneralLedgerAccounts > Account
+    # Noen eksportører bruker <GeneralLedgerAccount> i stedet for <Account>.
     for event, elem in ET.iterparse(xml_stream, events=("end",)):
-        tag = elem.tag
+        local = _local_tag(elem.tag)
 
-        if tag.endswith("GeneralLedgerAccount"):
+        if local in ("Account", "GeneralLedgerAccount"):
             konto = (_find_child_text(elem, "AccountID") or "").strip()
+            if not konto:
+                elem.clear()
+                continue
+
             kontonavn = (_find_child_text(elem, "AccountDescription") or "").strip()
 
-            # Balances (optional in some exports)
             od = _parse_amount(_find_child_text(elem, "OpeningDebitBalance"))
             oc = _parse_amount(_find_child_text(elem, "OpeningCreditBalance"))
             cd = _parse_amount(_find_child_text(elem, "ClosingDebitBalance"))
@@ -75,14 +85,20 @@ def _iter_general_ledger_accounts(xml_stream) -> list[SaftTrialBalanceRow]:
             ub = cd - cc
             netto = ub - ib
 
-            if konto:
-                rows.append(SaftTrialBalanceRow(konto=konto, kontonavn=kontonavn, ib=ib, ub=ub, netto=netto))
-
+            rows.append(SaftTrialBalanceRow(konto=konto, kontonavn=kontonavn, ib=ib, ub=ub, netto=netto))
             elem.clear()
 
-        elif tag.endswith("MasterFiles"):
-            # We have finished scanning MasterFiles; accounts live here.
+        elif local == "MasterFiles":
             break
+
+        elif local in ("GeneralLedgerAccounts", "Customers", "Suppliers",
+                        "TaxTable", "AnalysisTypeTable"):
+            # Container elements safe to clear (children already processed)
+            elem.clear()
+
+        # NB: Vi kaller IKKE elem.clear() for barn-elementer som AccountID,
+        # AccountDescription etc., fordi de må være tilgjengelige når
+        # parent-elementet (Account) behandles.
 
     return rows
 

@@ -880,8 +880,8 @@ def set_dataset_cache_meta(
 
     idx["versions"] = versions
     _save_index(display_name, year=y, dtype=dtype, idx=idx)
-    _audit(
-        display_name,
+    _append_audit(
+        ensure_client(display_name),
         {
             "action": "dataset_cache_set",
             "year": y,
