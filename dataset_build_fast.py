@@ -356,7 +356,7 @@ def _coerce_date_series(series: pd.Series) -> pd.Series:
     num = pd.to_numeric(series, errors="coerce")
     serial_mask = num.notna() & num.between(20000, 80000)
 
-    parsed = pd.to_datetime(series, errors="coerce", dayfirst=True)
+    parsed = pd.to_datetime(series, errors="coerce", format="mixed", dayfirst=True)
 
     if serial_mask.any():
         serial_dates = pd.to_datetime(num, unit="D", origin=_EXCEL_DATE_ORIGIN, errors="coerce")
