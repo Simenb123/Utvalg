@@ -54,16 +54,23 @@ class DatasetPage(ttk.Frame):
         self.dp.pack(fill="both", expand=True)
 
         # Eksport-linje nederst
-        row = ttk.Frame(self)
-        row.pack(fill="x", padx=8, pady=(0, 8))
+        self._export_row = ttk.Frame(self)
 
         self.btn_export = ttk.Button(
-            row,
+            self._export_row,
             text="Eksporter hovedbok til Excel",
             command=self._export_hovedbok_clicked,
+            style="Secondary.TButton",
             state="disabled",
         )
         self.btn_export.pack(side="left")
+
+        self._export_hint = ttk.Label(
+            self._export_row,
+            text="Datasettet er klart. Du kan eksportere hele hovedboken til Excel.",
+            style="Muted.TLabel",
+        )
+        self._export_hint.pack(side="left", padx=(8, 0))
 
         # Hvis bruker velger ny fil / endrer path, disable eksport igjen (best effort).
         self._install_path_watch()
@@ -71,11 +78,11 @@ class DatasetPage(ttk.Frame):
     def _install_path_watch(self) -> None:
         try:
             # Tk 8.5+
-            self.dp.path_var.trace_add("write", lambda *_a: self._set_export_enabled(False))
+            self.dp.path_var.trace_add("write", lambda *_a: self._on_path_changed())
         except Exception:
             try:
                 # Eldre API
-                self.dp.path_var.trace("w", lambda *_a: self._set_export_enabled(False))  # type: ignore[attr-defined]
+                self.dp.path_var.trace("w", lambda *_a: self._on_path_changed())  # type: ignore[attr-defined]
             except Exception:
                 return
 
@@ -84,6 +91,19 @@ class DatasetPage(ttk.Frame):
             self.btn_export.configure(state=("normal" if enabled else "disabled"))
         except Exception:
             pass
+
+        try:
+            if enabled:
+                if not self._export_row.winfo_manager():
+                    self._export_row.pack(fill="x", padx=8, pady=(0, 8))
+            elif self._export_row.winfo_manager():
+                self._export_row.pack_forget()
+        except Exception:
+            pass
+
+    def _on_path_changed(self) -> None:
+        self._last_df = None
+        self._set_export_enabled(False)
 
     def _on_dataset_ready(self, df: pd.DataFrame) -> None:
         self._last_df = df

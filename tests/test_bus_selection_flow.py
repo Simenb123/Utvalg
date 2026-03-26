@@ -9,6 +9,8 @@ import sys
 import types
 import importlib
 
+import pytest
+
 
 def make_fake_session():
     """Create a minimal fake `session` module for testing bus.emit."""
@@ -37,6 +39,19 @@ def make_fake_session():
     fake_session.UTVALG_TAB_ID = "utvalg-tab"
 
     return fake_session
+
+
+@pytest.fixture(autouse=True)
+def restore_session_and_bus():
+    """Restore sys.modules['session'] and reload bus after each test."""
+    original_session = sys.modules.get("session")
+    import bus as _bus
+    yield
+    if original_session is not None:
+        sys.modules["session"] = original_session
+    elif "session" in sys.modules:
+        del sys.modules["session"]
+    importlib.reload(_bus)
 
 
 def reload_bus_with_fake_session():

@@ -91,7 +91,7 @@ def test_build_from_file_excel_header_not_first_row_parses_amount_and_dates(tmp_
     assert pd.to_datetime(df.loc[df.index[0], "Dato"]).date() == dt.date(2025, 1, 15)
 
     # Konto/Bilag skal være tekst uten 'nan'
-    assert df["Konto"].dtype.name in {"string", "object"}
+    assert df["Konto"].dtype.name in {"string", "object", "str"}
     assert df["Konto"].astype(str).str.lower().str.contains("nan").sum() == 0
     assert df["Bilag"].astype(str).str.lower().str.contains("nan").sum() == 0
 

@@ -44,6 +44,40 @@ class BuildResult:
     cache_path: Optional[str] = None
 
 
+def _auto_detect_saft_system(client: str, saft_path: Path) -> None:
+    """Auto-detect regnskapssystem og MVA-mapping fra SAF-T header.
+
+    Kjøres bare for SAF-T-filer, og bare hvis klienten ikke allerede
+    har et regnskapssystem satt.
+    """
+    try:
+        import regnskap_client_overrides
+
+        existing_system = regnskap_client_overrides.load_accounting_system(client)
+        if existing_system:
+            return
+
+        header = saft_reader.read_saft_header(saft_path)
+        detected = saft_reader.detect_accounting_system(header)
+        if not detected:
+            return
+
+        regnskap_client_overrides.save_accounting_system(client, detected)
+        logger.info("Auto-detected accounting system '%s' for client '%s'", detected, client)
+
+        # Auto-sett MVA-mapping hvis klienten ikke har en fra før
+        existing_mva = regnskap_client_overrides.load_mva_code_mapping(client)
+        if not existing_mva:
+            import mva_system_defaults
+
+            default_mapping = mva_system_defaults.get_default_mapping(detected)
+            if default_mapping:
+                regnskap_client_overrides.save_mva_code_mapping(client, default_mapping)
+                logger.info("Auto-applied MVA mapping for system '%s', client '%s'", detected, client)
+    except Exception:
+        logger.exception("Auto-detect accounting system failed")
+
+
 def build_dataset(req: BuildRequest) -> BuildResult:
     """Bygger datasett (ren funksjon: ingen tkinter).
 
@@ -108,6 +142,10 @@ def build_dataset(req: BuildRequest) -> BuildResult:
                     )
                     if v2 is not None:
                         version_meta = v2.meta
+
+            # 2b) Auto-detect regnskapssystem fra SAF-T header (uavhengig av cache)
+            if is_saft_path(build_path):
+                _auto_detect_saft_system(req.store_client, build_path)
 
             # 3) Prøv å laste cached datasett fra sqlite (hvis finnes og signature matcher).
             if stored_version_id and cache_signature:
@@ -178,6 +216,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
     # Cache miss / ingen store_client-year: bygg datasett på vanlig måte
     if is_saft_path(build_path):
         df = saft_reader.read_saft_ledger(build_path)
+
     else:
         df = build_from_file(
             build_path,

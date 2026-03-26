@@ -90,6 +90,13 @@ class DatasetPane(ttk.Frame):
         # Eksportknappen ligger i PageDataset (for å unngå duplikate knapper).
 
         self._set_status("Klar.")
+        self._sync_source_mode(saft_mode=False)
+        self._update_build_readiness()
+
+        try:
+            self.path_var.trace_add("write", lambda *_args: self._update_build_readiness())
+        except Exception:
+            pass
 
     # ---- legacy/kompat API ----
     @property
@@ -102,8 +109,74 @@ class DatasetPane(ttk.Frame):
     def build_dataset(self) -> Tuple[pd.DataFrame, Columns]:
         req = self._gather_build_request()
         res = build_dataset(req)
-        self._apply_build_result(res, update_ml=True, show_message=True)
+        self._apply_build_result(res, update_ml=True, show_message=False)
         return res.df, res.cols
+
+    def _sync_source_mode(self, *, saft_mode: bool) -> None:
+        widgets = [
+            getattr(self, "_sheet_label", None),
+            self.sheet_combo,
+            getattr(self, "_header_label", None),
+            getattr(self, "_header_entry", None),
+            getattr(self, "_header_button", None),
+        ]
+
+        for widget in widgets:
+            if widget is None:
+                continue
+            try:
+                if saft_mode:
+                    widget.grid_remove()
+                else:
+                    widget.grid()
+            except Exception:
+                pass
+
+        hint = getattr(self, "_structure_hint_label", None)
+        if hint is not None:
+            try:
+                hint.configure(
+                    text=(
+                        getattr(self, "_structure_hint_saft_text", "")
+                        if saft_mode
+                        else getattr(self, "_structure_hint_default_text", "")
+                    )
+                )
+            except Exception:
+                pass
+
+    def _set_readiness(self, text: str, *, level: str) -> None:
+        label = getattr(self, "_readiness_lbl", None)
+        if label is None:
+            return
+
+        style_map = {
+            "info": "Status.TLabel",
+            "ready": "Ready.TLabel",
+            "warning": "Warning.TLabel",
+        }
+        label.configure(text=text, style=style_map.get(level, "Status.TLabel"))
+
+    def _update_build_readiness(self) -> None:
+        path = self.path_var.get().strip()
+        if not path:
+            self._set_readiness("Velg fil eller versjon for å starte.", level="warning")
+            return
+
+        if is_saft_path(path):
+            self._set_readiness("Klar til å bygge SAF-T-datasett.", level="ready")
+            return
+
+        if not self._headers:
+            self._set_readiness("Kontroller ark og header-rad før du bygger datasettet.", level="warning")
+            return
+
+        missing = [field for field in _REQUIRED if not self.combo_vars[field].get().strip()]
+        if missing:
+            self._set_readiness("Mangler påkrevde felt: " + ", ".join(missing), level="warning")
+            return
+
+        self._set_readiness("Klar til å bygge datasett.", level="ready")
 
     # ---- callbacks fra UI-builder ----
     def _choose_file(self) -> None:
@@ -179,13 +252,15 @@ class DatasetPane(ttk.Frame):
             return
 
         if is_saft_path(p):
+            self._sync_source_mode(saft_mode=True)
             headers = canonical_fields()
             self._headers = headers
             self._apply_headers_to_mapping_widgets(headers, saft_mode=True)
             self._guess_mapping(force=True)
-            self._set_status("SAF-T valgt (sheet/header er ikke relevant).")
+            self._set_status("SAF-T valgt. Ark og header-rad brukes ikke her.")
             return
 
+        self._sync_source_mode(saft_mode=False)
         self._refresh_sheet_choices(p)
 
         header_row = self._parse_header_row()
@@ -218,6 +293,7 @@ class DatasetPane(ttk.Frame):
 
         found = sum(1 for v in self.combo_vars.values() if v.get().strip())
         self._set_status(f"Lest {len(headers)} kolonner. Fant {found}/{len(self.combo_vars)} felt (ML/alias).")
+        self._update_build_readiness()
     def _guess_mapping(self, force: bool = True) -> None:
         p = self.path_var.get().strip()
         if not p:
@@ -227,10 +303,28 @@ class DatasetPane(ttk.Frame):
             for field, var in self.combo_vars.items():
                 if force or not var.get().strip():
                     var.set(field)
+            self._update_build_readiness()
             return
 
         if not self._headers:
+            self._update_build_readiness()
             return
+
+        # Prøv lagret klient-mapping først
+        stored = self._load_stored_client_mapping()
+        if stored:
+            applied = 0
+            for canon, src in stored.items():
+                if canon not in self.combo_vars:
+                    continue
+                if (not force) and self.combo_vars[canon].get().strip():
+                    continue
+                if src in self._headers:
+                    self.combo_vars[canon].set(src)
+                    applied += 1
+            if applied > 0:
+                self._update_build_readiness()
+                return
 
         mapping = suggest_mapping(self._headers, ml=self._ml_map)
         for canon, src in mapping.items():
@@ -240,6 +334,7 @@ class DatasetPane(ttk.Frame):
                 continue
             if src in self._headers:
                 self.combo_vars[canon].set(src)
+        self._update_build_readiness()
     def _build_dataset_clicked(self) -> None:
         try:
             req = self._gather_build_request()
@@ -251,7 +346,7 @@ class DatasetPane(ttk.Frame):
             return build_dataset(req)
 
         def done(res: BuildResult) -> None:
-            self._apply_build_result(res, update_ml=True, show_message=True)
+            self._apply_build_result(res, update_ml=True, show_message=False)
 
         def err(ex: Exception) -> None:
             logger.exception("Build dataset failed")
@@ -290,6 +385,7 @@ class DatasetPane(ttk.Frame):
 
     def _set_path(self, path: str, *, refresh_headers: bool, refresh_sheet: bool) -> None:
         path = (path or "").strip()
+        self._last_build = None
 
         # Guard: never allow internal SQLite cache files to be used as the
         # *source* dataset file.
@@ -307,6 +403,7 @@ class DatasetPane(ttk.Frame):
         if not path:
             # Clear UI when switching client/year with no active version.
             self.path_var.set("")
+            self._sync_source_mode(saft_mode=False)
 
             # Disable sheet selector
             try:
@@ -327,16 +424,81 @@ class DatasetPane(ttk.Frame):
                 except Exception:
                     pass
 
-            if refresh_headers:
-                self.status_var.set("Velg fil.")
+            self._set_status("Velg fil eller versjon for å komme i gang.", level="info")
+            self._update_build_readiness()
             return
 
         self.path_var.set(path)
+        self._sync_source_mode(saft_mode=is_saft_path(path))
         if refresh_sheet:
             self._refresh_sheet_choices(Path(path))
         if refresh_headers:
             self._load_headers(auto_detect=False)
             self._guess_mapping(force=True)
+        else:
+            self._update_build_readiness()
+
+    def _load_stored_client_mapping(self) -> Dict[str, str]:
+        """Hent lagret kolonne-mapping for aktiv klient (hvis finnes)."""
+        try:
+            if self._store_section is None:
+                return {}
+            client = (self._store_section.client_var.get() or "").strip()
+            if not client:
+                return {}
+            import regnskap_client_overrides
+            return regnskap_client_overrides.load_column_mapping(client)
+        except Exception:
+            return {}
+
+    def _auto_create_sb_from_saft(self) -> None:
+        """Opprett SB-versjon automatisk fra SAF-T-kildefilen (hvis ingen aktiv SB finnes, eller tom)."""
+        try:
+            import client_store
+            from saft_trial_balance import make_trial_balance_xlsx_from_saft
+
+            client = (self._store_section.client_var.get() or "").strip()
+            year = (self._store_section.year_var.get() or "").strip()
+            if not client or not year:
+                return
+
+            # Sjekk om SB allerede finnes og har data
+            existing_sb = client_store.get_active_version(client, year=year, dtype="sb")
+            if existing_sb is not None:
+                # Sjekk om eksisterende SB er tom (0 rader) — kan skje pga. gammel parser-bug
+                try:
+                    _sb_df = pd.read_excel(existing_sb.path)
+                    if not _sb_df.empty:
+                        return  # Har data, OK
+                    logger.info("Eksisterende SB er tom — sletter og oppretter på nytt")
+                    client_store.delete_version(
+                        client, year=year, dtype="sb", version_id=existing_sb.id
+                    )
+                except Exception:
+                    return  # Kan ikke lese — la den være
+
+            saft_path = Path(self.path_var.get().strip())
+            if not saft_path.exists():
+                return
+
+            import re
+            import tempfile
+            safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", saft_path.stem)
+            tmp_dir = Path(tempfile.mkdtemp(prefix="utvalg_sb_"))
+            tmp_xlsx = tmp_dir / f"saldobalanse_fra_{safe_stem}.xlsx"
+
+            make_trial_balance_xlsx_from_saft(saft_path, tmp_xlsx)
+
+            client_store.create_version(
+                client,
+                year=year,
+                dtype="sb",
+                src_path=tmp_xlsx,
+                make_active=True,
+            )
+            logger.info("Auto-opprettet SB fra SAF-T for %s/%s", client, year)
+        except Exception:
+            logger.debug("Auto SB fra SAF-T feilet", exc_info=True)
 
     def _refresh_sheet_choices(self, p: Path) -> None:
         sheets: list[str] = []
@@ -365,7 +527,7 @@ class DatasetPane(ttk.Frame):
         # SAF-T: mapping er forhåndsdefinert og brukes ikke som "fri" mapping i UI.
         # Vi viser likevel feltene for transparens, men låser comboboxene.
         for canon, cb in self.combo_widgets.items():
-            cb.config(values=headers)
+            cb.config(values=headers if saft_mode else ["", *headers])
             cb.config(state="disabled" if saft_mode else "readonly")
             v = self.combo_vars[canon].get().strip()
             if v and (v not in headers) and not saft_mode:
@@ -447,6 +609,17 @@ class DatasetPane(ttk.Frame):
             except Exception:
                 logger.exception("Kunne ikke oppdatere ML-map")
 
+            # Lagre mapping per klient for gjenbruk
+            try:
+                client = None
+                if self._store_section is not None:
+                    client = (self._store_section.client_var.get() or "").strip() or None
+                if client and mapping:
+                    import regnskap_client_overrides
+                    regnskap_client_overrides.save_column_mapping(client, mapping)
+            except Exception:
+                logger.debug("Kunne ikke lagre kolonne-mapping per klient", exc_info=True)
+
         # Hvis filen ble lagret som versjon: oppdater dropdown (men ikke overskriv filfeltet).
         if self._store_section is not None and res.stored_version_id:
             try:
@@ -455,14 +628,21 @@ class DatasetPane(ttk.Frame):
             except Exception:
                 logger.exception("Kunne ikke oppdatere store UI etter auto-store")
 
+        # Auto-opprett SB fra SAF-T hvis det er en SAF-T-fil og ingen aktiv SB finnes
+        if self._store_section is not None and is_saft_path(self.path_var.get()):
+            self._auto_create_sb_from_saft()
+
         try:
             r, c = res.df.shape
             if getattr(res, "loaded_from_cache", False):
-                self._set_status(f"Datasett lastet fra cache (SQL): rader={r:,} kolonner={c}".replace(",", " "))
+                self._set_status(
+                    f"Datasett lastet fra cache (SQL): rader={r:,} kolonner={c}".replace(",", " "),
+                    level="ready",
+                )
             else:
-                self._set_status(f"Datasett bygd: rader={r:,} kolonner={c}".replace(",", " "))
+                self._set_status(f"Datasett bygd: rader={r:,} kolonner={c}".replace(",", " "), level="ready")
         except Exception:
-            self._set_status("Datasett klart.")
+            self._set_status("Datasett klart.", level="ready")
 
         if show_message:
             messagebox.showinfo("Datasett", "Datasett er bygget og klart til analyse.")
@@ -472,10 +652,15 @@ class DatasetPane(ttk.Frame):
                 self._on_ready(res.df)
             except Exception:
                 logger.exception("on_ready callback failed")
-    def _set_status(self, text: str) -> None:
+    def _set_status(self, text: str, *, level: str = "info") -> None:
         if self.status_lbl is None:
             return
-        self.status_lbl.config(text=text)
+        style_map = {
+            "info": "Status.TLabel",
+            "ready": "Ready.TLabel",
+            "warning": "Warning.TLabel",
+        }
+        self.status_lbl.config(text=text, style=style_map.get(level, "Status.TLabel"))
         try:
             self.status_lbl.update_idletasks()
         except Exception:

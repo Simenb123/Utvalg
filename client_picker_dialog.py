@@ -172,8 +172,31 @@ def open_client_picker(
             parent=win,
         )
 
+    def on_search_down(event: tk.Event) -> str:  # noqa: ARG001
+        """↓ i søkefeltet → flytt fokus til listbox."""
+        if listbox.size() > 0:
+            cur = listbox.curselection()
+            idx = (cur[0] + 1) if cur and cur[0] + 1 < listbox.size() else (cur[0] if cur else 0)
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(idx)
+            listbox.activate(idx)
+            listbox.see(idx)
+            listbox.focus_set()
+        return "break"
+
+    def on_listbox_up(event: tk.Event) -> str | None:  # noqa: ARG001
+        """↑ øverst i listbox → flytt fokus tilbake til søkefeltet."""
+        cur = listbox.curselection()
+        if not cur or cur[0] == 0:
+            ent.focus_set()
+            ent.icursor(tk.END)
+            return "break"
+        return None
+
     # Bindinger
     query_var.trace_add("write", lambda *_: apply_filter())
+    ent.bind("<Down>", on_search_down)
+    listbox.bind("<Up>", on_listbox_up)
     listbox.bind("<Double-Button-1>", on_double_click)
     win.bind("<Return>", lambda *_: on_ok())
     win.bind("<Escape>", lambda *_: on_cancel())

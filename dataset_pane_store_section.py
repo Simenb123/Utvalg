@@ -179,8 +179,8 @@ class ClientStoreSection:
         w.cb_client.bind("<Return>", lambda _e: sec._debounced_refresh())
         w.cb_client.bind("<FocusOut>", lambda _e: sec._debounced_refresh())
         w.cb_hb.bind("<<ComboboxSelected>>", lambda _e: sec._on_select_hb())
-        w.ent_year.bind("<Return>", lambda _e: sec._debounced_refresh())
-        w.ent_year.bind("<FocusOut>", lambda _e: sec._debounced_refresh())
+        w.cb_year.bind("<<ComboboxSelected>>", lambda _e: sec._debounced_refresh())
+        w.cb_year.bind("<Return>", lambda _e: sec._debounced_refresh())
 
         sec.refresh()
         return sec
