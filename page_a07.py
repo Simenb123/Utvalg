@@ -2158,12 +2158,12 @@ class A07Page(ttk.Frame):
             justify="right",
         ).pack(side="right", padx=(0, 10))
 
-        control_workspace = ttk.Panedwindow(tab_control, orient="vertical")
+        control_workspace = ttk.Frame(tab_control)
         control_workspace.pack(fill="both", expand=True, pady=(8, 0))
         self.control_workspace = control_workspace
 
         control_top = ttk.Panedwindow(control_workspace, orient="horizontal")
-        control_workspace.add(control_top, weight=8)
+        control_top.pack(fill="both", expand=True)
 
         control_gl_panel = ttk.LabelFrame(control_top, text="GL-kontoer", padding=(8, 8))
         control_assign_panel = ttk.Frame(control_top, padding=(2, 22, 2, 0))
@@ -2222,10 +2222,10 @@ class A07Page(ttk.Frame):
             button.state(["disabled"])
 
         control_lower = ttk.Frame(control_workspace)
-        control_workspace.add(control_lower, weight=2)
+        control_lower.pack(fill="x", pady=(8, 0))
         self.control_lower_panel = control_lower
 
-        control_status = ttk.LabelFrame(control_lower, text="Valgt kode", padding=(8, 6))
+        control_status = ttk.LabelFrame(control_lower, text="Valgt kode", padding=(8, 5))
         control_status.pack(fill="x")
         self.control_panel = control_status
         control_status.columnconfigure(0, weight=1)
@@ -2288,12 +2288,11 @@ class A07Page(ttk.Frame):
         control_detail_panes.add(control_suggest_panel, weight=3)
         control_suggest_actions = ttk.Frame(control_suggest_panel)
         control_suggest_actions.pack(fill="x", pady=(0, 8))
-        ttk.Button(control_suggest_actions, text="Oppdater forslag", command=self._refresh_clicked).pack(side="right")
-        ttk.Button(control_suggest_actions, text="Tryllestav (valgt)", command=self._run_selected_control_action).pack(
+        ttk.Button(control_suggest_actions, text="Tryllestav", command=self._run_selected_control_action).pack(
             side="right",
-            padx=(0, 6),
+            padx=(0, 0),
         )
-        ttk.Button(control_suggest_actions, text="Bruk valgt", command=self._apply_selected_suggestion).pack(
+        ttk.Button(control_suggest_actions, text="Bruk forslag", command=self._apply_selected_suggestion).pack(
             side="right",
             padx=(0, 6),
         )
