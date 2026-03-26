@@ -57,11 +57,17 @@ def add_previous_year_columns(
     regnskapslinjer: pd.DataFrame,
     *,
     account_overrides: Optional[dict[str, int]] = None,
+    prior_year_overrides: Optional[dict[str, int]] = None,
 ) -> pd.DataFrame:
     """Legg til fjorårskolonner på en eksisterende RL-pivot DataFrame.
 
     Forventer at pivot_df har kolonnene: regnr, regnskapslinje, IB, Endring, UB, Antall.
     Legger til: UB_fjor, Endring_fjor, Endring_pct.
+
+    Args:
+        account_overrides: Inneværende års overstyringer (brukes ikke for fjor).
+        prior_year_overrides: Forrige års egne overstyringer. Hvis None,
+            brukes account_overrides som fallback (gammel oppførsel).
 
     Returnerer pivot_df med ekstra kolonner (NaN der fjorårsdata mangler).
     """
@@ -70,8 +76,11 @@ def add_previous_year_columns(
     if sb_prev is None or sb_prev.empty:
         return _add_empty_prev_cols(pivot_df)
 
+    # Bruk fjorår-overrides for fjorårs-SB, fallback til inneværende
+    prev_overrides = prior_year_overrides if prior_year_overrides is not None else account_overrides
+
     try:
-        prev_ib_ub = _aggregate_sb_to_regnr(sb_prev, intervals, account_overrides=account_overrides)
+        prev_ib_ub = _aggregate_sb_to_regnr(sb_prev, intervals, account_overrides=prev_overrides)
     except Exception as exc:
         log.warning("add_previous_year_columns: aggregering feilet: %s", exc)
         return _add_empty_prev_cols(pivot_df)

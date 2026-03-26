@@ -178,6 +178,60 @@ def test_mva_fields_preserve_other_data(tmp_path, monkeypatch) -> None:
     assert regnskap_client_overrides.load_mva_code_mapping("Testklient") == {"1": "1", "11": "11"}
 
 
+def test_year_specific_overrides(tmp_path, monkeypatch) -> None:
+    """Year-specific overrides take priority; fallback to year-agnostic."""
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides
+
+    # Save year-agnostic (legacy)
+    regnskap_client_overrides.save_account_overrides("Testklient", {"1500": 610})
+    assert regnskap_client_overrides.load_account_overrides("Testklient") == {"1500": 610}
+
+    # Without year, we get the legacy value
+    assert regnskap_client_overrides.load_account_overrides("Testklient", year=None) == {"1500": 610}
+    # With a year that has no year-specific overrides, we still get legacy
+    assert regnskap_client_overrides.load_account_overrides("Testklient", year="2024") == {"1500": 610}
+
+    # Save year-specific overrides for 2024
+    regnskap_client_overrides.save_account_overrides(
+        "Testklient", {"1500": 620, "3000": 10}, year="2024")
+
+    # Year-specific now takes priority
+    assert regnskap_client_overrides.load_account_overrides("Testklient", year="2024") == {"1500": 620, "3000": 10}
+    # A different year still falls back to legacy (which was updated to match 2024's save)
+    loaded_2023 = regnskap_client_overrides.load_account_overrides("Testklient", year="2023")
+    # 2023 has no year-specific, falls back to account_overrides (updated by last save)
+    assert loaded_2023 == {"1500": 620, "3000": 10}
+
+    # Save 2023-specific
+    regnskap_client_overrides.save_account_overrides(
+        "Testklient", {"1500": 610}, year="2023")
+    assert regnskap_client_overrides.load_account_overrides("Testklient", year="2023") == {"1500": 610}
+    # 2024 still has its own
+    assert regnskap_client_overrides.load_account_overrides("Testklient", year="2024") == {"1500": 620, "3000": 10}
+
+
+def test_prior_year_overrides(tmp_path, monkeypatch) -> None:
+    """load_prior_year_overrides returns previous year's overrides."""
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides
+
+    # Save overrides for 2023
+    regnskap_client_overrides.save_account_overrides(
+        "Testklient", {"1500": 610}, year="2023")
+
+    # Load prior year overrides for 2024 → should get 2023's
+    prior = regnskap_client_overrides.load_prior_year_overrides("Testklient", "2024")
+    assert prior == {"1500": 610}
+
+    # No overrides for 2022 → empty
+    prior_empty = regnskap_client_overrides.load_prior_year_overrides("Testklient", "2023")
+    # 2022 has no year-specific, falls back to legacy (which is 2023's save)
+    assert prior_empty == {"1500": 610}
+
+
 def test_mva_code_mapping_cleans_input(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 

@@ -43,15 +43,18 @@ def _load_current_client_account_overrides() -> dict[str, int]:
     try:
         import session as _session
         client = getattr(_session, "client", None)
+        year = getattr(_session, "year", None)
     except Exception:
         client = None
+        year = None
 
     if not client:
         return {}
 
     try:
         import regnskap_client_overrides
-        return regnskap_client_overrides.load_account_overrides(str(client))
+        return regnskap_client_overrides.load_account_overrides(
+            str(client), year=str(year) if year else None)
     except Exception as exc:
         log.debug("Klientoverstyringer ikke tilgjengelig: %s", exc)
         return {}
@@ -827,9 +830,15 @@ def refresh_rl_pivot(*, page: Any) -> None:
     if has_prev:
         try:
             import previous_year_comparison
+            import regnskap_client_overrides as _rco
+            import session as _sess
+            _cl = getattr(_sess, "client", None) or ""
+            _yr = getattr(_sess, "year", None) or ""
+            prior_overrides = _rco.load_prior_year_overrides(_cl, _yr) if _cl and _yr else None
             pivot_df = previous_year_comparison.add_previous_year_columns(
                 pivot_df, sb_prev, intervals, regnskapslinjer,
                 account_overrides=account_overrides,
+                prior_year_overrides=prior_overrides,
             )
         except Exception as exc:
             log.warning("refresh_rl_pivot: fjorårskolonner feilet: %s", exc)

@@ -92,8 +92,10 @@ def _load_current_overrides(client: str) -> dict[str, int]:
         return {}
     try:
         import regnskap_client_overrides
-
-        return regnskap_client_overrides.load_account_overrides(client)
+        import session as _session
+        year = getattr(_session, "year", None) or ""
+        return regnskap_client_overrides.load_account_overrides(
+            client, year=str(year) if year else None)
     except Exception:
         return {}
 
@@ -479,7 +481,10 @@ def remove_override_for_selected_account(page: Any, *, messagebox: Any) -> None:
     try:
         import regnskap_client_overrides
 
-        regnskap_client_overrides.remove_account_override(client, konto)
+        import session as _session
+        year = getattr(_session, "year", None) or ""
+        regnskap_client_overrides.remove_account_override(
+            client, konto, year=str(year) if year else None)
     except Exception as exc:
         _show_message(messagebox, "showerror", "Analyse-detaljer", f"Kunne ikke fjerne override.\n\n{exc}", parent=page)
         return
@@ -521,7 +526,11 @@ def apply_suggestion_for_selected_account(page: Any, *, messagebox: Any) -> None
     try:
         import regnskap_client_overrides
 
-        regnskap_client_overrides.set_account_override(client, konto, int(suggestion.suggested_regnr))
+        import session as _session
+        year = getattr(_session, "year", None) or ""
+        regnskap_client_overrides.set_account_override(
+            client, konto, int(suggestion.suggested_regnr),
+            year=str(year) if year else None)
     except Exception as exc:
         _show_message(messagebox, "showerror", "Analyse-detaljer", f"Kunne ikke lagre forslaget.\n\n{exc}", parent=page)
         return

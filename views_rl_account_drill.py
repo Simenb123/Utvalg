@@ -73,7 +73,10 @@ def open_account_mapping_dialog(
     try:
         import regnskap_client_overrides
 
-        current_overrides = regnskap_client_overrides.load_account_overrides(client)
+        import session as _session
+        _year = getattr(_session, "year", None) or ""
+        current_overrides = regnskap_client_overrides.load_account_overrides(
+            client, year=str(_year) if _year else None)
     except Exception:
         current_overrides = {}
 
@@ -113,7 +116,10 @@ def open_account_mapping_dialog(
         try:
             import regnskap_client_overrides
 
-            regnskap_client_overrides.set_account_override(client, konto, regnr)
+            import session as _session
+            _yr = getattr(_session, "year", None) or ""
+            regnskap_client_overrides.set_account_override(
+                client, konto, regnr, year=str(_yr) if _yr else None)
         except Exception as exc:
             messagebox.showerror("Endre mapping", f"Kunne ikke lagre mapping.\n\n{exc}", parent=win)
             return
@@ -128,7 +134,10 @@ def open_account_mapping_dialog(
         try:
             import regnskap_client_overrides
 
-            regnskap_client_overrides.remove_account_override(client, konto)
+            import session as _session
+            _yr = getattr(_session, "year", None) or ""
+            regnskap_client_overrides.remove_account_override(
+                client, konto, year=str(_yr) if _yr else None)
         except Exception as exc:
             messagebox.showerror("Endre mapping", f"Kunne ikke fjerne override.\n\n{exc}", parent=win)
             return
@@ -300,7 +309,10 @@ class RLAccountDrillDialog(tk.Toplevel):
             return {}
         try:
             import regnskap_client_overrides
-            return regnskap_client_overrides.load_account_overrides(self.client)
+            import session as _session
+            _year = getattr(_session, "year", None) or ""
+            return regnskap_client_overrides.load_account_overrides(
+                self.client, year=str(_year) if _year else None)
         except Exception:
             return {}
 
@@ -369,7 +381,10 @@ class RLAccountDrillDialog(tk.Toplevel):
         konto = str(selected.get("Konto", "") or "").strip()
         try:
             import regnskap_client_overrides
-            regnskap_client_overrides.remove_account_override(self.client, konto)
+            import session as _session
+            _yr = getattr(_session, "year", None) or ""
+            regnskap_client_overrides.remove_account_override(
+                self.client, konto, year=str(_yr) if _yr else None)
         except Exception as exc:
             messagebox.showerror("RL-drilldown", f"Kunne ikke fjerne override.\n\n{exc}", parent=self)
             return

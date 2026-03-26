@@ -26,15 +26,82 @@ def overrides_path(client: str) -> Path:
     return overrides_dir() / f"{_client_slug(client)}.json"
 
 
-def load_account_overrides(client: str | None) -> Dict[str, int]:
+def load_account_overrides(client: str | None, *, year: str | None = None) -> Dict[str, int]:
+    """Last konto → regnr-overstyringer for klient.
+
+    Strategi:
+      - Hvis *year* er gitt, bruker vi årets overstyringer (``account_overrides_by_year[year]``).
+      - Fallback til årsagnostisk ``account_overrides`` (bakoverkompatibilitet).
+    """
     if not client:
         return {}
 
     raw = _read_payload(client)
-    mapping = raw.get("account_overrides", {}) if isinstance(raw, dict) else {}
-    if not isinstance(mapping, dict):
+    if not isinstance(raw, dict):
         return {}
 
+    # År-spesifikke overrides har prioritet
+    if year:
+        by_year = raw.get("account_overrides_by_year", {})
+        if isinstance(by_year, dict) and str(year) in by_year:
+            mapping = by_year[str(year)]
+            if isinstance(mapping, dict):
+                return _clean_overrides_dict(mapping)
+
+    # Fallback: årsagnostisk (gammel modell)
+    mapping = raw.get("account_overrides", {})
+    if not isinstance(mapping, dict):
+        return {}
+    return _clean_overrides_dict(mapping)
+
+
+def save_account_overrides(client: str, overrides: Dict[str, int],
+                           *, year: str | None = None) -> Path:
+    """Lagre konto → regnr-overstyringer.
+
+    Hvis *year* er gitt, lagres under ``account_overrides_by_year[year]``.
+    Den årsagnostiske ``account_overrides`` oppdateres også for
+    bakoverkompatibilitet.
+    """
+    clean = _clean_overrides_dict(overrides)
+
+    payload = _read_payload(client)
+    payload["client"] = str(client)
+
+    # Alltid oppdater årsagnostisk kopi (bakoverkompatibilitet)
+    payload["account_overrides"] = clean
+
+    # Lagre per-år hvis year gitt
+    if year:
+        by_year = payload.get("account_overrides_by_year", {})
+        if not isinstance(by_year, dict):
+            by_year = {}
+        by_year[str(year)] = clean
+        payload["account_overrides_by_year"] = by_year
+
+    path = overrides_path(client)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def set_account_override(client: str, konto: str, regnr: int,
+                         *, year: str | None = None) -> Path:
+    current = load_account_overrides(client, year=year)
+    current[str(konto).strip()] = int(regnr)
+    return save_account_overrides(client, current, year=year)
+
+
+def remove_account_override(client: str, konto: str,
+                            *, year: str | None = None) -> Path:
+    current = load_account_overrides(client, year=year)
+    current.pop(str(konto).strip(), None)
+    return save_account_overrides(client, current, year=year)
+
+
+def _clean_overrides_dict(mapping: dict) -> Dict[str, int]:
+    """Rens og valider et konto → regnr-dict."""
     clean: Dict[str, int] = {}
     for konto, regnr in mapping.items():
         konto_s = str(konto or "").strip()
@@ -47,35 +114,19 @@ def load_account_overrides(client: str | None) -> Dict[str, int]:
     return clean
 
 
-def save_account_overrides(client: str, overrides: Dict[str, int]) -> Path:
-    clean: Dict[str, int] = {}
-    for konto, regnr in overrides.items():
-        konto_s = str(konto or "").strip()
-        if not konto_s:
-            continue
-        clean[konto_s] = int(regnr)
+def load_prior_year_overrides(client: str | None, year: str | None) -> Dict[str, int]:
+    """Last overstyringer for forrige år.
 
-    payload = _read_payload(client)
-    payload["client"] = str(client)
-    payload["account_overrides"] = clean
-
-    path = overrides_path(client)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
-    return path
-
-
-def set_account_override(client: str, konto: str, regnr: int) -> Path:
-    current = load_account_overrides(client)
-    current[str(konto).strip()] = int(regnr)
-    return save_account_overrides(client, current)
-
-
-def remove_account_override(client: str, konto: str) -> Path:
-    current = load_account_overrides(client)
-    current.pop(str(konto).strip(), None)
-    return save_account_overrides(client, current)
+    Brukes for fjorårs-SB-aggregering. Returnerer forrige års
+    egne overrides dersom de finnes, ellers tom dict.
+    """
+    if not client or not year:
+        return {}
+    try:
+        prev_year = str(int(year) - 1)
+    except (ValueError, TypeError):
+        return {}
+    return load_account_overrides(client, year=prev_year)
 
 
 def load_expected_regnskapslinjer(

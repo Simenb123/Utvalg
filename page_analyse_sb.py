@@ -220,8 +220,10 @@ def _resolve_target_kontoer(*, page: Any, sb_df: pd.DataFrame,
         import regnskap_client_overrides
         import session as _session
         client = getattr(_session, "client", None) or ""
+        year = getattr(_session, "year", None) or ""
         if client:
-            overrides = regnskap_client_overrides.load_account_overrides(client)
+            overrides = regnskap_client_overrides.load_account_overrides(
+                client, year=str(year) if year else None)
     except Exception:
         pass
 
@@ -523,7 +525,9 @@ def remap_sb_account(*, page: Any, konto: str, kontonavn: str) -> None:
     # Sjekk override
     try:
         import regnskap_client_overrides
-        overrides = regnskap_client_overrides.load_account_overrides(client)
+        year = getattr(_session, "year", None) or ""
+        overrides = regnskap_client_overrides.load_account_overrides(
+            client, year=str(year) if year else None)
         if konto in overrides:
             current_regnr = overrides[konto]
     except Exception:
@@ -1065,13 +1069,16 @@ def _execute_drag_remap(*, page: Any, kontoer: list[str],
         import regnskap_client_overrides
 
         client = getattr(_session, "client", None) or ""
+        year = getattr(_session, "year", None) or ""
         if not client:
             return
 
-        overrides = regnskap_client_overrides.load_account_overrides(client)
+        overrides = regnskap_client_overrides.load_account_overrides(
+            client, year=str(year) if year else None)
         for konto in kontoer:
             overrides[konto] = target_regnr
-        regnskap_client_overrides.save_account_overrides(client, overrides)
+        regnskap_client_overrides.save_account_overrides(
+            client, overrides, year=str(year) if year else None)
 
         # Oppdater RL-config og pivot
         page._reload_rl_config()
