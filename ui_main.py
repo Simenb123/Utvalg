@@ -321,31 +321,37 @@ class App(tk.Tk):
         except Exception:
             pass
 
-        # Oppdater Analyse
+        # Sett dataset-referanse umiddelbart (tester og andre moduler forventer dette)
         try:
-            if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
-                # AnalysePage henter df fra session og setter self.dataset = df (uten copy)
-                self.page_analyse.refresh_from_session(session)  # type: ignore[attr-defined]
-            elif hasattr(self.page_analyse, "on_dataset_loaded") and callable(getattr(self.page_analyse, "on_dataset_loaded")):
-                self.page_analyse.on_dataset_loaded(df)  # type: ignore[attr-defined]
-            else:
-                # Headless/minimal
-                setattr(self.page_analyse, "dataset", df)
+            setattr(self.page_analyse, "dataset", df)
         except Exception:
             pass
 
-        # Oppdater Resultat også (om ønskelig)
-        try:
-            if hasattr(self.page_resultat, "on_dataset_loaded") and callable(getattr(self.page_resultat, "on_dataset_loaded")):
-                self.page_resultat.on_dataset_loaded(df)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        # Defer tung refresh (pivot, filtre, SB) til etter at GUI har malt seg.
+        # Uten dette fryser appen mens alt oppdateres synkront.
+        def _deferred_refresh() -> None:
+            try:
+                if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
+                    self.page_analyse.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self.page_resultat, "on_dataset_loaded") and callable(getattr(self.page_resultat, "on_dataset_loaded")):
+                    self.page_resultat.on_dataset_loaded(df)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
+                    self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                pass
 
         try:
-            if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
-                self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
+            self.after_idle(_deferred_refresh)
         except Exception:
-            pass
+            _deferred_refresh()
 
         # Vis Analyse som neste steg
         try:

@@ -348,7 +348,7 @@ class DatasetPane(ttk.Frame):
         def done(res: BuildResult) -> None:
             self._apply_build_result(res, update_ml=True, show_message=False)
 
-        def err(ex: Exception) -> None:
+        def err(ex: BaseException, tb: str = "") -> None:
             logger.exception("Build dataset failed")
             messagebox.showerror("Datasett", f"Kunne ikke bygge datasett:\n{ex}")
             if self._on_error:
@@ -629,8 +629,12 @@ class DatasetPane(ttk.Frame):
                 logger.exception("Kunne ikke oppdatere store UI etter auto-store")
 
         # Auto-opprett SB fra SAF-T hvis det er en SAF-T-fil og ingen aktiv SB finnes
+        # Defer til etter at GUI har malt seg for å unngå frysing
         if self._store_section is not None and is_saft_path(self.path_var.get()):
-            self._auto_create_sb_from_saft()
+            try:
+                self.after_idle(self._auto_create_sb_from_saft)
+            except Exception:
+                self._auto_create_sb_from_saft()
 
         try:
             r, c = res.df.shape
