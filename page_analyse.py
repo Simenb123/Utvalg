@@ -210,9 +210,11 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._detail_summary_var = tk.StringVar(value="Velg en konto eller regnskapslinje for å se detaljer.")
         self._detail_status_var = tk.StringVar(value="Forslag og avvik vises her når en konto er valgt.")
 
-        # --- RL display options ---
+        # --- Display options ---
         self._var_hide_sumposter = tk.BooleanVar(value=False)
         self._var_include_ao = tk.BooleanVar(value=False)
+        self._var_hide_zero = tk.BooleanVar(value=False)
+        self._var_data_level = tk.StringVar(value="")
 
         # --- RL config cache ---
         self._rl_intervals = None
@@ -268,6 +270,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._refresh_mva_code_choices()
         self._apply_filters_and_refresh()
         self._adapt_pivot_columns_for_mode()
+        self._update_data_level()
 
     def _reload_rl_config(self) -> None:
         """Last intervall-mapping, regnskapslinjer og aktiv SB on-demand (best-effort)."""
@@ -602,6 +605,14 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         except Exception:
             pass
 
+    def _on_hide_zero_changed(self, _event=None) -> None:
+        """Toggle synlighet for kontoer med saldo = 0 i pivot-treet."""
+        try:
+            self._refresh_pivot()
+            self._refresh_transactions_view()
+        except Exception:
+            pass
+
     def _on_include_ao_changed(self, _event=None) -> None:
         """Toggle tilleggsposteringer (ÅO) i pivot og SB-visning."""
         try:
@@ -695,6 +706,65 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
     def _refresh_pivot(self) -> None:
         page_analyse_pivot.refresh_pivot(page=self)
+        self._update_ao_count_label()
+
+    def _update_ao_count_label(self) -> None:
+        """Vis antall tilleggsposteringer ved ÅO-checkboxen."""
+        lbl = getattr(self, "_ao_count_label", None)
+        if lbl is None:
+            return
+        try:
+            import regnskap_client_overrides
+            client = getattr(session, "client", None) or ""
+            year = str(getattr(session, "year", "") or "")
+            if client and year:
+                entries = regnskap_client_overrides.load_supplementary_entries(client, year)
+                count = len(entries)
+                lbl.configure(text=f"({count})" if count else "")
+            else:
+                lbl.configure(text="")
+        except Exception:
+            lbl.configure(text="")
+
+    def _has_transactions(self) -> bool:
+        """Sjekk om transaksjonsdata er tilgjengelig (ikke bare SB)."""
+        df = getattr(self, "dataset", None)
+        if df is None:
+            return False
+        if isinstance(df, pd.DataFrame) and df.empty:
+            return False
+        return True
+
+    def _update_data_level(self) -> None:
+        """Oppdater datanivå-indikator og aktiver/deaktiver TX-avhengige funksjoner."""
+        has_tx = self._has_transactions()
+        sb_df = getattr(self, "_rl_sb_df", None)
+        has_sb = sb_df is not None and isinstance(sb_df, pd.DataFrame) and not sb_df.empty
+
+        if has_tx:
+            level = "Hovedbok"
+        elif has_sb:
+            level = "Kun saldobalanse"
+        else:
+            level = ""
+        self._var_data_level.set(level)
+
+        # Deaktiver TX-visning i TB-only
+        tx_combo = getattr(self, "_tx_view_combo", None)
+        if tx_combo is not None:
+            try:
+                if has_tx:
+                    tx_combo.state(["!disabled"])
+                else:
+                    tx_combo.state(["disabled"])
+                    # Tving SB-modus om transaksjoner mangler
+                    if has_sb and not has_tx:
+                        try:
+                            self._var_tx_view_mode.set("Saldobalansekontoer")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
     def _select_all_accounts(self) -> None:
         page_analyse_pivot.select_all_accounts(page=self)

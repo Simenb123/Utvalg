@@ -74,6 +74,31 @@ def refresh_pivot(*, page: Any) -> None:
 
     pivot_df = build_pivot_by_account(df_filtered)
 
+    # Skjul nullsaldo-kontoer om brukeren har valgt det
+    hide_zero = False
+    try:
+        var = getattr(page, "_var_hide_zero", None)
+        if var is not None:
+            hide_zero = bool(var.get())
+    except Exception:
+        pass
+
+    # Last konto-kommentarer
+    account_comments: dict[str, str] = {}
+    try:
+        import regnskap_client_overrides as _rco
+        import session as _sess
+        _cl = getattr(_sess, "client", None) or ""
+        if _cl:
+            account_comments = _rco.load_comments(_cl).get("accounts", {})
+    except Exception:
+        pass
+
+    try:
+        tree.tag_configure("commented", foreground="#1565C0")
+    except Exception:
+        pass
+
     # Cache siste pivot for eksport
     try:
         page._pivot_df_last = pivot_df.copy()
@@ -87,11 +112,19 @@ def refresh_pivot(*, page: Any) -> None:
         sum_val = row.get("Sum beløp", 0.0)
         cnt_val = row.get("Antall bilag", 0)
 
+        if hide_zero and abs(float(sum_val or 0)) < 0.005:
+            continue
+
+        comment = account_comments.get(konto, "")
+        tags = ("commented",) if comment else ()
+        if comment:
+            navn = f"\u270e {navn}  \u2014 {comment}"
+
         sum_txt = formatting.fmt_amount(sum_val)
         cnt_txt = formatting.format_int_no(cnt_val)
 
         try:
-            tree.insert("", "end", values=(konto, navn, "", "", sum_txt, cnt_txt))
+            tree.insert("", "end", values=(konto, navn, "", "", sum_txt, cnt_txt), tags=tags)
         except Exception:
             # Defensive: one bad row should not break UI
             continue

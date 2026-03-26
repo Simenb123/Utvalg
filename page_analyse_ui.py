@@ -426,6 +426,13 @@ def build_ui(
     actions_btn = ttk.Menubutton(row1, text="Handlinger ▾", direction="below")
     actions_btn.grid(row=0, column=12, sticky="e")
 
+    # Datanivå-indikator (Hovedbok / Kun saldobalanse)
+    data_level_var = getattr(page, "_var_data_level", None)
+    if data_level_var is not None:
+        lbl_data_level = ttk.Label(row1, textvariable=data_level_var, style="Muted.TLabel")
+        lbl_data_level.grid(row=0, column=13, sticky="e", padx=(12, 0))
+        page._lbl_data_level = lbl_data_level
+
     actions_menu = tk.Menu(actions_btn, tearoff=False)
     actions_btn["menu"] = actions_menu
 
@@ -582,7 +589,17 @@ def build_ui(
         cb_hide_sum.grid(row=0, column=11, sticky="w", padx=(12, 0))
         page._cb_hide_sumposter = cb_hide_sum
 
-    # Inkluder tilleggsposteringer (ÅO)
+    # Skjul nullsaldo-kontoer
+    var_hide_zero = getattr(page, "_var_hide_zero", None)
+    if var_hide_zero is not None:
+        cb_hide_zero = ttk.Checkbutton(
+            row2, text="Skjul 0",
+            variable=var_hide_zero,
+            command=page._on_hide_zero_changed,
+        )
+        cb_hide_zero.grid(row=0, column=12, sticky="w", padx=(8, 0))
+
+    # Inkluder tilleggsposteringer (ÅO) med indikator
     var_include_ao = getattr(page, "_var_include_ao", None)
     if var_include_ao is not None:
         cb_ao = ttk.Checkbutton(
@@ -590,9 +607,12 @@ def build_ui(
             variable=var_include_ao,
             command=page._on_include_ao_changed,
         )
-        cb_ao.grid(row=0, column=12, sticky="w", padx=(8, 0))
+        cb_ao.grid(row=0, column=13, sticky="w", padx=(8, 0))
+        ao_count_label = ttk.Label(row2, text="", style="Muted.TLabel")
+        ao_count_label.grid(row=0, column=14, sticky="w", padx=(2, 0))
+        page._ao_count_label = ao_count_label
 
-    row2.grid_columnconfigure(13, weight=1)
+    row2.grid_columnconfigure(15, weight=1)
 
     row3 = ttk.Frame(filter_frame)
     row3.pack(fill="x", pady=(4, 0))
@@ -771,6 +791,10 @@ def build_ui(
             pivot_tree.tag_configure("sumline_major", background="#D6E2EF", foreground="#1A3350")
         except Exception:
             pass
+    try:
+        pivot_tree.tag_configure("commented", foreground="#1565C0")
+    except Exception:
+        pass
 
     pv_scroll = ttk.Scrollbar(pivot_frame, orient="vertical", command=pivot_tree.yview)
     pv_scroll.grid(row=0, column=1, sticky="ns")
@@ -944,6 +968,7 @@ def build_ui(
             width=20,
         )
         _tx_mode_cb.grid(row=0, column=1, sticky="w")
+        page._tx_view_combo = _tx_mode_cb
 
         _on_tx_mode_fn = getattr(page, "_on_tx_view_mode_changed", None)
         if callable(_on_tx_mode_fn):

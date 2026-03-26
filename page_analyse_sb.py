@@ -411,13 +411,29 @@ def refresh_sb_view(*, page: Any) -> None:
 # =====================================================================
 
 def _bind_sb_once(*, page: Any, tree: Any) -> None:
-    """Bind høyreklikk og drag-n-drop på SB-tree — kalles kun én gang."""
+    """Bind høyreklikk, dobbeltklikk og drag-n-drop på SB-tree — kalles kun én gang."""
     if getattr(tree, "_sb_events_bound", False):
         return
     tree._sb_events_bound = True  # type: ignore[attr-defined]
 
     _bind_sb_rightclick(page=page, tree=tree)
     _bind_sb_drag_drop(page=page, tree=tree)
+
+    def _on_sb_dblclick(event: Any) -> None:
+        """Dobbeltklikk på SB-konto → drill til transaksjoner."""
+        iid = tree.identify_row(event.y)
+        if not iid:
+            return
+        try:
+            values = tree.item(iid, "values")
+            konto = str(values[0]).strip() if values else ""
+        except Exception:
+            return
+        if not konto or konto.startswith("\u03a3"):  # Skip sum-rader
+            return
+        show_sb_account_transactions(page=page, konto=konto)
+
+    tree.bind("<Double-1>", _on_sb_dblclick, add=True)
 
 
 def _bind_sb_rightclick(*, page: Any, tree: Any) -> None:

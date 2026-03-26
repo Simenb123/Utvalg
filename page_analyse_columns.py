@@ -129,26 +129,33 @@ def show_pivot_column_menu(*, page: Any, event: Any) -> None:
     menu.add_separator()
     menu.add_command(label="Standard", command=lambda: reset_pivot_columns(page=page))
 
-    # Kommentar-alternativ hvis høyreklikk treffer en rad i RL-modus
+    # Kommentar-alternativ for RL- og Konto-modus
     agg_mode = ""
     try:
         agg_mode = str(page._var_aggregering.get()) if page._var_aggregering else ""
     except Exception:
         pass
 
-    if agg_mode == "Regnskapslinje" and tree is not None:
+    if tree is not None:
         try:
             item = tree.identify_row(event.y)
             if item:
                 vals = tree.item(item, "values")
                 if vals:
-                    regnr = str(vals[0]).strip()
-                    rl_name = str(vals[1]).strip() if len(vals) > 1 else ""
-                    menu.add_separator()
-                    menu.add_command(
-                        label=f"Kommentar for {regnr} {rl_name}\u2026",
-                        command=lambda: _open_rl_comment(page=page, regnr=regnr, rl_name=rl_name),
-                    )
+                    first_col = str(vals[0]).strip()
+                    second_col = str(vals[1]).strip() if len(vals) > 1 else ""
+                    if first_col and not first_col.startswith("\u03a3"):
+                        menu.add_separator()
+                        if agg_mode == "Regnskapslinje":
+                            menu.add_command(
+                                label=f"Kommentar for {first_col} {second_col}\u2026",
+                                command=lambda: _open_rl_comment(page=page, regnr=first_col, rl_name=second_col),
+                            )
+                        elif agg_mode in ("Konto", ""):
+                            menu.add_command(
+                                label=f"Kommentar for {first_col} {second_col}\u2026",
+                                command=lambda: _open_account_comment(page=page, konto=first_col, kontonavn=second_col),
+                            )
         except Exception:
             pass
 
@@ -164,6 +171,17 @@ def _open_rl_comment(*, page: Any, regnr: str, rl_name: str) -> None:
         import page_analyse_sb
         page_analyse_sb._edit_comment(
             page=page, kind="rl", key=regnr, label=f"{regnr} {rl_name}",
+        )
+    except Exception:
+        pass
+
+
+def _open_account_comment(*, page: Any, konto: str, kontonavn: str) -> None:
+    """Åpne kommentar-dialog for en konto i konto-pivot."""
+    try:
+        import page_analyse_sb
+        page_analyse_sb._edit_comment(
+            page=page, kind="accounts", key=konto, label=f"{konto} {kontonavn}",
         )
     except Exception:
         pass

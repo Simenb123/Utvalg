@@ -919,6 +919,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         _comment = _rl_comments.get(regnr, "")
         if _comment and regnr_int not in sumline_regnr:
             navn = f"\u270e {navn}  \u2014 {_comment}"
+            tags = tags + ("commented",) if tags else ("commented",)
 
         try:
             tree.insert("", "end", values=(regnr, navn, ib_txt, endring_txt, ub_txt, cnt_txt,
