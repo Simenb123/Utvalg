@@ -3,5 +3,6 @@ numpy
 openpyxl
 chardet
 lxml
+pyinstaller
 pytest
 pytest-cov

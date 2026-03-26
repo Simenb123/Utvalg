@@ -13,6 +13,7 @@ venv/
 .coverage.*
 .pytest_cache/
 htmlcov/
+*.log
 
 # IDE / editor
 .idea/
@@ -21,6 +22,7 @@ htmlcov/
 !.vscode/tasks.json
 !.vscode/settings.json
 !.vscode/extensions.json
+.claude/
 
 # Local app/session/runtime data
 .session/
@@ -28,6 +30,14 @@ clients/
 clients_index.json
 clients_index.stamp
 utvalg_data_dir.txt
+
+# Local build outputs
+build_exe/
+dist_exe/
+*.spec
+
+# Binary test/doc data
+doc/*.xlsx
 
 # OS cruft
 Thumbs.db

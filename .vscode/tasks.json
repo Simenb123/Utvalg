@@ -14,7 +14,7 @@
       "problemMatcher": []
     },
     {
-      "label": "Kjør Tester",
+      "label": "Kjor Tester",
       "type": "shell",
       "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
       "args": [
@@ -23,6 +23,18 @@
         "--override-ini",
         "addopts=",
         "-q"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Bygg EXE",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": [
+        "${workspaceFolder}\\build_exe.py"
       ],
       "options": {
         "cwd": "${workspaceFolder}"

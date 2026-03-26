@@ -28,6 +28,18 @@ def test_write_runtime_hook_creates_file(tmp_path: Path) -> None:
     assert "sys.executable" in content
 
 
+def test_write_runtime_hook_can_embed_data_dir_fallback(tmp_path: Path) -> None:
+    import build_exe
+
+    data_dir = tmp_path / "shared_data"
+    hook = build_exe.write_runtime_hook_set_cwd(tmp_path, data_dir=data_dir)
+    content = hook.read_text(encoding="utf-8")
+
+    assert "EMBEDDED_DATA_DIR" in content
+    assert repr(str(data_dir.resolve())) in content
+    assert "UTVALG_DATA_DIR" in content
+
+
 def test_build_pyinstaller_args_contains_expected_flags(tmp_path: Path) -> None:
     # Arrange
     (tmp_path / "app.py").write_text("print('hello')", encoding="utf-8")
@@ -113,3 +125,26 @@ def test_ensure_pyinstaller_available_raises_when_missing(monkeypatch) -> None:
         build_exe.ensure_pyinstaller_available()
 
     assert "pip install pyinstaller" in str(e.value).lower()
+
+
+def test_copy_sidecar_files_writes_active_data_dir_hint_and_preferences(tmp_path: Path, monkeypatch) -> None:
+    import build_exe
+
+    project_root = tmp_path / "project"
+    dist_dir = tmp_path / "dist"
+    data_dir = tmp_path / "shared_data"
+    project_root.mkdir()
+    data_dir.mkdir()
+
+    pref_src = project_root / ".session" / "preferences.json"
+    pref_src.parent.mkdir(parents=True, exist_ok=True)
+    pref_src.write_text('{"last_client": "Nbs Regnskap AS"}', encoding="utf-8")
+
+    monkeypatch.setattr(build_exe.app_paths, "data_dir", lambda app_name="Utvalg": data_dir)
+
+    build_exe._copy_sidecar_files(project_root=project_root, dist_dir=dist_dir)
+
+    assert (dist_dir / "utvalg_data_dir.txt").read_text(encoding="utf-8").strip() == str(data_dir)
+    assert (dist_dir / ".session" / "preferences.json").read_text(encoding="utf-8") == (
+        '{"last_client": "Nbs Regnskap AS"}'
+    )
