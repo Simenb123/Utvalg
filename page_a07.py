@@ -1327,7 +1327,7 @@ def compact_control_next_action(next_action: object) -> str:
         return "Forslag"
     if action_s == "Map manuelt.":
         return "Manuell"
-    if action_s == "Ingen handling nÃ¸dvendig.":
+    if action_s == "Ingen handling nødvendig.":
         return "Ingen"
     return action_s or "-"
 
@@ -1660,7 +1660,7 @@ def build_mapping_history_details(
     elif previous_accounts:
         relation = "Historikk finnes, men ikke mapping i aar."
     else:
-        relation = "Ingen mapping ennÃ¥."
+        relation = "Ingen mapping ennå."
 
     history_label = previous_year or "tidligere aar"
     return f"{code_s} | I aar: {current_text} | {history_label}: {previous_text} | {relation}"
@@ -3577,7 +3577,8 @@ class A07Page(ttk.Frame):
         self._on_control_selection_changed()
 
     def _select_primary_tab(self) -> None:
-        return
+        """No-op: arbeidsflaten bruker ikke interne tabs som kan byttes."""
+        pass
 
     def _restore_context_state(self, client: str | None, year: str | None) -> None:
         self.workspace.a07_df = _empty_a07_df()
@@ -3797,12 +3798,6 @@ class A07Page(ttk.Frame):
             self._notify_inline(
                 "Last A07 og bruk aktiv saldobalanse for valgt klient/aar for du eksporterer.",
                 focus_widget=self,
-            )
-            return
-        if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
-            messagebox.showinfo(
-                "A07",
-                "Last A07 JSON og sÃ¸rg for at valgt klient/aar har en aktiv saldobalanse i Utvalg for du eksporterer.",
             )
             return
 
@@ -4488,12 +4483,6 @@ class A07Page(ttk.Frame):
                 focus_widget=self,
             )
             return
-        if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
-            messagebox.showinfo(
-                "A07",
-                "Last A07 JSON og sørg for at valgt klient/år har en aktiv saldobalanse i Utvalg.",
-            )
-            return
 
         try:
             selected_code = self._selected_control_code()
@@ -4514,19 +4503,6 @@ class A07Page(ttk.Frame):
                 self._notify_inline(
                     f"Tryllestav fant ingen trygge forslag. Skippet {skipped_total} uloste koder.",
                     focus_widget=self.tree_a07,
-                )
-                return
-                self.status_var.set(
-                    f"Tryllestav fant ingen trygge forslag. Skippet {skipped_total} uloste koder."
-                )
-                messagebox.showinfo(
-                    "A07",
-                    f"Tryllestav fant ingen trygge forslag. Skippet {skipped_total} uloste koder.",
-                )
-                return
-                messagebox.showinfo(
-                    "A07",
-                    "Tryllestav fant ingen trygge historikk- eller solverforslag å bruke automatisk.",
                 )
                 return
 
@@ -4551,12 +4527,6 @@ class A07Page(ttk.Frame):
             self._notify_inline(
                 "Last A07 og bruk aktiv saldobalanse for valgt klient/aar for aa lage mapping.",
                 focus_widget=self,
-            )
-            return
-        if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
-            messagebox.showinfo(
-                "A07",
-                "Last A07 JSON og bruk aktiv saldobalanse for valgt klient/aar for aa lage mapping.",
             )
             return
 

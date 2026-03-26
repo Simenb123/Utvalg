@@ -547,7 +547,7 @@ def test_compact_control_next_action_shortens_user_hint() -> None:
     assert page_a07.compact_control_next_action("Bruk historikk.") == "Historikk"
     assert page_a07.compact_control_next_action("Bruk beste forslag.") == "Forslag"
     assert page_a07.compact_control_next_action("Map manuelt.") == "Manuell"
-    assert page_a07.compact_control_next_action("Ingen handling nÃ¸dvendig.") == "Ingen"
+    assert page_a07.compact_control_next_action("Ingen handling nødvendig.") == "Ingen"
 
 
 def test_build_control_queue_df_summarizes_mapping_history_and_best_suggestion() -> None:
@@ -1118,7 +1118,7 @@ def test_filter_a07_overview_df_keeps_custom_columns_for_control_queue() -> None
     control_df = pd.DataFrame(
         [
             {"Kode": "bonus", "Status": "Avvik", "NesteHandling": "Map manuelt."},
-            {"Kode": "aga", "Status": "Ekskludert", "NesteHandling": "Ingen handling nÃ¸dvendig."},
+            {"Kode": "aga", "Status": "Ekskludert", "NesteHandling": "Ingen handling nødvendig."},
         ]
     )
 
