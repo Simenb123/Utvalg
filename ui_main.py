@@ -12,10 +12,12 @@ import pandas as pd
 
 # Local imports
 import session
+import theme
 
 # Pages / views
 from page_dataset import DatasetPage
 from page_analyse import AnalysePage
+from page_a07 import A07Page
 from page_utvalg_strata import UtvalgStrataPage
 
 # "Resultat" fanen i dette repoet er implementert via page_utvalg.UtvalgPage
@@ -145,6 +147,10 @@ class App(tk.Tk):
         # --- Normal GUI-init ---
         self.title("Utvalg – revisjonsverktøy")
         self.geometry("1100x700")
+        try:
+            theme.apply_theme(self)
+        except Exception:
+            pass
 
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True)
@@ -152,12 +158,14 @@ class App(tk.Tk):
         # Pages
         self.page_dataset = DatasetPage(self.nb)
         self.page_analyse = AnalysePage(self.nb)
+        self.page_a07 = A07Page(self.nb)
         self.page_utvalg = UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample)
         self.page_resultat = UtvalgPage(self.nb)
         self.page_logg = LoggPage(self.nb)
 
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
+        self.nb.add(self.page_a07, text="A07")
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
         self.nb.add(self.page_logg, text="Logg")
@@ -193,6 +201,7 @@ class App(tk.Tk):
         self.page_dataset = SimpleNamespace(dp=dp_stub)  # type: ignore[assignment]
 
         # Resten brukes ikke av testene, men vi setter dem for robusthet
+        self.page_a07 = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
         self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
         self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
         self.page_logg = SimpleNamespace()  # type: ignore[assignment]
@@ -302,6 +311,16 @@ class App(tk.Tk):
         except Exception:
             pass
 
+        # Oppdater session.client / session.year fra DatasetPane sin store-seksjon
+        try:
+            dp = getattr(self.page_dataset, "dp", None) or getattr(self.page_dataset, "dataset_pane", None) or getattr(self.page_dataset, "pane", None)
+            sec = getattr(dp, "_store_section", None) if dp else None
+            if sec is not None:
+                session.client = (getattr(sec, "client_var", None) and sec.client_var.get() or "").strip() or None
+                session.year = (getattr(sec, "year_var", None) and sec.year_var.get() or "").strip() or None
+        except Exception:
+            pass
+
         # Oppdater Analyse
         try:
             if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
@@ -319,6 +338,12 @@ class App(tk.Tk):
         try:
             if hasattr(self.page_resultat, "on_dataset_loaded") and callable(getattr(self.page_resultat, "on_dataset_loaded")):
                 self.page_resultat.on_dataset_loaded(df)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
+                self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
         except Exception:
             pass
 

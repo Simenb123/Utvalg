@@ -461,7 +461,7 @@ class _VersionsDialog:
                 self._state.client,
                 year=self._state.year,
                 dtype=dtype,
-                source_path=str(src_path),
+                src_path=Path(src_path),
                 make_active=True,
             )
         except Exception:
@@ -504,7 +504,7 @@ class _VersionsDialog:
                 self._state.client,
                 year=self._state.year,
                 dtype="hb",
-                source_path=str(src_path),
+                src_path=Path(src_path),
                 make_active=True,
             )
         except Exception:
@@ -680,7 +680,7 @@ class _VersionsDialog:
                 self._state.client,
                 year=self._state.year,
                 dtype="sb",
-                source_path=str(tmp_xlsx),
+                src_path=tmp_xlsx,
                 make_active=bool(make_active),
             )
         except Exception:
