@@ -111,6 +111,279 @@ def combo_display_name(
     return sep.join(out_parts)
 
 
+def combo_display_name_for_mode(
+    combo: str,
+    *,
+    display_mode: str = "konto",
+    konto_navn_map: Mapping[str, str] | None = None,
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+) -> str:
+    mode = (display_mode or "konto").strip().lower()
+    if mode.startswith("regn") and konto_regnskapslinje_map:
+        return combo_display_name(combo, konto_regnskapslinje_map, include_numbers=False)
+    return combo_display_name(combo, konto_navn_map)
+
+
+def account_display_name_for_mode(
+    konto: str,
+    *,
+    display_mode: str = "konto",
+    konto_navn_map: Mapping[str, str] | None = None,
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+) -> str:
+    key = _konto_str(konto)
+    mode = (display_mode or "konto").strip().lower()
+    if mode.startswith("regn") and konto_regnskapslinje_map:
+        return str(konto_regnskapslinje_map.get(key, key) or key)
+    if konto_navn_map:
+        name = str(konto_navn_map.get(key, "") or "").strip()
+        if name:
+            return f"{key} {name}"
+    return key
+
+
+def combo_regnskapslinje_labels(
+    combo: str,
+    *,
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    label_map = konto_regnskapslinje_map or {}
+    for raw in str(combo or "").split(","):
+        key = _konto_str(raw)
+        if not key:
+            continue
+        label = str(label_map.get(key, "") or "").strip()
+        if not label or label in seen:
+            continue
+        labels.append(label)
+        seen.add(label)
+    return labels
+
+
+def find_expected_combos_by_regnskapslinjer(
+    combos: Sequence[str],
+    *,
+    expected_regnskapslinjer: Sequence[str],
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+) -> list[str]:
+    expected = {str(v).strip() for v in expected_regnskapslinjer if str(v).strip()}
+    if not expected or not konto_regnskapslinje_map:
+        return []
+
+    matched: list[str] = []
+    for combo in combos:
+        combo_key = str(combo or "").strip()
+        if not combo_key:
+            continue
+        labels = combo_regnskapslinje_labels(
+            combo_key,
+            konto_regnskapslinje_map=konto_regnskapslinje_map,
+        )
+        if labels and set(labels).issubset(expected):
+            matched.append(combo_key)
+    return matched
+
+
+def _legacy_find_expected_combos_by_netting_regnskapslinjer(
+    combos: Sequence[str],
+    *,
+    df_scope: pd.DataFrame,
+    selected_accounts: Sequence[str],
+    selected_regnskapslinjer: Sequence[str] | None = None,
+    expected_regnskapslinjer: Sequence[str],
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+    selected_direction: str | None = None,
+    tolerance: float = 1.0,
+    empty_label: str = "(ingen motkonto)",
+) -> list[str]:
+    expected = {str(v).strip() for v in expected_regnskapslinjer if str(v).strip()}
+    if not expected or not konto_regnskapslinje_map:
+        return []
+    if df_scope is None or df_scope.empty:
+        return []
+    selected_source = None
+    if selected_regnskapslinjer is not None:
+        selected_source = {str(v).strip() for v in selected_regnskapslinjer if str(v).strip()}
+        if not selected_source:
+            return []
+
+    df = _ensure_scope_columns(df_scope)
+    sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
+    if not sel_set:
+        return []
+    belop_col = "Beløp"
+    if belop_col not in df.columns:
+        for col in df.columns:
+            cleaned = str(col).strip().lower()
+            if cleaned in {"belop", "beløp", "belã¸p"}:
+                belop_col = str(col)
+                break
+
+    try:
+        tolerance_value = max(float(tolerance or 0.0), 0.0)
+    except Exception:
+        tolerance_value = 1.0
+
+    bilag_to_combo = build_bilag_to_motkonto_combo(df, list(sel_set), empty_label=empty_label)
+
+    sel_mask = df["Konto_str"].isin(sel_set)
+    selected_by_bilag = df.loc[sel_mask].groupby("Bilag_str")["Beløp"].sum()
+
+    dir_norm = normalize_direction(selected_direction)
+    if dir_norm == "kredit":
+        selected_by_bilag = selected_by_bilag.where(selected_by_bilag < 0, 0.0)
+    elif dir_norm == "debet":
+        selected_by_bilag = selected_by_bilag.where(selected_by_bilag > 0, 0.0)
+
+    regnskapslinje_labels = df["Konto_str"].map(lambda k: str((konto_regnskapslinje_map or {}).get(str(k), "") or "").strip())
+    expected_mask = (~sel_mask) & regnskapslinje_labels.isin(expected)
+    other_mask = (~sel_mask) & ~regnskapslinje_labels.isin(expected)
+
+    expected_by_bilag = df.loc[expected_mask].groupby("Bilag_str")["Beløp"].sum()
+    other_by_bilag = df.loc[other_mask].groupby("Bilag_str")["Beløp"].apply(lambda s: s.abs().sum())
+    expected_presence = df.loc[expected_mask].groupby("Bilag_str").size()
+
+    bilag_values = sorted({str(v) for v in df["Bilag_str"].dropna().astype(str).tolist() if str(v).strip()})
+    if not bilag_values:
+        return []
+
+    bilag_eval = pd.DataFrame(index=pd.Index(bilag_values, name="Bilag_str"))
+    bilag_eval["Kombinasjon"] = [str(bilag_to_combo.get(_bilag_str(v), empty_label) or "").strip() for v in bilag_values]
+    bilag_eval["SelectedNet"] = selected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["ExpectedSum"] = expected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["OtherAbs"] = other_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["HasExpected"] = expected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
+    bilag_eval["Residual"] = bilag_eval["SelectedNet"] + bilag_eval["ExpectedSum"]
+    bilag_eval["Matches"] = (
+        bilag_eval["HasExpected"]
+        & bilag_eval["Residual"].abs().le(tolerance_value)
+        & bilag_eval["OtherAbs"].le(tolerance_value)
+    )
+
+    matched_set: set[str] = set()
+    for combo_key, group in bilag_eval.groupby("Kombinasjon", dropna=False):
+        combo_text = str(combo_key or "").strip()
+        if not combo_text:
+            continue
+        if bool(group["HasExpected"].any()) and bool(group["Matches"].all()):
+            matched_set.add(combo_text)
+
+    matched: list[str] = []
+    for combo in combos:
+        combo_key = str(combo or "").strip()
+        if combo_key and combo_key in matched_set:
+            matched.append(combo_key)
+    return matched
+
+
+def find_expected_combos_by_netting_regnskapslinjer(
+    combos: Sequence[str],
+    *,
+    df_scope: pd.DataFrame,
+    selected_accounts: Sequence[str],
+    selected_regnskapslinjer: Sequence[str] | None = None,
+    expected_regnskapslinjer: Sequence[str],
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+    selected_direction: str | None = None,
+    tolerance: float = 1.0,
+    empty_label: str = "(ingen motkonto)",
+) -> list[str]:
+    expected = {str(v).strip() for v in expected_regnskapslinjer if str(v).strip()}
+    if not expected or not konto_regnskapslinje_map:
+        return []
+    if df_scope is None or df_scope.empty:
+        return []
+
+    selected_source = None
+    if selected_regnskapslinjer is not None:
+        selected_source = {str(v).strip() for v in selected_regnskapslinjer if str(v).strip()}
+        if not selected_source:
+            return []
+
+    df = _ensure_scope_columns(df_scope)
+    sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
+    if not sel_set:
+        return []
+    belop_col = "Beløp"
+    if belop_col not in df.columns:
+        for col in df.columns:
+            cleaned = str(col).strip().lower()
+            if cleaned in {"belop", "beløp", "belã¸p"}:
+                belop_col = str(col)
+                break
+
+    try:
+        tolerance_value = max(float(tolerance or 0.0), 0.0)
+    except Exception:
+        tolerance_value = 1.0
+
+    bilag_to_combo = build_bilag_to_motkonto_combo(df, list(sel_set), empty_label=empty_label)
+
+    regnskapslinje_labels = df["Konto_str"].map(
+        lambda k: str((konto_regnskapslinje_map or {}).get(str(k), "") or "").strip()
+    )
+    sel_mask = df["Konto_str"].isin(sel_set)
+    if selected_source is None:
+        selected_focus_mask = sel_mask
+    else:
+        selected_focus_mask = sel_mask & regnskapslinje_labels.isin(selected_source)
+
+    selected_by_bilag = df.loc[selected_focus_mask].groupby("Bilag_str")[belop_col].sum()
+
+    dir_norm = normalize_direction(selected_direction)
+    if dir_norm == "kredit":
+        selected_by_bilag = selected_by_bilag.where(selected_by_bilag < 0, 0.0)
+    elif dir_norm == "debet":
+        selected_by_bilag = selected_by_bilag.where(selected_by_bilag > 0, 0.0)
+
+    expected_mask = (~sel_mask) & regnskapslinje_labels.isin(expected)
+    other_mask = ~(selected_focus_mask | expected_mask)
+
+    expected_by_bilag = df.loc[expected_mask].groupby("Bilag_str")[belop_col].sum()
+    other_by_bilag = df.loc[other_mask].groupby("Bilag_str")[belop_col].apply(lambda s: s.abs().max())
+    expected_presence = df.loc[expected_mask].groupby("Bilag_str").size()
+    selected_presence = df.loc[selected_focus_mask].groupby("Bilag_str").size()
+
+    bilag_values = sorted({str(v) for v in df["Bilag_str"].dropna().astype(str).tolist() if str(v).strip()})
+    if not bilag_values:
+        return []
+
+    bilag_eval = pd.DataFrame(index=pd.Index(bilag_values, name="Bilag_str"))
+    bilag_eval["Kombinasjon"] = [str(bilag_to_combo.get(_bilag_str(v), empty_label) or "").strip() for v in bilag_values]
+    bilag_eval["SelectedNet"] = selected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["ExpectedSum"] = expected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["OtherMaxAbs"] = other_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["HasExpected"] = expected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
+    bilag_eval["HasSelected"] = selected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
+    bilag_eval["Residual"] = bilag_eval["SelectedNet"] + bilag_eval["ExpectedSum"]
+    bilag_eval["Relevant"] = bilag_eval["HasSelected"] | bilag_eval["HasExpected"]
+    bilag_eval["Matches"] = (
+        bilag_eval["Relevant"]
+        & bilag_eval["HasSelected"]
+        & bilag_eval["HasExpected"]
+        & bilag_eval["Residual"].abs().le(tolerance_value)
+        & bilag_eval["OtherMaxAbs"].le(tolerance_value)
+    )
+
+    matched_set: set[str] = set()
+    for combo_key, group in bilag_eval.groupby("Kombinasjon", dropna=False):
+        combo_text = str(combo_key or "").strip()
+        if not combo_text:
+            continue
+        relevant_group = group[group["Relevant"]]
+        if not relevant_group.empty and bool(relevant_group["Matches"].all()):
+            matched_set.add(combo_text)
+
+    matched: list[str] = []
+    for combo in combos:
+        combo_key = str(combo or "").strip()
+        if combo_key and combo_key in matched_set:
+            matched.append(combo_key)
+    return matched
+
+
 def normalize_direction(selected_direction: str | None) -> str:
     """Normaliser retning til en av: 'alle', 'debet', 'kredit'."""
     s = (selected_direction or "").strip().lower()

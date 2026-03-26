@@ -4,8 +4,15 @@ import pytest
 
 from motpost.combinations import build_bilag_to_motkonto_combo
 from motpost.combinations import build_motkonto_combinations_per_selected_account
-from motpost.combo_workflow import apply_combo_status, compute_selected_net_sum_by_combo
-from motpost_konto_core import build_motpost_excel_workbook
+from motpost.combo_workflow import (
+    account_display_name_for_mode,
+    apply_combo_status,
+    combo_display_name_for_mode,
+    find_expected_combos_by_netting_regnskapslinjer,
+    find_expected_combos_by_regnskapslinjer,
+    compute_selected_net_sum_by_combo,
+)
+from motpost_konto_core import build_bilag_details, build_motpost_excel_workbook
 from views_motpost_konto import build_motpost_data
 
 
@@ -46,6 +53,47 @@ def test_build_motpost_data_credit_only_sums():
     assert data.selected_sum == -1500.0
     # Control sum on scope should be 0.0
     assert abs(data.control_sum) < 1e-9
+
+
+def test_build_bilag_details_includes_selected_side_mva_fields() -> None:
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 2, 2],
+            "Dato": ["2025-01-01", "2025-01-01", "2025-01-01", "2025-01-02", "2025-01-02"],
+            "Konto": ["3000", "2700", "1500", "3000", "1500"],
+            "Kontonavn": ["Salg", "Utgående mva", "Kundefordringer", "Salg", "Kundefordringer"],
+            "Tekst": ["Salg A", "MVA", "Kunde A", "Salg B", "Kunde B"],
+            "Beløp": [-1000.0, 250.0, 750.0, -500.0, 500.0],
+            "MVA-kode": ["3", "", "", "", ""],
+            "MVA-prosent": ["25", "", "", "", ""],
+            "MVA-beløp": [250.0, 0.0, 0.0, 0.0, 0.0],
+        }
+    )
+
+    data = build_motpost_data(df, {"3000"}, selected_direction="Kredit")
+    details = build_bilag_details(data, "1500")
+
+    assert list(details["Bilag"]) == ["1", "2"]
+    assert details.loc[0, "MVA-kode"] == "3"
+    assert details.loc[0, "MVA-prosent"] == "25"
+    assert details.loc[0, "MVA-beløp"] == pytest.approx(250.0)
+    assert details.loc[1, "MVA-kode"] == ""
+    assert details.loc[1, "MVA-prosent"] == ""
+    assert details.loc[1, "MVA-beløp"] == pytest.approx(0.0)
+
+
+def test_build_bilag_details_uses_cached_detail_rows() -> None:
+    df = _sample_df()
+    data = build_motpost_data(df, {"3000"}, selected_direction="Kredit")
+
+    prebuilt = data.df_details.copy()
+    object.__setattr__(data, "_df_details_cache", prebuilt)
+
+    details = build_bilag_details(data, "1500")
+
+    assert list(details["Bilag"]) == ["1", "2"]
+    assert details.loc[0, "Motbel\u00f8p"] == pytest.approx(750.0)
+    assert details.loc[1, "Motbel\u00f8p"] == pytest.approx(500.0)
 
 
 def test_bilag_to_motkonto_combo_and_drilldown_symmetry():
@@ -143,6 +191,182 @@ def test_compute_selected_net_sum_by_combo_raises_on_empty_selected_accounts():
     df = _sample_df()
     with pytest.raises(ValueError):
         compute_selected_net_sum_by_combo(df, [])
+
+
+def test_combo_display_helpers_can_show_regnskapslinjer() -> None:
+    rl_map = {
+        "3000": "10 Salgsinntekt",
+        "3001": "15 Annen driftsinntekt",
+    }
+
+    combo_name = combo_display_name_for_mode(
+        "3000, 3001",
+        display_mode="Regnskapslinje",
+        konto_regnskapslinje_map=rl_map,
+    )
+    account_name = account_display_name_for_mode(
+        "3000",
+        display_mode="Regnskapslinje",
+        konto_regnskapslinje_map=rl_map,
+    )
+
+    assert combo_name == "10 Salgsinntekt; 15 Annen driftsinntekt"
+    assert account_name == "10 Salgsinntekt"
+
+
+def test_find_expected_combos_by_regnskapslinjer_matches_subset_of_expected_lines() -> None:
+    combos = ["1500", "1500, 2700", "1500, 2900", "3909"]
+    rl_map = {
+        "1500": "610 Kundefordringer",
+        "2700": "790 Skyldig offentlige avgifter",
+        "2900": "798 Konserngjeld",
+        "3909": "15 Annen driftsinntekt",
+    }
+
+    matched = find_expected_combos_by_regnskapslinjer(
+        combos,
+        expected_regnskapslinjer=["610 Kundefordringer", "790 Skyldig offentlige avgifter"],
+        konto_regnskapslinje_map=rl_map,
+    )
+
+    assert matched == ["1500", "1500, 2700"]
+
+
+def test_find_expected_combos_by_netting_regnskapslinjer_respects_tolerance() -> None:
+    combos = ["1400, 7790", "1400, 7790, 6800"]
+    rl_map = {
+        "1400": "146 Varelager",
+        "7790": "79 Sum driftskostnader",
+        "6800": "70 Annen driftskostnad",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 2, 2, 2],
+            "Konto": ["4000", "1400", "7790", "4000", "1400", "6800"],
+            "Beløp": [1000.0, -999.6, -0.4, 1000.0, -900.0, -100.0],
+        }
+    )
+
+    matched_loose = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+    matched_strict = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=0.1,
+    )
+
+    assert matched_loose == ["1400, 7790"]
+    assert matched_strict == []
+
+
+def test_find_expected_combos_by_netting_regnskapslinjer_uses_selected_source_regnskapslinjer() -> None:
+    combos = ["1400", "2400"]
+    rl_map = {
+        "4000": "20 Varekostnad",
+        "4010": "70 Annen driftskostnad",
+        "1400": "146 Varelager",
+        "2400": "780 Leverandørgjeld",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 2, 2],
+            "Konto": ["4000", "1400", "4010", "2400"],
+            "Beløp": [1000.0, -1000.0, 200.0, -200.0],
+        }
+    )
+
+    matched = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000", "4010"],
+        selected_regnskapslinjer=["20 Varekostnad"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+
+    assert matched == ["1400"]
+
+
+def test_find_expected_combos_by_netting_regnskapslinjer_allows_small_rounding_lines_per_line_threshold() -> None:
+    combos = ["1400, 6800, 6900"]
+    rl_map = {
+        "4000": "20 Varekostnad",
+        "1400": "146 Varelager",
+        "6800": "70 Annen driftskostnad",
+        "6900": "70 Annen driftskostnad",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 1],
+            "Konto": ["4000", "1400", "6800", "6900"],
+            "Beløp": [1000.0, -1000.0, -0.6, 0.6],
+        }
+    )
+
+    matched_loose = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        selected_regnskapslinjer=["20 Varekostnad"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+    matched_strict = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        selected_regnskapslinjer=["20 Varekostnad"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=0.5,
+    )
+
+    assert matched_loose == ["1400, 6800, 6900"]
+    assert matched_strict == []
+
+
+def test_find_expected_combos_by_netting_regnskapslinjer_rejects_large_unexpected_lines_even_if_they_net_to_zero() -> None:
+    combos = ["1400, 6800, 6900"]
+    rl_map = {
+        "1400": "146 Varelager",
+        "6800": "70 Annen driftskostnad",
+        "6900": "70 Annen driftskostnad",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 1],
+            "Konto": ["4000", "1400", "6800", "6900"],
+            "Beløp": [1000.0, -1000.0, -100.0, 100.0],
+        }
+    )
+
+    matched = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+
+    assert matched == []
 
 
 def _find_header_row(ws, must_contain: set[str]) -> int:

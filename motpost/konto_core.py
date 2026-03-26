@@ -161,6 +161,98 @@ def _unique_join(values: Iterable[str]) -> str:
     return ", ".join(out)
 
 
+def _find_first_column(df: pd.DataFrame, names: Iterable[str]) -> str | None:
+    for name in names:
+        if name in df.columns:
+            return name
+    return None
+
+
+def _normalize_mva_code(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return ""
+    try:
+        num = float(text.replace(" ", "").replace(",", "."))
+    except Exception:
+        return text.upper()
+    if abs(num - round(num)) < 1e-9:
+        return str(int(round(num)))
+    return text.upper()
+
+
+def _normalize_mva_percent(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"nan", "none", "<na>"}:
+        return ""
+    try:
+        num = float(text.replace(" ", "").replace(",", "."))
+    except Exception:
+        return text
+    if abs(num) <= 1.0:
+        num *= 100.0
+    if abs(num - round(num)) < 1e-9:
+        return str(int(round(num)))
+    return f"{num:.1f}".rstrip("0").rstrip(".")
+
+
+def _selected_side_mask(df: pd.DataFrame, selected_set: set[str], *, selected_direction: str = "Alle") -> pd.Series:
+    mask = df["Konto_str"].isin(selected_set)
+    dir_norm = (selected_direction or "Alle").strip().lower()
+    if dir_norm.startswith("deb"):
+        mask = mask & (df["Beløp"].map(_safe_float) > 0)
+    elif dir_norm.startswith("kre") or dir_norm.startswith("cri"):
+        mask = mask & (df["Beløp"].map(_safe_float) < 0)
+    return mask
+
+
+def _summarize_selected_side_mva(df: pd.DataFrame, selected_set: set[str], *, selected_direction: str = "Alle") -> dict[str, Any]:
+    if df is None or df.empty:
+        return {"MVA-kode": "", "MVA-prosent": "", "MVA-beløp": 0.0}
+
+    sel_mask = _selected_side_mask(df, selected_set, selected_direction=selected_direction)
+    df_sel = df.loc[sel_mask].copy()
+    if df_sel.empty:
+        return {"MVA-kode": "", "MVA-prosent": "", "MVA-beløp": 0.0}
+
+    code_col = _find_first_column(df_sel, ("MVA-kode", "mva-kode", "Mva", "mva"))
+    rate_col = _find_first_column(df_sel, ("MVA-prosent", "mva-prosent"))
+    amount_col = _find_first_column(df_sel, ("MVA-beløp", "MVA-belop", "mva-beløp", "mva-belop"))
+
+    codes: list[str] = []
+    seen_codes: set[str] = set()
+    if code_col is not None:
+        for value in df_sel[code_col].tolist():
+            token = _normalize_mva_code(value)
+            if not token or token in seen_codes:
+                continue
+            seen_codes.add(token)
+            codes.append(token)
+
+    rates: list[str] = []
+    seen_rates: set[str] = set()
+    if rate_col is not None:
+        for value in df_sel[rate_col].tolist():
+            token = _normalize_mva_percent(value)
+            if not token or token in seen_rates:
+                continue
+            seen_rates.add(token)
+            rates.append(token)
+
+    mva_amount = 0.0
+    if amount_col is not None:
+        try:
+            mva_amount = float(pd.to_numeric(df_sel[amount_col], errors="coerce").fillna(0.0).sum())
+        except Exception:
+            mva_amount = 0.0
+
+    return {
+        "MVA-kode": ", ".join(codes),
+        "MVA-prosent": ", ".join(rates),
+        "MVA-beløp": mva_amount,
+    }
+
+
 # -----------------------------
 # Bygg analysegrunnlag
 # -----------------------------
@@ -346,6 +438,11 @@ def build_bilag_details(data: MotpostData, motkonto: str) -> pd.DataFrame:
         kontoer = _unique_join(sorted({_konto_str(x) for x in df_b["Konto"].tolist()}))
         dato = _first_non_empty(df_b["Dato"].astype(object)) if "Dato" in df_b.columns else None
         tekst = _first_non_empty(df_b["Tekst"].astype(object)) if "Tekst" in df_b.columns else None
+        mva_summary = _summarize_selected_side_mva(
+            df_b,
+            selected_set,
+            selected_direction=data.selected_direction,
+        )
         rows.append(
             {
                 "Bilag": bilag,
@@ -353,6 +450,9 @@ def build_bilag_details(data: MotpostData, motkonto: str) -> pd.DataFrame:
                 "Tekst": tekst or "",
                 "Beløp (valgte kontoer)": selected_sum,
                 "Motbeløp": mot_sum,
+                "MVA-kode": mva_summary["MVA-kode"],
+                "MVA-prosent": mva_summary["MVA-prosent"],
+                "MVA-beløp": mva_summary["MVA-beløp"],
                 "Kontoer i bilag": kontoer,
             }
         )
@@ -379,6 +479,9 @@ def build_bilag_details_all(data: MotpostData) -> pd.DataFrame:
                 "Motkontonavn",
                 "Beløp (valgte kontoer)",
                 "Motbeløp",
+                "MVA-kode",
+                "MVA-prosent",
+                "MVA-beløp",
                 "Kontoer i bilag",
             ]
         )
@@ -388,7 +491,7 @@ def build_bilag_details_all(data: MotpostData) -> pd.DataFrame:
     # Sikre at hjelpekolonnene finnes (build_motpost_data legger disse på, men vær robust).
     df_work = df.copy()
     if "Bilag_str" not in df_work.columns:
-        df_work["Bilag_str"] = df_work.get("Bilag", "").map(_konto_str)
+        df_work["Bilag_str"] = df_work.get("Bilag", "").map(_bilag_str)
     if "Konto_str" not in df_work.columns:
         df_work["Konto_str"] = df_work.get("Konto", "").map(_konto_str)
 
@@ -426,6 +529,9 @@ def build_bilag_details_all(data: MotpostData) -> pd.DataFrame:
                 "Motkontonavn",
                 "Beløp (valgte kontoer)",
                 "Motbeløp",
+                "MVA-kode",
+                "MVA-prosent",
+                "MVA-beløp",
                 "Kontoer i bilag",
             ]
         )
@@ -463,8 +569,32 @@ def build_bilag_details_all(data: MotpostData) -> pd.DataFrame:
     )
     meta["Bilag_key"] = meta["Bilag_str"].map(bilag_key.to_dict()).fillna(meta["Bilag_str"])
 
-    details = mot_agg.merge(sel_sum.reset_index(), on="Bilag_str", how="left").merge(meta, on="Bilag_str", how="left")
+    mva_rows: list[dict[str, Any]] = []
+    for bilag_str, df_b in df_work.groupby("Bilag_str", dropna=False):
+        mva_summary = _summarize_selected_side_mva(
+            df_b,
+            selected_set,
+            selected_direction=data.selected_direction,
+        )
+        mva_rows.append(
+            {
+                "Bilag_str": bilag_str,
+                "MVA-kode": mva_summary["MVA-kode"],
+                "MVA-prosent": mva_summary["MVA-prosent"],
+                "MVA-beløp": mva_summary["MVA-beløp"],
+            }
+        )
+    df_mva = pd.DataFrame(mva_rows)
+
+    details = (
+        mot_agg.merge(sel_sum.reset_index(), on="Bilag_str", how="left")
+        .merge(meta, on="Bilag_str", how="left")
+        .merge(df_mva, on="Bilag_str", how="left")
+    )
     details["Beløp (valgte kontoer)"] = details["Beløp (valgte kontoer)"].fillna(0.0)
+    details["MVA-kode"] = details["MVA-kode"].fillna("")
+    details["MVA-prosent"] = details["MVA-prosent"].fillna("")
+    details["MVA-beløp"] = details["MVA-beløp"].fillna(0.0)
 
     # Kolonneordre
     out_cols = [
@@ -476,6 +606,9 @@ def build_bilag_details_all(data: MotpostData) -> pd.DataFrame:
         "Motkontonavn",
         "Beløp (valgte kontoer)",
         "Motbeløp",
+        "MVA-kode",
+        "MVA-prosent",
+        "MVA-beløp",
         "Kontoer i bilag",
     ]
     details = details[out_cols]
@@ -581,3 +714,187 @@ def build_motpost_excel_workbook(*args, **kwargs):
     from .excel import build_motpost_excel_workbook as _impl
 
     return _impl(*args, **kwargs)
+
+
+def _ensure_motpost_helper_columns(df: pd.DataFrame) -> pd.DataFrame:
+    amount_col = "Bel\u00f8p"
+    amount_num_col = "Bel\u00f8p_num"
+
+    work = df
+    if "Bilag_str" not in work.columns:
+        if work is df:
+            work = work.copy()
+        work["Bilag_str"] = work["Bilag"].map(_bilag_str)
+    if "Konto_str" not in work.columns:
+        if work is df:
+            work = work.copy()
+        work["Konto_str"] = work["Konto"].map(_konto_str)
+    if amount_num_col not in work.columns:
+        if work is df:
+            work = work.copy()
+        work[amount_num_col] = work[amount_col].map(_safe_float)
+    if "Dato_dt" not in work.columns:
+        if work is df:
+            work = work.copy()
+        if "Dato" in work.columns:
+            work["Dato_dt"] = pd.to_datetime(work["Dato"], errors="coerce")
+        else:
+            work["Dato_dt"] = pd.NaT
+    if amount_col in work.columns and not pd.api.types.is_numeric_dtype(work[amount_col]):
+        if work is df:
+            work = work.copy()
+        work[amount_col] = work[amount_num_col]
+    return work
+
+
+def _build_motpost_data_fast(
+    df_all: pd.DataFrame,
+    selected_accounts: set[str] | Iterable[str],
+    *,
+    selected_direction: str = "Alle",
+) -> MotpostData:
+    selected_set = {_konto_str(k) for k in selected_accounts}
+    selected_tuple = tuple(sorted(selected_set))
+    amount_col = "Bel\u00f8p"
+    amount_num_col = "Bel\u00f8p_num"
+
+    if df_all is None or df_all.empty:
+        empty = pd.DataFrame()
+        return MotpostData(
+            selected_accounts=selected_tuple,
+            bilag_count=0,
+            selected_sum=0.0,
+            selected_direction=selected_direction,
+            control_sum=0.0,
+            df_motkonto=empty,
+            df_selected=empty,
+            df_scope=empty,
+        )
+
+    required = {"Bilag", "Konto", amount_col}
+    if required - set(df_all.columns):
+        empty = pd.DataFrame()
+        return MotpostData(
+            selected_accounts=selected_tuple,
+            bilag_count=0,
+            selected_sum=0.0,
+            selected_direction=selected_direction,
+            control_sum=0.0,
+            df_motkonto=empty,
+            df_selected=empty,
+            df_scope=empty,
+        )
+
+    df = _ensure_motpost_helper_columns(df_all)
+    df_sel = df.loc[df["Konto_str"].isin(selected_set)]
+
+    dir_norm = (selected_direction or "Alle").strip().lower()
+    if dir_norm in {"debet", "debit"}:
+        df_sel = df_sel.loc[df_sel[amount_num_col] > 0]
+    elif dir_norm in {"kredit", "credit"}:
+        df_sel = df_sel.loc[df_sel[amount_num_col] < 0]
+
+    bilag_scope = [_bilag_str(v) for v in pd.unique(df_sel["Bilag_str"].dropna())]
+    if not bilag_scope:
+        empty = pd.DataFrame()
+        return MotpostData(
+            selected_accounts=selected_tuple,
+            bilag_count=0,
+            selected_sum=0.0,
+            selected_direction=selected_direction,
+            control_sum=0.0,
+            df_motkonto=empty,
+            df_selected=empty,
+            df_scope=empty,
+        )
+
+    df_scope = df.loc[df["Bilag_str"].isin(set(bilag_scope))].copy()
+    df_scope[amount_col] = df_scope[amount_num_col]
+
+    selected_sum = float(df_sel[amount_num_col].sum())
+    control_sum = float(df_scope[amount_num_col].sum())
+
+    df_selected_pivot = (
+        df_sel.groupby("Konto_str", dropna=False)
+        .agg(
+            Kontonavn=("Kontonavn", _first_non_empty) if "Kontonavn" in df_sel.columns else ("Konto_str", lambda s: ""),
+            Sum=(amount_num_col, "sum"),
+            Antall_bilag=("Bilag_str", pd.Series.nunique),
+        )
+        .reset_index()
+        .rename(columns={"Konto_str": "Konto", "Antall_bilag": "Antall bilag"})
+    )
+    df_selected_pivot["% andel"] = (
+        (df_selected_pivot["Sum"] / selected_sum * 100.0) if selected_sum != 0 else 0.0
+    )
+    df_selected_pivot = df_selected_pivot[["Konto", "Kontonavn", "Sum", "% andel", "Antall bilag"]]
+    df_selected_pivot = df_selected_pivot.sort_values(by="Sum", key=lambda s: s.abs(), ascending=False)
+
+    df_mot = df_scope.loc[~df_scope["Konto_str"].isin(selected_set)]
+    df_mot_pivot = (
+        df_mot.groupby("Konto_str", dropna=False)
+        .agg(
+            Kontonavn=("Kontonavn", _first_non_empty) if "Kontonavn" in df_mot.columns else ("Konto_str", lambda s: ""),
+            Sum=(amount_num_col, "sum"),
+            Antall_bilag=("Bilag_str", pd.Series.nunique),
+        )
+        .reset_index()
+        .rename(columns={"Konto_str": "Motkonto", "Antall_bilag": "Antall bilag"})
+    )
+    df_mot_pivot["% andel"] = (
+        (df_mot_pivot["Sum"] / selected_sum * 100.0) if selected_sum != 0 else 0.0
+    )
+    df_mot_pivot = df_mot_pivot[["Motkonto", "Kontonavn", "Sum", "% andel", "Antall bilag"]]
+    df_mot_pivot = df_mot_pivot.sort_values(by="Sum", key=lambda s: s.abs(), ascending=False)
+
+    return MotpostData(
+        selected_accounts=selected_tuple,
+        bilag_count=int(len(bilag_scope)),
+        selected_sum=selected_sum,
+        selected_direction=selected_direction,
+        control_sum=control_sum,
+        df_motkonto=df_mot_pivot.reset_index(drop=True),
+        df_selected=df_selected_pivot.reset_index(drop=True),
+        df_scope=df_scope.reset_index(drop=True),
+    )
+
+
+def _build_bilag_details_fast(data: MotpostData, motkonto: str) -> pd.DataFrame:
+    if data.df_scope is None or data.df_scope.empty:
+        return pd.DataFrame()
+
+    details_all = data.df_details
+    if details_all is None or details_all.empty or "Motkonto" not in details_all.columns:
+        return pd.DataFrame()
+
+    motkonto = _konto_str(motkonto)
+    details = details_all.loc[details_all["Motkonto"].map(_konto_str) == motkonto].copy()
+    if details.empty:
+        return pd.DataFrame()
+
+    if "Bilag" in details.columns:
+        details["Bilag"] = details["Bilag"].map(_bilag_str)
+    if "Dato" in details.columns:
+        details["Dato"] = pd.to_datetime(details["Dato"], errors="coerce")
+
+    sort_cols = [col for col in ("Dato", "Bilag") if col in details.columns]
+    if sort_cols:
+        details = details.sort_values(by=sort_cols, ascending=True, kind="mergesort")
+
+    preferred_cols = [
+        "Bilag",
+        "Dato",
+        "Tekst",
+        "Bel\u00f8p (valgte kontoer)",
+        "Motbel\u00f8p",
+        "MVA-kode",
+        "MVA-prosent",
+        "MVA-bel\u00f8p",
+        "Kontoer i bilag",
+    ]
+    cols = [col for col in preferred_cols if col in details.columns]
+    return details[cols].reset_index(drop=True)
+
+
+build_motpost_data = _build_motpost_data_fast
+build_bilag_details = _build_bilag_details_fast

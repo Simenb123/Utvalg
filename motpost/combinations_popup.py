@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+from time import perf_counter
 from typing import Callable, Mapping, Optional, Sequence, Set
 
 import tkinter as tk
@@ -13,13 +15,18 @@ from motpost.combinations import build_bilag_to_motkonto_combo
 from formatting import fmt_amount, fmt_date
 from motpost.combinations_popup_helpers import build_bilag_rows, format_combo_df_for_display, truncate_text
 from motpost.combo_comment_workflow import edit_comment_for_focus, edit_comment_for_tree_item
+from motpost.expected_regnskapslinje_dialog import choose_expected_regnskapslinjer
 
 from motpost.combo_workflow import (
     STATUS_EXPECTED,
     STATUS_NEUTRAL,
     STATUS_OUTLIER,
+    account_display_name_for_mode,
     apply_combo_status,
     combo_display_name,
+    combo_display_name_for_mode,
+    find_expected_combos_by_netting_regnskapslinjer,
+    find_expected_combos_by_regnskapslinjer,
     normalize_combo_status,
     normalize_direction,
     status_label,
@@ -27,6 +34,8 @@ from motpost.combo_workflow import (
 )
 from motpost.utils import _bilag_str, _clean_name, _konto_str, _safe_float
 from ui_treeview_sort import enable_treeview_sorting
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class _ComboSelection:
@@ -46,6 +55,9 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         selected_accounts: Sequence[str],
         konto_navn_map: Mapping[str, str],
         df_scope: pd.DataFrame,
+        scope_mode: str | None = None,
+        scope_items: Sequence[str] | None = None,
+        konto_regnskapslinje_map: Mapping[str, str] | None = None,
         outlier_motkonto: Optional[Set[str]] = None,
         selected_direction: Optional[str] = None,
         outlier_combinations: Optional[Set[str]] = None,
@@ -62,8 +74,17 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
         # Normalize / cache inputs
         self._konto_navn_map = {str(k): _clean_name(v) for k, v in (konto_navn_map or {}).items()}
+        self._konto_regnskapslinje_map = {
+            str(k): str(v).strip()
+            for k, v in (konto_regnskapslinje_map or {}).items()
+            if str(k).strip() and str(v).strip()
+        }
         self._selected_accounts = [_konto_str(a) for a in (selected_accounts or []) if _konto_str(a)]
         self._selected_accounts_set = set(self._selected_accounts)
+        self._scope_mode = str(scope_mode or "konto").strip().lower()
+        self._scope_items = [str(x).strip() for x in (scope_items or []) if str(x).strip()]
+        display_default = "Regnskapslinje" if self._scope_mode.startswith("regn") and self._konto_regnskapslinje_map else "Konto"
+        self._display_mode_var = tk.StringVar(value=display_default)
         self._selected_direction = normalize_direction(selected_direction)
         if self._selected_direction == "kredit":
             self._net_heading, self._net_label = "Netto kredit (valgte kontoer)", "Netto kredit"
@@ -72,7 +93,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         else:
             self._net_heading, self._net_label = "Netto valgte kontoer", "Netto"
 
-        self._df_scope = df_scope.copy() if df_scope is not None else pd.DataFrame()
+        self._df_scope = df_scope if isinstance(df_scope, pd.DataFrame) else pd.DataFrame()
         if "Bilag_str" not in self._df_scope.columns and "Bilag" in self._df_scope.columns:
             self._df_scope["Bilag_str"] = self._df_scope["Bilag"].map(_bilag_str)
         if "Konto_str" not in self._df_scope.columns and "Konto" in self._df_scope.columns:
@@ -111,6 +132,18 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
         self._current_selection: Optional[_ComboSelection] = None
         self._bilag_rows_cache: Optional[pd.DataFrame] = None
+        self._df_combos_raw = df_combos if isinstance(df_combos, pd.DataFrame) else pd.DataFrame()
+        self._df_per_selected_raw = df_per_selected if isinstance(df_per_selected, pd.DataFrame) else pd.DataFrame()
+        self._display_rows_cache: dict[str, tuple[list[dict[str, object]], list[dict[str, object]]]] = {}
+        self._drilldown_cache: dict[tuple[str, str], dict[str, object]] = {}
+        self._regnskapslinje_label_map = self._build_regnskapslinje_label_map()
+        self._expected_regnskapslinjer: set[str] = set()
+        self._selected_netting_regnskapslinjer: set[str] = set()
+        self._auto_expected_combos: set[str] = set()
+        self._expected_require_netting_var = tk.BooleanVar(value=False)
+        self._expected_netting_tolerance_var = tk.StringVar(value="1")
+        self._restore_expected_regnskapslinjer_preset()
+        self._restore_expected_regnskapslinje_rule_preset()
 
         # UI vars
         self._vis_var = tk.IntVar(value=200)
@@ -139,6 +172,13 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         if self._summary:
             lbl_summary = ttk.Label(container, text=self._summary, anchor="w", justify="left")
             lbl_summary.pack(fill=tk.X, padx=2, pady=(0, 8))
+        if self._scope_mode.startswith("regn") and self._scope_items:
+            scope_text = "Valgte regnskapslinjer: " + ", ".join(self._scope_items)
+            ttk.Label(container, text=scope_text, anchor="w", justify="left").pack(fill=tk.X, padx=2, pady=(0, 8))
+        if self._konto_regnskapslinje_map:
+            self._lbl_expected_regnskapslinjer = ttk.Label(container, text="", anchor="w", justify="left")
+            self._lbl_expected_regnskapslinjer.pack(fill=tk.X, padx=2, pady=(0, 8))
+            self._update_expected_regnskapslinjer_label()
 
         # Top: notebook with combos + per-selected
         nb = ttk.Notebook(container)
@@ -152,13 +192,52 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         # --- All combos tab ---
         top_bar = ttk.Frame(frame_all)
         top_bar.pack(fill=tk.X, padx=4, pady=(4, 0))
+        rules_bar = ttk.Frame(frame_all)
+        rules_bar.pack(fill=tk.X, padx=4, pady=(6, 0))
 
         ttk.Label(top_bar, text="Status:").pack(side=tk.LEFT)
+
+        if self._konto_regnskapslinje_map:
+            ttk.Label(rules_bar, text="Visning:").pack(side=tk.LEFT)
+            cmb_display = ttk.Combobox(
+                rules_bar,
+                textvariable=self._display_mode_var,
+                values=["Konto", "Regnskapslinje"],
+                width=16,
+                state="readonly",
+            )
+            cmb_display.pack(side=tk.LEFT, padx=(4, 8))
+            cmb_display.bind("<<ComboboxSelected>>", lambda _e=None: self._refresh_display_mode())
+            ttk.Button(
+                rules_bar,
+                text="Forventede RL...",
+                command=self._choose_expected_regnskapslinjer,
+            ).pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Button(
+                rules_bar,
+                text="Utlign valgte RL...",
+                command=self._choose_selected_netting_regnskapslinjer,
+            ).pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Checkbutton(
+                rules_bar,
+                text="Krev utligning",
+                variable=self._expected_require_netting_var,
+                command=self._on_expected_rule_changed,
+            ).pack(side=tk.LEFT, padx=(0, 6))
+            ttk.Label(rules_bar, text="Terskel:").pack(side=tk.LEFT, padx=(0, 2))
+            self._entry_expected_netting_tolerance = ttk.Entry(
+                rules_bar,
+                textvariable=self._expected_netting_tolerance_var,
+                width=7,
+            )
+            self._entry_expected_netting_tolerance.pack(side=tk.LEFT, padx=(0, 8))
+            self._entry_expected_netting_tolerance.bind("<Return>", lambda _e=None: self._on_expected_rule_changed())
+            self._entry_expected_netting_tolerance.bind("<FocusOut>", lambda _e=None: self._on_expected_rule_changed())
 
         # Fargede knapper (bruk tk.Button for å sikre bakgrunnsfarge i Windows TTK-tema)
         btn_expected = tk.Button(
             top_bar,
-            text="Marker som forventet",
+            text="Marker forventet",
             command=lambda: self._set_status_selected(STATUS_EXPECTED),
             bg="#C6EFCE",
             activebackground="#C6EFCE",
@@ -180,22 +259,25 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
         btn_reset = ttk.Button(
             top_bar,
-            text="Nullstill markering",
+            text="Nullstill",
             command=lambda: self._set_status_selected(STATUS_NEUTRAL),
         )
         btn_reset.pack(side=tk.LEFT, padx=(6, 0))
 
-        # Snarveier-hint (ikke for mye tekst, men nok til at det oppdages)
         ttk.Label(
-            top_bar,
-            text="Snarveier: Ctrl+E=Forventet, Ctrl+O=Outlier, Ctrl+0=Nullstill",
-        ).pack(side=tk.LEFT, padx=(12, 0))
+            rules_bar,
+            text="Ctrl+E forventet  |  Ctrl+O outlier  |  Ctrl+0 nullstill",
+        ).pack(side=tk.RIGHT)
 
         btn_close = ttk.Button(top_bar, text="Lukk", command=self.destroy)
         btn_close.pack(side=tk.RIGHT)
 
         btn_expand = ttk.Button(top_bar, text="□", width=3, command=self._toggle_zoom)
         btn_expand.pack(side=tk.RIGHT, padx=(0, 6))
+        try:
+            btn_expand.configure(text="Utvid", width=8)
+        except Exception:
+            pass
 
         btn_export = ttk.Button(top_bar, text="Eksporter Excel", command=self._export_excel)
         btn_export.pack(side=tk.RIGHT, padx=(0, 6))
@@ -295,26 +377,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             self._combo_net_sum_map = {}
             self._combo_total_net_sum = 0.0
 
-        # Populate all combos (display)
-        df_disp = format_combo_df_for_display(df_combos)
-        for _, r in df_disp.iterrows():
-            combo = str(r.get("Kombinasjon", "") or "").strip()
-            combo_name = combo_display_name(combo, self._konto_navn_map) if combo else ""
-            status_code = normalize_combo_status(self._combo_status_map.get(combo, ""))
-            status_txt = status_label(status_code)
-            comment_full = str(self._combo_comment_map.get(combo, "") or "").strip()
-            comment_disp = truncate_text(comment_full, max_len=80) if comment_full else ""
-            row_dict = {**r.to_dict(), "Kombinasjon (navn)": combo_name, "Netto valgte kontoer": fmt_amount(float(self._combo_net_sum_map.get(combo, 0.0) or 0.0)), "Status": status_txt, "Kommentar": comment_disp}
-            vals = [row_dict.get(c, "") for c in self._tree_all["columns"]]
-            tags = ()
-            if status_code == STATUS_EXPECTED:
-                tags = ("expected",)
-            elif status_code == STATUS_OUTLIER:
-                tags = ("outlier",)
-            self._tree_all.insert("", tk.END, values=vals, tags=tags)
-
-        # Init summering (ingen rader markert som default)
-        self._update_combo_selection_summary()
+        self._populate_all_tree()
 
         self._tree_all.bind("<<TreeviewSelect>>", self._on_combo_selected)
         self._tree_all.bind("<Double-1>", self._on_combo_doubleclick)
@@ -345,12 +408,8 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         self._tree_per.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         enable_treeview_sorting(self._tree_per)
 
-        for _, r in (df_per_selected if df_per_selected is not None else pd.DataFrame()).iterrows():
-            combo = str(r.get("Kombinasjon", "") or "").strip()
-            combo_name = combo_display_name(combo, self._konto_navn_map) if combo else ""
-            row_dict = {**r.to_dict(), "Kombinasjon (navn)": combo_name}
-            vals = [row_dict.get(c, "") for c in self._tree_per["columns"]]
-            self._tree_per.insert("", tk.END, values=vals)
+        self._populate_per_tree()
+        self._apply_expected_regnskapslinjer()
 
         self._tree_per.bind("<<TreeviewSelect>>", self._on_per_selected_selected)
         self._tree_per.bind("<Double-1>", self._on_per_selected_doubleclick)
@@ -369,6 +428,23 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         frame_left = ttk.LabelFrame(paned, text="Fordeling (sum)")
         paned.add(frame_left, weight=1)
 
+        dist_toolbar = ttk.Frame(frame_left)
+        dist_toolbar.pack(fill=tk.X, padx=4, pady=(4, 0))
+        ttk.Label(dist_toolbar, text="Vis som:").pack(side=tk.LEFT)
+        dist_mode_values = ["Konto"]
+        if self._konto_regnskapslinje_map:
+            dist_mode_values.append("Regnskapslinje")
+        self._distribution_mode_var = tk.StringVar(value=dist_mode_values[0])
+        self._cmb_distribution_mode = ttk.Combobox(
+            dist_toolbar,
+            textvariable=self._distribution_mode_var,
+            values=dist_mode_values,
+            width=16,
+            state="readonly",
+        )
+        self._cmb_distribution_mode.pack(side=tk.LEFT, padx=(4, 0))
+        self._cmb_distribution_mode.bind("<<ComboboxSelected>>", lambda _e=None: self._refresh_distribution_view())
+
         left_nb = ttk.Notebook(frame_left)
         left_nb.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
@@ -376,6 +452,9 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         tab_sel = ttk.Frame(left_nb)
         left_nb.add(tab_mot, text="Motposter")
         left_nb.add(tab_sel, text="Valgte kontoer")
+        self._left_nb = left_nb
+        self._tab_mot = tab_mot
+        self._tab_sel = tab_sel
 
         # Motposts sum tree
         dist_cols = ("Konto", "Kontonavn", "Sum", "Andel")
@@ -413,6 +492,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         self._tree_sel.column("Andel", width=90, anchor=tk.E, stretch=False)
         self._tree_sel.pack(fill=tk.BOTH, expand=True)
         enable_treeview_sorting(self._tree_sel)
+        self._configure_distribution_tree_columns()
 
         # Summering under valgte-kontoer-tabell
         self._lbl_sel_total = ttk.Label(tab_sel, text="")
@@ -499,6 +579,561 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             self._outlier_combinations_ref.update(out)
         except Exception:
             pass
+
+    def _display_mode(self) -> str:
+        try:
+            return str(self._display_mode_var.get() or "Konto").strip()
+        except Exception:
+            return "Konto"
+
+    def _base_display_rows(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        mode = self._display_mode()
+        cached = self._display_rows_cache.get(mode)
+        if cached is not None:
+            return cached
+
+        started = perf_counter()
+
+        combo_rows: list[dict[str, object]] = []
+        df_disp = format_combo_df_for_display(self._df_combos_raw)
+        for _, r in df_disp.iterrows():
+            combo = str(r.get("Kombinasjon", "") or "").strip()
+            combo_name = (
+                combo_display_name_for_mode(
+                    combo,
+                    display_mode=mode,
+                    konto_navn_map=self._konto_navn_map,
+                    konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+                )
+                if combo
+                else ""
+            )
+            combo_rows.append(
+                {
+                    **r.to_dict(),
+                    "Kombinasjon (navn)": combo_name,
+                    "Netto valgte kontoer": fmt_amount(float(self._combo_net_sum_map.get(combo, 0.0) or 0.0)),
+                }
+            )
+
+        per_rows: list[dict[str, object]] = []
+        for _, r in self._df_per_selected_raw.iterrows():
+            combo = str(r.get("Kombinasjon", "") or "").strip()
+            combo_name = (
+                combo_display_name_for_mode(
+                    combo,
+                    display_mode=mode,
+                    konto_navn_map=self._konto_navn_map,
+                    konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+                )
+                if combo
+                else ""
+            )
+            selected_value = account_display_name_for_mode(
+                str(r.get("Valgt konto", "") or ""),
+                display_mode=mode,
+                konto_navn_map=self._konto_navn_map,
+                konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+            )
+            per_rows.append({**r.to_dict(), "Valgt konto": selected_value, "Kombinasjon (navn)": combo_name})
+
+        payload = (combo_rows, per_rows)
+        self._display_rows_cache[mode] = payload
+        logger.debug(
+            "Motpost kombinasjoner: bygget display-cache mode=%s rows=%s/%s på %.3fs",
+            mode,
+            len(combo_rows),
+            len(per_rows),
+            perf_counter() - started,
+        )
+        return payload
+
+    def _get_drilldown_payload(self, combo_key: str) -> dict[str, object]:
+        mode = self._distribution_mode()
+        cache_key = (str(combo_key or ""), mode)
+        cached = self._drilldown_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        started = perf_counter()
+        bilag_list = list(self._combo_to_bilag.get(str(combo_key or ""), []) or [])
+        if not bilag_list:
+            payload = {
+                "bilag_list": [],
+                "sum_sel": 0.0,
+                "sum_mot": 0.0,
+                "kontroll": 0.0,
+                "df_sel": pd.DataFrame(),
+                "df_mot": pd.DataFrame(),
+                "bilag_rows": pd.DataFrame(),
+            }
+            self._drilldown_cache[cache_key] = payload
+            return payload
+
+        df_combo = self._df_scope.loc[self._df_scope["Bilag_str"].isin(bilag_list)]
+
+        sel_mask = df_combo["Konto_str"].isin(self._selected_accounts_set)
+        dir_norm = normalize_direction(self._selected_direction)
+        if dir_norm == "kredit":
+            sel_mask = sel_mask & (df_combo["Beløp_num"] < 0)
+        elif dir_norm == "debet":
+            sel_mask = sel_mask & (df_combo["Beløp_num"] > 0)
+
+        df_sel = df_combo.loc[sel_mask].copy()
+        df_mot = df_combo.loc[~sel_mask].copy()
+        sum_sel = float(df_sel["Beløp_num"].sum()) if not df_sel.empty else 0.0
+        sum_mot = float(df_mot["Beløp_num"].sum()) if not df_mot.empty else 0.0
+        payload = {
+            "bilag_list": bilag_list,
+            "sum_sel": sum_sel,
+            "sum_mot": sum_mot,
+            "kontroll": sum_sel + sum_mot,
+            "df_sel": df_sel,
+            "df_mot": df_mot,
+            "bilag_rows": build_bilag_rows(df_combo, df_sel, df_mot),
+        }
+        self._drilldown_cache[cache_key] = payload
+        logger.debug(
+            "Motpost kombinasjoner: bygget drilldown-cache combo=%s mode=%s bilag=%s på %.3fs",
+            combo_key,
+            mode,
+            len(bilag_list),
+            perf_counter() - started,
+        )
+        return payload
+
+    def _refresh_display_mode(self) -> None:
+        heading = "Kombinasjon (regnskapslinje)" if self._display_mode().lower().startswith("regn") else "Kombinasjon (navn)"
+        try:
+            self._tree_all.heading("Kombinasjon (navn)", text=heading)
+        except Exception:
+            pass
+        try:
+            self._tree_per.heading("Valgt konto", text="Valgt regnskapslinje" if self._display_mode().lower().startswith("regn") else "Valgt konto")
+            self._tree_per.heading("Kombinasjon (navn)", text=heading)
+        except Exception:
+            pass
+        self._populate_all_tree()
+        self._populate_per_tree()
+
+    @staticmethod
+    def _sort_regnskapslinje_label(value: str) -> tuple[int, int | str, str]:
+        text = str(value or "").strip()
+        if not text:
+            return (2, "", "")
+        head = text.split(" ", 1)[0].strip()
+        try:
+            return (0, int(head), text.lower())
+        except Exception:
+            return (1, text.lower(), text.lower())
+
+    @staticmethod
+    def _parse_regnskapslinje_regnr(value: object) -> int | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        head = text.split(" ", 1)[0].strip()
+        try:
+            return int(head)
+        except Exception:
+            return None
+
+    def _build_regnskapslinje_label_map(self) -> dict[int, str]:
+        label_map: dict[int, str] = {}
+
+        def _add(label: object) -> None:
+            text = str(label or "").strip()
+            if not text:
+                return
+            regnr = self._parse_regnskapslinje_regnr(text)
+            if regnr is None or regnr in label_map:
+                return
+            label_map[regnr] = text
+
+        for label in self._scope_items:
+            _add(label)
+        for label in self._konto_regnskapslinje_map.values():
+            _add(label)
+
+        try:
+            import regnskap_config
+            from regnskap_mapping import normalize_regnskapslinjer
+
+            regn = normalize_regnskapslinjer(regnskap_config.load_regnskapslinjer())
+            for row in regn[["regnr", "regnskapslinje"]].itertuples(index=False):
+                try:
+                    regnr = int(row.regnr)
+                except Exception:
+                    continue
+                if regnr in label_map:
+                    continue
+                navn = str(row.regnskapslinje or "").strip()
+                label_map[regnr] = f"{regnr} {navn}".strip()
+        except Exception:
+            pass
+
+        return label_map
+
+    def _current_scope_regnr(self) -> list[int]:
+        regnr_values: list[int] = []
+        for label in self._scope_items:
+            regnr = self._parse_regnskapslinje_regnr(label)
+            if regnr is None or regnr in regnr_values:
+                continue
+            regnr_values.append(regnr)
+        return regnr_values
+
+    def _current_client(self) -> str | None:
+        try:
+            import session as _session
+            client = getattr(_session, "client", None)
+        except Exception:
+            client = None
+        client_str = str(client or "").strip()
+        return client_str or None
+
+    def _restore_expected_regnskapslinjer_preset(self) -> None:
+        scope_regnr = self._current_scope_regnr()
+        client = self._current_client()
+        if not client or not scope_regnr:
+            return
+        try:
+            import regnskap_client_overrides
+
+            expected_regnr = regnskap_client_overrides.load_expected_regnskapslinjer(
+                client,
+                scope_regnr=scope_regnr,
+                selected_direction=self._selected_direction,
+            )
+        except Exception:
+            expected_regnr = []
+
+        restored: set[str] = set()
+        for regnr in expected_regnr:
+            label = str(self._regnskapslinje_label_map.get(int(regnr), int(regnr))).strip()
+            if label:
+                restored.add(label)
+        self._expected_regnskapslinjer = restored
+
+    def _available_regnskapslinjer(self) -> list[str]:
+        values = {str(v).strip() for v in self._regnskapslinje_label_map.values() if str(v).strip()}
+        return sorted(values, key=self._sort_regnskapslinje_label)
+
+    def _available_selected_regnskapslinjer(self) -> list[str]:
+        values: set[str] = set()
+        for konto in self._selected_accounts:
+            label = str(self._konto_regnskapslinje_map.get(str(konto), "") or "").strip()
+            if label:
+                values.add(label)
+        for label in self._scope_items:
+            text = str(label or "").strip()
+            if text:
+                values.add(text)
+        return sorted(values, key=self._sort_regnskapslinje_label)
+
+    def _effective_selected_netting_regnskapslinjer(self) -> list[str]:
+        selected = sorted(self._selected_netting_regnskapslinjer, key=self._sort_regnskapslinje_label)
+        if selected:
+            return selected
+        available = self._available_selected_regnskapslinjer()
+        if len(available) == 1:
+            return available
+        return []
+
+    def _update_expected_regnskapslinjer_label(self) -> None:
+        if not hasattr(self, "_lbl_expected_regnskapslinjer"):
+            return
+        selected = sorted(self._expected_regnskapslinjer, key=self._sort_regnskapslinje_label)
+        use_netting = bool(self._expected_require_netting_var.get())
+        tolerance = self._format_tolerance(self._expected_netting_tolerance_value())
+        selected_source = self._effective_selected_netting_regnskapslinjer()
+        if not selected:
+            text = "Forventede regnskapslinjer: ingen"
+        else:
+            preview = ", ".join(selected[:4])
+            if len(selected) > 4:
+                preview += ", ..."
+            text = f"Forventede regnskapslinjer ({len(selected)}): {preview}"
+            if use_netting:
+                if selected_source:
+                    source_preview = ", ".join(selected_source[:3])
+                    if len(selected_source) > 3:
+                        source_preview += ", ..."
+                else:
+                    source_preview = "velg kilde-RL"
+                text += f" | Utlign fra: {source_preview} | Krev utligning <= {tolerance}"
+        try:
+            self._lbl_expected_regnskapslinjer.config(text=text)
+        except Exception:
+            pass
+
+    def _choose_expected_regnskapslinjer(self) -> None:
+        choices = self._available_regnskapslinjer()
+        if not choices:
+            return
+        selected = choose_expected_regnskapslinjer(
+            self,
+            options=choices,
+            selected=sorted(self._expected_regnskapslinjer, key=self._sort_regnskapslinje_label),
+        )
+        if selected is None:
+            return
+        self._expected_regnskapslinjer = {str(v).strip() for v in selected if str(v).strip()}
+        self._save_expected_regnskapslinjer_preset()
+        self._update_expected_regnskapslinjer_label()
+        self._apply_expected_regnskapslinjer()
+
+    def _choose_selected_netting_regnskapslinjer(self) -> None:
+        choices = self._available_selected_regnskapslinjer()
+        if not choices:
+            return
+        selected = choose_expected_regnskapslinjer(
+            self,
+            options=choices,
+            selected=sorted(self._selected_netting_regnskapslinjer, key=self._sort_regnskapslinje_label),
+            title="Regnskapslinjer som skal utlignes fra valgt side",
+        )
+        if selected is None:
+            return
+        self._selected_netting_regnskapslinjer = {str(v).strip() for v in selected if str(v).strip()}
+        self._save_expected_regnskapslinje_rule_preset()
+        self._update_expected_regnskapslinjer_label()
+        self._apply_expected_regnskapslinjer()
+
+    def _save_expected_regnskapslinjer_preset(self) -> None:
+        scope_regnr = self._current_scope_regnr()
+        client = self._current_client()
+        if not client or not scope_regnr:
+            return
+
+        expected_regnr: list[int] = []
+        for label in sorted(self._expected_regnskapslinjer, key=self._sort_regnskapslinje_label):
+            regnr = self._parse_regnskapslinje_regnr(label)
+            if regnr is None or regnr in expected_regnr:
+                continue
+            expected_regnr.append(regnr)
+
+        try:
+            import regnskap_client_overrides
+
+            regnskap_client_overrides.save_expected_regnskapslinjer(
+                client,
+                scope_regnr=scope_regnr,
+                expected_regnr=expected_regnr,
+                selected_direction=self._selected_direction,
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _format_tolerance(value: float) -> str:
+        try:
+            num = max(float(value or 0.0), 0.0)
+        except Exception:
+            num = 1.0
+        if abs(num - round(num)) < 1e-9:
+            return str(int(round(num)))
+        return f"{num:.2f}".replace(".", ",")
+
+    def _expected_netting_tolerance_value(self) -> float:
+        raw = str(self._expected_netting_tolerance_var.get() or "").strip()
+        if not raw:
+            return 1.0
+        try:
+            value = float(raw.replace(" ", "").replace(",", "."))
+        except Exception:
+            value = 1.0
+        return max(value, 0.0)
+
+    def _restore_expected_regnskapslinje_rule_preset(self) -> None:
+        scope_regnr = self._current_scope_regnr()
+        client = self._current_client()
+        if not client or not scope_regnr:
+            return
+        try:
+            import regnskap_client_overrides
+
+            payload = regnskap_client_overrides.load_expected_regnskapslinje_rule(
+                client,
+                scope_regnr=scope_regnr,
+                selected_direction=self._selected_direction,
+            )
+        except Exception:
+            payload = {"require_netting": False, "tolerance": 1.0}
+
+        try:
+            self._expected_require_netting_var.set(bool(payload.get("require_netting", False)))
+        except Exception:
+            pass
+        try:
+            self._expected_netting_tolerance_var.set(self._format_tolerance(float(payload.get("tolerance", 1.0) or 1.0)))
+        except Exception:
+            self._expected_netting_tolerance_var.set("1")
+        restored: set[str] = set()
+        for regnr in payload.get("selected_regnr", []) or []:
+            try:
+                key = int(regnr)
+            except Exception:
+                continue
+            label = str(self._regnskapslinje_label_map.get(key, key)).strip()
+            if label:
+                restored.add(label)
+        self._selected_netting_regnskapslinjer = restored
+
+    def _save_expected_regnskapslinje_rule_preset(self) -> None:
+        scope_regnr = self._current_scope_regnr()
+        client = self._current_client()
+        if not client or not scope_regnr:
+            return
+        selected_regnr: list[int] = []
+        for label in sorted(self._selected_netting_regnskapslinjer, key=self._sort_regnskapslinje_label):
+            regnr = self._parse_regnskapslinje_regnr(label)
+            if regnr is None or regnr in selected_regnr:
+                continue
+            selected_regnr.append(regnr)
+        try:
+            import regnskap_client_overrides
+
+            regnskap_client_overrides.save_expected_regnskapslinje_rule(
+                client,
+                scope_regnr=scope_regnr,
+                require_netting=bool(self._expected_require_netting_var.get()),
+                tolerance=self._expected_netting_tolerance_value(),
+                selected_regnr=selected_regnr,
+                selected_direction=self._selected_direction,
+            )
+        except Exception:
+            pass
+
+    def _on_expected_rule_changed(self) -> None:
+        try:
+            self._expected_netting_tolerance_var.set(
+                self._format_tolerance(self._expected_netting_tolerance_value())
+            )
+        except Exception:
+            pass
+        self._save_expected_regnskapslinje_rule_preset()
+        self._update_expected_regnskapslinjer_label()
+        self._apply_expected_regnskapslinjer()
+
+    def _apply_expected_regnskapslinjer(self) -> None:
+        previous_auto_expected = set(self._auto_expected_combos)
+        self._auto_expected_combos = set()
+        if previous_auto_expected:
+            clearable = [
+                combo
+                for combo in previous_auto_expected
+                if normalize_combo_status(self._combo_status_map.get(combo, "")) == STATUS_EXPECTED
+            ]
+            if clearable:
+                apply_combo_status(self._combo_status_map, clearable, STATUS_NEUTRAL)
+
+        if not self._expected_regnskapslinjer or self._df_combos_raw is None or self._df_combos_raw.empty:
+            for item in self._tree_all.get_children(""):
+                try:
+                    combo = str(self._tree_all.set(item, "Kombinasjon") or "").strip()
+                except Exception:
+                    combo = ""
+                if combo:
+                    self._apply_status_to_tree_item(item, combo)
+            self._update_combo_selection_summary()
+            return
+
+        try:
+            combo_values = [
+                str(v).strip()
+                for v in self._df_combos_raw.get("Kombinasjon", pd.Series(dtype=object)).tolist()
+                if str(v).strip()
+            ]
+        except Exception:
+            combo_values = []
+
+        expected_labels = sorted(self._expected_regnskapslinjer, key=self._sort_regnskapslinje_label)
+        if bool(self._expected_require_netting_var.get()):
+            selected_source_labels = self._effective_selected_netting_regnskapslinjer()
+            expected_combos = find_expected_combos_by_netting_regnskapslinjer(
+                combo_values,
+                df_scope=self._df_scope,
+                selected_accounts=self._selected_accounts,
+                selected_regnskapslinjer=selected_source_labels,
+                expected_regnskapslinjer=expected_labels,
+                konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+                selected_direction=self._selected_direction,
+                tolerance=self._expected_netting_tolerance_value(),
+            )
+        else:
+            expected_combos = find_expected_combos_by_regnskapslinjer(
+                combo_values,
+                expected_regnskapslinjer=expected_labels,
+                konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+            )
+        if not expected_combos:
+            for item in self._tree_all.get_children(""):
+                try:
+                    combo = str(self._tree_all.set(item, "Kombinasjon") or "").strip()
+                except Exception:
+                    combo = ""
+                if combo:
+                    self._apply_status_to_tree_item(item, combo)
+            self._update_combo_selection_summary()
+            return
+
+        combos_to_mark = [
+            combo
+            for combo in expected_combos
+            if normalize_combo_status(self._combo_status_map.get(combo, "")) != STATUS_OUTLIER
+        ]
+        if not combos_to_mark:
+            for item in self._tree_all.get_children(""):
+                try:
+                    combo = str(self._tree_all.set(item, "Kombinasjon") or "").strip()
+                except Exception:
+                    combo = ""
+                if combo:
+                    self._apply_status_to_tree_item(item, combo)
+            self._update_combo_selection_summary()
+            return
+
+        apply_combo_status(self._combo_status_map, combos_to_mark, STATUS_EXPECTED)
+        self._auto_expected_combos = set(combos_to_mark)
+        for item in self._tree_all.get_children(""):
+            try:
+                combo = str(self._tree_all.set(item, "Kombinasjon") or "").strip()
+            except Exception:
+                combo = ""
+            if combo:
+                self._apply_status_to_tree_item(item, combo)
+        self._update_combo_selection_summary()
+
+    def _populate_all_tree(self) -> None:
+        self._clear_tree(self._tree_all)
+        combo_rows, _ = self._base_display_rows()
+        for r in combo_rows:
+            combo = str(r.get("Kombinasjon", "") or "").strip()
+            status_code = normalize_combo_status(self._combo_status_map.get(combo, ""))
+            status_txt = status_label(status_code)
+            comment_full = str(self._combo_comment_map.get(combo, "") or "").strip()
+            comment_disp = truncate_text(comment_full, max_len=80) if comment_full else ""
+            row_dict = {
+                **r,
+                "Status": status_txt,
+                "Kommentar": comment_disp,
+            }
+            vals = [row_dict.get(c, "") for c in self._tree_all["columns"]]
+            tags = ()
+            if status_code == STATUS_EXPECTED:
+                tags = ("expected",)
+            elif status_code == STATUS_OUTLIER:
+                tags = ("outlier",)
+            self._tree_all.insert("", tk.END, values=vals, tags=tags)
+        self._update_combo_selection_summary()
+
+    def _populate_per_tree(self) -> None:
+        self._clear_tree(self._tree_per)
+        _, per_rows = self._base_display_rows()
+        for row_dict in per_rows:
+            vals = [row_dict.get(c, "") for c in self._tree_per["columns"]]
+            self._tree_per.insert("", tk.END, values=vals)
 
     def _set_status_selected(self, status_code: str) -> None:
         """Setter status for *alle* markerte rader i kombinasjonslisten."""
@@ -767,6 +1402,50 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
     # ---- Drilldown calculations ----
 
+    def _distribution_mode(self) -> str:
+        try:
+            return str(self._distribution_mode_var.get() or "Konto").strip()
+        except Exception:
+            return "Konto"
+
+    @staticmethod
+    def _split_regnskapslinje_label(label: str) -> tuple[str, str]:
+        text = str(label or "").strip()
+        if not text:
+            return ("", "")
+        parts = text.split(" ", 1)
+        if len(parts) == 2 and parts[0].strip().isdigit():
+            return (parts[0].strip(), parts[1].strip())
+        return ("", text)
+
+    def _configure_distribution_tree_columns(self) -> None:
+        mode = self._distribution_mode()
+        if mode.startswith("Regn"):
+            col1, col2 = "Nr", "Regnskapslinje"
+            mot_title, sel_title = "Motposter per RL", "Valgte RL"
+        else:
+            col1, col2 = "Konto", "Kontonavn"
+            mot_title, sel_title = "Motposter", "Valgte kontoer"
+
+        for tree in (self._tree_mot, self._tree_sel):
+            try:
+                tree.heading("Konto", text=col1)
+                tree.heading("Kontonavn", text=col2)
+                tree.column("Konto", width=(70 if mode.startswith("Regn") else 80), anchor=tk.W, stretch=False)
+                tree.column("Kontonavn", width=280, anchor=tk.W)
+            except Exception:
+                continue
+        try:
+            self._left_nb.tab(self._tab_mot, text=mot_title)
+            self._left_nb.tab(self._tab_sel, text=sel_title)
+        except Exception:
+            pass
+
+    def _refresh_distribution_view(self) -> None:
+        self._configure_distribution_tree_columns()
+        if self._current_selection is not None:
+            self._update_drilldown(self._current_selection)
+
     def _update_drilldown(self, selection: _ComboSelection) -> None:
         self._current_selection = selection
         combo_key = selection.combo
@@ -897,6 +1576,109 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
             tree.insert("", tk.END, values=(k, name, fmt_amount(belop), pct_txt), tags=tags)
 
+    def _populate_account_sum_tree(
+        self,
+        tree: ttk.Treeview,
+        df_lines: pd.DataFrame,
+        base_sum: Optional[float] = None,
+    ) -> None:
+        """Fyller fordelingstabell på konto- eller regnskapslinjenivå."""
+        self._clear_tree(tree)
+        if df_lines is None or df_lines.empty:
+            return
+
+        show_regnskapslinje = self._distribution_mode().startswith("Regn") and bool(self._konto_regnskapslinje_map)
+        grouped = df_lines.copy()
+
+        if show_regnskapslinje:
+            grouped["_dist_key"] = grouped["Konto_str"].map(
+                lambda konto: str(self._konto_regnskapslinje_map.get(str(konto), "") or "").strip() or "(ikke mappet)"
+            )
+            opposite_keys = {
+                str(label).strip() or "(ikke mappet)"
+                for label in grouped.loc[grouped["Konto_str"].isin(self._selected_accounts_set), "_dist_key"].tolist()
+                if str(label).strip()
+            }
+        else:
+            grouped["_dist_key"] = grouped["Konto_str"].astype(str)
+            opposite_keys = {
+                str(konto).strip()
+                for konto in grouped.loc[grouped["Konto_str"].isin(self._selected_accounts_set), "_dist_key"].tolist()
+                if str(konto).strip()
+            }
+
+        amount_col = next(
+            (
+                col
+                for col in ("Beløp_num", "BelÃ¸p_num", "BelÃƒÂ¸p_num")
+                if col in grouped.columns
+            ),
+            None,
+        )
+        if amount_col is None:
+            if "Beløp" in grouped.columns:
+                grouped["Beløp_num"] = grouped["Beløp"].map(_safe_float)
+            else:
+                grouped["Beløp_num"] = 0.0
+            amount_col = "Beløp_num"
+
+        if "BelÃ¸p_num" not in grouped.columns and amount_col in grouped.columns:
+            grouped["BelÃ¸p_num"] = grouped[amount_col]
+        if "BelÃƒÂ¸p_num" not in grouped.columns and amount_col in grouped.columns:
+            grouped["BelÃƒÂ¸p_num"] = grouped[amount_col]
+
+        by_key = grouped.groupby("_dist_key", dropna=False)["BelÃ¸p_num"].sum()
+        if "Beløp_num" in grouped.columns:
+            by_key = grouped.groupby("_dist_key", dropna=False)["Beløp_num"].sum()
+        by_key = by_key.reindex(by_key.abs().sort_values(ascending=False).index)
+
+        name_map = {}
+        if not show_regnskapslinje and "Kontonavn" in grouped.columns:
+            for konto, s in grouped.groupby("_dist_key", dropna=False)["Kontonavn"]:
+                name = ""
+                for value in s.tolist():
+                    if value is None:
+                        continue
+                    try:
+                        import pandas as _pd
+                        if _pd.isna(value):
+                            continue
+                    except Exception:
+                        pass
+                    text = str(value).strip()
+                    if text and text.lower() != "nan":
+                        name = text
+                        break
+                if name:
+                    name_map[str(konto)] = name
+
+        show_pct = base_sum is not None and abs(float(base_sum)) > 1e-12
+
+        for key, belop in by_key.items():
+            row_key = str(key)
+            if show_regnskapslinje:
+                display_key, name = self._split_regnskapslinje_label(row_key)
+                if not display_key:
+                    display_key = row_key
+            else:
+                display_key = row_key
+                name = name_map.get(row_key) or self._konto_navn_map.get(row_key, "")
+
+            tags = ()
+            if tree is self._tree_mot and row_key in opposite_keys:
+                tags = ("valgt_motsatt",)
+                if name:
+                    name = f"{name} (valgt, motsatt)"
+                else:
+                    name = "(valgt, motsatt)"
+
+            pct_txt = ""
+            if show_pct:
+                pct = (abs(float(belop)) / abs(float(base_sum))) * 100.0
+                pct_txt = fmt_amount(pct, decimals=2)
+
+            tree.insert("", tk.END, values=(display_key, name, fmt_amount(belop), pct_txt), tags=tags)
+
     def _apply_bilag_limit(self) -> None:
         # If no current drilldown, nothing to do
         if self._bilag_rows_cache is None:
@@ -957,6 +1739,104 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
 
 
+def _popup_refresh_display_mode(self: _MotkontoCombinationsPopup) -> None:
+    heading = "Kombinasjon (regnskapslinje)" if self._display_mode().lower().startswith("regn") else "Kombinasjon (navn)"
+    try:
+        self._tree_all.heading("Kombinasjon (navn)", text=heading)
+    except Exception:
+        pass
+    try:
+        self._tree_per.heading(
+            "Valgt konto",
+            text="Valgt regnskapslinje" if self._display_mode().lower().startswith("regn") else "Valgt konto",
+        )
+        self._tree_per.heading("Kombinasjon (navn)", text=heading)
+    except Exception:
+        pass
+    self._populate_all_tree()
+    self._populate_per_tree()
+
+
+def _popup_populate_all_tree(self: _MotkontoCombinationsPopup) -> None:
+    self._clear_tree(self._tree_all)
+    combo_rows, _ = self._base_display_rows()
+    for row in combo_rows:
+        combo = str(row.get("Kombinasjon", "") or "").strip()
+        status_code = normalize_combo_status(self._combo_status_map.get(combo, ""))
+        status_txt = status_label(status_code)
+        comment_full = str(self._combo_comment_map.get(combo, "") or "").strip()
+        comment_disp = truncate_text(comment_full, max_len=80) if comment_full else ""
+        values = {**row, "Status": status_txt, "Kommentar": comment_disp}
+        tags = ()
+        if status_code == STATUS_EXPECTED:
+            tags = ("expected",)
+        elif status_code == STATUS_OUTLIER:
+            tags = ("outlier",)
+        self._tree_all.insert("", tk.END, values=[values.get(c, "") for c in self._tree_all["columns"]], tags=tags)
+    self._update_combo_selection_summary()
+
+
+def _popup_populate_per_tree(self: _MotkontoCombinationsPopup) -> None:
+    self._clear_tree(self._tree_per)
+    _, per_rows = self._base_display_rows()
+    for row in per_rows:
+        self._tree_per.insert("", tk.END, values=[row.get(c, "") for c in self._tree_per["columns"]])
+
+
+def _popup_update_drilldown(self: _MotkontoCombinationsPopup, selection: _ComboSelection) -> None:
+    self._current_selection = selection
+    combo_key = selection.combo
+
+    payload = self._get_drilldown_payload(combo_key)
+    bilag_list = list(payload.get("bilag_list", []) or [])
+    if not bilag_list:
+        self._lbl_combo.config(text=f"Kombinasjon: {combo_key} | (ingen bilag)")
+        self._clear_tree(self._tree_sel)
+        self._clear_tree(self._tree_mot)
+        self._clear_tree(self._tree_bilag)
+        self._lbl_vis_info.config(text="")
+        self._bilag_rows_cache = None
+        try:
+            self._lbl_sel_total.config(text="")
+            self._lbl_mot_total.config(text="")
+        except Exception:
+            pass
+        return
+
+    df_sel = payload.get("df_sel")
+    df_mot = payload.get("df_mot")
+    sum_sel = float(payload.get("sum_sel", 0.0) or 0.0)
+    sum_mot = float(payload.get("sum_mot", 0.0) or 0.0)
+    kontroll = float(payload.get("kontroll", 0.0) or 0.0)
+
+    try:
+        self._lbl_sel_total.config(text=f"Sum valgte kontoer: {fmt_amount(sum_sel)}")
+        self._lbl_mot_total.config(text=f"Sum motposter: {fmt_amount(sum_mot)} | Kontroll: {fmt_amount(kontroll)}")
+    except Exception:
+        pass
+
+    dir_txt = self._selected_direction if self._selected_direction != "alle" else "netto"
+    extra = f" | Per valgt konto: {selection.selected_account}" if selection.selected_account else ""
+    self._lbl_combo.config(
+        text=(
+            f"Kombinasjon: {combo_key}{extra}\n"
+            f"Bilag: {len(bilag_list)} | Sum valgte kontoer ({dir_txt}): {fmt_amount(sum_sel)}"
+            f" | Sum motposter: {fmt_amount(sum_mot)} | Kontroll (valgt + mot): {fmt_amount(kontroll)}"
+        )
+    )
+
+    self._populate_account_sum_tree(self._tree_sel, df_sel, base_sum=sum_sel)
+    self._populate_account_sum_tree(self._tree_mot, df_mot, base_sum=sum_sel)
+    self._bilag_rows_cache = payload.get("bilag_rows")
+    self._apply_bilag_limit()
+
+
+_MotkontoCombinationsPopup._refresh_display_mode = _popup_refresh_display_mode
+_MotkontoCombinationsPopup._populate_all_tree = _popup_populate_all_tree
+_MotkontoCombinationsPopup._populate_per_tree = _popup_populate_per_tree
+_MotkontoCombinationsPopup._update_drilldown = _popup_update_drilldown
+
+
 def show_motkonto_combinations_popup(
     parent: tk.Misc,
     df_combos: pd.DataFrame,
@@ -967,11 +1847,14 @@ def show_motkonto_combinations_popup(
     selected_accounts: Sequence[str],
     konto_navn_map: Mapping[str, str],
     df_scope: pd.DataFrame,
+    scope_mode: str | None = None,
+    scope_items: Sequence[str] | None = None,
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
     outlier_motkonto: Optional[Set[str]] = None,
     selected_direction: Optional[str] = None,
     outlier_combinations: Optional[Set[str]] = None,
     combo_status_map: Optional[dict[str, str]] = None,
-        combo_comment_map: Optional[dict[str, str]] = None,
+    combo_comment_map: Optional[dict[str, str]] = None,
     on_outlier_changed: Optional[Callable[[Set[str]], None]] = None,
     on_export_excel: Optional[Callable[..., None]] = None,
 ) -> _MotkontoCombinationsPopup:
@@ -985,6 +1868,9 @@ def show_motkonto_combinations_popup(
         selected_accounts=selected_accounts,
         konto_navn_map=konto_navn_map,
         df_scope=df_scope,
+        scope_mode=scope_mode,
+        scope_items=scope_items,
+        konto_regnskapslinje_map=konto_regnskapslinje_map,
         outlier_motkonto=outlier_motkonto,
         selected_direction=selected_direction,
         outlier_combinations=outlier_combinations,

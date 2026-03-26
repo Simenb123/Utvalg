@@ -40,6 +40,20 @@ def test_build_motpost_selected_accounts_label_and_value() -> None:
     assert vm.build_motpost_selected_accounts_value(data) == "3000, 3001, 3020"
 
 
+def test_build_motpost_scope_label_and_value_for_regnskapslinjer() -> None:
+    items = ("10 Salgsinntekt", "40 LÃ¸nnskostnad")
+
+    assert vm.build_motpost_scope_label(items, scope_mode="regnskapslinje") == "Valgte regnskapslinjer (2):"
+    assert vm.build_motpost_scope_value(items) == "10 Salgsinntekt, 40 LÃ¸nnskostnad"
+
+
+def test_build_motpost_expected_label_and_value() -> None:
+    items = ("610 Kundefordringer", "790 Skyldig offentlige avgifter")
+
+    assert vm.build_motpost_expected_label(items) == "Forventede regnskapslinjer (2):"
+    assert vm.build_motpost_expected_value(items) == "610 Kundefordringer, 790 Skyldig offentlige avgifter"
+
+
 class DummyEntry:
     def __init__(self) -> None:
         self.bindings: dict[str, object] = {}

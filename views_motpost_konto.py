@@ -22,11 +22,14 @@ Viktig:
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import re
+from typing import Any, Mapping, Optional, Sequence
 
 import pandas as pd
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import session
+import regnskap_client_overrides
 
 from motpost.view_konto_actions import (
     clear_outliers,
@@ -46,8 +49,12 @@ from motpost.view_konto_tree import (
 from motpost.view_konto_ui import (
     bind_entry_select_all,
     build_motpost_header_metrics_text,
+    build_motpost_expected_label,
+    build_motpost_expected_value,
     build_motpost_selected_accounts_label,
     build_motpost_selected_accounts_value,
+    build_motpost_scope_label,
+    build_motpost_scope_value,
     build_ui,
 )
 
@@ -67,6 +74,83 @@ from motpost_konto_core import (
 from ui_treeview_sort import enable_treeview_sorting
 
 
+_REGNSKAPSLINJE_REGNR_RE = re.compile(r"^\s*(\d+)")
+
+
+def _parse_regnskapslinje_regnr(value: object) -> int | None:
+    match = _REGNSKAPSLINJE_REGNR_RE.match(str(value or "").strip())
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _sort_regnskapslinje_label(value: object) -> tuple[int, int | str]:
+    regnr = _parse_regnskapslinje_regnr(value)
+    if regnr is not None:
+        return (0, regnr)
+    return (1, str(value or "").strip().lower())
+
+
+def _build_regnskapslinje_label_map(
+    scope_items: Sequence[str] | None,
+    konto_regnskapslinje_map: Mapping[str, str] | None,
+) -> dict[int, str]:
+    labels: dict[int, str] = {}
+    for raw in list(scope_items or ()) + list((konto_regnskapslinje_map or {}).values()):
+        text = str(raw or "").strip()
+        regnr = _parse_regnskapslinje_regnr(text)
+        if regnr is None or not text:
+            continue
+        labels.setdefault(regnr, text)
+    return labels
+
+
+def _restore_expected_regnskapslinjer_for_view(
+    *,
+    client: str | None,
+    scope_mode: str,
+    scope_items: Sequence[str] | None,
+    konto_regnskapslinje_map: Mapping[str, str] | None,
+    selected_direction: str | None,
+) -> tuple[str, ...]:
+    if not str(scope_mode or "").strip().lower().startswith("regn"):
+        return ()
+
+    scope_regnr: list[int] = []
+    for label in scope_items or ():
+        regnr = _parse_regnskapslinje_regnr(label)
+        if regnr is None or regnr in scope_regnr:
+            continue
+        scope_regnr.append(regnr)
+
+    if not client or not scope_regnr:
+        return ()
+
+    label_map = _build_regnskapslinje_label_map(scope_items, konto_regnskapslinje_map)
+    try:
+        expected_regnr = regnskap_client_overrides.load_expected_regnskapslinjer(
+            client,
+            scope_regnr=scope_regnr,
+            selected_direction=selected_direction,
+        )
+    except Exception:
+        return ()
+
+    restored: list[str] = []
+    seen: set[str] = set()
+    for regnr in expected_regnr:
+        label = str(label_map.get(int(regnr), int(regnr))).strip()
+        if not label or label in seen:
+            continue
+        restored.append(label)
+        seen.add(label)
+
+    return tuple(sorted(restored, key=_sort_regnskapslinje_label))
+
+
 class MotpostKontoView(tk.Toplevel):
     def __init__(
         self,
@@ -76,6 +160,9 @@ class MotpostKontoView(tk.Toplevel):
         konto_name_map: dict[str, str] | None = None,
         *,
         selected_direction: str = "Alle",
+        scope_mode: str = "konto",
+        scope_items: list[str] | tuple[str, ...] | set[str] | None = None,
+        konto_regnskapslinje_map: dict[str, str] | None = None,
     ):
         super().__init__(master)
         self.title("Motpostanalyse")
@@ -85,6 +172,20 @@ class MotpostKontoView(tk.Toplevel):
         self._selected_accounts = {_konto_str(k) for k in konto_list}
         self._selected_direction = selected_direction
         self._konto_name_map: dict[str, str] = dict(konto_name_map or {})
+        self._scope_mode = "regnskapslinje" if str(scope_mode or "").strip().lower().startswith("regn") else "konto"
+        self._scope_items = tuple(str(x).strip() for x in (scope_items or []) if str(x).strip())
+        self._konto_regnskapslinje_map: dict[str, str] = {
+            _konto_str(k): str(v).strip()
+            for k, v in (konto_regnskapslinje_map or {}).items()
+            if _konto_str(k) and str(v).strip()
+        }
+        self._expected_regnskapslinjer = _restore_expected_regnskapslinjer_for_view(
+            client=getattr(session, "client", None),
+            scope_mode=self._scope_mode,
+            scope_items=self._scope_items,
+            konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+            selected_direction=self._selected_direction,
+        )
         self._data = build_motpost_data(
             self._df_all,
             self._selected_accounts,
@@ -98,6 +199,18 @@ class MotpostKontoView(tk.Toplevel):
         self._selected_motkonto: Optional[str] = None
 
         self._details_limit_var = tk.IntVar(value=200)
+        self._details_mva_code_values = ["Alle"]
+        self._details_mva_code_var = tk.StringVar(value="Alle")
+        self._details_mva_mode_values = [
+            "Alle",
+            "Med MVA-kode",
+            "Uten MVA-kode",
+            "Treffer forventet",
+            "Avvik fra forventet",
+        ]
+        self._details_mva_mode_var = tk.StringVar(value="Alle")
+        self._details_expected_mva_values = ["25", "15", "12", "0"]
+        self._details_expected_mva_var = tk.StringVar(value="25")
 
         self._build_ui()
         self._render_summary()
@@ -202,6 +315,9 @@ def show_motpost_konto(
     selected_direction: str = "Alle",
     direction: str | None = None,
     retning: str | None = None,
+    scope_mode: str | None = None,
+    scope_items: list[str] | tuple[str, ...] | set[str] | None = None,
+    konto_regnskapslinje_map: dict[str, str] | None = None,
     **_: Any,
 ) -> None:
     """Entry-point brukt fra Analyse-fanen.
@@ -227,7 +343,16 @@ def show_motpost_konto(
     # MotpostKontoView kan ha litt ulik signatur i forskjellige versjoner.
     # Prøv å sende med så mye som mulig, men fall tilbake dersom den ikke støtter argumentene.
     try:
-        MotpostKontoView(master, df, konto_norm, konto_name_map, selected_direction=dir_value)
+        MotpostKontoView(
+            master,
+            df,
+            konto_norm,
+            konto_name_map,
+            selected_direction=dir_value,
+            scope_mode=scope_mode or "konto",
+            scope_items=scope_items,
+            konto_regnskapslinje_map=konto_regnskapslinje_map,
+        )
         return
     except TypeError:
         pass
@@ -276,7 +401,11 @@ __all__ = [
     "treeview_value_from_iid",
     # UI helpers (nyttig for tester og gjenbruk)
     "build_motpost_header_metrics_text",
+    "build_motpost_expected_label",
+    "build_motpost_expected_value",
     "build_motpost_selected_accounts_label",
     "build_motpost_selected_accounts_value",
+    "build_motpost_scope_label",
+    "build_motpost_scope_value",
     "bind_entry_select_all",
 ]

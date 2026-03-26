@@ -16,9 +16,14 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+import logging
 import os
-import sys
+from time import perf_counter
 import subprocess
+import sys
+
+
+logger = logging.getLogger(__name__)
 
 
 def on_select_motkonto(view: Any, *, konto_str_fn: Callable[[Any], str]) -> None:
@@ -74,38 +79,69 @@ def show_combinations(
 
         selected_direction = getattr(getattr(view, "_data", None), "selected_direction", "Alle")
         konto_navn_map = getattr(view, "_konto_name_map", None)
+        combo_cache = getattr(view, "_combo_popup_build_cache", None)
+        if not isinstance(combo_cache, dict):
+            combo_cache = {}
+            view._combo_popup_build_cache = combo_cache
 
-        # Nyere builders aksepterer selected_direction; eldre stubs/tests gjør ikke.
-        try:
-            df_combo = build_motkonto_combinations_fn(
-                df_scope,
-                selected_accounts,
-                selected_direction=selected_direction,
-                outlier_motkonto=view._outliers,
-                konto_navn_map=konto_navn_map,
-            )
-        except TypeError:
-            df_combo = build_motkonto_combinations_fn(
-                df_scope,
-                selected_accounts,
-                outlier_motkonto=view._outliers,
-                konto_navn_map=konto_navn_map,
-            )
+        cache_key = (
+            id(df_scope),
+            int(len(df_scope)),
+            tuple(str(c) for c in df_scope.columns),
+            tuple(str(a) for a in selected_accounts),
+            str(selected_direction or "Alle"),
+            tuple(sorted(str(k) for k in getattr(view, "_outliers", set()))),
+            id(konto_navn_map),
+        )
 
-        try:
-            df_combo_per = build_motkonto_combinations_per_selected_account_fn(
-                df_scope,
-                selected_accounts,
-                selected_direction=selected_direction,
-                outlier_motkonto=view._outliers,
-                konto_navn_map=konto_navn_map,
-            )
-        except TypeError:
-            df_combo_per = build_motkonto_combinations_per_selected_account_fn(
-                df_scope,
-                selected_accounts,
-                outlier_motkonto=view._outliers,
-                konto_navn_map=konto_navn_map,
+        cached_payload = combo_cache.get(cache_key)
+        if cached_payload is not None:
+            df_combo, df_combo_per = cached_payload
+        else:
+            t0 = perf_counter()
+
+            # Nyere builders aksepterer selected_direction; eldre stubs/tests gjør ikke.
+            try:
+                df_combo = build_motkonto_combinations_fn(
+                    df_scope,
+                    selected_accounts,
+                    selected_direction=selected_direction,
+                    outlier_motkonto=view._outliers,
+                    konto_navn_map=konto_navn_map,
+                )
+            except TypeError:
+                df_combo = build_motkonto_combinations_fn(
+                    df_scope,
+                    selected_accounts,
+                    outlier_motkonto=view._outliers,
+                    konto_navn_map=konto_navn_map,
+                )
+
+            try:
+                df_combo_per = build_motkonto_combinations_per_selected_account_fn(
+                    df_scope,
+                    selected_accounts,
+                    selected_direction=selected_direction,
+                    outlier_motkonto=view._outliers,
+                    konto_navn_map=konto_navn_map,
+                )
+            except TypeError:
+                df_combo_per = build_motkonto_combinations_per_selected_account_fn(
+                    df_scope,
+                    selected_accounts,
+                    outlier_motkonto=view._outliers,
+                    konto_navn_map=konto_navn_map,
+                )
+
+            combo_cache[cache_key] = (df_combo, df_combo_per)
+            if len(combo_cache) > 8:
+                combo_cache.pop(next(iter(combo_cache)), None)
+            logger.debug(
+                "motpost.show_combinations built popup data in %.3fs (scope_rows=%s, combos=%s, per_selected=%s)",
+                perf_counter() - t0,
+                len(df_scope),
+                len(df_combo),
+                len(df_combo_per),
             )
 
         bilag_total = int(df_scope["Bilag"].astype(str).nunique()) if "Bilag" in df_scope.columns else 0
@@ -129,6 +165,9 @@ def show_combinations(
         if combo_comment_map is None:
             combo_comment_map = {}
         view._combo_comment_map = combo_comment_map
+        scope_mode = getattr(view, "_scope_mode", None)
+        scope_items = getattr(view, "_scope_items", None)
+        konto_regnskapslinje_map = getattr(view, "_konto_regnskapslinje_map", None)
 
         # Ny signatur (med drilldown/outliers). I tester kan funksjonen være monkeypatched
         # med eldre signatur, så vi faller tilbake ved TypeError.
@@ -143,6 +182,9 @@ def show_combinations(
                 selected_accounts=selected_accounts,
                 selected_direction=selected_direction,
                 konto_navn_map=konto_navn_map,
+                scope_mode=scope_mode,
+                scope_items=scope_items,
+                konto_regnskapslinje_map=konto_regnskapslinje_map,
                 outlier_combinations=outlier_combos,
                 combo_status_map=combo_status_map,
                 combo_comment_map=combo_comment_map,

@@ -80,14 +80,11 @@ def _ensure_wrap_text(ws: Worksheet, *, start_row: int, end_row: int, start_col:
     for rr in range(start_row, end_row + 1):
         for cc in range(start_col, end_col + 1):
             cell = ws.cell(row=rr, column=cc)
-            try:
-                cell.alignment = cell.alignment.copy(wrap_text=True)
-            except Exception:
-                cell.alignment = Alignment(
-                    horizontal=cell.alignment.horizontal,
-                    vertical=cell.alignment.vertical,
-                    wrap_text=True,
-                )
+            cell.alignment = Alignment(
+                horizontal=cell.alignment.horizontal,
+                vertical=cell.alignment.vertical,
+                wrap_text=True,
+            )
 
 
 def write_oversikt_sheet(

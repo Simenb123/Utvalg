@@ -21,12 +21,46 @@ class DummyMotpostView:
         )
 
 
+class DummyMotpostViewWithScope:
+    created: List[dict[str, Any]] = []
+
+    def __init__(self, master, df_transactions: pd.DataFrame, konto_list, konto_name_map=None, **kwargs):
+        DummyMotpostViewWithScope.created.append(
+            {
+                "master": master,
+                "df_len": len(df_transactions),
+                "accounts": list(konto_list),
+                "konto_name_map": dict(konto_name_map or {}),
+                "kwargs": dict(kwargs),
+            }
+        )
+
+
 class _DummyVar:
     def __init__(self, value: int):
         self._value = value
 
     def get(self):
         return self._value
+
+
+class _DummyTextVar:
+    def __init__(self, value: str):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value: str) -> None:
+        self._value = value
+
+
+class _FakeCombo:
+    def __init__(self):
+        self.configured: dict[str, object] = {}
+
+    def configure(self, **kwargs):
+        self.configured.update(kwargs)
 
 
 class _FakeTree:
@@ -88,6 +122,32 @@ def test_show_motpost_konto_accepts_positional_konto_name_map(monkeypatch) -> No
     assert DummyMotpostView.created[0]["accounts"] == ["3000"]
 
 
+def test_show_motpost_konto_forwards_rl_scope_keywords_when_supported(monkeypatch) -> None:
+    DummyMotpostViewWithScope.created.clear()
+    monkeypatch.setattr(views_motpost_konto, "MotpostKontoView", DummyMotpostViewWithScope)
+
+    df = _sample_df()
+    views_motpost_konto.show_motpost_konto(
+        master="root",
+        df_all=df,
+        selected_accounts=["3000"],
+        konto_name_map={"3000": "Salg"},
+        selected_direction="Kredit",
+        scope_mode="regnskapslinje",
+        scope_items=["10 Salgsinntekt"],
+        konto_regnskapslinje_map={"3000": "10 Salgsinntekt"},
+    )
+
+    assert len(DummyMotpostViewWithScope.created) == 1
+    created = DummyMotpostViewWithScope.created[0]
+    assert created["master"] == "root"
+    assert created["accounts"] == ["3000"]
+    assert created["kwargs"]["selected_direction"] == "Kredit"
+    assert created["kwargs"]["scope_mode"] == "regnskapslinje"
+    assert created["kwargs"]["scope_items"] == ["10 Salgsinntekt"]
+    assert created["kwargs"]["konto_regnskapslinje_map"] == {"3000": "10 Salgsinntekt"}
+
+
 def test_show_motpost_konto_with_empty_account_list_does_not_open_view(monkeypatch) -> None:
     """Typisk feiltilfelle: kalles uten kontoer -> skal ikke åpne vindu."""
     DummyMotpostView.created.clear()
@@ -133,6 +193,59 @@ def test_refresh_details_calls_build_bilag_details_without_unexpected_kwargs(mon
     assert len(v._tree_details.inserted) == 1
 
 
+def test_refresh_details_applies_mva_filters_and_updates_code_choices(monkeypatch) -> None:
+    def _stub_build_bilag_details(data, motkonto):
+        return pd.DataFrame(
+            [
+                {
+                    "Bilag": "10",
+                    "Dato": pd.Timestamp("2025-01-01"),
+                    "Tekst": "Med forventet mva",
+                    "Beløp (valgte kontoer)": -100.0,
+                    "Motbeløp": 100.0,
+                    "MVA-kode": "3",
+                    "MVA-prosent": "25",
+                    "MVA-beløp": 25.0,
+                    "Kontoer i bilag": "3000, 1500, 2700",
+                },
+                {
+                    "Bilag": "11",
+                    "Dato": pd.Timestamp("2025-01-02"),
+                    "Tekst": "Uten mva",
+                    "Beløp (valgte kontoer)": -80.0,
+                    "Motbeløp": 80.0,
+                    "MVA-kode": "",
+                    "MVA-prosent": "",
+                    "MVA-beløp": 0.0,
+                    "Kontoer i bilag": "3000, 1500",
+                },
+            ]
+        )
+
+    monkeypatch.setattr(views_motpost_konto, "build_bilag_details", _stub_build_bilag_details)
+
+    v = views_motpost_konto.MotpostKontoView.__new__(views_motpost_konto.MotpostKontoView)
+    v._tree_details = _FakeTree()
+    v._details_limit_var = _DummyVar(200)
+    v._details_mva_code_var = _DummyTextVar("Alle")
+    v._details_mva_code_combo = _FakeCombo()
+    v._details_mva_mode_var = _DummyTextVar("Avvik fra forventet")
+    v._details_expected_mva_var = _DummyTextVar("25")
+    v._selected_motkonto = "2400"
+    v._data = SimpleNamespace()
+
+    views_motpost_konto.MotpostKontoView._refresh_details(v)
+
+    assert v._details_mva_code_values == ["Alle", "3"]
+    assert v._details_mva_code_combo.configured["values"] == ("Alle", "3")
+    assert len(v._tree_details.inserted) == 1
+    inserted = v._tree_details.inserted[0]["kwargs"]
+    assert inserted["values"][0] == "11"
+    assert inserted["values"][5] == ""
+    assert inserted["values"][6] == ""
+    assert "mva_avvik" in inserted["tags"]
+
+
 def test_show_combinations_uses_df_scope_positional_args(monkeypatch) -> None:
     calls = {"combo": None, "combo_per": None, "popup": None}
 
@@ -167,6 +280,175 @@ def test_show_combinations_uses_df_scope_positional_args(monkeypatch) -> None:
     assert calls["combo_per"] is not None
     assert calls["popup"] is not None
     assert calls["combo"]["sel"] == {"3000"}
+
+
+def test_show_combinations_passes_rl_scope_context_to_popup(monkeypatch) -> None:
+    calls = {"popup": None}
+
+    def _stub_combo(df_scope, selected_accounts, *, outlier_motkonto=None, konto_navn_map=None):
+        return pd.DataFrame([{"Kombinasjon #": 1, "Kombinasjon": "2400", "Antall bilag": 1}])
+
+    def _stub_combo_per(df_scope, selected_accounts, *, outlier_motkonto=None, konto_navn_map=None):
+        return pd.DataFrame([{"Valgt konto": "3000", "Kombinasjon": "2400"}])
+
+    def _stub_popup(
+        parent,
+        *,
+        df_combos,
+        df_combo_per_selected=None,
+        title="",
+        summary=None,
+        df_scope=None,
+        selected_accounts=(),
+        selected_direction=None,
+        konto_navn_map=None,
+        scope_mode=None,
+        scope_items=None,
+        konto_regnskapslinje_map=None,
+        outlier_combinations=None,
+        combo_status_map=None,
+        combo_comment_map=None,
+        on_export_excel=None,
+    ):
+        calls["popup"] = {
+            "title": title,
+            "summary": summary,
+            "scope_mode": scope_mode,
+            "scope_items": list(scope_items or ()),
+            "konto_regnskapslinje_map": dict(konto_regnskapslinje_map or {}),
+            "selected_accounts": list(selected_accounts or ()),
+            "selected_direction": selected_direction,
+        }
+
+    monkeypatch.setattr(views_motpost_konto, "build_motkonto_combinations", _stub_combo)
+    monkeypatch.setattr(views_motpost_konto, "build_motkonto_combinations_per_selected_account", _stub_combo_per)
+    monkeypatch.setattr(views_motpost_konto, "show_motkonto_combinations_popup", _stub_popup)
+
+    df_scope = pd.DataFrame(
+        [
+            {"Bilag": 1, "Konto": 3000, "BelÃ¸p": -100.0},
+            {"Bilag": 1, "Konto": 2400, "BelÃ¸p": 100.0},
+        ]
+    )
+    v = views_motpost_konto.MotpostKontoView.__new__(views_motpost_konto.MotpostKontoView)
+    v._data = SimpleNamespace(df_scope=df_scope, selected_accounts=("3000",), selected_direction="Kredit")
+    v._outliers = set()
+    v._scope_mode = "regnskapslinje"
+    v._scope_items = ("10 Salgsinntekt",)
+    v._konto_regnskapslinje_map = {"3000": "10 Salgsinntekt", "2400": "610 Kundefordringer"}
+    v._export_excel = lambda *args, **kwargs: None
+
+    views_motpost_konto.MotpostKontoView._show_combinations(v)
+
+    assert calls["popup"] is not None
+    assert calls["popup"]["scope_mode"] == "regnskapslinje"
+    assert calls["popup"]["scope_items"] == ["10 Salgsinntekt"]
+    assert calls["popup"]["konto_regnskapslinje_map"] == {
+        "3000": "10 Salgsinntekt",
+        "2400": "610 Kundefordringer",
+    }
+    assert calls["popup"]["selected_accounts"] == ["3000"]
+    assert calls["popup"]["selected_direction"] == "Kredit"
+
+
+def test_show_combinations_reuses_cached_popup_builds(monkeypatch) -> None:
+    calls = {"combo": 0, "combo_per": 0, "popup": 0}
+
+    def _stub_combo(df_scope, selected_accounts, *, selected_direction=None, outlier_motkonto=None, konto_navn_map=None):
+        calls["combo"] += 1
+        return pd.DataFrame([{"Kombinasjon #": 1, "Kombinasjon": "2400", "Antall bilag": 1}])
+
+    def _stub_combo_per(df_scope, selected_accounts, *, selected_direction=None, outlier_motkonto=None, konto_navn_map=None):
+        calls["combo_per"] += 1
+        return pd.DataFrame([{"Valgt konto": "3000", "Kombinasjon": "2400"}])
+
+    def _stub_popup(*args, **kwargs):
+        calls["popup"] += 1
+
+    monkeypatch.setattr(views_motpost_konto, "build_motkonto_combinations", _stub_combo)
+    monkeypatch.setattr(views_motpost_konto, "build_motkonto_combinations_per_selected_account", _stub_combo_per)
+    monkeypatch.setattr(views_motpost_konto, "show_motkonto_combinations_popup", _stub_popup)
+
+    df_scope = pd.DataFrame(
+        [
+            {"Bilag": 1, "Konto": 3000, "BelÃ¸p": -100.0},
+            {"Bilag": 1, "Konto": 2400, "BelÃ¸p": 100.0},
+        ]
+    )
+    v = views_motpost_konto.MotpostKontoView.__new__(views_motpost_konto.MotpostKontoView)
+    v._data = SimpleNamespace(df_scope=df_scope, selected_accounts=("3000",), selected_direction="Kredit")
+    v._outliers = set()
+    v._export_excel = lambda *args, **kwargs: None
+
+    views_motpost_konto.MotpostKontoView._show_combinations(v)
+    views_motpost_konto.MotpostKontoView._show_combinations(v)
+
+    assert calls["combo"] == 1
+    assert calls["combo_per"] == 1
+    assert calls["popup"] == 2
+
+
+def test_restore_expected_regnskapslinjer_for_view_uses_client_preset(monkeypatch) -> None:
+    monkeypatch.setattr(
+        views_motpost_konto.regnskap_client_overrides,
+        "load_expected_regnskapslinjer",
+        lambda client, *, scope_regnr, selected_direction=None: [610, 790],
+    )
+
+    restored = views_motpost_konto._restore_expected_regnskapslinjer_for_view(
+        client="Nbs Regnskap AS",
+        scope_mode="regnskapslinje",
+        scope_items=("10 Salgsinntekt",),
+        konto_regnskapslinje_map={
+            "1500": "610 Kundefordringer",
+            "2700": "790 Skyldig offentlige avgifter",
+        },
+        selected_direction="Kredit",
+    )
+
+    assert restored == (
+        "610 Kundefordringer",
+        "790 Skyldig offentlige avgifter",
+    )
+
+
+def test_render_summary_marks_expected_motkonto_rows() -> None:
+    v = SimpleNamespace()
+    v._tree_summary = _FakeTree()
+    v._data = SimpleNamespace(
+        df_motkonto=pd.DataFrame(
+            [
+                {
+                    "Motkonto": "1500",
+                    "Kontonavn": "Kundefordringer",
+                    "Sum": 17329550.29,
+                    "% andel": -112.6,
+                    "Antall bilag": 105,
+                },
+                {
+                    "Motkonto": "2700",
+                    "Kontonavn": "Utgående merverdiavgift, høy sats",
+                    "Sum": -3714400.34,
+                    "% andel": 24.1,
+                    "Antall bilag": 112,
+                },
+            ]
+        )
+    )
+    v._outliers = set()
+    v._expected_regnskapslinjer = ("610 Kundefordringer",)
+    v._konto_regnskapslinje_map = {
+        "1500": "610 Kundefordringer",
+        "2700": "790 Skyldig offentlige avgifter",
+    }
+
+    views_motpost_konto.render_summary(v)
+
+    first = v._tree_summary.inserted[0]["kwargs"]
+    second = v._tree_summary.inserted[1]["kwargs"]
+    assert "expected" in first["tags"]
+    assert "(forventet)" in first["values"][1]
+    assert "expected" not in second["tags"]
 
 
 def test_export_excel_accepts_combo_status_and_comment_payloads(monkeypatch, tmp_path) -> None:
