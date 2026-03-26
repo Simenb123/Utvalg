@@ -28,6 +28,12 @@ dataset: Optional[pd.DataFrame] = None
 client: Optional[str] = None
 year: Optional[str] = None
 
+# Feature-specific state containers used by newer workspaces.
+# These are intentionally loose and can be replaced by richer dataclasses
+# later without breaking the basic session contract.
+consolidation_project = None
+reskontro_state: dict = {}
+
 # A mutable structure holding information about the current account selection.
 # Expected keys:
 #     ``accounts`` – a list of account identifiers (as strings)
