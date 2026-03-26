@@ -46,32 +46,28 @@ _A07_COLUMNS = (
 )
 
 _CONTROL_COLUMNS = (
-    ("Kode", "Kode", 340, "w"),
+    ("Kode", "Kode", 360, "w"),
     ("Belop", "Belop", 130, "e"),
-    ("Status", "Arbeid", 90, "w"),
-    ("Anbefalt", "Neste", 90, "w"),
+    ("Status", "Status", 95, "w"),
+    ("Anbefalt", "Neste", 110, "w"),
 )
 
 _CONTROL_GL_COLUMNS = (
     ("Konto", "Konto", 80, "w"),
-    ("Navn", "Navn", 220, "w"),
-    ("IB", "IB", 95, "e"),
-    ("Endring", "Endring", 95, "e"),
-    ("UB", "UB", 95, "e"),
-    ("Kode", "Kode", 120, "w"),
+    ("Navn", "Navn", 300, "w"),
+    ("Endring", "Endring", 110, "e"),
 )
+
+_CONTROL_GL_DATA_COLUMNS = ("Konto", "Navn", "IB", "Endring", "UB", "Kode")
 
 _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
     ("Konto", "Konto", 90, "w"),
-    ("Navn", "Navn", 260, "w"),
-    ("IB", "IB", 110, "e"),
-    ("Endring", "Endring", 110, "e"),
-    ("UB", "UB", 110, "e"),
+    ("Navn", "Navn", 320, "w"),
+    ("Endring", "Endring", 120, "e"),
 )
 
 _CONTROL_SUGGESTION_COLUMNS = (
-    ("ForslagKontoer", "ForslagKontoer", 180, "w"),
-    ("GL_Sum", "GL_Sum", 120, "e"),
+    ("ForslagKontoer", "Forslag", 220, "w"),
     ("Diff", "Diff", 120, "e"),
     ("Score", "Score", 90, "e"),
     ("WithinTolerance", "Innenfor", 80, "center"),
@@ -147,7 +143,7 @@ _SUGGESTION_SCOPE_LABELS = {
     "alle": "Alle forslag",
 }
 
-_CONTROL_DRAG_IDLE_HINT = "Velg konto til venstre og kode til hoyre, eller dra konto inn."
+_CONTROL_DRAG_IDLE_HINT = "Velg kode og konto, eller dra konto inn."
 
 _NUMERIC_COLUMNS_ZERO_DECIMALS = {"AntallKontoer"}
 _NUMERIC_COLUMNS_THREE_DECIMALS = {"Score"}
@@ -1223,6 +1219,7 @@ def best_suggestion_row_for_code(suggestions_df: pd.DataFrame, code: str | None)
     return matches.iloc[0]
 
 
+# Compact control summaries keep the workspace readable in the pilot UI.
 def build_control_suggestion_summary(code: str | None, suggestions_df: pd.DataFrame, selected_row: pd.Series | None) -> str:
     code_s = str(code or "").strip()
     if not code_s:
@@ -1234,8 +1231,8 @@ def build_control_suggestion_summary(code: str | None, suggestions_df: pd.DataFr
     row = selected_row if selected_row is not None else suggestions_df.iloc[0]
     accounts = str(row.get("ForslagKontoer") or "").strip() or "-"
     diff = _format_picker_amount(row.get("Diff")) or "-"
-    within = "innenfor" if bool(row.get("WithinTolerance", False)) else "sjekkes"
-    return f"{count} forslag for {code_s}. Valgt forslag: {accounts} | diff {diff} | {within} toleranse."
+    status = "OK" if bool(row.get("WithinTolerance", False)) else "Sjekk"
+    return f"Forslag {count} | Valgt {accounts} | Diff {diff} | {status}"
 
 
 def build_control_suggestion_effect_summary(
@@ -1245,7 +1242,7 @@ def build_control_suggestion_effect_summary(
 ) -> str:
     code_s = str(code or "").strip()
     if not code_s:
-        return "Velg kode i hoyre liste for aa se hva valgt forslag vil gjøre."
+        return "Velg kode i hoyre liste for aa se hva valgt forslag vil gjore."
     if selected_row is None:
         return f"Velg et forslag for aa se hva som vil bli mappet til {code_s}."
 
@@ -1258,13 +1255,13 @@ def build_control_suggestion_effect_summary(
     current_text = ",".join(current) if current else "ingen mapping"
     suggested_text = ",".join(suggested)
     diff = _format_picker_amount(selected_row.get("Diff")) or "-"
-    status_text = "Innenfor toleranse." if bool(selected_row.get("WithinTolerance", False)) else "Sjekk diff før bruk."
+    status_text = "OK" if bool(selected_row.get("WithinTolerance", False)) else "Sjekk"
 
     if current and set(current) == set(suggested):
-        return f"Valgt forslag matcher dagens mapping {suggested_text}. Diff {diff}. {status_text}"
+        return f"Matcher dagens mapping {suggested_text} | Diff {diff} | {status_text}"
     if not current:
-        return f"Vil mappe {suggested_text} til {code_s}. Diff {diff}. {status_text}"
-    return f"Vil erstatte mapping {current_text} med {suggested_text}. Diff {diff}. {status_text}"
+        return f"Mapper {suggested_text} til {code_s} | Diff {diff} | {status_text}"
+    return f"Erstatter {current_text} med {suggested_text} | Diff {diff} | {status_text}"
 
 
 def build_control_accounts_summary(accounts_df: pd.DataFrame, code: str | None) -> str:
@@ -1272,7 +1269,7 @@ def build_control_accounts_summary(accounts_df: pd.DataFrame, code: str | None) 
     if not code_s:
         return "Velg kode i hoyre liste for aa se mappede kontoer."
     if accounts_df is None or accounts_df.empty:
-        return f"Ingen kontoer er mappet til {code_s} ennå."
+        return f"Ingen kontoer er mappet til {code_s} enna."
 
     count = int(len(accounts_df))
     total_raw = accounts_df.get("Endring", pd.Series(dtype=object)).sum()
@@ -1286,7 +1283,7 @@ def build_control_accounts_summary(accounts_df: pd.DataFrame, code: str | None) 
     if not kontoer:
         kontoer = "-"
     suffix = "konto" if count == 1 else "kontoer"
-    return f"{count} {suffix} mappet til {code_s}. Endring {total_endring}. Kontoer: {kontoer}."
+    return f"{count} {suffix} | Endring {total_endring} | {kontoer}"
 
 
 def control_recommendation_label(
@@ -1491,12 +1488,32 @@ def build_control_queue_df(
             }
         )
 
-    return pd.DataFrame(rows, columns=[c[0] for c in _CONTROL_COLUMNS] + list(_CONTROL_EXTRA_COLUMNS))
+    out = pd.DataFrame(rows, columns=[c[0] for c in _CONTROL_COLUMNS] + list(_CONTROL_EXTRA_COLUMNS))
+    if out.empty:
+        return out
+
+    status_priority = {
+        "Trenger manuell mapping": 0,
+        "Trenger vurdering": 1,
+        "Ferdig": 2,
+    }
+    work_status = out.get("Arbeidsstatus", pd.Series(index=out.index, dtype="object")).fillna("").astype(str)
+    belop_abs = pd.to_numeric(out.get("Belop"), errors="coerce").abs().fillna(0)
+    sort_df = out.assign(
+        _status_priority=work_status.map(status_priority).fillna(9),
+        _belop_abs=belop_abs,
+    )
+    sort_df = sort_df.sort_values(
+        by=["_status_priority", "_belop_abs", "Kode"],
+        ascending=[True, False, True],
+        kind="stable",
+    )
+    return sort_df.drop(columns=["_status_priority", "_belop_abs"], errors="ignore").reset_index(drop=True)
 
 
 def build_control_gl_df(gl_df: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
     if gl_df is None or gl_df.empty:
-        return pd.DataFrame(columns=[c[0] for c in _CONTROL_GL_COLUMNS])
+        return pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
 
     mapping_clean = {str(account).strip(): str(code).strip() for account, code in (mapping or {}).items()}
     rows: list[dict[str, object]] = []
@@ -1515,7 +1532,7 @@ def build_control_gl_df(gl_df: pd.DataFrame, mapping: dict[str, str]) -> pd.Data
             }
         )
 
-    return pd.DataFrame(rows, columns=[c[0] for c in _CONTROL_GL_COLUMNS])
+    return pd.DataFrame(rows, columns=list(_CONTROL_GL_DATA_COLUMNS))
 
 
 def build_control_selected_account_df(gl_df: pd.DataFrame, mapping: dict[str, str], code: str | None) -> pd.DataFrame:
@@ -1538,11 +1555,24 @@ def filter_control_gl_df(
     *,
     search_text: object = "",
     only_unmapped: bool = False,
+    active_only: bool = False,
 ) -> pd.DataFrame:
     if control_gl_df is None or control_gl_df.empty:
-        return pd.DataFrame(columns=[c[0] for c in _CONTROL_GL_COLUMNS])
+        return pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
 
     filtered = control_gl_df.copy()
+    if active_only:
+        numeric_cols = [column for column in ("IB", "Endring", "UB") if column in filtered.columns]
+        if numeric_cols:
+            numeric = filtered[numeric_cols].apply(pd.to_numeric, errors="coerce").fillna(0)
+            has_activity = numeric.ne(0).any(axis=1)
+        else:
+            has_activity = pd.Series(False, index=filtered.index)
+        if "Kode" in filtered.columns:
+            has_mapping = filtered["Kode"].fillna("").astype(str).str.strip() != ""
+            filtered = filtered.loc[has_activity | has_mapping].copy()
+        else:
+            filtered = filtered.loc[has_activity].copy()
     if only_unmapped and "Kode" in filtered.columns:
         filtered = filtered.loc[filtered["Kode"].astype(str).str.strip() == ""].copy()
 
@@ -1984,7 +2014,7 @@ class A07Page(ttk.Frame):
         )
         self.a07_overview_df = _empty_a07_df()
         self.control_df = _empty_control_df()
-        self.control_gl_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_GL_COLUMNS])
+        self.control_gl_df = pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
         self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
         self.reconcile_df = _empty_reconcile_df()
         self.mapping_df = _empty_mapping_df()
@@ -2018,9 +2048,9 @@ class A07Page(ttk.Frame):
         self.history_path_var = tk.StringVar(value="Historikk: ingen tidligere A07-mapping")
         self.suggestion_details_var = tk.StringVar(value="Velg et forslag for aa se hvorfor det scorer hoeyt.")
         self.control_suggestion_summary_var = tk.StringVar(value="Velg kode i hoyre liste for aa se forslag.")
-        self.control_suggestion_effect_var = tk.StringVar(value="Velg kode i hoyre liste for aa se hva valgt forslag vil gjøre.")
+        self.control_suggestion_effect_var = tk.StringVar(value="Velg forslag for aa se effekt.")
         self.history_details_var = tk.StringVar(value="Velg en kode for aa se historikk.")
-        self.control_summary_var = tk.StringVar(value="Velg en A07-kode for aa starte arbeidet.")
+        self.control_summary_var = tk.StringVar(value="Slik jobber du")
         self.control_intro_var = tk.StringVar(value="Velg kode i høyre liste.")
         self.control_meta_var = tk.StringVar(value="")
         self.control_match_var = tk.StringVar(value="")
@@ -2035,6 +2065,7 @@ class A07Page(ttk.Frame):
         self.a07_filter_label_var = tk.StringVar(value=_CONTROL_VIEW_LABELS["neste"])
         self.control_code_filter_var = tk.StringVar(value="")
         self.control_gl_filter_var = tk.StringVar(value="")
+        self.control_gl_active_only_var = tk.BooleanVar(value=True)
         self.control_gl_unmapped_only_var = tk.BooleanVar(value=False)
         self.suggestion_scope_var = tk.StringVar(value="valgt_kode")
         self.suggestion_scope_label_var = tk.StringVar(value=_SUGGESTION_SCOPE_LABELS["valgt_kode"])
@@ -2165,9 +2196,9 @@ class A07Page(ttk.Frame):
         control_top = ttk.Panedwindow(control_workspace, orient="horizontal")
         control_top.pack(fill="both", expand=True)
 
-        control_gl_panel = ttk.LabelFrame(control_top, text="GL-kontoer", padding=(8, 8))
-        control_assign_panel = ttk.Frame(control_top, padding=(2, 22, 2, 0))
-        control_a07_panel = ttk.LabelFrame(control_top, text="A07-koder", padding=(8, 8))
+        control_gl_panel = ttk.LabelFrame(control_top, text="1. Velg konto", padding=(8, 8))
+        control_assign_panel = ttk.Frame(control_top, padding=(2, 10, 2, 0))
+        control_a07_panel = ttk.LabelFrame(control_top, text="2. Velg kode i arbeidskø", padding=(8, 8))
         control_top.add(control_gl_panel, weight=3)
         control_top.add(control_assign_panel, weight=0)
         control_top.add(control_a07_panel, weight=4)
@@ -2184,10 +2215,16 @@ class A07Page(ttk.Frame):
         self.entry_control_gl_filter.bind("<KeyRelease>", lambda _event: self._on_control_gl_filter_changed())
         ttk.Checkbutton(
             control_gl_filters,
+            text="Kun aktive",
+            variable=self.control_gl_active_only_var,
+            command=self._on_control_gl_filter_changed,
+        ).pack(side="left")
+        ttk.Checkbutton(
+            control_gl_filters,
             text="Kun umappede",
             variable=self.control_gl_unmapped_only_var,
             command=self._on_control_gl_filter_changed,
-        ).pack(side="left")
+        ).pack(side="left", padx=(8, 0))
         self.tree_control_gl = self._build_tree_tab(control_gl_panel, _CONTROL_GL_COLUMNS)
         try:
             self.tree_control_gl.tag_configure("control_gl_unmapped", background="#FFF3CD", foreground="#7A5B00")
@@ -2206,9 +2243,16 @@ class A07Page(ttk.Frame):
         except Exception:
             pass
 
+        ttk.Label(
+            control_assign_panel,
+            text="3. Tildel",
+            style="Muted.TLabel",
+            justify="center",
+        ).pack(fill="x", pady=(0, 8))
+
         self.btn_control_assign = ttk.Button(
             control_assign_panel,
-            text="Tildel",
+            text="Tildel ->",
             command=self._assign_selected_control_mapping,
         )
         self.btn_control_assign.pack(fill="x")
@@ -2225,7 +2269,7 @@ class A07Page(ttk.Frame):
         control_lower.pack(fill="x", pady=(8, 0))
         self.control_lower_panel = control_lower
 
-        control_status = ttk.LabelFrame(control_lower, text="Valgt kode", padding=(8, 5))
+        control_status = ttk.LabelFrame(control_lower, text="Neste steg", padding=(8, 5))
         control_status.pack(fill="x")
         self.control_panel = control_status
         control_status.columnconfigure(0, weight=1)
@@ -2252,13 +2296,13 @@ class A07Page(ttk.Frame):
         control_actions.grid(row=0, column=1, sticky="ne", padx=(12, 0))
         self.btn_control_best = ttk.Button(
             control_actions,
-            text="Bruk forslag",
+            text="Beste forslag",
             command=self._apply_best_suggestion_for_selected_code,
         )
         self.btn_control_best.pack(side="left")
         self.btn_control_history = ttk.Button(
             control_actions,
-            text="Bruk historikk",
+            text="Historikk",
             command=self._apply_history_for_selected_code,
         )
         self.btn_control_history.pack(side="left", padx=(6, 0))
@@ -2279,12 +2323,13 @@ class A07Page(ttk.Frame):
             wraplength=1180,
             justify="left",
         )
+        self.lbl_control_drag.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         control_detail_panes = ttk.Panedwindow(control_lower, orient="vertical")
         control_detail_panes.pack(fill="both", expand=True, pady=(6, 0))
         self.control_detail_panes = control_detail_panes
 
-        control_suggest_panel = ttk.LabelFrame(control_detail_panes, text="Forslag for valgt kode", padding=(8, 8))
+        control_suggest_panel = ttk.LabelFrame(control_detail_panes, text="Forslag", padding=(8, 8))
         control_detail_panes.add(control_suggest_panel, weight=3)
         control_suggest_actions = ttk.Frame(control_suggest_panel)
         control_suggest_actions.pack(fill="x", pady=(0, 8))
@@ -2298,19 +2343,13 @@ class A07Page(ttk.Frame):
         )
         ttk.Label(
             control_suggest_panel,
-            textvariable=self.control_suggestion_summary_var,
-            style="Muted.TLabel",
-            wraplength=1180,
-            justify="left",
-        ).pack(anchor="w", pady=(0, 8))
-        ttk.Label(
-            control_suggest_panel,
             textvariable=self.control_suggestion_effect_var,
             style="Muted.TLabel",
             wraplength=1180,
             justify="left",
-        ).pack(anchor="w", pady=(0, 8))
+        ).pack(anchor="w", pady=(0, 4))
         self.tree_control_suggestions = self._build_tree_tab(control_suggest_panel, _CONTROL_SUGGESTION_COLUMNS)
+        self.tree_control_suggestions.configure(height=4)
         try:
             self.tree_control_suggestions.tag_configure("suggestion_ok", background="#E2F1EB", foreground="#256D5A")
             self.tree_control_suggestions.tag_configure(
@@ -2324,7 +2363,7 @@ class A07Page(ttk.Frame):
 
         control_accounts_panel = ttk.LabelFrame(
             control_detail_panes,
-            text="Kontoer mappet til valgt kode",
+            text="Mappede kontoer",
             padding=(8, 8),
         )
         control_detail_panes.add(control_accounts_panel, weight=2)
@@ -2351,6 +2390,7 @@ class A07Page(ttk.Frame):
             control_accounts_panel,
             _CONTROL_SELECTED_ACCOUNT_COLUMNS,
         )
+        self.tree_control_accounts.configure(height=3)
 
         self.tree_history = self._build_tree_tab(tab_history, _HISTORY_COLUMNS)
         self.tree_suggestions = self._build_tree_tab(tab_suggestions, _SUGGESTION_COLUMNS)
@@ -3069,7 +3109,7 @@ class A07Page(ttk.Frame):
         except Exception:
             return
 
-    def _control_gl_filter_state(self) -> tuple[str, bool]:
+    def _control_gl_filter_state(self) -> tuple[str, bool, bool]:
         try:
             search_text = str(self.control_gl_filter_var.get() or "")
         except Exception:
@@ -3078,7 +3118,11 @@ class A07Page(ttk.Frame):
             only_unmapped = bool(self.control_gl_unmapped_only_var.get())
         except Exception:
             only_unmapped = False
-        return search_text, only_unmapped
+        try:
+            active_only = bool(self.control_gl_active_only_var.get())
+        except Exception:
+            active_only = False
+        return search_text, only_unmapped, active_only
 
     def _refresh_a07_tree(self) -> None:
         selected_code = self._selected_code_from_tree(self.tree_a07)
@@ -3130,11 +3174,12 @@ class A07Page(ttk.Frame):
         selected_account = self._selected_control_gl_account()
         selected_code = self._selected_code_from_tree(self.tree_a07)
         suggested_accounts = self._selected_control_suggestion_accounts()
-        search_text, only_unmapped = self._control_gl_filter_state()
+        search_text, only_unmapped, active_only = self._control_gl_filter_state()
         filtered_gl_df = filter_control_gl_df(
             self.control_gl_df,
             search_text=search_text,
             only_unmapped=only_unmapped,
+            active_only=active_only,
         )
         self._fill_tree(
             self.tree_control_gl,
@@ -3283,17 +3328,17 @@ class A07Page(ttk.Frame):
         code = self._selected_code_from_tree(self.tree_a07)
         if not code:
             self.control_intro_var.set("Velg kode i høyre liste.")
-            self.control_summary_var.set("Velg en A07-kode for aa starte arbeidet.")
-            self.control_meta_var.set("")
-            self.control_match_var.set("")
+            self.control_summary_var.set("Slik jobber du")
+            self.control_meta_var.set("1. Velg konto og kode")
+            self.control_match_var.set("2. Trykk Tildel eller dra konto til valgt kode")
             self.control_mapping_var.set("")
             self.control_history_var.set("")
             self.control_best_var.set("")
             self.control_next_var.set("Velg kode for aa starte.")
-            self.control_drag_var.set(_CONTROL_DRAG_IDLE_HINT)
-            self.control_suggestion_effect_var.set("Velg kode i hoyre liste for aa se hva valgt forslag vil gjøre.")
+            self.control_drag_var.set("Vis detaljer bare ved behov for forslag og mappede kontoer.")
+            self.control_suggestion_effect_var.set("Velg forslag for aa se effekt.")
             try:
-                self.control_panel.configure(text="Valgt kode")
+                self.control_panel.configure(text="Neste steg")
                 self.btn_control_best.state(["disabled"])
                 self.btn_control_history.state(["disabled"])
                 self.lbl_control_drag.configure(style="Muted.TLabel")
@@ -3330,6 +3375,14 @@ class A07Page(ttk.Frame):
         )
         best_row = best_suggestion_row_for_code(self.workspace.suggestions, code)
 
+        def _compact_accounts(values: Sequence[object]) -> str:
+            tokens = [str(value).strip() for value in values if str(value).strip()]
+            if not tokens:
+                return "ingen"
+            if len(tokens) <= 3:
+                return ", ".join(tokens)
+            return ", ".join(tokens[:3]) + ", ..."
+
         summary_parts = [code]
         if navn and navn.casefold() != code.casefold():
             summary_parts.append(navn)
@@ -3347,20 +3400,23 @@ class A07Page(ttk.Frame):
             best_suggestion=best_row,
         )
         self.control_summary_var.set(" | ".join(summary_parts))
-        self.control_meta_var.set(
-            f"{work_label} | Belop {belop or '-'} | Neste {compact_control_next_action(next_action)}"
-        )
+        # Build one compact meta line: status, amount, GL diff
+        meta_parts = [work_label, f"Belop {belop or '-'}"]
         if reconcile_row is not None:
             gl_belop = self._format_value(reconcile_row.get("GL_Belop"), "GL_Belop")
             diff_belop = self._format_value(reconcile_row.get("Diff"), "Diff")
-            count_accounts = self._format_value(reconcile_row.get("AntallKontoer"), "AntallKontoer")
-            self.control_match_var.set(
-                f"GL {gl_belop or '-'} | Diff {diff_belop or '-'} | Kontoer {count_accounts or '0'}"
-            )
-        else:
-            self.control_match_var.set("Ingen detaljkontroll ennå.")
-        mapping_text = ", ".join(current_accounts) if current_accounts else "ingen mapping"
-        history_text = ", ".join(history_accounts) if history_accounts else "ingen"
+            meta_parts.append(f"GL {gl_belop or '-'}")
+            meta_parts.append(f"Diff {diff_belop or '-'}")
+        compact_next = compact_control_next_action(next_action)
+        if compact_next.casefold() != work_label.casefold():
+            meta_parts.append(f"Neste {compact_next}")
+        self.control_meta_var.set(" | ".join(meta_parts))
+        mapping_text = _compact_accounts(current_accounts)
+        history_text = _compact_accounts(history_accounts)
+        info_parts = [f"Mapping {mapping_text}"]
+        if history_text != "ingen":
+            info_parts.append(f"Historikk {history_text}")
+        self.control_match_var.set(" | ".join(info_parts))
         self.control_mapping_var.set(f"Mapping: {mapping_text} | Historikk: {history_text}")
         self.control_history_var.set(f"Historikk: {history_text}")
 
@@ -3379,7 +3435,7 @@ class A07Page(ttk.Frame):
         self.control_next_var.set(f"Neste: {next_action}")
 
         try:
-            self.control_panel.configure(text="Valgt kode")
+            self.control_panel.configure(text=f"Aktiv kode: {code}")
             if best_row is not None and bool(best_row.get("WithinTolerance", False)):
                 self.btn_control_best.state(["!disabled"])
             else:
@@ -3389,7 +3445,7 @@ class A07Page(ttk.Frame):
             else:
                 self.btn_control_history.state(["disabled"])
             if not self._current_drag_accounts():
-                self.control_drag_var.set(_CONTROL_DRAG_IDLE_HINT)
+                self.control_drag_var.set(f"Dra konto fra venstre til {code}, eller bruk Tildel.")
                 self.lbl_control_drag.configure(style="Muted.TLabel")
         except Exception:
             pass
@@ -3397,9 +3453,6 @@ class A07Page(ttk.Frame):
 
     def _on_control_selection_changed(self) -> None:
         code = self._selected_control_code()
-        if code and not bool(getattr(self, "_control_details_visible", False)) and not self._control_details_auto_revealed:
-            self._set_control_details_visible(True)
-            self._control_details_auto_revealed = True
         self._update_history_details_from_selection()
         if self._selected_suggestion_scope() == "valgt_kode":
             self._refresh_suggestions_tree()
@@ -3584,7 +3637,7 @@ class A07Page(ttk.Frame):
         self.workspace.a07_df = _empty_a07_df()
         self.a07_overview_df = _empty_a07_df()
         self.control_df = _empty_control_df()
-        self.control_gl_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_GL_COLUMNS])
+        self.control_gl_df = pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
         self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
         self.workspace.mapping = {}
         self.workspace.suggestions = _empty_suggestions_df()
@@ -3599,22 +3652,22 @@ class A07Page(ttk.Frame):
         self.previous_mapping_path = None
         self.previous_mapping_year = None
         self.history_details_var.set("Velg en kode for aa se historikk.")
-        self.control_summary_var.set("Velg en A07-kode for aa starte arbeidet.")
+        self.control_summary_var.set("Slik jobber du")
         self.control_intro_var.set("Velg kode i høyre liste.")
-        self.control_meta_var.set("")
-        self.control_match_var.set("")
+        self.control_meta_var.set("1. Velg konto og kode")
+        self.control_match_var.set("2. Trykk Tildel eller dra konto til valgt kode")
         self.control_mapping_var.set("")
         self.control_history_var.set("")
         self.control_best_var.set("")
         self.control_suggestion_summary_var.set("Velg kode i hoyre liste for aa se forslag.")
-        self.control_suggestion_effect_var.set("Velg kode i hoyre liste for aa se hva valgt forslag vil gjøre.")
+        self.control_suggestion_effect_var.set("Velg forslag for aa se effekt.")
         self.control_next_var.set("Velg kode for aa starte.")
-        self.control_drag_var.set(_CONTROL_DRAG_IDLE_HINT)
+        self.control_drag_var.set("Vis detaljer bare ved behov for forslag og mappede kontoer.")
         self.control_bucket_var.set("Ferdig 0 | Vurdering 0 | Manuell 0")
         self.control_code_filter_var.set("")
         self._control_details_auto_revealed = False
         try:
-            self.control_panel.configure(text="Valgt kode")
+            self.control_panel.configure(text="Neste steg")
             self.lbl_control_drag.configure(style="Muted.TLabel")
         except Exception:
             pass
