@@ -20,7 +20,44 @@ from konto_utils import konto_to_str
 
 
 def refresh_pivot(*, page: Any) -> None:
-    """Bygg pivot per konto og fyll treeview."""
+    """Bygg pivot og fyll treeview – dispatcher på aggregering-modus."""
+    # RL-modus: deleger til page_analyse_rl
+    agg_var = getattr(page, "_var_aggregering", None)
+    agg_mode = ""
+    try:
+        agg_mode = str(agg_var.get()) if agg_var is not None else ""
+    except Exception:
+        pass
+
+    if agg_mode == "Regnskapslinje":
+        try:
+            import page_analyse_rl
+            page_analyse_rl.refresh_rl_pivot(page=page)
+        except Exception as exc:
+            import logging
+            logging.getLogger("app").warning("refresh_pivot (RL): %s", exc)
+        return
+
+    if agg_mode == "MVA-kode":
+        try:
+            import page_analyse_mva
+            page_analyse_mva.refresh_mva_pivot(page=page)
+        except Exception as exc:
+            import logging
+            logging.getLogger("app").warning("refresh_pivot (MVA): %s", exc)
+        return
+
+    # --- standard konto-modus – tilbakestill headings ---
+    try:
+        page._rl_mapping_warning = ""
+    except Exception:
+        pass
+    try:
+        import page_analyse_rl
+        page_analyse_rl.update_pivot_headings(page=page, mode="Konto")
+    except Exception:
+        pass
+
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
         return
@@ -54,10 +91,17 @@ def refresh_pivot(*, page: Any) -> None:
         cnt_txt = formatting.format_int_no(cnt_val)
 
         try:
-            tree.insert("", "end", values=(konto, navn, sum_txt, cnt_txt))
+            tree.insert("", "end", values=(konto, navn, "", "", sum_txt, cnt_txt))
         except Exception:
             # Defensive: one bad row should not break UI
             continue
+
+    maybe_auto_fit = getattr(page, "_maybe_auto_fit_pivot_tree", None)
+    if callable(maybe_auto_fit):
+        try:
+            maybe_auto_fit()
+        except Exception:
+            pass
 
 
 def select_all_accounts(*, page: Any) -> None:
@@ -77,12 +121,37 @@ def select_all_accounts(*, page: Any) -> None:
         pass
 
 
-def get_selected_accounts(*, page: Any) -> List[str]:
+def get_selected_accounts(*, page: Any) -> List[str]:  # noqa: C901
     """Hent valgte kontoer fra pivot-tree.
 
-    Dersom ingen rader er eksplisitt markert, returneres alle synlige kontoer
-    (for effektivt workflow, spesielt før "Til utvalg").
+    I RL-modus: mapper valgte regnskapslinjer til underliggende kontoer.
+    I konto-modus: returnerer valgte kontoer direkte (eksisterende logikk).
+
+    Dersom ingen rader er eksplisitt markert, returneres alle synlige kontoer.
     """
+    # RL-modus: deleger til page_analyse_rl
+    agg_var = getattr(page, "_var_aggregering", None)
+    agg_mode = ""
+    try:
+        agg_mode = str(agg_var.get()) if agg_var is not None else ""
+    except Exception:
+        pass
+
+    if agg_mode == "Regnskapslinje":
+        try:
+            import page_analyse_rl
+            return page_analyse_rl.get_selected_rl_accounts(page=page)
+        except Exception:
+            return []
+
+    if agg_mode == "MVA-kode":
+        try:
+            import page_analyse_mva
+            return page_analyse_mva.get_selected_mva_accounts(page=page)
+        except Exception:
+            return []
+
+    # --- standard konto-modus ---
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
         return []

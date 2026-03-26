@@ -15,17 +15,10 @@ def test_normalize_tx_column_config_pins_and_requires_and_filters_unknowns():
         required=("Konto", "Kontonavn", "Bilag"),
     )
 
-    # Unknown column 'Prosjekt' should be filtered out
     assert "Prosjekt" not in order_clean
-
-    # Pinned columns should be forced to the front
     assert order_clean[:2] == ["Konto", "Kontonavn"]
-
-    # Required columns should be visible even if user didn't pick them
     assert "Bilag" in visible_order
     assert visible_order[:2] == ["Konto", "Kontonavn"]
-
-    # Dato/Beløp chosen by user should remain visible
     assert "Dato" in visible_order
     assert "Beløp" in visible_order
 
@@ -41,12 +34,41 @@ def test_normalize_tx_column_config_handles_empty_order_and_de_dupes_visible():
         required=("Konto", "Kontonavn", "Bilag"),
     )
 
-    # Falls back to all_cols (with pinned forced first)
     assert order_clean[:2] == ["Konto", "Kontonavn"]
-
-    # Unknown visible col removed, duplicates removed
     assert "X" not in visible_order
-
-    # Required/pinned are always visible
     assert visible_order[:2] == ["Konto", "Kontonavn"]
     assert "Bilag" in visible_order
+
+
+def test_unique_preserve_canonicalizes_alias_columns_and_keeps_custom_columns():
+    cols = [
+        "Konto",
+        "konto",
+        "Belop",
+        "beløp",
+        "CustomerName",
+        "Kundenavn",
+        "mva-kode",
+        "MVA-kode",
+        "Egendefinert",
+    ]
+
+    out = analyse_columns.unique_preserve(cols, canonicalize=True)
+
+    assert out == ["Konto", "Beløp", "Kundenavn", "MVA-kode", "Egendefinert"]
+
+
+def test_normalize_tx_column_config_canonicalizes_old_saved_aliases():
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=["konto", "customername", "mva-kode"],
+        visible=["customername", "mva-kode"],
+        all_cols=["Konto", "Kundenavn", "MVA-kode"],
+        pinned=("Konto", "Kontonavn"),
+        required=("Konto", "Bilag"),
+    )
+
+    assert "konto" not in order_clean
+    assert "customername" not in order_clean
+    assert "mva-kode" not in order_clean
+    assert "Kundenavn" in order_clean
+    assert "MVA-kode" in visible_order

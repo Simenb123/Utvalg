@@ -26,6 +26,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 
+import analyse_columns
 from analyse_model import build_pivot_by_account
 from konto_utils import konto_to_str
 from logger import get_logger
@@ -92,16 +93,24 @@ def _format_date_ddmmyyyy(s: pd.Series) -> pd.Series:
     if s.empty:
         return pd.Series([], dtype="object")
 
-    # Robust parsing for norske/internasjonale varianter.
-    # Pandas kan ellers forsøke å inferere én felles format-streng og feile på "blandede" kolonner.
-    try:
-        dt = pd.to_datetime(s, errors="coerce", dayfirst=True, format="mixed")  # pandas >= 2.0
-    except TypeError:  # pragma: no cover (eldre pandas)
-        # Fallback (to-pass) uten format='mixed'
-        dt = pd.to_datetime(s, errors="coerce", dayfirst=True)
-        if dt.isna().any():
-            dt2 = pd.to_datetime(s, errors="coerce")
-            dt = dt.fillna(dt2)
+    text = _safe_str_series(s)
+    dt = pd.Series(pd.NaT, index=text.index, dtype="datetime64[ns]")
+
+    # ISO-datoer må parses uten dayfirst=True, ellers kan 2025-01-02 bli 01.02.2025.
+    iso_mask = text.str.match(r"^\d{4}-\d{1,2}-\d{1,2}(?:[ T].*)?$", na=False)
+    if iso_mask.any():
+        dt.loc[iso_mask] = pd.to_datetime(text.loc[iso_mask], errors="coerce")
+
+    remaining = dt.isna() & text.ne("")
+    if remaining.any():
+        try:
+            parsed = pd.to_datetime(text.loc[remaining], errors="coerce", dayfirst=True, format="mixed")
+        except TypeError:  # pragma: no cover (eldre pandas)
+            parsed = pd.to_datetime(text.loc[remaining], errors="coerce", dayfirst=True)
+            if parsed.isna().any():
+                parsed2 = pd.to_datetime(text.loc[remaining], errors="coerce")
+                parsed = parsed.fillna(parsed2)
+        dt.loc[remaining] = parsed
 
     out = dt.dt.strftime("%d.%m.%Y")
     return out.fillna("").astype(str)
@@ -315,10 +324,14 @@ def build_transactions_view_df(
     for c in tx_cols:
         if c in out.columns:
             continue
+        source_col = next((src for src in analyse_columns.candidate_source_columns(c) if src in df.columns), None)
+        if source_col is not None:
+            out[c] = _safe_str_series(df[source_col])
+            continue
         if c in df.columns:
             out[c] = _safe_str_series(df[c])
-        else:
-            out[c] = ""
+            continue
+        out[c] = ""
 
     return out[list(tx_cols)].reset_index(drop=True)
 

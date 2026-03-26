@@ -22,6 +22,30 @@ import analyse_viewdata
 import formatting
 
 
+def _set_summary_text(*, page: Any, lbl: Any, base_text: str) -> None:
+    text = base_text
+
+    agg_mode = ""
+    try:
+        agg_var = getattr(page, "_var_aggregering", None)
+        agg_mode = str(agg_var.get()) if agg_var is not None else ""
+    except Exception:
+        agg_mode = ""
+
+    try:
+        warning = str(getattr(page, "_rl_mapping_warning", "") or "").strip()
+    except Exception:
+        warning = ""
+
+    if agg_mode == "Regnskapslinje" and warning:
+        text = f"{text} | {warning}"
+
+    try:
+        lbl.config(text=text)
+    except Exception:
+        pass
+
+
 def refresh_transactions_view(*, page: Any) -> None:
     """Oppdater transaksjonslisten basert på valgte kontoer i pivot."""
     tx_tree = getattr(page, "_tx_tree", None)
@@ -37,10 +61,7 @@ def refresh_transactions_view(*, page: Any) -> None:
 
     df_filtered = getattr(page, "_df_filtered", None)
     if df_filtered is None or not isinstance(df_filtered, pd.DataFrame) or df_filtered.empty:
-        try:
-            lbl.config(text="Oppsummering: (ingen rader)")
-        except Exception:
-            pass
+        _set_summary_text(page=page, lbl=lbl, base_text="Oppsummering: (ingen rader)")
         return
 
     # Hent valgte kontoer
@@ -49,18 +70,19 @@ def refresh_transactions_view(*, page: Any) -> None:
     except Exception:
         sel_accounts = []
 
+    try:
+        import page_analyse_detail_panel
+
+        sel_accounts = page_analyse_detail_panel.selected_transaction_accounts(page, list(sel_accounts))
+    except Exception:
+        sel_accounts = list(sel_accounts)
+
     if not sel_accounts:
-        try:
-            lbl.config(text="Oppsummering: (ingen rader)")
-        except Exception:
-            pass
+        _set_summary_text(page=page, lbl=lbl, base_text="Oppsummering: (ingen rader)")
         return
 
     if "Konto" not in df_filtered.columns:
-        try:
-            lbl.config(text="Oppsummering: (mangler Konto-kolonne)")
-        except Exception:
-            pass
+        _set_summary_text(page=page, lbl=lbl, base_text="Oppsummering: (mangler Konto-kolonne)")
         return
 
     # Display subset
@@ -85,20 +107,20 @@ def refresh_transactions_view(*, page: Any) -> None:
     shown_sum = float(bel_show.sum())
 
     if total_rows == shown_rows:
-        try:
-            lbl.config(text=f"Oppsummering: {total_rows} rader | Sum: {formatting.fmt_amount(total_sum)}")
-        except Exception:
-            pass
+        _set_summary_text(
+            page=page,
+            lbl=lbl,
+            base_text=f"Oppsummering: {total_rows} rader | Sum: {formatting.fmt_amount(total_sum)}",
+        )
     else:
-        try:
-            lbl.config(
-                text=(
-                    f"Oppsummering: {shown_rows} av {total_rows} rader | "
-                    f"Sum: {formatting.fmt_amount(shown_sum)} (totalt {formatting.fmt_amount(total_sum)})"
-                )
-            )
-        except Exception:
-            pass
+        _set_summary_text(
+            page=page,
+            lbl=lbl,
+            base_text=(
+                f"Oppsummering: {shown_rows} av {total_rows} rader | "
+                f"Sum: {formatting.fmt_amount(shown_sum)} (totalt {formatting.fmt_amount(total_sum)})"
+            ),
+        )
 
     tx_cols = list(getattr(page, "TX_COLS", analyse_viewdata.DEFAULT_TX_COLS))
 
@@ -151,6 +173,13 @@ def refresh_transactions_view(*, page: Any) -> None:
             tx_tree.insert("", "end", values=values, tags=tags)
         except Exception:
             continue
+
+    maybe_auto_fit = getattr(page, "_maybe_auto_fit_tx_tree", None)
+    if callable(maybe_auto_fit):
+        try:
+            maybe_auto_fit()
+        except Exception:
+            pass
 
 
 

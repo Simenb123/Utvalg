@@ -49,8 +49,24 @@ def reset_filters(*, page: Any, dir_options: Sequence[Any]) -> None:
     try:
         page._var_search.set("")
         page._var_direction.set(dir_options[0].label)
+        if getattr(page, "_var_bilag", None) is not None:
+            page._var_bilag.set("")
+        if getattr(page, "_var_motpart", None) is not None:
+            page._var_motpart.set("")
+        if getattr(page, "_var_date_from", None) is not None:
+            page._var_date_from.set("")
+        if getattr(page, "_var_date_to", None) is not None:
+            page._var_date_to.set("")
         page._var_min.set("")
         page._var_max.set("")
+        if getattr(page, "_var_mva_code", None) is not None:
+            page._var_mva_code.set(getattr(page, "MVA_CODE_ALL_LABEL", "Alle"))
+        if getattr(page, "_var_mva_mode", None) is not None:
+            try:
+                default_mode = page.MVA_FILTER_OPTIONS[0]
+            except Exception:
+                default_mode = "Alle"
+            page._var_mva_mode.set(default_mode)
         page._var_max_rows.set(200)
         for v in page._series_vars:
             v.set(0)
@@ -120,13 +136,57 @@ def apply_filters_and_refresh(*, page: Any, dir_options: Sequence[Any]) -> None:
                 page._lbl_tx_summary.config(text="Oppsummering: (ingen rader)")
             except Exception:
                 pass
+        refresh_detail = getattr(page, "_refresh_detail_panel", None)
+        if callable(refresh_detail):
+            try:
+                refresh_detail()
+            except Exception:
+                pass
         return
+
+    refresh_mva_codes = getattr(page, "_refresh_mva_code_choices", None)
+    if callable(refresh_mva_codes):
+        try:
+            refresh_mva_codes()
+        except Exception:
+            pass
 
     search = (page._var_search.get() or "").strip()
     direction_label = page._var_direction.get()
     direction = next((o.value for o in dir_options if o.label == direction_label), None)
+    bilag = ""
+    motpart = ""
+    period_from = ""
+    period_to = ""
+    try:
+        bilag = (page._var_bilag.get() or "").strip()
+    except Exception:
+        bilag = ""
+    try:
+        motpart = (page._var_motpart.get() or "").strip()
+    except Exception:
+        motpart = ""
+    try:
+        period_from = (page._var_date_from.get() or "").strip()
+    except Exception:
+        period_from = ""
+    try:
+        period_to = (page._var_date_to.get() or "").strip()
+    except Exception:
+        period_to = ""
     min_amount = safe_float(page._var_min.get())
     max_amount = safe_float(page._var_max.get())
+    mva_code = ""
+    try:
+        mva_code = (page._var_mva_code.get() or "").strip()
+    except Exception:
+        mva_code = ""
+    if mva_code == getattr(page, "MVA_CODE_ALL_LABEL", "Alle"):
+        mva_code = ""
+    try:
+        mva_mode = page._var_mva_mode.get()
+    except Exception:
+        mva_mode = "Alle"
 
     # kontoserier: if none selected => no kontoserie-filter
     kontoserier = [i for i, v in enumerate(page._series_vars) if v.get()]
@@ -135,11 +195,17 @@ def apply_filters_and_refresh(*, page: Any, dir_options: Sequence[Any]) -> None:
     df_f = filter_dataset(
         dataset,
         search=search,
+        bilag=bilag,
+        motpart=motpart,
+        period_from=period_from,
+        period_to=period_to,
         direction=direction,
         min_amount=min_amount,
         max_amount=max_amount,
         abs_amount=False,
         kontoserier=kontoserier_arg,
+        mva_code=mva_code,
+        mva_mode=mva_mode,
     )
 
     # Normalise Konto for safe selection/filtering.
@@ -152,3 +218,9 @@ def apply_filters_and_refresh(*, page: Any, dir_options: Sequence[Any]) -> None:
     # Oppdater visning
     page._refresh_pivot()
     page._refresh_transactions_view()
+    refresh_detail = getattr(page, "_refresh_detail_panel", None)
+    if callable(refresh_detail):
+        try:
+            refresh_detail()
+        except Exception:
+            pass

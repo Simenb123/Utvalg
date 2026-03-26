@@ -64,3 +64,27 @@ def test_build_transactions_view_df_falls_back_to_mva_column_when_mva_kode_missi
     out = analyse_viewdata.build_transactions_view_df(df, tx_cols=tx_cols)
 
     assert out.loc[0, "MVA-kode"] == "3"
+
+
+def test_build_transactions_view_df_resolves_alias_columns_for_canonical_optional_fields() -> None:
+    df = pd.DataFrame(
+        {
+            "Bilag": [1],
+            "BelÃ¸p": [100.0],
+            "Tekst": ["Test"],
+            "Konto": ["3000"],
+            "Kontonavn": ["Salg"],
+            "Dato": ["01.01.2025"],
+            "customer": ["20008"],
+            "customername": ["ACME"],
+            "leverandornavn": ["Leverandor X"],
+        }
+    )
+
+    tx_cols = list(analyse_viewdata.DEFAULT_TX_COLS) + ["Kundenr", "Kundenavn", "Leverandørnavn"]
+
+    out = analyse_viewdata.build_transactions_view_df(df, tx_cols=tx_cols)
+
+    assert out.loc[0, "Kundenr"] == "20008"
+    assert out.loc[0, "Kundenavn"] == "ACME"
+    assert out.loc[0, "Leverandørnavn"] == "Leverandor X"

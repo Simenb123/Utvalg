@@ -134,3 +134,83 @@ def prepare_pivot_export_sheets(*, page: Any) -> Dict[str, pd.DataFrame]:
 
     sheet_name = getattr(analyse_viewdata, "SHEET_PIVOT", "Pivot pr konto")
     return {sheet_name: pivot_df}
+
+
+def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
+    """Bygg eksportgrunnlag for RL-regnskapsoppstilling.
+
+    Returnerer både RL-pivoten og et transaksjonsgrunnlag som kan legges i
+    eget ark i Excel-eksporten.
+    """
+
+    try:
+        import session
+    except Exception:  # pragma: no cover
+        session = None  # type: ignore
+
+    try:
+        import page_analyse_rl
+    except Exception:
+        return {
+            "rl_df": pd.DataFrame(),
+            "regnskapslinjer": None,
+            "transactions_df": pd.DataFrame(),
+            "client": getattr(session, "client", None) if session is not None else None,
+            "year": getattr(session, "year", None) if session is not None else None,
+        }
+
+    df_filtered = getattr(page, "_df_filtered", None)
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+    sb_df = getattr(page, "_rl_sb_df", None)
+
+    if not isinstance(df_filtered, pd.DataFrame) or df_filtered.empty or intervals is None or regnskapslinjer is None:
+        rl_df = pd.DataFrame()
+    else:
+        try:
+            account_overrides = page_analyse_rl._load_current_client_account_overrides()
+        except Exception:
+            account_overrides = None
+        try:
+            rl_df = page_analyse_rl.build_rl_pivot(
+                df_filtered,
+                intervals,
+                regnskapslinjer,
+                sb_df=sb_df,
+                account_overrides=account_overrides,
+            )
+        except Exception:
+            rl_df = pd.DataFrame()
+
+    tx_df = pd.DataFrame()
+    if isinstance(df_filtered, pd.DataFrame) and not df_filtered.empty:
+        tx_cols = tuple(getattr(page, "TX_COLS", analyse_viewdata.DEFAULT_TX_COLS))
+        try:
+            selected_accounts = list(page._get_selected_accounts())
+        except Exception:
+            selected_accounts = []
+
+        if selected_accounts:
+            tx_sheets = analyse_viewdata.prepare_transactions_export_sheets(
+                df_filtered,
+                selected_accounts,
+                max_rows=max(len(df_filtered.index), 1),
+                tx_cols=tx_cols,
+            )
+            tx_df = tx_sheets.get(analyse_viewdata.SHEET_TX_ALL)
+            if tx_df is None or getattr(tx_df, "empty", True):
+                tx_df = tx_sheets.get(analyse_viewdata.SHEET_TX)
+            if tx_df is None or getattr(tx_df, "empty", True):
+                tx_df = tx_sheets.get(analyse_viewdata.SHEET_TX_SHOWN)
+            if tx_df is None:
+                tx_df = pd.DataFrame()
+        else:
+            tx_df = analyse_viewdata.build_transactions_view_df(df_filtered, tx_cols=tx_cols)
+
+    return {
+        "rl_df": rl_df if isinstance(rl_df, pd.DataFrame) else pd.DataFrame(),
+        "regnskapslinjer": regnskapslinjer,
+        "transactions_df": tx_df if isinstance(tx_df, pd.DataFrame) else pd.DataFrame(),
+        "client": getattr(session, "client", None) if session is not None else None,
+        "year": getattr(session, "year", None) if session is not None else None,
+    }
