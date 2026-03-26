@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import json
+
+import pandas as pd
+
+from a07_feature import (
+    SuggestConfig,
+    apply_suggestion_to_mapping,
+    load_rulebook,
+    suggest_mapping_candidates,
+    suggest_mappings,
+)
+
+
+def test_suggest_excludes_aga_and_ignores_mapping_to_excluded_codes():
+    a07 = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1000},
+            {"Kode": "aga", "Navn": "AGA", "Belop": 200},
+            {"Kode": "forskuddstrekk", "Navn": "Forskuddstrekk", "Belop": 300},
+        ]
+    )
+    gl = pd.DataFrame(
+        [
+            {"Konto": 5000, "Navn": "Loenn til ansatte", "UB": 0, "Debet": 1000, "Kredit": 0},
+            {"Konto": 5400, "Navn": "Arbeidsgiveravgift", "UB": 0, "Debet": 200, "Kredit": 0},
+            {"Konto": 2600, "Navn": "Forskuddstrekk", "UB": 0, "Debet": 0, "Kredit": 300},
+        ]
+    )
+
+    cfg = SuggestConfig(
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        top_codes=10,
+        exclude_mapped_accounts=True,
+        override_existing_mapping=False,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="UB",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+    )
+
+    df = suggest_mapping_candidates(a07, gl, mapping_existing={"5000": "aga"}, config=cfg)
+
+    assert "aga" not in set(df["Kode"].astype(str).tolist())
+    assert "forskuddstrekk" not in set(df["Kode"].astype(str).tolist())
+    row = df.loc[df["Kode"] == "fastloenn"].iloc[0]
+    assert row["ForslagKontoer"] == "5000"
+    assert row["GL_Sum"] == 1000
+    assert bool(row["WithinTolerance"]) is True
+
+
+def test_suggest_mappings_filters_irrelevant_accounts_and_keeps_columns_stable():
+    a07 = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1_000_000},
+            {"Kode": "bonus", "Navn": "Bonus", "Belop": 50_000},
+        ]
+    )
+    gl = pd.DataFrame(
+        [
+            {"Konto": 1000, "Navn": "Bankinnskudd", "UB": 75_000_000, "Debet": 0, "Kredit": 0},
+            {"Konto": 5000, "Navn": "Loenn til ansatte", "UB": 600_000, "Debet": 600_000, "Kredit": 0},
+            {"Konto": 5010, "Navn": "Loenn timeloenn", "UB": 400_000, "Debet": 400_000, "Kredit": 0},
+            {"Konto": 5090, "Navn": "Bonus", "UB": 50_000, "Debet": 50_000, "Kredit": 0},
+            {"Konto": 7000, "Navn": "Kontorrekvisita", "UB": 10_000, "Debet": 10_000, "Kredit": 0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={},
+        max_combo=2,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="UB",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+    )
+
+    assert list(df.columns) == [
+        "Kode",
+        "KodeNavn",
+        "Basis",
+        "A07_Belop",
+        "ForslagKontoer",
+        "GL_Sum",
+        "Diff",
+        "Score",
+        "ComboSize",
+        "WithinTolerance",
+        "HitTokens",
+        "HistoryAccounts",
+        "Explain",
+    ]
+    assert not df["ForslagKontoer"].astype(str).str.contains("1000").any()
+
+    fast = df[df["Kode"] == "fastloenn"].iloc[0]
+    assert fast["ForslagKontoer"] in {"5000,5010", "5010,5000"}
+    assert fast["GL_Sum"] == 1_000_000
+    assert bool(fast["WithinTolerance"]) is True
+    assert str(fast["Basis"]).strip() != ""
+    assert "basis=" in str(fast["Explain"])
+
+    bonus = df[df["Kode"] == "bonus"].iloc[0]
+    assert bonus["ForslagKontoer"] == "5090"
+    assert bonus["GL_Sum"] == 50_000
+
+
+def test_suggest_residual_only_matches_remaining_amount():
+    a07 = pd.DataFrame([{"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1_000_000}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": 5000, "Navn": "Loenn til ansatte", "UB": 600_000, "Debet": 600_000, "Kredit": 0},
+            {"Konto": 5010, "Navn": "Loenn timeloenn", "UB": 400_000, "Debet": 400_000, "Kredit": 0},
+            {"Konto": 5090, "Navn": "Bonus", "UB": 50_000, "Debet": 50_000, "Kredit": 0},
+        ]
+    )
+
+    cfg = SuggestConfig(
+        max_combo=2,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        top_codes=10,
+        exclude_mapped_accounts=True,
+        override_existing_mapping=False,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="UB",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+    )
+
+    df = suggest_mapping_candidates(a07, gl, mapping_existing={"5000": "fastloenn"}, config=cfg)
+
+    row = df.loc[df["Kode"] == "fastloenn"].iloc[0]
+    assert row["ForslagKontoer"] == "5010"
+    assert row["GL_Sum"] == 1_000_000
+    assert bool(row["WithinTolerance"]) is True
+
+
+def test_apply_suggestion_to_mapping_respects_existing_mapping_by_default():
+    a07 = pd.DataFrame([{"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1_000_000}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": 5000, "Navn": "Loenn til ansatte", "UB": 600_000, "Debet": 600_000, "Kredit": 0},
+            {"Konto": 5010, "Navn": "Loenn timeloenn", "UB": 400_000, "Debet": 400_000, "Kredit": 0},
+        ]
+    )
+
+    df = suggest_mapping_candidates(
+        a07,
+        gl,
+        mapping={},
+        config=SuggestConfig(top_suggestions_per_code=1, max_combo=2, tolerance_rel=0.001, tolerance_abs=1.0),
+    )
+    row = df.iloc[0]
+
+    mapping = {}
+    apply_suggestion_to_mapping(mapping, row)
+    assert mapping["5000"] == "fastloenn"
+    assert mapping["5010"] == "fastloenn"
+
+    mapping2 = {"5000": "bonus"}
+    apply_suggestion_to_mapping(mapping2, row, override_existing=False)
+    assert mapping2["5000"] == "bonus"
+    assert mapping2["5010"] == "fastloenn"
+
+
+def test_suggestconfig_accepts_top_per_code_alias():
+    cfg = SuggestConfig(top_suggestions_per_code=1, top_per_code=7)
+    assert cfg.top_suggestions_per_code == 7
+
+
+def test_load_rulebook_supports_pipe_ranges_aliases_and_special_add(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "fastloenn": {
+                        "label": "Fast loenn",
+                        "allowed_ranges": ["5000-5099 | 5190", "5290"],
+                        "keywords": ["loenn"],
+                        "special_add": [{"account": "2940", "basis": "Endring", "weight": -1.0}],
+                        "expected_sign": 1,
+                    }
+                },
+                "aliases": {
+                    "loenn": ["maanedsloenn", "fastlonn"],
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    rulebook = load_rulebook(str(rulebook_path))
+    rule = rulebook["fastloenn"]
+
+    assert rule.allowed_ranges == ((5000, 5099), (5190, 5190), (5290, 5290))
+    assert "maanedsloenn" in rule.keywords
+    assert len(rule.special_add) == 1
+    assert rule.special_add[0].account == "2940"
+    assert rule.expected_sign == 1
+
+
+def test_suggest_mappings_applies_rulebook_special_add_in_solver(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "feriepenger": {
+                        "basis": "Endring",
+                        "allowed_ranges": ["5000-5399 | 2900-2940"],
+                        "keywords": ["feriepenger"],
+                        "boost_accounts": ["2940"],
+                        "expected_sign": 0,
+                        "special_add": [{"account": "2940", "basis": "Endring", "weight": -1.0}],
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    a07 = pd.DataFrame([{"Kode": "feriepenger", "Navn": "Feriepenger", "Belop": 300.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Feriepenger kostnad", "Endring": 500.0},
+            {"Konto": "2940", "Navn": "Skyldig feriepenger", "Endring": 200.0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={},
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="Endring",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+        rulebook_path=str(rulebook_path),
+    )
+
+    row = df.loc[df["Kode"] == "feriepenger"].iloc[0]
+    assert row["ForslagKontoer"] == "5000"
+    assert row["GL_Sum"] == 300.0
+    assert bool(row["WithinTolerance"]) is True
+    assert "special_add" in str(row["Explain"])
+
+
+def test_suggest_mappings_expected_sign_prefers_negative_match(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "trekkILoennForFerie": {
+                        "basis": "Endring",
+                        "allowed_ranges": ["5200-5399"],
+                        "keywords": ["trekk", "ferie"],
+                        "expected_sign": -1,
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    a07 = pd.DataFrame([{"Kode": "trekkILoennForFerie", "Navn": "Trekk i loenn for ferie", "Belop": -59009.1}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5290", "Navn": "Trekk i loenn for ferie", "Endring": -59009.1},
+            {"Konto": "5291", "Navn": "Trekk i loenn for ferie", "Endring": 59009.1},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={},
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="Endring",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+        rulebook_path=str(rulebook_path),
+    )
+
+    row = df.loc[df["Kode"] == "trekkILoennForFerie"].iloc[0]
+    assert row["ForslagKontoer"] == "5290"
+    assert row["GL_Sum"] == -59009.1
+    assert bool(row["WithinTolerance"]) is True
+    assert "sign=-1" in str(row["Explain"])
+
+
+def test_suggest_mappings_prioritizes_previous_year_mapping_when_candidates_are_equal():
+    a07 = pd.DataFrame([{"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1000.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Loenn", "Endring": 1000.0},
+            {"Konto": "5001", "Navn": "Loenn", "Endring": 1000.0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={},
+        mapping_prior={"5001": "fastloenn"},
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="Endring",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+    )
+
+    row = df.loc[df["Kode"] == "fastloenn"].iloc[0]
+    assert row["ForslagKontoer"] == "5001"
+    assert row["GL_Sum"] == 1000.0
+    assert bool(row["WithinTolerance"]) is True
+    assert row["HistoryAccounts"] == "5001"
+    assert "historikk=5001" in str(row["Explain"])
