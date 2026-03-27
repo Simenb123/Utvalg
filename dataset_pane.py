@@ -451,16 +451,25 @@ class DatasetPane(ttk.Frame):
         except Exception:
             return {}
 
-    def _auto_create_sb_from_saft(self) -> None:
-        """Opprett SB-versjon automatisk fra SAF-T-kildefilen (hvis ingen aktiv SB finnes, eller tom)."""
+    def _auto_create_sb_from_saft(
+        self,
+        *,
+        client: str,
+        year: str,
+        saft_path: Path,
+    ) -> bool:
+        """Opprett SB-versjon automatisk fra SAF-T-kildefilen.
+
+        Returnerer ``True`` hvis en ny SB-versjon faktisk ble opprettet.
+        All tung IO kjøres i bakgrunnstråd; kalleren må derfor samle inn
+        klient/år/path før jobben starter i GUI-tråden.
+        """
         try:
             import client_store
             from saft_trial_balance import make_trial_balance_xlsx_from_saft
 
-            client = (self._store_section.client_var.get() or "").strip()
-            year = (self._store_section.year_var.get() or "").strip()
             if not client or not year:
-                return
+                return False
 
             # Sjekk om SB allerede finnes og har data
             existing_sb = client_store.get_active_version(client, year=year, dtype="sb")
@@ -469,17 +478,16 @@ class DatasetPane(ttk.Frame):
                 try:
                     _sb_df = pd.read_excel(existing_sb.path)
                     if not _sb_df.empty:
-                        return  # Har data, OK
+                        return False  # Har data, OK
                     logger.info("Eksisterende SB er tom — sletter og oppretter på nytt")
                     client_store.delete_version(
                         client, year=year, dtype="sb", version_id=existing_sb.id
                     )
                 except Exception:
-                    return  # Kan ikke lese — la den være
+                    return False  # Kan ikke lese — la den være
 
-            saft_path = Path(self.path_var.get().strip())
             if not saft_path.exists():
-                return
+                return False
 
             import re
             import tempfile
@@ -497,8 +505,55 @@ class DatasetPane(ttk.Frame):
                 make_active=True,
             )
             logger.info("Auto-opprettet SB fra SAF-T for %s/%s", client, year)
+            return True
         except Exception:
             logger.debug("Auto SB fra SAF-T feilet", exc_info=True)
+            return False
+
+    def _schedule_auto_create_sb_from_saft(self) -> None:
+        """Start auto-oppretting av SB fra SAF-T i bakgrunnstråd."""
+        try:
+            store = self._store_section
+            if store is None:
+                return
+            client = (store.client_var.get() or "").strip()
+            year = (store.year_var.get() or "").strip()
+            saft_path = Path(self.path_var.get().strip())
+        except Exception:
+            logger.debug("Kunne ikke samle inn SAF-T auto-SB input", exc_info=True)
+            return
+
+        if not client or not year or not saft_path.exists():
+            return
+
+        def work() -> bool:
+            return self._auto_create_sb_from_saft(client=client, year=year, saft_path=saft_path)
+
+        def done(created: bool) -> None:
+            if not created:
+                return
+            try:
+                if self._store_section is not None:
+                    self._store_section.refresh()
+            except Exception:
+                logger.exception("Kunne ikke oppdatere store UI etter auto-opprettet SB")
+            try:
+                self._set_status("Datasett klart. Saldobalanse fra SAF-T er opprettet i bakgrunnen.", level="ready")
+            except Exception:
+                pass
+
+        def err(ex: BaseException, tb: str = "") -> None:
+            logger.exception("Auto-oppretting av SB fra SAF-T feilet")
+
+        try:
+            self.loading.run_async(
+                "Oppretter saldobalanse fra SAF-T…",
+                work,
+                on_done=done,
+                on_error=err,
+            )
+        except Exception:
+            logger.exception("Kunne ikke starte bakgrunnsjobb for SAF-T -> SB")
 
     def _refresh_sheet_choices(self, p: Path) -> None:
         sheets: list[str] = []
@@ -628,13 +683,13 @@ class DatasetPane(ttk.Frame):
             except Exception:
                 logger.exception("Kunne ikke oppdatere store UI etter auto-store")
 
-        # Auto-opprett SB fra SAF-T hvis det er en SAF-T-fil og ingen aktiv SB finnes
-        # Defer til etter at GUI har malt seg for å unngå frysing
+        # Auto-opprett SB fra SAF-T hvis det er en SAF-T-fil og ingen aktiv SB finnes.
+        # Den tunge jobben må gå i bakgrunnstråd, ellers ser appen ut til å henge.
         if self._store_section is not None and is_saft_path(self.path_var.get()):
             try:
-                self.after_idle(self._auto_create_sb_from_saft)
+                self.after_idle(self._schedule_auto_create_sb_from_saft)
             except Exception:
-                self._auto_create_sb_from_saft()
+                self._schedule_auto_create_sb_from_saft()
 
         try:
             r, c = res.df.shape

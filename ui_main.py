@@ -328,30 +328,36 @@ class App(tk.Tk):
             pass
 
         # Defer tung refresh (pivot, filtre, SB) til etter at GUI har malt seg.
-        # Uten dette fryser appen mens alt oppdateres synkront.
-        def _deferred_refresh() -> None:
+        # Spre oppdateringene litt utover for å redusere opplevd heng.
+        def _refresh_analyse() -> None:
             try:
                 if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
                     self.page_analyse.refresh_from_session(session)  # type: ignore[attr-defined]
             except Exception:
-                pass
+                log.exception("Analyse refresh after dataset load failed")
 
+        def _refresh_resultat() -> None:
             try:
                 if hasattr(self.page_resultat, "on_dataset_loaded") and callable(getattr(self.page_resultat, "on_dataset_loaded")):
                     self.page_resultat.on_dataset_loaded(df)  # type: ignore[attr-defined]
             except Exception:
-                pass
+                log.exception("Resultat refresh after dataset load failed")
 
+        def _refresh_a07() -> None:
             try:
                 if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
                     self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
             except Exception:
-                pass
+                log.exception("A07 refresh after dataset load failed")
 
         try:
-            self.after_idle(_deferred_refresh)
+            self.after_idle(_refresh_analyse)
+            self.after(25, _refresh_resultat)
+            self.after(50, _refresh_a07)
         except Exception:
-            _deferred_refresh()
+            _refresh_analyse()
+            _refresh_resultat()
+            _refresh_a07()
 
         # Vis Analyse som neste steg
         try:

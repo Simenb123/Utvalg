@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+import session
 import ui_main
 
 
@@ -44,6 +45,43 @@ def test_dataset_ready_updates_analysis() -> None:
         assert app.page_analyse.dataset is df
     finally:
         # Ensure the application is destroyed to clean up any Tk resources
+        try:
+            app.destroy()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+
+def test_dataset_ready_continues_when_analyse_refresh_fails() -> None:
+    """Regression: feil i Analyse-refresh må ikke stoppe Resultat/A07-oppdatering."""
+    session.client = None
+    session.year = None
+    app = ui_main.create_app()
+    try:
+        try:
+            app.withdraw()  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        called: list[str] = []
+
+        setattr(app, "after_idle", lambda fn: fn())
+        setattr(app, "after", lambda _ms, fn: fn())
+        setattr(app.page_analyse, "refresh_from_session", lambda _session: (_ for _ in ()).throw(RuntimeError("boom")))
+        setattr(app.page_resultat, "on_dataset_loaded", lambda _df: called.append("resultat"))
+        setattr(app.page_a07, "refresh_from_session", lambda _session: called.append("a07"))
+
+        df = pd.DataFrame({
+            "Konto": [1000],
+            "Kontonavn": ["Testkonto"],
+            "Beløp": [123.45],
+            "Bilag": ["1"],
+        })
+
+        app._on_data_ready(df)
+
+        assert app.page_analyse.dataset is df
+        assert called == ["resultat", "a07"]
+    finally:
         try:
             app.destroy()  # type: ignore[attr-defined]
         except Exception:
