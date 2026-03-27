@@ -140,6 +140,85 @@ def _resolve_sb_columns(sb_df: pd.DataFrame) -> dict[str, str]:
     return col_map
 
 
+def _capture_sb_selection(tree: Any) -> tuple[list[str], str]:
+    selected_accounts: list[str] = []
+    focused_account = ""
+
+    try:
+        selected = list(tree.selection())
+    except Exception:
+        selected = []
+
+    for item in selected:
+        try:
+            values = list(tree.item(item, "values") or [])
+        except Exception:
+            values = []
+        konto = str(values[0]).strip() if values else ""
+        if konto:
+            selected_accounts.append(konto)
+
+    try:
+        focus_item = tree.focus()
+    except Exception:
+        focus_item = ""
+
+    if focus_item:
+        try:
+            values = list(tree.item(focus_item, "values") or [])
+        except Exception:
+            values = []
+        focused_account = str(values[0]).strip() if values else ""
+
+    return selected_accounts, focused_account
+
+
+def _restore_sb_selection(tree: Any, *, selected_accounts: list[str], focused_account: str) -> None:
+    wanted = {str(v or "").strip() for v in selected_accounts if str(v or "").strip()}
+    focus_wanted = str(focused_account or "").strip()
+    if not wanted and not focus_wanted:
+        return
+
+    items_to_select: list[str] = []
+    focus_item = ""
+
+    try:
+        items = tree.get_children("")
+    except Exception:
+        items = ()
+
+    for item in items:
+        try:
+            values = list(tree.item(item, "values") or [])
+        except Exception:
+            values = []
+        konto = str(values[0]).strip() if values else ""
+        if not konto:
+            continue
+        if konto in wanted:
+            items_to_select.append(item)
+        if focus_wanted and konto == focus_wanted and not focus_item:
+            focus_item = item
+
+    if items_to_select:
+        try:
+            tree.selection_set(items_to_select)
+        except Exception:
+            pass
+        if not focus_item:
+            focus_item = items_to_select[0]
+
+    if focus_item:
+        try:
+            tree.focus(focus_item)
+        except Exception:
+            pass
+        try:
+            tree.see(focus_item)
+        except Exception:
+            pass
+
+
 def _get_selected_rl_name(*, page: Any) -> str:
     """Hent navnet på valgt regnskapslinje (for visning i summary-label)."""
     tree = getattr(page, "_pivot_tree", None)
@@ -265,6 +344,8 @@ def refresh_sb_view(*, page: Any) -> None:
     if tree is None:
         return
 
+    selected_accounts, focused_account = _capture_sb_selection(tree)
+
     _clear_tree(tree)
 
     # Hent SB-data
@@ -272,19 +353,8 @@ def refresh_sb_view(*, page: Any) -> None:
     if sb_df is None or not isinstance(sb_df, pd.DataFrame) or sb_df.empty:
         return
 
-    # Tilleggsposteringer: juster SB hvis aktivert
     try:
-        _ao_var = getattr(page, "_var_include_ao", None)
-        if _ao_var is not None and bool(_ao_var.get()):
-            import tilleggsposteringer
-            import regnskap_client_overrides
-            import session as _session
-            _cl = getattr(_session, "client", None) or ""
-            _yr = getattr(_session, "year", None) or ""
-            if _cl and _yr:
-                ao_entries = regnskap_client_overrides.load_supplementary_entries(_cl, _yr)
-                if ao_entries:
-                    sb_df = tilleggsposteringer.apply_to_sb(sb_df, ao_entries)
+        sb_df = page._get_effective_sb_df()
     except Exception:
         pass
 
@@ -404,6 +474,11 @@ def refresh_sb_view(*, page: Any) -> None:
 
     # Bind høyreklikk + drag-n-drop (én gang)
     _bind_sb_once(page=page, tree=tree)
+    _restore_sb_selection(
+        tree,
+        selected_accounts=selected_accounts,
+        focused_account=focused_account,
+    )
 
 
 # =====================================================================
@@ -735,10 +810,13 @@ def _edit_comment(*, page: Any, kind: str, key: str, label: str) -> None:
         new_text = txt.get("1.0", "end").strip()
         regnskap_client_overrides.save_comment(client, kind=kind, key=str(key), text=new_text)
         dlg.destroy()
-        # Refresh SB view for å vise kommentaren
         try:
-            page._refresh_pivot()
-            page._refresh_transactions_view()
+            refresh_views = getattr(page, "_refresh_analysis_views_after_adjustment_change", None)
+            if callable(refresh_views):
+                refresh_views()
+            else:
+                page._refresh_pivot()
+                page._refresh_transactions_view()
         except Exception:
             pass
 
@@ -755,12 +833,20 @@ def _edit_comment(*, page: Any, kind: str, key: str, label: str) -> None:
     ttk.Button(btn_frame, text="Lagre", command=_save).pack(side="right", padx=(4, 0))
     ttk.Button(btn_frame, text="Avbryt", command=dlg.destroy).pack(side="right")
     if current:
-        ttk.Button(btn_frame, text="Fjern", command=lambda: (
-            regnskap_client_overrides.save_comment(client, kind=kind, key=str(key), text=""),
-            dlg.destroy(),
-            page._refresh_pivot(),
-            page._refresh_transactions_view(),
-        )).pack(side="left")
+        def _remove() -> None:
+            regnskap_client_overrides.save_comment(client, kind=kind, key=str(key), text="")
+            dlg.destroy()
+            try:
+                refresh_views = getattr(page, "_refresh_analysis_views_after_adjustment_change", None)
+                if callable(refresh_views):
+                    refresh_views()
+                else:
+                    page._refresh_pivot()
+                    page._refresh_transactions_view()
+            except Exception:
+                pass
+
+        ttk.Button(btn_frame, text="Fjern", command=_remove).pack(side="left")
 
     dlg.update_idletasks()
     w, h = dlg.winfo_width(), dlg.winfo_height()

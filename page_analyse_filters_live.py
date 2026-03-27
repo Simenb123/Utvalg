@@ -116,33 +116,37 @@ def apply_filters_now(*, page: Any) -> None:
     page._apply_filters_and_refresh()
 
 
-def apply_filters_and_refresh(*, page: Any, dir_options: Sequence[Any]) -> None:
-    """Filtrer datasettet og oppdater pivot + transaksjoner."""
-    # Headless: just keep dataset pointer updated.
-    if not getattr(page, "_tk_ok", False):
-        return
-
+def _clear_views_for_missing_dataset(*, page: Any) -> None:
+    """Nullstill visninger når dataset mangler eller er ugyldig."""
     dataset = getattr(page, "dataset", None)
-
-    if dataset is None or not isinstance(dataset, pd.DataFrame):
-        page._df_filtered = None
+    _ = dataset
+    page._df_filtered = None
+    try:
+        page._clear_tree(page._pivot_tree)
+        page._clear_tree(page._tx_tree)
+    except Exception:
+        pass
+    if getattr(page, "_lbl_tx_summary", None) is not None:
         try:
-            page._clear_tree(page._pivot_tree)
-            page._clear_tree(page._tx_tree)
+            page._lbl_tx_summary.config(text="Oppsummering: (ingen rader)")
         except Exception:
             pass
-        if getattr(page, "_lbl_tx_summary", None) is not None:
-            try:
-                page._lbl_tx_summary.config(text="Oppsummering: (ingen rader)")
-            except Exception:
-                pass
-        refresh_detail = getattr(page, "_refresh_detail_panel", None)
-        if callable(refresh_detail):
-            try:
-                refresh_detail()
-            except Exception:
-                pass
-        return
+    refresh_detail = getattr(page, "_refresh_detail_panel", None)
+    if callable(refresh_detail):
+        try:
+            refresh_detail()
+        except Exception:
+            pass
+
+
+def build_filtered_df(*, page: Any, dir_options: Sequence[Any]) -> Optional[pd.DataFrame]:
+    """Bygg filtrert DataFrame uten å trigge GUI-render direkte."""
+    if not getattr(page, "_tk_ok", False):
+        return None
+
+    dataset = getattr(page, "dataset", None)
+    if dataset is None or not isinstance(dataset, pd.DataFrame):
+        return None
 
     refresh_mva_codes = getattr(page, "_refresh_mva_code_choices", None)
     if callable(refresh_mva_codes):
@@ -212,6 +216,20 @@ def apply_filters_and_refresh(*, page: Any, dir_options: Sequence[Any]) -> None:
     if "Konto" in df_f.columns:
         df_f = df_f.copy()
         df_f["Konto"] = df_f["Konto"].map(konto_to_str)
+
+    return df_f
+
+
+def apply_filters_and_refresh(*, page: Any, dir_options: Sequence[Any]) -> None:
+    """Filtrer datasettet og oppdater pivot + transaksjoner."""
+    # Headless: just keep dataset pointer updated.
+    if not getattr(page, "_tk_ok", False):
+        return
+
+    df_f = build_filtered_df(page=page, dir_options=dir_options)
+    if df_f is None:
+        _clear_views_for_missing_dataset(page=page)
+        return
 
     page._df_filtered = df_f
 

@@ -28,6 +28,16 @@ dataset: Optional[pd.DataFrame] = None
 client: Optional[str] = None
 year: Optional[str] = None
 
+# Active version type – "hb", "sb", or None.
+# Set by set_dataset() / set_tb() so downstream consumers know whether
+# the session is running in full transaction mode or TB-only.
+version_type: Optional[str] = None
+
+# Active trial-balance DataFrame (saldobalanse).
+# Populated when the user selects an SB version; None otherwise.
+# Columns: konto, kontonavn, ib, ub, netto.
+tb_df: Optional[pd.DataFrame] = None
+
 # Feature-specific state containers used by newer workspaces.
 # These are intentionally loose and can be replaced by richer dataclasses
 # later without breaking the basic session contract.
@@ -41,12 +51,26 @@ reskontro_state: dict = {}
 SELECTION: dict = {}
 
 def set_dataset(df: pd.DataFrame, cols: Columns) -> None:
-    global _df, _cols, dataset
+    global _df, _cols, dataset, version_type
     _df, _cols = df, cols
     # Also update the global dataset attribute so other modules can retrieve
     # the current DataFrame via session.dataset. Without this assignment
     # modules that import session will not see the loaded data.
     dataset = df
+    version_type = "hb"
+
+
+def set_tb(df: pd.DataFrame) -> None:
+    """Set the active trial-balance (saldobalanse) DataFrame.
+
+    This marks the session as TB-only mode.  The main ``dataset`` is NOT
+    cleared — consumers that need transaction data can still check it,
+    but ``version_type`` will be ``"sb"`` signalling that TB is the
+    primary data source.
+    """
+    global tb_df, version_type
+    tb_df = df
+    version_type = "sb"
 
 def get_dataset() -> Tuple[Optional[pd.DataFrame], Optional[Columns]]:
     return _df, _cols

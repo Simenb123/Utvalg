@@ -351,6 +351,12 @@ class DummyPage:
     def _on_tx_select(self):
         self._inc("tx_select")
 
+    def _on_tx_tree_mouse_press(self, _event=None):
+        self._inc("tx_press")
+
+    def _on_tx_tree_mouse_drag(self, _event=None):
+        self._inc("tx_drag")
+
     def _open_bilag_drilldown_from_tx_selection(self):
         self._inc("drilldown")
 
@@ -421,6 +427,12 @@ def test_build_ui_restores_missing_analyse_features() -> None:
     res2 = page._tx_tree.bindings["<Return>"](None)
     assert res2 == "break"
     assert page.calls.get("drilldown", 0) == 2
+    assert "<ButtonPress-1>" in page._tx_tree.bindings
+    page._tx_tree.bindings["<ButtonPress-1>"](None)
+    assert page.calls.get("tx_press", 0) == 1
+    assert "<B1-Motion>" in page._tx_tree.bindings
+    page._tx_tree.bindings["<B1-Motion>"](None)
+    assert page.calls.get("tx_drag", 0) == 1
 
     # 6) trace_add/trace for live filter + max rows
     assert page._var_search.trace_calls, "Forventer variabel-trace på _var_search"

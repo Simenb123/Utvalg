@@ -24,6 +24,7 @@ from page_utvalg_strata import UtvalgStrataPage
 # (ikke page_resultat, som du nå får ModuleNotFoundError på)
 from page_utvalg import UtvalgPage
 from page_logg import LoggPage
+from page_consolidation import ConsolidationPage
 
 log = logging.getLogger(__name__)
 
@@ -162,10 +163,12 @@ class App(tk.Tk):
         self.page_utvalg = UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample)
         self.page_resultat = UtvalgPage(self.nb)
         self.page_logg = LoggPage(self.nb)
+        self.page_consolidation = ConsolidationPage(self.nb)
 
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
         self.nb.add(self.page_a07, text="A07")
+        self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
         self.nb.add(self.page_logg, text="Logg")
@@ -205,6 +208,7 @@ class App(tk.Tk):
         self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
         self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
         self.page_logg = SimpleNamespace()  # type: ignore[assignment]
+        self.page_consolidation = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
 
         # Installer hook slik at testene kan finne dp._on_ready og kalle callback
         self._maybe_install_dataset_ready_hook()
@@ -308,6 +312,7 @@ class App(tk.Tk):
 
         try:
             session.dataset = df
+            session.version_type = "hb"
         except Exception:
             pass
 
@@ -332,7 +337,7 @@ class App(tk.Tk):
         def _refresh_analyse() -> None:
             try:
                 if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
-                    self.page_analyse.refresh_from_session(session)  # type: ignore[attr-defined]
+                    self.page_analyse.refresh_from_session(session, defer_heavy=True)  # type: ignore[attr-defined]
             except Exception:
                 log.exception("Analyse refresh after dataset load failed")
 
@@ -343,26 +348,59 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Resultat refresh after dataset load failed")
 
-        def _refresh_a07() -> None:
+        def _refresh_consolidation() -> None:
             try:
-                if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
-                    self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
+                if hasattr(self.page_consolidation, "refresh_from_session") and callable(getattr(self.page_consolidation, "refresh_from_session")):
+                    self.page_consolidation.refresh_from_session(session)  # type: ignore[attr-defined]
             except Exception:
-                log.exception("A07 refresh after dataset load failed")
+                log.exception("Consolidation refresh after dataset load failed")
 
         try:
             self.after_idle(_refresh_analyse)
             self.after(25, _refresh_resultat)
-            self.after(50, _refresh_a07)
+            self.after(50, _refresh_consolidation)
         except Exception:
             _refresh_analyse()
             _refresh_resultat()
-            _refresh_a07()
+            _refresh_consolidation()
 
         # Vis Analyse som neste steg
         try:
             if hasattr(self, "nb") and hasattr(self.nb, "select"):
                 self.nb.select(self.page_analyse)
+        except Exception:
+            pass
+
+    def _on_tb_ready(self) -> None:
+        """Kalles naar en SB-versjon er valgt og session.tb_df er satt.
+
+        Refresher Konsolidering og Analyse (som allerede haandterer TB-only).
+        """
+        def _refresh_analyse() -> None:
+            try:
+                if hasattr(self.page_analyse, "refresh_from_session") and callable(getattr(self.page_analyse, "refresh_from_session")):
+                    self.page_analyse.refresh_from_session(session, defer_heavy=True)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Analyse refresh after TB load failed")
+
+        def _refresh_consolidation() -> None:
+            try:
+                if hasattr(self.page_consolidation, "refresh_from_session") and callable(getattr(self.page_consolidation, "refresh_from_session")):
+                    self.page_consolidation.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Consolidation refresh after TB load failed")
+
+        try:
+            self.after_idle(_refresh_analyse)
+            self.after(25, _refresh_consolidation)
+        except Exception:
+            _refresh_analyse()
+            _refresh_consolidation()
+
+        # Vis Konsolidering som neste steg (TB-only → konsolidering er primær bruk)
+        try:
+            if hasattr(self, "nb") and hasattr(self.nb, "select"):
+                self.nb.select(self.page_consolidation)
         except Exception:
             pass
 

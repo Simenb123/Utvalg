@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, Sequence
 
+import analyse_treewidths
+
 
 def _safe_period_value(raw: object) -> int | None:
     text = str(raw or "").strip()
@@ -769,10 +771,12 @@ def build_ui(
     pivot_tree.grid(row=0, column=0, sticky="nsew")
     for col in pivot_tree["columns"]:
         pivot_tree.heading(col, text=col)
-        pivot_tree.column(col, width=140, anchor="w")
-    pivot_tree.column("Konto", width=80)
-    pivot_tree.column("Sum", width=110, anchor="e")
-    pivot_tree.column("Antall", width=60, anchor="e")
+        pivot_tree.column(
+            col,
+            width=analyse_treewidths.default_column_width(col),
+            anchor=analyse_treewidths.column_anchor(col),
+            stretch=(col == "Kontonavn"),
+        )
 
     try:
         import tkinter.font as tkfont  # type: ignore
@@ -806,6 +810,9 @@ def build_ui(
     _pivot_col_menu_fn = getattr(page, "_show_pivot_column_menu", None)
     if callable(_pivot_col_menu_fn):
         pivot_tree.bind("<Button-3>", _pivot_col_menu_fn)
+    _pivot_resize_fn = getattr(page, "_schedule_balance_pivot_tree", None)
+    if callable(_pivot_resize_fn):
+        pivot_tree.bind("<Configure>", lambda _e=None: _pivot_resize_fn(), add="+")
 
     # Appliser lagret kolonne-synlighet
     _apply_pivot_vis = getattr(page, "_apply_pivot_visible_columns", None)
@@ -1114,7 +1121,13 @@ def build_ui(
         detail_accounts_tree.bind("<<TreeviewSelect>>", lambda _e=None: _detail_select_fn())
 
     _tx_double_click_fn = getattr(page, "_on_tx_tree_double_click", None)
+    _tx_press_fn = getattr(page, "_on_tx_tree_mouse_press", None)
+    _tx_drag_fn = getattr(page, "_on_tx_tree_mouse_drag", None)
     _tx_release_fn = getattr(page, "_on_tx_tree_mouse_release", None)
+    if callable(_tx_press_fn):
+        tx_tree.bind("<ButtonPress-1>", lambda e: _tx_press_fn(e))
+    if callable(_tx_drag_fn):
+        tx_tree.bind("<B1-Motion>", lambda e: _tx_drag_fn(e))
     if callable(_tx_release_fn):
         tx_tree.bind("<ButtonRelease-1>", lambda e: _tx_release_fn(e))
 

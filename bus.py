@@ -61,6 +61,10 @@ def emit(event_name: str, data: Any = None) -> None:
         _handle_selection_set_accounts(data)
         return
 
+    if event_name == "TB_LOADED":
+        _handle_tb_loaded(data)
+        return
+
     # Ukjente events: bevisst no-op
     return
 
@@ -143,3 +147,28 @@ def _handle_selection_set_accounts(data: Any) -> None:
             _do_update()
     else:
         _do_update()
+
+
+def _handle_tb_loaded(data: Any) -> None:
+    """Håndterer TB_LOADED-eventet.
+
+    Kaller App._on_tb_ready() for å refreshe downstream faner
+    (Konsolidering, Analyse) etter at en SB-versjon er valgt.
+    """
+    try:
+        import session as _session  # type: ignore[import]
+    except Exception:
+        return
+
+    app = getattr(_session, "APP", None)
+    if app is None:
+        return
+
+    if hasattr(app, "_on_tb_ready") and callable(getattr(app, "_on_tb_ready")):
+        if hasattr(app, "after"):
+            try:
+                app.after(0, app._on_tb_ready)  # type: ignore[attr-defined]
+            except Exception:
+                app._on_tb_ready()  # type: ignore[attr-defined]
+        else:
+            app._on_tb_ready()  # type: ignore[attr-defined]

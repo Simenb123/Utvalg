@@ -228,6 +228,13 @@ def enable_treeview_sorting(
         text_key = lambda s: s.casefold()
 
     def _on_click(col: str) -> None:
+        if getattr(tree, "_suppress_next_heading_sort", False):
+            try:
+                tree._suppress_next_heading_sort = False  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            return
+
         state: _SortState = tree._sort_state  # type: ignore[attr-defined]
         if state.last_col == col:
             state.descending = not state.descending

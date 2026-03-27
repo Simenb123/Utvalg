@@ -23,6 +23,9 @@ import preferences
 
 # Kolonner som alltid skal strekke seg for å fylle ledig plass
 PIVOT_STRETCH_COLS = ("Kontonavn",)
+PIVOT_FILL_PRIORITY = ("Kontonavn", "Konto", "Sum")
+PIVOT_FILL_WEIGHTS = {"Kontonavn": 7, "Konto": 2, "Sum": 1}
+TX_HEADER_DRAG_THRESHOLD_PX = 10
 
 
 def pivot_default_for_mode(*, page: Any) -> tuple[str, ...]:
@@ -509,6 +512,65 @@ def auto_fit_tree_columns(
         persist_saved_column_widths(pref_key, stored_widths)
 
 
+def rebalance_tree_columns_to_available_width(
+    *,
+    tree: Any,
+    columns: List[str],
+    preferred_cols: List[str],
+    weights: dict[str, int] | None = None,
+) -> None:
+    """Fordel ledig Treeview-bredde til prioriterte kolonner.
+
+    Eksisterende kolonnebredder brukes som base. Dersom treeviewen er bredere
+    enn summen av kolonnene, fordeles overskytende plass til prioriterte
+    kolonner slik at vi unngar store ubrukt hvite flater.
+    """
+    try:
+        available = int(tree.winfo_width())
+    except Exception:
+        return
+    if available <= 80:
+        return
+
+    widths = {
+        col: safe_tree_column_width(tree, col) or analyse_treewidths.default_column_width(col)
+        for col in columns
+    }
+    total = sum(widths.values())
+    extra = available - total - 6
+    if extra <= 8:
+        return
+
+    targets = [col for col in preferred_cols if col in columns]
+    if not targets:
+        targets = [col for col in columns if analyse_treewidths.column_anchor(col) == "w"]
+    if not targets and columns:
+        targets = [columns[-1]]
+    if not targets:
+        return
+
+    weight_map = weights or {}
+    total_weight = sum(max(1, int(weight_map.get(col, 1))) for col in targets)
+    if total_weight <= 0:
+        return
+
+    remaining = extra
+    for idx, col in enumerate(targets):
+        if idx == len(targets) - 1:
+            share = remaining
+        else:
+            share = max(0, int(extra * max(1, int(weight_map.get(col, 1))) / total_weight))
+            remaining -= share
+        try:
+            tree.column(
+                col,
+                width=widths[col] + share,
+                anchor=analyse_treewidths.column_anchor(col),
+            )
+        except Exception:
+            continue
+
+
 def sample_tx_values_for_width(*, page: Any, display_col: str, limit: int = 200) -> List[Any]:
     import pandas as pd
     df = page._df_filtered if isinstance(page._df_filtered, pd.DataFrame) else page.dataset
@@ -581,6 +643,7 @@ def maybe_auto_fit_pivot_tree(*, page: Any) -> None:
         persist=force,
         stretch_cols=set(PIVOT_STRETCH_COLS),
     )
+    rebalance_pivot_tree_columns(page=page)
     if force:
         page._pivot_first_load = False
 
@@ -610,11 +673,48 @@ def auto_fit_pivot_columns(*, page: Any) -> None:
         persist=True,
         stretch_cols=set(PIVOT_STRETCH_COLS),
     )
+    rebalance_pivot_tree_columns(page=page)
 
 
 def auto_fit_analyse_columns(*, page: Any) -> None:
     auto_fit_pivot_columns(page=page)
     auto_fit_tx_columns(page=page)
+
+
+def rebalance_pivot_tree_columns(*, page: Any) -> None:
+    tree = getattr(page, "_pivot_tree", None)
+    if tree is None:
+        return
+    rebalance_tree_columns_to_available_width(
+        tree=tree,
+        columns=tree_display_columns(tree),
+        preferred_cols=list(PIVOT_FILL_PRIORITY),
+        weights=dict(PIVOT_FILL_WEIGHTS),
+    )
+
+
+def schedule_balance_pivot_tree(*, page: Any) -> None:
+    tree = getattr(page, "_pivot_tree", None)
+    if tree is None:
+        return
+    try:
+        after_id = getattr(page, "_pivot_balance_after_id", None)
+        if after_id:
+            page.after_cancel(after_id)
+    except Exception:
+        pass
+
+    def _run() -> None:
+        try:
+            page._pivot_balance_after_id = None
+        except Exception:
+            pass
+        rebalance_pivot_tree_columns(page=page)
+
+    try:
+        page._pivot_balance_after_id = page.after_idle(_run)
+    except Exception:
+        rebalance_pivot_tree_columns(page=page)
 
 
 # =====================================================================
@@ -645,6 +745,98 @@ def on_tx_tree_double_click(*, page: Any, event: Any) -> Optional[str]:
         persist=True,
     )
     return "break"
+
+
+def on_tx_tree_mouse_press(*, page: Any, event: Any) -> None:
+    tree = getattr(page, "_tx_tree", None)
+    if tree is None or event is None:
+        return
+
+    try:
+        region = str(tree.identify_region(event.x, event.y))
+    except Exception:
+        region = ""
+    if region != "heading":
+        setattr(page, "_tx_header_drag", None)
+        return
+
+    col = column_id_from_event(tree, event)
+    if not col:
+        setattr(page, "_tx_header_drag", None)
+        return
+
+    setattr(
+        page,
+        "_tx_header_drag",
+        {
+            "source": col,
+            "start_x": int(getattr(event, "x", 0) or 0),
+            "active": False,
+        },
+    )
+
+
+def on_tx_tree_mouse_drag(*, page: Any, event: Any) -> None:
+    tree = getattr(page, "_tx_tree", None)
+    drag = getattr(page, "_tx_header_drag", None)
+    if tree is None or event is None or not isinstance(drag, dict):
+        return
+
+    if drag.get("active"):
+        return
+
+    try:
+        region = str(tree.identify_region(event.x, event.y))
+    except Exception:
+        region = ""
+    if region != "heading":
+        return
+
+    start_x = int(drag.get("start_x", 0) or 0)
+    cur_x = int(getattr(event, "x", 0) or 0)
+    if abs(cur_x - start_x) < TX_HEADER_DRAG_THRESHOLD_PX:
+        return
+
+    drag["active"] = True
+    setattr(page, "_tx_header_drag", drag)
+    try:
+        tree._suppress_next_heading_sort = True  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def _finish_tx_header_drag(*, page: Any, event: Any) -> bool:
+    tree = getattr(page, "_tx_tree", None)
+    drag = getattr(page, "_tx_header_drag", None)
+    setattr(page, "_tx_header_drag", None)
+    if tree is None or event is None or not isinstance(drag, dict):
+        return False
+
+    if not drag.get("active"):
+        return False
+
+    source = str(drag.get("source") or "").strip()
+    target = column_id_from_event(tree, event) or ""
+    if not source or not target or source == target:
+        return False
+
+    order = analyse_columns.reorder_tx_column(
+        getattr(page, "_tx_cols_order", ()),
+        source=source,
+        target=target,
+        all_cols=get_all_tx_columns_for_chooser(page=page),
+        pinned=getattr(page, "PINNED_TX_COLS", ("Konto", "Kontonavn")),
+        required=getattr(page, "REQUIRED_TX_COLS", ("Konto", "Kontonavn", "Bilag")),
+    )
+    current_visible = list(getattr(page, "TX_COLS", ()))
+    apply_tx_column_config(page=page, order=order, visible=current_visible)
+    try:
+        after_idle = getattr(tree, "after_idle", None)
+        if callable(after_idle):
+            after_idle(lambda: setattr(tree, "_suppress_next_heading_sort", False))
+    except Exception:
+        pass
+    return True
 
 
 def on_pivot_tree_double_click(*, page: Any, event: Any) -> Optional[str]:
@@ -678,6 +870,10 @@ def on_tx_tree_mouse_release(*, page: Any, event: Any) -> None:
     tree = getattr(page, "_tx_tree", None)
     if tree is None or event is None:
         return
+
+    if _finish_tx_header_drag(page=page, event=event):
+        return
+
     try:
         region = str(tree.identify_region(event.x, event.y))
     except Exception:

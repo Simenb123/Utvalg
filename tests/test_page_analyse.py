@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import inspect
 import tkinter
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -112,6 +113,90 @@ class _FakePivotTree:
         self.see_calls.append(item)
 
 
+class _FakeWidthTree:
+    def __init__(self, *, widths, available_width, columns=None):
+        self._columns = tuple(columns or ("Konto", "Kontonavn", "Sum", "Antall"))
+        self._displaycolumns = self._columns
+        self._widths = dict(widths)
+        self._available_width = int(available_width)
+
+    def __getitem__(self, key):
+        if key == "columns":
+            return self._columns
+        if key == "displaycolumns":
+            return self._displaycolumns
+        raise KeyError(key)
+
+    def column(self, col, option=None, **kwargs):
+        if kwargs:
+            if "width" in kwargs:
+                self._widths[col] = int(kwargs["width"])
+            return {"width": self._widths.get(col, 0)}
+        if option == "width":
+            return self._widths.get(col, 0)
+        return {"width": self._widths.get(col, 0)}
+
+    def winfo_width(self):
+        return self._available_width
+
+
+class _FakeAccountRefreshTree:
+    def __init__(self, initial_rows):
+        self._rows = dict(initial_rows)
+        self._selection = list(initial_rows.keys())[:1]
+        self._focus = self._selection[0] if self._selection else ""
+        self.selection_calls = []
+        self.focus_calls = []
+        self.see_calls = []
+        self._counter = 0
+
+    def get_children(self, *_a, **_k):
+        return list(self._rows.keys())
+
+    def set(self, item, col):
+        return self._rows.get(item, {}).get(col, "")
+
+    def selection(self):
+        return list(self._selection)
+
+    def selection_set(self, items):
+        if isinstance(items, (list, tuple)):
+            self._selection = list(items)
+        else:
+            self._selection = [items]
+        self.selection_calls.append(list(self._selection))
+
+    def focus(self, item=None):
+        if item is None:
+            return self._focus
+        self._focus = item
+        self.focus_calls.append(item)
+
+    def see(self, item):
+        self.see_calls.append(item)
+
+    def insert(self, _parent, _index, values=(), tags=()):
+        self._counter += 1
+        item = f"new{self._counter}"
+        row = {
+            "Konto": values[0] if len(values) > 0 else "",
+            "Kontonavn": values[1] if len(values) > 1 else "",
+        }
+        self._rows[item] = row
+        return item
+
+    def delete(self, item):
+        self._rows.pop(item, None)
+
+
+class _FakeHeaderTree:
+    def __init__(self):
+        self._suppress_next_heading_sort = False
+
+    def identify_region(self, _x, _y):
+        return "heading"
+
+
 def test_open_rl_drilldown_passes_mapping_context(monkeypatch) -> None:
     import page_analyse
     import page_analyse_rl
@@ -179,6 +264,7 @@ def test_reload_rl_drilldown_df_refreshes_and_restores_selection(monkeypatch) ->
     captured = {}
 
     monkeypatch.setattr(page_analyse_rl, "_load_current_client_account_overrides", lambda: {"1000": 10})
+    monkeypatch.setattr(page, "_get_effective_sb_df", lambda: "effective-sb", raising=False)
 
     def fake_build(df_filtered, intervals, regnskapslinjer, **kwargs):
         captured["df_filtered"] = df_filtered
@@ -197,7 +283,84 @@ def test_reload_rl_drilldown_df_refreshes_and_restores_selection(monkeypatch) ->
     assert page._pivot_tree.see_calls == ["row1"]
     assert captured["kwargs"]["regnr_filter"] == [10, 20]
     assert captured["kwargs"]["account_overrides"] == {"1000": 10}
+    assert captured["kwargs"]["sb_df"] == "effective-sb"
     assert out.equals(expected)
+
+
+def test_account_pivot_refresh_restores_selected_account(monkeypatch) -> None:
+    import page_analyse_pivot
+
+    tree = _FakeAccountRefreshTree(
+        {
+            "old1": {"Konto": "1000", "Kontonavn": "Bank"},
+            "old2": {"Konto": "2000", "Kontonavn": "Kasse"},
+        }
+    )
+    page = SimpleNamespace(
+        _pivot_tree=tree,
+        _df_filtered=pd.DataFrame(
+            {
+                "Konto": ["1000", "1000", "2000"],
+                "Kontonavn": ["Bank", "Bank", "Kasse"],
+                "Beløp": [100.0, -25.0, 50.0],
+            }
+        ),
+        _clear_tree=lambda target: [target.delete(item) for item in list(target.get_children(""))],
+        _maybe_auto_fit_pivot_tree=lambda: None,
+    )
+
+    page_analyse_pivot.refresh_pivot(page=page)
+
+    assert tree.selection_calls, "Refresh should restore a selection when one existed before refresh"
+    selected_item = tree.selection_calls[-1][0]
+    assert tree.set(selected_item, "Konto") == "1000"
+    assert tree.focus_calls[-1] == selected_item
+    assert tree.see_calls[-1] == selected_item
+
+
+def test_tx_header_drag_reorders_columns(monkeypatch) -> None:
+    import page_analyse_columns
+
+    page = SimpleNamespace(
+        _tx_tree=_FakeHeaderTree(),
+        _tx_cols_order=["Konto", "Kontonavn", "Dato", "Bilag", "Beløp", "Tekst"],
+        TX_COLS=("Konto", "Kontonavn", "Dato", "Bilag", "Beløp", "Tekst"),
+        TX_COLS_DEFAULT=("Konto", "Kontonavn", "Dato", "Bilag", "Beløp", "Tekst"),
+        PINNED_TX_COLS=("Konto", "Kontonavn"),
+        REQUIRED_TX_COLS=("Konto", "Kontonavn", "Bilag"),
+    )
+
+    captured = {}
+
+    monkeypatch.setattr(
+        page_analyse_columns,
+        "column_id_from_event",
+        lambda _tree, event: event.col,
+    )
+    monkeypatch.setattr(
+        page_analyse_columns,
+        "get_all_tx_columns_for_chooser",
+        lambda *, page: list(page._tx_cols_order),
+    )
+    monkeypatch.setattr(
+        page_analyse_columns,
+        "apply_tx_column_config",
+        lambda *, page, order, visible, all_cols=None: captured.update(
+            {"order": list(order), "visible": list(visible)}
+        ),
+    )
+
+    press = SimpleNamespace(x=10, y=0, col="Tekst")
+    drag = SimpleNamespace(x=40, y=0, col="Tekst")
+    release = SimpleNamespace(x=60, y=0, col="Beløp")
+
+    page_analyse_columns.on_tx_tree_mouse_press(page=page, event=press)
+    page_analyse_columns.on_tx_tree_mouse_drag(page=page, event=drag)
+    page_analyse_columns.on_tx_tree_mouse_release(page=page, event=release)
+
+    assert page._tx_tree._suppress_next_heading_sort is True
+    assert captured["order"].index("Tekst") < captured["order"].index("Beløp")
+    assert captured["visible"] == list(page.TX_COLS)
 
 
 def test_export_regnskapsoppstilling_excel_uses_payload_and_save_dialog(monkeypatch, tmp_path) -> None:
@@ -243,3 +406,36 @@ def test_export_regnskapsoppstilling_excel_uses_payload_and_save_dialog(monkeypa
     assert calls["kwargs"]["transactions_df"].equals(payload["transactions_df"])
     assert calls["kwargs"]["client"] == "Nbs Regnskap AS"
     assert calls["kwargs"]["year"] == "2025"
+
+
+def test_rebalance_pivot_tree_columns_uses_available_width() -> None:
+    import page_analyse_columns
+
+    tree = _FakeWidthTree(
+        widths={"Konto": 80, "Kontonavn": 210, "Sum": 110, "Antall": 60},
+        available_width=720,
+    )
+    page = SimpleNamespace(_pivot_tree=tree)
+
+    page_analyse_columns.rebalance_pivot_tree_columns(page=page)
+
+    total = sum(tree.column(col, option="width") for col in tree["displaycolumns"])
+    assert total >= 700
+    assert tree.column("Kontonavn", option="width") > 210
+
+
+def test_rebalance_pivot_tree_columns_keeps_widths_when_no_extra_space() -> None:
+    import page_analyse_columns
+
+    tree = _FakeWidthTree(
+        widths={"Konto": 80, "Kontonavn": 210, "Sum": 110, "Antall": 60},
+        available_width=430,
+    )
+    page = SimpleNamespace(_pivot_tree=tree)
+
+    page_analyse_columns.rebalance_pivot_tree_columns(page=page)
+
+    assert tree.column("Konto", option="width") == 80
+    assert tree.column("Kontonavn", option="width") == 210
+    assert tree.column("Sum", option="width") == 110
+    assert tree.column("Antall", option="width") == 60

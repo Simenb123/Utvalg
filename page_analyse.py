@@ -26,6 +26,7 @@ funksjonene ved kall.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
@@ -54,6 +55,8 @@ import page_analyse_pivot
 import page_analyse_sb
 import page_analyse_transactions
 import page_analyse_ui
+
+log = logging.getLogger(__name__)
 
 try:
     from ui_treeview_sort import enable_treeview_sorting as _enable_treeview_sorting
@@ -147,6 +150,8 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         # Live filter debounce / scheduling
         self._filter_after_id: Optional[str] = None
         self._suspend_live_filter: bool = False
+        self._heavy_refresh_after_id: Optional[str] = None
+        self._heavy_refresh_generation: int = 0
 
         # --- headless-friendly init ---
         self._tk_ok = True
@@ -172,11 +177,15 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._sb_tree = None
             self._sb_frame = None
             self._tx_frame = None
+            self._tx_header_drag = None
+            self._pivot_balance_after_id = None
             self._detail_selected_account = ""
             self._detail_accounts_df = None
             self._detail_suggestions_by_account = {}
             self._detail_profiles_by_account = {}
             self._detail_context = {}
+            self._heavy_refresh_after_id = None
+            self._heavy_refresh_generation = 0
             self._init_error = e
             return
 
@@ -241,6 +250,8 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._sb_tree = None
         self._sb_frame = None
         self._tx_frame = None
+        self._tx_header_drag = None
+        self._pivot_balance_after_id = None
         self._lbl_tx_summary = None
         self._detail_panel = None
         self._detail_accounts_tree = None
@@ -257,7 +268,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     def set_utvalg_callback(self, callback: Callable[[List[str]], None]) -> None:
         self._utvalg_callback = callback
 
-    def refresh_from_session(self, sess: object = session) -> None:
+    def refresh_from_session(self, sess: object = session, *, defer_heavy: bool = False) -> None:
         """Reload data from session and refresh UI.
 
         Viktig: Vi beholder råverdien i self.dataset (ikke bare DataFrame),
@@ -266,11 +277,112 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         """
         df = getattr(sess, "dataset", None)
         self.dataset = df  # type: ignore[assignment]
-        self._reload_rl_config()
         self._refresh_mva_code_choices()
+        self._update_data_level()
+        if defer_heavy:
+            self._schedule_heavy_refresh()
+            return
+        self._run_full_refresh()
+
+    def _run_full_refresh(self) -> None:
+        self._reload_rl_config()
         self._apply_filters_and_refresh()
         self._adapt_pivot_columns_for_mode()
         self._update_data_level()
+
+    def _schedule_heavy_refresh(self) -> None:
+        """Planlegg én tung refresh etter at GUI har fått tilbake kontroll."""
+        self._heavy_refresh_generation += 1
+        generation = self._heavy_refresh_generation
+
+        pending = getattr(self, "_heavy_refresh_after_id", None)
+        if pending:
+            try:
+                self.after_cancel(pending)
+            except Exception:
+                pass
+            self._heavy_refresh_after_id = None
+
+        if not getattr(self, "_tk_ok", False):
+            self._run_full_refresh()
+            return
+
+        def _start() -> None:
+            if generation != self._heavy_refresh_generation:
+                return
+            self._heavy_refresh_after_id = None
+            self._run_heavy_refresh_staged(generation)
+
+        try:
+            self._heavy_refresh_after_id = self.after_idle(_start)
+        except Exception:
+            self._heavy_refresh_after_id = None
+            self._run_full_refresh()
+
+    def _run_heavy_refresh_staged(self, generation: int | None = None) -> None:
+        """Kjør første Analyse-render i små steg for å unngå GUI-heng."""
+        token = self._heavy_refresh_generation if generation is None else generation
+
+        def _is_stale() -> bool:
+            return token != self._heavy_refresh_generation
+
+        def _run_next(step_index: int = 0) -> None:
+            if _is_stale():
+                return
+
+            if step_index == 0:
+                try:
+                    self._reload_rl_config()
+                except Exception:
+                    log.exception("Analyse staged refresh: reload RL config failed")
+            elif step_index == 1:
+                try:
+                    df_filtered = page_analyse_filters_live.build_filtered_df(page=self, dir_options=_DIR_OPTIONS)
+                    self._df_filtered = df_filtered
+                    if df_filtered is None:
+                        page_analyse_filters_live._clear_views_for_missing_dataset(page=self)
+                except Exception:
+                    log.exception("Analyse staged refresh: build filtered df failed")
+                    self._df_filtered = None
+                    try:
+                        page_analyse_filters_live._clear_views_for_missing_dataset(page=self)
+                    except Exception:
+                        pass
+            elif step_index == 2:
+                if self._df_filtered is not None:
+                    try:
+                        self._refresh_pivot()
+                    except Exception:
+                        log.exception("Analyse staged refresh: pivot refresh failed")
+            elif step_index == 3:
+                if self._df_filtered is not None:
+                    try:
+                        self._refresh_transactions_view()
+                    except Exception:
+                        log.exception("Analyse staged refresh: transactions refresh failed")
+            elif step_index == 4:
+                if self._df_filtered is not None:
+                    try:
+                        self._refresh_detail_panel()
+                    except Exception:
+                        log.exception("Analyse staged refresh: detail refresh failed")
+            elif step_index == 5:
+                try:
+                    self._adapt_pivot_columns_for_mode()
+                except Exception:
+                    log.exception("Analyse staged refresh: adapt pivot columns failed")
+                try:
+                    self._update_data_level()
+                except Exception:
+                    log.exception("Analyse staged refresh: update data level failed")
+                return
+
+            try:
+                self.after(10, lambda: _run_next(step_index + 1))
+            except Exception:
+                _run_next(step_index + 1)
+
+        _run_next()
 
     def _reload_rl_config(self) -> None:
         """Last intervall-mapping, regnskapslinjer og aktiv SB on-demand (best-effort)."""
@@ -434,11 +546,20 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     def _maybe_auto_fit_pivot_tree(self) -> None:
         page_analyse_columns.maybe_auto_fit_pivot_tree(page=self)
 
+    def _schedule_balance_pivot_tree(self) -> None:
+        page_analyse_columns.schedule_balance_pivot_tree(page=self)
+
     def _auto_fit_analyse_columns(self) -> None:
         page_analyse_columns.auto_fit_analyse_columns(page=self)
 
     def _on_tx_tree_double_click(self, event=None):
         return page_analyse_columns.on_tx_tree_double_click(page=self, event=event)
+
+    def _on_tx_tree_mouse_press(self, event=None):
+        page_analyse_columns.on_tx_tree_mouse_press(page=self, event=event)
+
+    def _on_tx_tree_mouse_drag(self, event=None):
+        page_analyse_columns.on_tx_tree_mouse_drag(page=self, event=event)
 
     def _on_pivot_tree_double_click(self, event=None):
         return page_analyse_columns.on_pivot_tree_double_click(page=self, event=event)
@@ -600,8 +721,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     def _on_hide_sumposter_changed(self, _event=None) -> None:
         """Toggle synlighet for Σ-sumposter i pivot-treet."""
         try:
-            self._refresh_pivot()
-            self._refresh_transactions_view()
+            self._refresh_analysis_views_after_adjustment_change()
         except Exception:
             pass
 
@@ -616,7 +736,48 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     def _on_include_ao_changed(self, _event=None) -> None:
         """Toggle tilleggsposteringer (ÅO) i pivot og SB-visning."""
         try:
+            self._refresh_analysis_views_after_adjustment_change()
+        except Exception:
+            pass
+
+    def _include_ao_enabled(self) -> bool:
+        try:
+            return bool(self._var_include_ao.get()) if self._var_include_ao is not None else False
+        except Exception:
+            return False
+
+    def _get_effective_sb_df(self):
+        sb_df = getattr(self, "_rl_sb_df", None)
+        if sb_df is None:
+            return None
+        if not self._include_ao_enabled():
+            return sb_df
+        try:
+            import session as _session
+            import regnskap_client_overrides
+            import tilleggsposteringer
+
+            client = getattr(_session, "client", None) or ""
+            year = getattr(_session, "year", None) or ""
+            if not client or not year:
+                return sb_df
+            ao_entries = regnskap_client_overrides.load_supplementary_entries(client, year)
+            if not ao_entries:
+                return sb_df
+            return tilleggsposteringer.apply_to_sb(sb_df, ao_entries)
+        except Exception:
+            return sb_df
+
+    def _refresh_analysis_views_after_adjustment_change(self) -> None:
+        try:
             self._refresh_pivot()
+        except Exception:
+            pass
+        try:
+            self._refresh_detail_panel()
+        except Exception:
+            pass
+        try:
             self._refresh_transactions_view()
         except Exception:
             pass
@@ -635,10 +796,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 return
             tilleggsposteringer.open_dialog(
                 self, client=client, year=year,
-                on_changed=lambda: (
-                    self._refresh_pivot(),
-                    self._refresh_transactions_view(),
-                ),
+                on_changed=lambda: self._refresh_analysis_views_after_adjustment_change(),
             )
         except Exception as exc:
             import logging
@@ -891,7 +1049,10 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         df_filtered = getattr(self, "_df_filtered", None)
         intervals = getattr(self, "_rl_intervals", None)
         regnskapslinjer = getattr(self, "_rl_regnskapslinjer", None)
-        sb_df = getattr(self, "_rl_sb_df", None)
+        try:
+            sb_df = self._get_effective_sb_df()
+        except Exception:
+            sb_df = getattr(self, "_rl_sb_df", None)
 
         if not isinstance(df_filtered, pd.DataFrame) or intervals is None or regnskapslinjer is None:
             return pd.DataFrame(columns=cols)

@@ -586,7 +586,10 @@ def build_selected_rl_account_drilldown(*, page: Any) -> tuple[pd.DataFrame, Lis
     df_filtered = getattr(page, "_df_filtered", None)
     intervals = getattr(page, "_rl_intervals", None)
     regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
-    sb_df = getattr(page, "_rl_sb_df", None)
+    try:
+        sb_df = page._get_effective_sb_df()
+    except Exception:
+        sb_df = getattr(page, "_rl_sb_df", None)
     account_overrides = _load_current_client_account_overrides()
 
     if not isinstance(df_filtered, pd.DataFrame) or intervals is None or regnskapslinjer is None:
@@ -726,6 +729,8 @@ def refresh_rl_pivot(*, page: Any) -> None:
     if tree is None:
         return
 
+    selected_regnr = [regnr for regnr, _ in get_selected_rl_rows(page=page)]
+
     # Oppdater headings
     update_pivot_headings(page=page, mode="Regnskapslinje")
 
@@ -754,29 +759,10 @@ def refresh_rl_pivot(*, page: Any) -> None:
         _show_rl_not_configured(tree)
         return
 
-    sb_df = getattr(page, "_rl_sb_df", None)
-
-    # Tilleggsposteringer: juster SB hvis aktivert
-    _include_ao = False
     try:
-        _ao_var = getattr(page, "_var_include_ao", None)
-        if _ao_var is not None:
-            _include_ao = bool(_ao_var.get())
+        sb_df = page._get_effective_sb_df()
     except Exception:
-        pass
-    if _include_ao and sb_df is not None and isinstance(sb_df, pd.DataFrame):
-        try:
-            import tilleggsposteringer
-            import regnskap_client_overrides
-            import session as _session
-            _cl = getattr(_session, "client", None) or ""
-            _yr = getattr(_session, "year", None) or ""
-            if _cl and _yr:
-                ao_entries = regnskap_client_overrides.load_supplementary_entries(_cl, _yr)
-                if ao_entries:
-                    sb_df = tilleggsposteringer.apply_to_sb(sb_df, ao_entries)
-        except Exception:
-            pass
+        sb_df = getattr(page, "_rl_sb_df", None)
 
     account_overrides = _load_current_client_account_overrides()
     try:
@@ -931,6 +917,12 @@ def refresh_rl_pivot(*, page: Any) -> None:
     if callable(maybe_auto_fit):
         try:
             maybe_auto_fit()
+        except Exception:
+            pass
+
+    if selected_regnr:
+        try:
+            page._restore_rl_pivot_selection(selected_regnr)
         except Exception:
             pass
 

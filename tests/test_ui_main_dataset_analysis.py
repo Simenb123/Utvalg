@@ -52,7 +52,7 @@ def test_dataset_ready_updates_analysis() -> None:
 
 
 def test_dataset_ready_continues_when_analyse_refresh_fails() -> None:
-    """Regression: feil i Analyse-refresh må ikke stoppe Resultat/A07-oppdatering."""
+    """Regression: feil i Analyse-refresh må ikke stoppe Resultat, og A07 skal ikke eager-refreshes."""
     session.client = None
     session.year = None
     app = ui_main.create_app()
@@ -62,11 +62,18 @@ def test_dataset_ready_continues_when_analyse_refresh_fails() -> None:
         except Exception:
             pass
 
-        called: list[str] = []
+        called: list[object] = []
 
         setattr(app, "after_idle", lambda fn: fn())
         setattr(app, "after", lambda _ms, fn: fn())
-        setattr(app.page_analyse, "refresh_from_session", lambda _session: (_ for _ in ()).throw(RuntimeError("boom")))
+        setattr(
+            app.page_analyse,
+            "refresh_from_session",
+            lambda _session, *, defer_heavy=False: (
+                called.append(("analyse", defer_heavy)),
+                (_ for _ in ()).throw(RuntimeError("boom")),
+            )[-1],
+        )
         setattr(app.page_resultat, "on_dataset_loaded", lambda _df: called.append("resultat"))
         setattr(app.page_a07, "refresh_from_session", lambda _session: called.append("a07"))
 
@@ -80,7 +87,7 @@ def test_dataset_ready_continues_when_analyse_refresh_fails() -> None:
         app._on_data_ready(df)
 
         assert app.page_analyse.dataset is df
-        assert called == ["resultat", "a07"]
+        assert called == [("analyse", True), "resultat"]
     finally:
         try:
             app.destroy()  # type: ignore[attr-defined]

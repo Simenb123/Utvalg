@@ -72,3 +72,34 @@ def test_normalize_tx_column_config_canonicalizes_old_saved_aliases():
     assert "mva-kode" not in order_clean
     assert "Kundenavn" in order_clean
     assert "MVA-kode" in visible_order
+
+
+def test_reorder_tx_column_moves_column_but_keeps_pinned_first():
+    order = ["Konto", "Kontonavn", "Dato", "Bilag", "Beløp", "Tekst"]
+
+    out = analyse_columns.reorder_tx_column(
+        order,
+        source="Tekst",
+        target="Beløp",
+        all_cols=order,
+        pinned=("Konto", "Kontonavn"),
+        required=("Konto", "Kontonavn", "Bilag"),
+    )
+
+    assert out[:2] == ["Konto", "Kontonavn"]
+    assert out.index("Tekst") < out.index("Beløp")
+
+
+def test_reorder_tx_column_does_not_move_pinned_column_out_of_front():
+    order = ["Konto", "Kontonavn", "Dato", "Bilag", "Beløp"]
+
+    out = analyse_columns.reorder_tx_column(
+        order,
+        source="Konto",
+        target="Beløp",
+        all_cols=order,
+        pinned=("Konto", "Kontonavn"),
+        required=("Konto", "Kontonavn", "Bilag"),
+    )
+
+    assert out[:2] == ["Konto", "Kontonavn"]

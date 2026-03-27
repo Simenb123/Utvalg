@@ -147,7 +147,10 @@ def _build_account_mode_context(page: Any) -> dict[str, Any]:
     rows["Kontonavn"] = work["Kontonavn"].fillna("").astype(str) if "Kontonavn" in work.columns else ""
     grouped = rows.groupby(["Konto", "Kontonavn"], as_index=False).agg(Antall=("_cnt", "sum"), Endring=("_belop", "sum"))
 
-    sb_df = getattr(page, "_rl_sb_df", None)
+    try:
+        sb_df = page._get_effective_sb_df()
+    except Exception:
+        sb_df = getattr(page, "_rl_sb_df", None)
     if isinstance(sb_df, pd.DataFrame) and not sb_df.empty and "konto" in sb_df.columns:
         sb_work = sb_df.copy()
         sb_work["konto"] = sb_work["konto"].astype(str)

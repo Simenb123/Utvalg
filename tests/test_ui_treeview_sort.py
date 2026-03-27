@@ -125,3 +125,21 @@ def test_sorting_preserves_selection_and_focus_best_effort():
 
     assert set(tree.selection()) == {"iid1", "iid2"}
     assert tree.focus() == "iid2"
+
+
+def test_sorting_can_be_suppressed_once_for_header_drag():
+    tree = DummyTree(
+        columns=["BelÃ¸p"],
+        rows=[
+            {"BelÃ¸p": "1 000,00"},
+            {"BelÃ¸p": "-1 000,00"},
+        ],
+    )
+    enable_treeview_sorting(tree)
+
+    tree._suppress_next_heading_sort = True
+    tree._heading_cmds["BelÃ¸p"]()
+    assert _values_in_order(tree, "BelÃ¸p") == ["1 000,00", "-1 000,00"]
+
+    tree._heading_cmds["BelÃ¸p"]()
+    assert _values_in_order(tree, "BelÃ¸p") == ["-1 000,00", "1 000,00"]

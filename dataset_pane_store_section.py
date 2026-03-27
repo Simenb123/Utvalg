@@ -433,6 +433,53 @@ class ClientStoreSection:
         except Exception:
             pass
 
+    def _on_select_sb(self, version_id: str) -> None:
+        """Handle selection of an SB (saldobalanse) version."""
+        if not _HAS_CLIENT_STORE or client_store is None:
+            return
+        c = self._client()
+        if not c:
+            return
+        y = self._year()
+        try:
+            v = client_store.get_version(c, year=y, dtype="sb", version_id=version_id)
+        except Exception:
+            log.debug("Could not look up SB version %s", version_id, exc_info=True)
+            return
+        if v is None:
+            return
+
+        try:
+            from trial_balance_reader import read_trial_balance
+            tb_df = read_trial_balance(v.path)
+        except Exception:
+            log.exception("Failed to read SB file %s", v.path)
+            messagebox.showerror("Saldobalanse", f"Kunne ikke lese saldobalanse:\n{v.path}")
+            return
+
+        try:
+            import session
+            session.set_tb(tb_df)
+            session.client = c
+            session.year = y
+        except Exception:
+            log.exception("Failed to set TB in session")
+
+        # Notify DatasetPane to switch to SB mode
+        tb_cb = getattr(self, "_on_tb_selected_cb", None)
+        if callable(tb_cb):
+            try:
+                tb_cb(str(v.path))
+            except Exception:
+                log.debug("_on_tb_selected_cb failed", exc_info=True)
+
+        # Notify ui_main via bus event so downstream tabs refresh
+        try:
+            import bus
+            bus.emit("TB_LOADED", tb_df)
+        except Exception:
+            log.debug("bus.emit TB_LOADED failed", exc_info=True)
+
     def _on_store_current_file(self) -> None:
         p = str(self.get_current_path() or "").strip()
         if not p:
@@ -489,6 +536,9 @@ class ClientStoreSection:
             self.hb_var.set(version_id)
             self._on_select_hb()
 
+        def _use_sb_version(version_id: str) -> None:
+            self._on_select_sb(version_id)
+
         open_versions_dialog(
             self.frame,
             client=client,
@@ -496,6 +546,7 @@ class ClientStoreSection:
             dtype=self.dtype,
             current_path_getter=self.get_current_path,
             on_use_version=_use_version,
+            on_use_sb_version=_use_sb_version,
             on_after_change=self.refresh,
         )
 

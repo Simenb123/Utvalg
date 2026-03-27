@@ -288,6 +288,35 @@ class _InsertTree:
         return None
 
 
+class _RefreshTree:
+    def __init__(self):
+        self.rows = {"old10": {"Konto": "10", "Kontonavn": "Eiendeler"}}
+        self._selection = ["old10"]
+
+    def selection(self):
+        return list(self._selection)
+
+    def focus(self):
+        return self._selection[0] if self._selection else ""
+
+    def get_children(self, *_a, **_k):
+        return list(self.rows.keys())
+
+    def set(self, item, col):
+        return self.rows.get(item, {}).get(col, "")
+
+    def delete(self, item):
+        self.rows.pop(item, None)
+
+    def insert(self, _parent, _index, values=(), tags=()):
+        item = f"row{len(self.rows) + 1}"
+        self.rows[item] = {
+            "Konto": values[0] if len(values) > 0 else "",
+            "Kontonavn": values[1] if len(values) > 1 else "",
+        }
+        return item
+
+
 def test_get_selected_rl_accounts_basic() -> None:
     from page_analyse_rl import get_selected_rl_accounts
 
@@ -486,3 +515,36 @@ def test_load_rl_config_returns_none_when_not_configured(monkeypatch, tmp_path) 
     intervals, regnskapslinjer = load_rl_config()
     assert intervals is None
     assert regnskapslinjer is None
+
+
+def test_refresh_rl_pivot_restores_selected_regnskapslinje(monkeypatch) -> None:
+    import page_analyse_rl
+
+    restore_calls = []
+
+    class _Page:
+        def __init__(self):
+            self._pivot_tree = _RefreshTree()
+            self._df_filtered = _make_hb()
+            self._rl_intervals = _make_intervals()
+            self._rl_regnskapslinjer = _make_regnskapslinjer()
+            self._rl_sb_df = None
+            self._rl_mapping_warning = ""
+
+        @staticmethod
+        def _clear_tree(tree):
+            for item in list(tree.get_children("")):
+                tree.delete(item)
+
+        def _maybe_auto_fit_pivot_tree(self):
+            return None
+
+        def _restore_rl_pivot_selection(self, values):
+            restore_calls.append(list(values))
+
+    monkeypatch.setattr(page_analyse_rl, "update_pivot_headings", lambda **_k: None)
+
+    page = _Page()
+    page_analyse_rl.refresh_rl_pivot(page=page)
+
+    assert restore_calls == [[10]]

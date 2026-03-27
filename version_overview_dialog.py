@@ -108,6 +108,7 @@ class _VersionsDialog:
         state: _DialogState,
         current_path_getter,
         on_use_version=None,
+        on_use_sb_version=None,
         on_after_change=None,
         dtypes: list[str] | None = None,
     ):
@@ -115,6 +116,7 @@ class _VersionsDialog:
         self._state = state
         self._current_path_getter = current_path_getter
         self._on_use_version = on_use_version
+        self._on_use_sb_version = on_use_sb_version
         self._on_after_change = on_after_change
 
         self._dtypes = list(dict.fromkeys(dtypes or [state.dtype]))
@@ -619,12 +621,16 @@ class _VersionsDialog:
             messagebox.showerror("Versjoner", "Kunne ikke bruke valgt versjon.", parent=self.top)
             return
 
-        # Only HB updates the main dataset field
         if self._on_use_version and dtype == "hb":
             try:
                 self._on_use_version(vid)
             except Exception:
                 _log.exception("on_use_version failed")
+        elif self._on_use_sb_version and dtype == "sb":
+            try:
+                self._on_use_sb_version(vid)
+            except Exception:
+                _log.exception("on_use_sb_version failed")
 
         self._after_change()
         self._on_close()
@@ -717,6 +723,7 @@ def open_versions_dialog(
     dtype: str,
     current_path_getter,
     on_use_version=None,
+    on_use_sb_version=None,
     on_after_change=None,
     dtypes: list[str] | None = None,
 ) -> None:
@@ -734,6 +741,7 @@ def open_versions_dialog(
         state=_DialogState(client=client, year=year, dtype=dtype),
         current_path_getter=current_path_getter,
         on_use_version=on_use_version,
+        on_use_sb_version=on_use_sb_version,
         on_after_change=on_after_change,
         dtypes=dtypes,
     )

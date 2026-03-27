@@ -44,7 +44,9 @@ MAIN_FILETYPES = [
     ("SAF-T (zip/xml)", "*.zip;*.xml"),
 ]
 
-_REQUIRED = ("Konto", "Bilag", "Beløp")
+_REQUIRED_HB = ("Konto", "Bilag", "Beløp")
+_REQUIRED_SB = ("Konto",)
+_REQUIRED = _REQUIRED_HB  # default, overridden by _source_mode
 
 
 class DatasetPane(ttk.Frame):
@@ -68,6 +70,7 @@ class DatasetPane(ttk.Frame):
         self._ml_map = load_ml_map()
         self._headers: list[str] = []
         self._last_build: Optional[Tuple[pd.DataFrame, Columns]] = None
+        self._source_mode: str = "hb"  # "hb" or "sb"
 
         self.path_var = tk.StringVar(value="")
         self.sheet_var = tk.StringVar(value="")
@@ -158,6 +161,11 @@ class DatasetPane(ttk.Frame):
         label.configure(text=text, style=style_map.get(level, "Status.TLabel"))
 
     def _update_build_readiness(self) -> None:
+        # In SB mode, readiness comes from session.tb_df, not from mapping combos
+        if self._source_mode == "sb":
+            self._set_readiness("Saldobalanse lastet — TB-only modus.", level="ready")
+            return
+
         path = self.path_var.get().strip()
         if not path:
             self._set_readiness("Velg fil eller versjon for å starte.", level="warning")
@@ -171,7 +179,8 @@ class DatasetPane(ttk.Frame):
             self._set_readiness("Kontroller ark og header-rad før du bygger datasettet.", level="warning")
             return
 
-        missing = [field for field in _REQUIRED if not self.combo_vars[field].get().strip()]
+        required = _REQUIRED_HB
+        missing = [field for field in required if not self.combo_vars[field].get().strip()]
         if missing:
             self._set_readiness("Mangler påkrevde felt: " + ", ".join(missing), level="warning")
             return
@@ -365,6 +374,36 @@ class DatasetPane(ttk.Frame):
         )
 
     # ---- intern ----
+    def set_sb_mode(self, active: bool = True) -> None:
+        """Switch the DatasetPane to SB (saldobalanse) or HB (hovedbok) mode.
+
+        In SB mode the mapping combos for Bilag/Beloep are hidden and
+        the readiness label shows "TB-only modus".
+        """
+        self._source_mode = "sb" if active else "hb"
+
+        # Hide/show mapping combos for HB-only fields
+        hb_only_fields = {"Bilag", "Beløp", "Dato", "Tekst", "Kundenr", "Kundenavn",
+                          "Leverandørnr", "Leverandørnavn", "MVA-kode", "MVA-beløp",
+                          "MVA-prosent", "Valuta", "Valutabeløp"}
+        for field_name, widget in getattr(self, "combo_widgets", {}).items():
+            if widget is None:
+                continue
+            try:
+                label = getattr(widget, "_label", None)
+                if active and field_name in hb_only_fields:
+                    widget.grid_remove()
+                    if label is not None:
+                        label.grid_remove()
+                else:
+                    widget.grid()
+                    if label is not None:
+                        label.grid()
+            except Exception:
+                pass
+
+        self._update_build_readiness()
+
     def _try_mount_store_section(self):
         try:
             from dataset_pane_store import ClientStoreSection
@@ -372,13 +411,21 @@ class DatasetPane(ttk.Frame):
             return None
 
         def _on_path_selected(s: str) -> None:
+            # If we were in SB mode and user selects a new file, switch back to HB
+            if self._source_mode == "sb":
+                self.set_sb_mode(False)
             self._set_path(s, refresh_headers=True, refresh_sheet=True)
+
+        def _on_tb_selected(s: str) -> None:
+            self.set_sb_mode(True)
 
         def _get_current_path() -> str:
             return self.path_var.get()
 
         try:
-            return ClientStoreSection.create(self._store_container, on_path_selected=_on_path_selected, get_current_path=_get_current_path)
+            sec = ClientStoreSection.create(self._store_container, on_path_selected=_on_path_selected, get_current_path=_get_current_path)
+            sec._on_tb_selected_cb = _on_tb_selected
+            return sec
         except Exception:
             logger.exception("Kunne ikke montere ClientStoreSection")
             return None
@@ -615,7 +662,8 @@ class DatasetPane(ttk.Frame):
         mapping: Dict[str, str] = {}
         if not is_saft_path(p):
             mapping = {k: v.get().strip() for k, v in self.combo_vars.items() if v.get().strip()}
-            missing = [r for r in _REQUIRED if not mapping.get(r)]
+            required = _REQUIRED_SB if self._source_mode == "sb" else _REQUIRED_HB
+            missing = [r for r in required if not mapping.get(r)]
             if missing:
                 raise ValueError("Mapping mangler påkrevde felt: " + ", ".join(missing))
 

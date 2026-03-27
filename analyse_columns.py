@@ -161,3 +161,44 @@ def normalize_tx_column_config(
         visible_order = list(order_clean)
 
     return order_clean, visible_order
+
+
+def reorder_tx_column(
+    order: Sequence[object] | None,
+    *,
+    source: object,
+    target: object,
+    all_cols: Sequence[object] | None = None,
+    pinned: Sequence[str] = ("Konto", "Kontonavn"),
+    required: Sequence[str] = ("Konto", "Kontonavn", "Bilag"),
+) -> list[str]:
+    """Flytt en kolonne i TX-rekkefølgen og behold eksisterende kontrakter."""
+
+    order_clean, _ = normalize_tx_column_config(
+        order=order,
+        visible=order,
+        all_cols=all_cols,
+        pinned=pinned,
+        required=required,
+    )
+
+    src = canonicalize_display_column_name(source)
+    dst = canonicalize_display_column_name(target)
+    if not src or not dst or src == dst:
+        return list(order_clean)
+    if src not in order_clean or dst not in order_clean:
+        return list(order_clean)
+
+    moved = list(order_clean)
+    moved.remove(src)
+    insert_at = moved.index(dst)
+    moved.insert(insert_at, src)
+
+    final_order, _ = normalize_tx_column_config(
+        order=moved,
+        visible=moved,
+        all_cols=all_cols,
+        pinned=pinned,
+        required=required,
+    )
+    return list(final_order)
