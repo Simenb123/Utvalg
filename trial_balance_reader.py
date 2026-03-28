@@ -59,21 +59,10 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "ib",
         "ingående",
         "inngående",
-        "inngaaende",
         "opening",
         "openingbalance",
         "opening balance",
         "startbalance",
-        "saldo i fjor",
-        "saldoifjor",
-        "ifjor",
-        "i fjor",
-        "forrige aar",
-        "forrigeaar",
-        "forrige år",
-        "forrigeår",
-        "inngående balanse",
-        "inngaaende balanse",
     ],
     "ub": [
         "ub",
@@ -84,19 +73,6 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "closing balance",
         "endbalance",
         "sluttbalanse",
-        "saldo i aar",
-        "saldoiaar",
-        "saldo i år",
-        "saldoiår",
-        "i aar",
-        "iaar",
-        "i år",
-        "iår",
-        "utgående balanse",
-        "utgaaende balanse",
-        "årets saldo",
-        "aarets saldo",
-        "saldo",
     ],
     "netto": [
         "netto",
@@ -106,11 +82,6 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "periode",
         "change",
         "delta",
-        "årets bevegelse",
-        "aarets bevegelse",
-        "bevegelse",
-        "periodens bevegelse",
-        "endring i perioden",
     ],
     "debet": ["debet", "debit"],
     "kredit": ["kredit", "credit"],
@@ -153,28 +124,6 @@ def read_trial_balance(
     return out
 
 
-def read_raw_trial_balance(
-    path: str | Path,
-    *,
-    sheet_name: Optional[str] = None,
-    max_rows: int = 20,
-) -> "pd.DataFrame":
-    """Les rå data uten normalisering — for forhåndsvisning."""
-    import pandas as pd
-
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(str(p))
-
-    if p.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
-        sn = sheet_name or _guess_sheet_name(p)
-        df = pd.read_excel(p, sheet_name=sn, nrows=max_rows)
-    else:
-        df = pd.read_csv(p, nrows=max_rows, sep=None, engine="python")
-
-    return _clean_frame(df)
-
-
 def infer_trial_balance_columns(df: "pd.DataFrame") -> TrialBalanceColumns:
     """Gjetter kolonner basert på header-navn.
 
@@ -207,18 +156,6 @@ def infer_trial_balance_columns(df: "pd.DataFrame") -> TrialBalanceColumns:
     # Hvis både debet og kredit finnes, kan vi bruke dem som netto.
     debet = pick("debet", optional=True)
     kredit = pick("kredit", optional=True)
-
-    # Heuristikk: kolonner som er rene årstall (f.eks. "2025", "2024")
-    # Høyeste årstall → UB, nest høyeste → IB
-    if ub is None or ib is None:
-        year_cols = _detect_year_columns(df, exclude={konto, kontonavn, ib, ub, netto, debet, kredit})
-        if year_cols:
-            if ub is None:
-                ub = year_cols[0]  # høyeste årstall = UB
-                log.info("Årstall-heuristikk: '%s' → UB", ub)
-            if ib is None and len(year_cols) >= 2:
-                ib = year_cols[1]  # nest høyeste = IB
-                log.info("Årstall-heuristikk: '%s' → IB", ib)
 
     if ub is None and netto is None and (debet is None or kredit is None):
         raise ValueError(
@@ -411,31 +348,6 @@ def _parse_amount(v: object) -> float:
         return -val if neg else val
     except Exception:
         return float("nan")
-
-
-def _detect_year_columns(
-    df: "pd.DataFrame",
-    exclude: set,
-) -> List[str]:
-    """Finn kolonner som er rene årstall (2000-2099), sortert høyest først.
-
-    Returnerer kolonnenavn sortert synkende (nyeste først → UB-kandidat).
-    """
-    import pandas as pd
-
-    hits: List[Tuple[int, str]] = []
-    for col in df.columns:
-        if col in exclude:
-            continue
-        raw = str(col).strip()
-        if re.fullmatch(r"20\d{2}", raw):
-            # Sjekk at kolonnen inneholder numeriske verdier (ikke tekst)
-            if pd.api.types.is_numeric_dtype(df[col]) or df[col].dropna().apply(
-                lambda v: isinstance(v, (int, float))
-            ).all():
-                hits.append((int(raw), col))
-    hits.sort(reverse=True)
-    return [col for _, col in hits]
 
 
 def _norm_header(h: object) -> str:

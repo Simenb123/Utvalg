@@ -53,15 +53,6 @@ class DatasetPage(ttk.Frame):
         self.dp = DatasetPane(self, on_dataset_ready=self._on_dataset_ready)
         self.dp.pack(fill="both", expand=True)
 
-        # Datakilde-indikator
-        self._source_bar = ttk.Frame(self)
-        self._source_bar.pack(fill="x", padx=8, pady=(4, 0))
-        self._source_lbl = ttk.Label(
-            self._source_bar, text="", foreground="#555555",
-        )
-        self._source_lbl.pack(anchor="w")
-        self._update_source_indicator()
-
         # Eksport-linje nederst
         self._export_row = ttk.Frame(self)
 
@@ -113,36 +104,10 @@ class DatasetPage(ttk.Frame):
     def _on_path_changed(self) -> None:
         self._last_df = None
         self._set_export_enabled(False)
-        self._update_source_indicator()
 
     def _on_dataset_ready(self, df: pd.DataFrame) -> None:
         self._last_df = df
         self._set_export_enabled(True)
-        self._update_source_indicator()
-
-    def _update_source_indicator(self) -> None:
-        """Update the data source indicator showing what's loaded."""
-        parts: list[str] = []
-
-        # HB status
-        hb = getattr(session, "dataset", None)
-        if hb is not None and isinstance(hb, pd.DataFrame) and not hb.empty:
-            parts.append(f"Hovedbok: {len(hb)} rader")
-
-        # SB status
-        tb = getattr(session, "tb_df", None)
-        if tb is not None and isinstance(tb, pd.DataFrame) and not tb.empty:
-            parts.append(f"Saldobalanse: {len(tb)} kontoer")
-
-        if parts:
-            text = "Lastet: " + " | ".join(parts)
-        else:
-            text = "Ingen datasett lastet"
-
-        try:
-            self._source_lbl.configure(text=text)
-        except Exception:
-            pass
 
     def _export_hovedbok_clicked(self) -> None:
         df = self._last_df
