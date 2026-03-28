@@ -23,6 +23,7 @@ except Exception:  # pragma: no cover
 
 import pandas as pd
 
+import client_store
 import session
 from consolidation.models import (
     CompanyTB,
@@ -69,6 +70,9 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         toolbar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
 
         ttk.Button(toolbar, text="Importer selskap", command=self._on_import_company).pack(
+            side="left", padx=(0, 4),
+        )
+        ttk.Button(toolbar, text="Fra klientliste", command=self._on_import_from_clients).pack(
             side="left", padx=(0, 4),
         )
         self._btn_use_session_tb = ttk.Button(
@@ -306,6 +310,17 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         tb = getattr(sess, "tb_df", None)
         has_tb = tb is not None and isinstance(tb, pd.DataFrame) and not tb.empty
 
+        # Also check if client_store has SB versions for current client
+        if not has_tb:
+            client = str(getattr(sess, "client", "") or "").strip()
+            year = str(getattr(sess, "year", "") or "").strip()
+            if client and year:
+                try:
+                    sb_versions = client_store.list_versions(client, year=year, dtype="sb")
+                    has_tb = len(sb_versions) > 0
+                except Exception:
+                    pass
+
         # Check if session TB is already imported as a company
         already_imported = False
         if has_tb and self._project is not None:
@@ -320,13 +335,31 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
             self._btn_use_session_tb.pack_forget()
 
     def _on_use_session_tb(self) -> None:
-        """Import the active session TB as a company."""
+        """Import the active session TB (or current client's SB from store) as a company."""
         tb = getattr(session, "tb_df", None)
+        source_file = "aktiv saldobalanse"
+
+        client = str(getattr(session, "client", "") or "").strip()
+        year = str(getattr(session, "year", "") or "").strip()
+
+        # If no session TB, try loading from client_store
+        if (tb is None or (isinstance(tb, pd.DataFrame) and tb.empty)) and client and year:
+            try:
+                sb_versions = client_store.list_versions(client, year=year, dtype="sb")
+                if sb_versions:
+                    v = sb_versions[-1]  # most recent
+                    company_obj, tb, warnings = tb_import.import_company_tb(v.path, client)
+                    source_file = v.filename
+                    if warnings:
+                        messagebox.showwarning("Import-advarsler", "\n".join(warnings))
+            except Exception as exc:
+                messagebox.showerror("Importfeil", str(exc))
+                return
+
         if tb is None or (isinstance(tb, pd.DataFrame) and tb.empty):
             messagebox.showinfo("Saldobalanse", "Ingen aktiv saldobalanse i session.")
             return
 
-        client = str(getattr(session, "client", "") or "").strip()
         if not client:
             messagebox.showwarning("Saldobalanse", "Velg klient foerst.")
             return
@@ -344,7 +377,7 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         company = CompanyTB(
             name=name,
             source_type="session",
-            source_file="aktiv saldobalanse",
+            source_file=source_file,
             row_count=len(tb),
             has_ib=bool("ib" in tb.columns and tb["ib"].notna().any()),
         )
@@ -660,22 +693,38 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         if not path:
             return
 
+        self._import_tb_with_preview(path, default_name=Path(path).stem)
+
+    def _import_tb_with_preview(
+        self, path: str, *, default_name: str, source_type: str = "excel",
+    ) -> None:
+        """Import TB via preview dialog, then add to project."""
+        from tb_preview_dialog import open_tb_preview
+
+        df = open_tb_preview(self, path)
+        if df is None:
+            return  # User cancelled
+
         name = simpledialog.askstring(
             "Selskapsnavn",
             "Skriv inn selskapsnavn:",
-            initialvalue=Path(path).stem,
+            initialvalue=default_name,
         )
         if not name:
             return
 
-        try:
-            company, df, warnings = tb_import.import_company_tb(path, name)
-        except Exception as exc:
-            messagebox.showerror("Importfeil", str(exc))
-            return
+        # Build CompanyTB metadata
+        has_ib = bool("ib" in df.columns and df["ib"].notna().any() and (df["ib"].abs() > 0.005).any())
+        company = CompanyTB(
+            name=name.strip(),
+            source_file=Path(path).name,
+            source_type=source_type,
+            row_count=len(df),
+            has_ib=has_ib,
+        )
 
-        if warnings:
-            messagebox.showwarning("Import-advarsler", "\n".join(warnings))
+        if not has_ib:
+            messagebox.showwarning("Import-advarsler", "Ingen IB-verdier funnet — kun UB/netto er tilgjengelig.")
 
         proj = self._ensure_project()
         proj.companies.append(company)
@@ -685,6 +734,27 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         self._compute_mapping_status()
         self._refresh_company_tree()
         self._update_status()
+
+    # ------------------------------------------------------------------
+    # Import from client list
+    # ------------------------------------------------------------------
+
+    def _on_import_from_clients(self) -> None:
+        """Open dialog to pick a client+year+SB version from client_store."""
+        dlg = _ClientTBPickerDialog(self)
+        self.wait_window(dlg)
+        if dlg.result is None:
+            return
+
+        client_name, year, version = dlg.result
+        path = version.path
+        if not path or not Path(path).exists():
+            messagebox.showerror("Feil", f"Filen finnes ikke:\n{path}")
+            return
+
+        self._import_tb_with_preview(
+            path, default_name=client_name, source_type="client_store",
+        )
 
     def _on_journal_select(self, _event=None) -> None:
         sel = self._tree_journals.selection()
@@ -874,3 +944,142 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         except Exception as exc:
             logger.exception("Export failed")
             messagebox.showerror("Eksportfeil", str(exc))
+
+
+# ======================================================================
+# Client TB Picker Dialog
+# ======================================================================
+
+class _ClientTBPickerDialog(tk.Toplevel):  # type: ignore[misc]
+    """Dialog for picking a client's SB version from client_store."""
+
+    def __init__(self, parent: tk.Widget) -> None:
+        super().__init__(parent)
+        self.title("Velg selskap fra klientliste")
+        self.geometry("600x450")
+        self.resizable(True, True)
+        self.transient(parent)
+        self.grab_set()
+
+        self.result: (
+            tuple[str, str, client_store.VersionModel] | None
+        ) = None
+
+        self._build_ui()
+        self._populate_clients()
+
+    def _build_ui(self) -> None:
+        # --- Top: client/year selectors ---
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=8, pady=(8, 4))
+
+        ttk.Label(top, text="Klient:").pack(side="left")
+        self._cmb_client = ttk.Combobox(top, state="readonly", width=30)
+        self._cmb_client.pack(side="left", padx=(4, 12))
+        self._cmb_client.bind("<<ComboboxSelected>>", self._on_client_selected)
+
+        ttk.Label(top, text="Aar:").pack(side="left")
+        self._cmb_year = ttk.Combobox(top, state="readonly", width=8)
+        self._cmb_year.pack(side="left", padx=(4, 0))
+        self._cmb_year.bind("<<ComboboxSelected>>", self._on_year_selected)
+
+        # --- Middle: SB version list ---
+        mid = ttk.Frame(self)
+        mid.pack(fill="both", expand=True, padx=8, pady=4)
+
+        cols = ("filename", "created")
+        self._tree = ttk.Treeview(mid, columns=cols, show="headings", selectmode="browse")
+        self._tree.heading("filename", text="Filnavn")
+        self._tree.heading("created", text="Opprettet")
+        self._tree.column("filename", width=350)
+        self._tree.column("created", width=150)
+        self._tree.pack(fill="both", expand=True, side="left")
+
+        sb = ttk.Scrollbar(mid, orient="vertical", command=self._tree.yview)
+        sb.pack(fill="y", side="right")
+        self._tree.configure(yscrollcommand=sb.set)
+
+        # --- Bottom: buttons ---
+        btm = ttk.Frame(self)
+        btm.pack(fill="x", padx=8, pady=(4, 8))
+
+        ttk.Button(btm, text="Importer", command=self._on_ok).pack(side="right", padx=(4, 0))
+        ttk.Button(btm, text="Avbryt", command=self.destroy).pack(side="right")
+
+        self._versions: list[client_store.VersionModel] = []
+
+    def _populate_clients(self) -> None:
+        try:
+            clients = client_store.list_clients()
+        except Exception:
+            clients = []
+        self._cmb_client["values"] = clients
+        if clients:
+            self._cmb_client.current(0)
+            self._on_client_selected()
+
+    def _on_client_selected(self, _event=None) -> None:
+        client = self._cmb_client.get()
+        if not client:
+            return
+
+        # Discover years for this client
+        d = client_store._find_client_dir(client)
+        years: list[str] = []
+        if d is not None:
+            years_d = d / "years"
+            if years_d.exists():
+                years = sorted(
+                    [y.name for y in years_d.iterdir() if y.is_dir()],
+                    reverse=True,
+                )
+
+        self._cmb_year["values"] = years
+        if years:
+            self._cmb_year.current(0)
+            self._on_year_selected()
+        else:
+            self._cmb_year.set("")
+            self._tree.delete(*self._tree.get_children())
+            self._versions.clear()
+
+    def _on_year_selected(self, _event=None) -> None:
+        client = self._cmb_client.get()
+        year = self._cmb_year.get()
+        if not client or not year:
+            return
+
+        self._tree.delete(*self._tree.get_children())
+        self._versions.clear()
+
+        try:
+            versions = client_store.list_versions(client, year=year, dtype="sb")
+        except Exception:
+            versions = []
+
+        self._versions = versions
+        import time
+        for v in versions:
+            created = ""
+            if v.created_at:
+                try:
+                    created = time.strftime("%Y-%m-%d %H:%M", time.localtime(v.created_at))
+                except Exception:
+                    pass
+            self._tree.insert("", "end", iid=v.id, values=(v.filename, created))
+
+        if versions:
+            self._tree.selection_set(versions[0].id)
+
+    def _on_ok(self) -> None:
+        sel = self._tree.selection()
+        if not sel:
+            return
+        vid = sel[0]
+        client = self._cmb_client.get()
+        year = self._cmb_year.get()
+        for v in self._versions:
+            if v.id == vid:
+                self.result = (client, year, v)
+                break
+        self.destroy()

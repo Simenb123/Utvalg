@@ -449,9 +449,22 @@ class ClientStoreSection:
         if v is None:
             return
 
+        # Show preview dialog for column confirmation
         try:
-            from trial_balance_reader import read_trial_balance
-            tb_df = read_trial_balance(v.path)
+            from tb_preview_dialog import open_tb_preview
+            parent = self._frm.winfo_toplevel()
+            tb_df = open_tb_preview(parent, v.path)
+            if tb_df is None:
+                return  # User cancelled
+        except ImportError:
+            # Fallback: read without preview
+            try:
+                from trial_balance_reader import read_trial_balance
+                tb_df = read_trial_balance(v.path)
+            except Exception:
+                log.exception("Failed to read SB file %s", v.path)
+                messagebox.showerror("Saldobalanse", f"Kunne ikke lese saldobalanse:\n{v.path}")
+                return
         except Exception:
             log.exception("Failed to read SB file %s", v.path)
             messagebox.showerror("Saldobalanse", f"Kunne ikke lese saldobalanse:\n{v.path}")
