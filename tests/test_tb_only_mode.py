@@ -240,7 +240,7 @@ class TestUiMainVersionType:
 
 class TestConsolidationSessionTb:
     def test_update_session_tb_button_shows_when_tb_available(self):
-        """Button should be visible when session.tb_df is set and no session company exists."""
+        """Button should be visible when _resolve_active_client_tb returns data."""
         from page_consolidation import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
@@ -252,14 +252,15 @@ class TestConsolidationSessionTb:
         page._btn_use_session_tb = btn
         page._btn_run = MagicMock()
 
-        sess = SimpleNamespace(tb_df=_sample_tb())
-        page._update_session_tb_button(sess)
+        # Mock _resolve_active_client_tb to return data
+        page._resolve_active_client_tb = MagicMock(return_value=(_sample_tb(), "TestClient", "session"))
+        page._update_session_tb_button(None)
 
         btn.pack.assert_called_once()
         btn.pack_forget.assert_not_called()
 
     def test_update_session_tb_button_hides_when_no_tb(self):
-        """Button should be hidden when session.tb_df is None."""
+        """Button should be hidden when _resolve_active_client_tb returns None."""
         from page_consolidation import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
@@ -269,29 +270,33 @@ class TestConsolidationSessionTb:
         btn = MagicMock()
         page._btn_use_session_tb = btn
 
-        sess = SimpleNamespace(tb_df=None)
-        page._update_session_tb_button(sess)
+        page._resolve_active_client_tb = MagicMock(return_value=None)
+        page._update_session_tb_button(None)
 
         btn.pack_forget.assert_called_once()
         btn.pack.assert_not_called()
 
     def test_update_session_tb_button_hides_when_already_imported(self):
-        """Button should be hidden when a session company already exists."""
+        """Button should be hidden when parent is already a session company."""
         from page_consolidation import ConsolidationPage
         from consolidation.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
-        page._project = ConsolidationProject(
+
+        proj = ConsolidationProject(
             client="Test", year="2025",
             companies=[CompanyTB(name="Foo", source_type="session")],
         )
+        # Set parent_company_id to the session company
+        proj.parent_company_id = proj.companies[0].company_id
+        page._project = proj
 
         btn = MagicMock()
         page._btn_use_session_tb = btn
 
-        sess = SimpleNamespace(tb_df=_sample_tb())
-        page._update_session_tb_button(sess)
+        page._resolve_active_client_tb = MagicMock(return_value=(_sample_tb(), "Test", "session"))
+        page._update_session_tb_button(None)
 
         btn.pack_forget.assert_called_once()
         btn.pack.assert_not_called()
@@ -330,11 +335,16 @@ class TestConsolidationSessionTb:
         page._compute_mapping_status = MagicMock()
         page._refresh_company_tree = MagicMock()
         page._update_status = MagicMock()
+        page._select_and_show_company = MagicMock()
 
         # Mock simpledialog to return a name
         monkeypatch.setattr(
             "page_consolidation.simpledialog.askstring",
             lambda *a, **kw: "Morselskap AS",
+        )
+        # Mock messagebox to avoid Tk requirement
+        monkeypatch.setattr(
+            "page_consolidation.messagebox", MagicMock(),
         )
 
         page._on_use_session_tb()
@@ -348,7 +358,7 @@ class TestConsolidationSessionTb:
 
         # Verify TB was stored
         assert c.company_id in page._company_tbs
-        assert page._company_tbs[c.company_id] is tb
+        pd.testing.assert_frame_equal(page._company_tbs[c.company_id], tb)
 
         # Verify persisted to disk
         loaded = storage.load_company_tb("TestKonsern", "2025", c.company_id)

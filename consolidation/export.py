@@ -19,7 +19,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from consolidation.elimination import journals_to_dataframe
-from consolidation.models import CompanyTB, EliminationJournal, RunResult
+from consolidation.models import CompanyTB, CurrencyDetail, EliminationJournal, RunResult
 
 logger = logging.getLogger(__name__)
 
@@ -50,13 +50,24 @@ def build_consolidation_workbook(
     *,
     client: str | None = None,
     year: str | None = None,
+    parent_company_id: str = "",
+    regnr_to_name: dict[int, str] | None = None,
+    hide_zero: bool = False,
 ) -> Workbook:
     """Bygg komplett konsoliderings-arbeidsbok."""
     wb = Workbook()
 
-    _build_konsernoppstilling(wb, result_df, client=client, year=year)
-    _build_elimineringer(wb, eliminations)
-    _build_company_sheets(wb, companies, mapped_tbs)
+    _build_konsernoppstilling(wb, result_df, client=client, year=year, hide_zero=hide_zero)
+    company_names = {c.company_id: c.name for c in companies}
+    _build_elimineringer(wb, eliminations, company_names=company_names)
+    # Sortér: parent først, resten alfabetisk
+    companies_sorted = sorted(
+        companies,
+        key=lambda c: (0 if c.company_id == parent_company_id else 1, c.name),
+    )
+    _build_company_sheets(wb, companies_sorted, mapped_tbs, regnr_to_name=regnr_to_name, hide_zero=hide_zero)
+    _build_valutakontroll(wb, run_result.currency_details)
+    _build_saldobalanse_alle(wb, run_result.account_details)
     _build_kontrollark(wb, run_result, companies, eliminations, client=client, year=year)
 
     return wb
@@ -72,11 +83,17 @@ def save_consolidation_workbook(
     run_result: RunResult,
     client: str | None = None,
     year: str | None = None,
+    parent_company_id: str = "",
+    regnr_to_name: dict[int, str] | None = None,
+    hide_zero: bool = False,
 ) -> str:
     """Bygg og lagre arbeidsbok. Returnerer filstien."""
     wb = build_consolidation_workbook(
         result_df, companies, eliminations, mapped_tbs, run_result,
         client=client, year=year,
+        parent_company_id=parent_company_id,
+        regnr_to_name=regnr_to_name,
+        hide_zero=hide_zero,
     )
     p = Path(path)
     if p.suffix.lower() != ".xlsx":
@@ -97,6 +114,7 @@ def _build_konsernoppstilling(
     *,
     client: str | None = None,
     year: str | None = None,
+    hide_zero: bool = False,
 ) -> None:
     ws = wb.active
     ws.title = "Konsernoppstilling"
@@ -141,6 +159,13 @@ def _build_konsernoppstilling(
     for _, row in result_df.iterrows():
         regnr = int(row.get("regnr", 0))
         is_sum = bool(row.get("sumpost", False))
+
+        # Filtrer null-linjer (samme logikk som GUI)
+        if hide_zero and not is_sum:
+            data_vals = [_safe_float(row.get(dc)) for dc in data_cols]
+            if all(abs(v) < 0.005 for v in data_vals):
+                continue
+
         values = [regnr, str(row.get("regnskapslinje", "") or "")]
         for dc in data_cols:
             values.append(_safe_float(row.get(dc)))
@@ -175,9 +200,13 @@ def _build_konsernoppstilling(
 # Ark 2: Elimineringer
 # ---------------------------------------------------------------------------
 
+_KIND_LABELS = {"manual": "Manuell", "from_suggestion": "Forslag", "template": "Template"}
+
+
 def _build_elimineringer(
     wb: Workbook,
     eliminations: list[EliminationJournal],
+    company_names: dict[str, str] | None = None,
 ) -> None:
     ws = wb.create_sheet("Elimineringer")
 
@@ -185,15 +214,18 @@ def _build_elimineringer(
         ws["A1"] = "Ingen elimineringer registrert."
         return
 
-    headers = ["Journal", "Regnr", "Selskap", "Beloep", "Beskrivelse"]
+    name_map = company_names or {}
+    headers = ["Journal", "Type", "Regnr", "Selskap", "Beloep", "Beskrivelse"]
     row = 1
 
     for journal in eliminations:
         # Journalnavn som header
         cell = ws.cell(row=row, column=1, value=journal.name)
         cell.font = Font(bold=True, size=12)
+        kind_label = _KIND_LABELS.get(journal.kind, journal.kind)
+        ws.cell(row=row, column=2, value=kind_label)
         balanced_text = "Balansert" if journal.is_balanced else f"UBALANSE ({journal.net:.2f})"
-        ws.cell(row=row, column=3, value=balanced_text)
+        ws.cell(row=row, column=4, value=balanced_text)
         row += 1
 
         # Kolonneheaders
@@ -207,17 +239,19 @@ def _build_elimineringer(
         # Linjer
         for line in journal.lines:
             ws.cell(row=row, column=1, value=journal.name).border = _BORDER
-            ws.cell(row=row, column=2, value=line.regnr).border = _BORDER
-            ws.cell(row=row, column=3, value=line.company_id).border = _BORDER
-            c = ws.cell(row=row, column=4, value=line.amount)
+            ws.cell(row=row, column=2, value=kind_label).border = _BORDER
+            ws.cell(row=row, column=3, value=line.regnr).border = _BORDER
+            company_display = name_map.get(line.company_id, line.company_id[:16])
+            ws.cell(row=row, column=4, value=company_display).border = _BORDER
+            c = ws.cell(row=row, column=5, value=line.amount)
             c.number_format = _AMOUNT_FMT
             c.border = _BORDER
-            ws.cell(row=row, column=5, value=line.description).border = _BORDER
+            ws.cell(row=row, column=6, value=line.description).border = _BORDER
             row += 1
 
         row += 1  # blank linje mellom journaler
 
-    for col, w in {"A": 20, "B": 10, "C": 20, "D": 16, "E": 30}.items():
+    for col, w in {"A": 20, "B": 12, "C": 10, "D": 20, "E": 16, "F": 30}.items():
         ws.column_dimensions[col].width = w
 
 
@@ -229,7 +263,19 @@ def _build_company_sheets(
     wb: Workbook,
     companies: list[CompanyTB],
     mapped_tbs: dict[str, pd.DataFrame],
+    *,
+    regnr_to_name: dict[int, str] | None = None,
+    hide_zero: bool = False,
 ) -> None:
+    _col_headers = {
+        "konto": "Konto", "kontonavn": "Kontonavn",
+        "regnr": "Regnr", "rl_navn": "Regnskapslinje",
+        "ib": "IB", "netto": "Bevegelse", "ub": "UB",
+    }
+    # Kanonisk kolonnerekkefølge: metadata, deretter IB | Netto | UB
+    _col_order = ["konto", "kontonavn", "regnr", "rl_navn", "ib", "netto", "ub"]
+    _amount_cols = {"ib", "netto", "ub"}
+
     for company in companies:
         tb = mapped_tbs.get(company.company_id)
         if tb is None or tb.empty:
@@ -238,27 +284,43 @@ def _build_company_sheets(
         sheet_name = f"TB - {company.name}"[:31]  # Excel 31-char limit
         ws = wb.create_sheet(sheet_name)
 
-        # Velg relevante kolonner
-        show_cols = []
-        for c in ["konto", "kontonavn", "regnr", "ib", "ub", "netto"]:
-            if c in tb.columns:
-                show_cols.append(c)
+        # Bygg regnskapslinje-navn kolonne dersom regnr finnes
+        has_regnr = "regnr" in tb.columns
+        show_cols = [c for c in _col_order if c in tb.columns or c == "rl_navn"]
+        if not has_regnr:
+            show_cols = [c for c in show_cols if c not in ("regnr", "rl_navn")]
 
         # Headers
         for col_idx, col in enumerate(show_cols, start=1):
-            cell = ws.cell(row=1, column=col_idx, value=col.capitalize())
+            cell = ws.cell(row=1, column=col_idx, value=_col_headers.get(col, col))
             cell.font = Font(bold=True)
             cell.fill = _HEADER_FILL
             cell.border = _BORDER
 
         # Data
-        for row_idx, (_, row) in enumerate(tb.iterrows(), start=2):
+        row_idx = 2
+        for _, row in tb.iterrows():
+            # Filter: skip zero-lines when hide_zero is active
+            if hide_zero:
+                data_vals = [float(row.get(c, 0) or 0) for c in _amount_cols if c in tb.columns]
+                if all(abs(v) < 0.005 for v in data_vals):
+                    continue
             for col_idx, col in enumerate(show_cols, start=1):
-                val = row.get(col)
+                if col == "rl_navn":
+                    # Slaa opp regnskapslinje-navn fra regnr
+                    regnr_raw = row.get("regnr")
+                    try:
+                        rn = int(regnr_raw) if pd.notna(regnr_raw) else None
+                    except (ValueError, TypeError):
+                        rn = None
+                    val = (regnr_to_name or {}).get(rn, "") if rn is not None else ""
+                else:
+                    val = row.get(col)
                 cell = ws.cell(row=row_idx, column=col_idx, value=val)
                 cell.border = _BORDER
-                if col in ("ib", "ub", "netto"):
+                if col in _amount_cols:
                     cell.number_format = _AMOUNT_FMT
+            row_idx += 1
 
         ws.freeze_panes = "A2"
 
@@ -266,10 +328,142 @@ def _build_company_sheets(
         for i, col in enumerate(show_cols, start=1):
             if col == "kontonavn":
                 ws.column_dimensions[_excel_col(i)].width = 35
-            elif col in ("ib", "ub", "netto"):
+            elif col == "rl_navn":
+                ws.column_dimensions[_excel_col(i)].width = 30
+            elif col in _amount_cols:
                 ws.column_dimensions[_excel_col(i)].width = 16
             else:
                 ws.column_dimensions[_excel_col(i)].width = 12
+
+
+# ---------------------------------------------------------------------------
+# Ark: Valutakontroll
+# ---------------------------------------------------------------------------
+
+def _build_valutakontroll(
+    wb: Workbook,
+    currency_details: list[CurrencyDetail],
+) -> None:
+    """Bygg kontrollark for valutaomregning: en rad per selskap x regnr."""
+    if not currency_details:
+        return
+
+    ws = wb.create_sheet("Valutakontroll")
+
+    headers = [
+        "Selskap", "Valuta", "Regnr", "Regnskapslinje", "Type",
+        "Beloep foer omregning", "Kurs brukt", "Kursregel",
+        "Beloep etter omregning",
+    ]
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = Font(bold=True)
+        cell.fill = _HEADER_FILL
+        cell.border = _BORDER
+
+    for row_idx, cd in enumerate(currency_details, start=2):
+        ws.cell(row=row_idx, column=1, value=cd.company_name).border = _BORDER
+        ws.cell(row=row_idx, column=2, value=cd.currency).border = _BORDER
+        ws.cell(row=row_idx, column=3, value=cd.regnr).border = _BORDER
+        ws.cell(row=row_idx, column=4, value=cd.regnskapslinje).border = _BORDER
+        ws.cell(row=row_idx, column=5, value=cd.line_type).border = _BORDER
+        c = ws.cell(row=row_idx, column=6, value=cd.amount_before)
+        c.number_format = _AMOUNT_FMT
+        c.border = _BORDER
+        c = ws.cell(row=row_idx, column=7, value=cd.rate)
+        c.number_format = "0.0000"
+        c.border = _BORDER
+        ws.cell(row=row_idx, column=8, value=cd.rate_rule).border = _BORDER
+        c = ws.cell(row=row_idx, column=9, value=cd.amount_after)
+        c.number_format = _AMOUNT_FMT
+        c.border = _BORDER
+
+    ws.freeze_panes = "A2"
+
+    col_widths = [22, 8, 8, 30, 10, 22, 12, 12, 22]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[_excel_col(i)].width = w
+
+
+# ---------------------------------------------------------------------------
+# Ark: Saldobalanse alle (flat per-konto per-selskap)
+# ---------------------------------------------------------------------------
+
+def _build_saldobalanse_alle(
+    wb: Workbook,
+    account_details: pd.DataFrame | None,
+) -> None:
+    """Bygg flatt kontrollark med en rad per konto per selskap.
+
+    Kolonner: Selskap, Konto, Kontonavn, Regnr, Regnskapslinje,
+              IB, Bevegelse, UB, Valuta, Kurs brukt, Kursregel,
+              Beloep foer omregning, Beloep etter omregning.
+
+    ``Beloep foer/etter omregning`` refererer til UB-kolonnen som
+    er det eneste feltet motoren bruker for aggregering.
+    """
+    if account_details is None or account_details.empty:
+        return
+
+    ws = wb.create_sheet("Saldobalanse alle")
+
+    headers = [
+        "Selskap", "Konto", "Kontonavn", "Regnr", "Regnskapslinje",
+        "IB", "Bevegelse", "UB",
+        "Valuta", "Kurs brukt", "Kursregel",
+        "Beloep foer omregning", "Beloep etter omregning",
+    ]
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = Font(bold=True)
+        cell.fill = _HEADER_FILL
+        cell.border = _BORDER
+
+    _amt_cols = {6, 7, 8, 12, 13}  # 1-indexed columns with amount format
+    _rate_col = 10
+
+    for row_idx, (_, row) in enumerate(account_details.iterrows(), start=2):
+        regnr_raw = row.get("regnr")
+        regnr_val = int(regnr_raw) if pd.notna(regnr_raw) else ""
+        vals = [
+            row.get("selskap", ""),
+            row.get("konto", ""),
+            row.get("kontonavn", ""),
+            regnr_val,
+            row.get("regnskapslinje", ""),
+            _safe_float(row.get("ib")),
+            _safe_float(row.get("netto")),
+            _safe_float(row.get("ub_original")),
+            row.get("valuta", ""),
+            row.get("kurs", 1.0),
+            row.get("kursregel", ""),
+            _safe_float(row.get("ub_original")),
+            _safe_float(row.get("ub")),
+        ]
+        for col_idx, val in enumerate(vals, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = _BORDER
+            if col_idx in _amt_cols:
+                cell.number_format = _AMOUNT_FMT
+            elif col_idx == _rate_col:
+                cell.number_format = "0.0000"
+
+    ws.freeze_panes = "A2"
+
+    col_widths = [22, 10, 30, 8, 28, 16, 16, 16, 8, 12, 12, 18, 18]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[_excel_col(i)].width = w
+
+
+def _safe_float(val) -> float:
+    """Konverter til float, returnerer 0.0 for None/NaN."""
+    if val is None:
+        return 0.0
+    try:
+        f = float(val)
+        return 0.0 if pd.isna(f) else f
+    except (ValueError, TypeError):
+        return 0.0
 
 
 # ---------------------------------------------------------------------------

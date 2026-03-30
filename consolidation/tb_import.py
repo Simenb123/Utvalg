@@ -55,10 +55,64 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     for c in ("ib", "ub", "netto"):
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
+    # Deriver manglende verdier — samme logikk som trial_balance_reader.
+    # Hvis bare netto finnes (IB=0, UB=0, Netto!=0): sett UB = IB + Netto.
+    has_ib = (df["ib"].abs() > 0.005).any()
+    has_ub = (df["ub"].abs() > 0.005).any()
+    has_netto = (df["netto"].abs() > 0.005).any()
+
+    if not has_ub and has_netto:
+        df["ub"] = df["ib"] + df["netto"]
+    elif not has_netto and has_ib and has_ub:
+        df["netto"] = df["ub"] - df["ib"]
+
     # Fjern rader uten kontonummer
     df = df[df["konto"].str.len() > 0].copy()
 
     return df[CANONICAL_COLS]
+
+
+def validate_tb(df: pd.DataFrame) -> list[str]:
+    """Validate a normalized TB DataFrame and return warnings.
+
+    This function is used by both the direct import path (SAF-T) and
+    the preview import path (Excel/CSV) to ensure consistent quality checks.
+    """
+    warnings: list[str] = []
+
+    # Check for IB values — important for consolidation quality
+    if "ib" in df.columns:
+        has_ib = (df["ib"].abs() > 0.005).any()
+        if not has_ib:
+            warnings.append(
+                "Ingen IB-verdier funnet — dette er kun netto-/bevegelsesdata, "
+                "ikke en fullstendig saldobalanse. UB settes lik Netto."
+            )
+
+    # Check for non-numeric account numbers
+    if "konto" in df.columns:
+        non_digit = df[~df["konto"].str.match(r"^\d+$")]
+        if len(non_digit) > 0:
+            warnings.append(
+                f"{len(non_digit)} konto(er) med ikke-numerisk kontonummer."
+            )
+
+    # Check for empty account names
+    if "kontonavn" in df.columns:
+        empty_names = (df["kontonavn"].str.strip() == "").sum()
+        if empty_names > 0:
+            warnings.append(f"{empty_names} konto(er) uten kontonavn.")
+
+    # Check for all-zero rows (possible junk data)
+    numeric_cols = [c for c in ("ib", "ub", "netto") if c in df.columns]
+    if numeric_cols:
+        all_zero = (df[numeric_cols].abs() < 0.005).all(axis=1).sum()
+        if all_zero > len(df) * 0.5 and len(df) > 5:
+            warnings.append(
+                f"{all_zero} av {len(df)} rader har kun nullverdier."
+            )
+
+    return warnings
 
 
 def import_company_tb(
@@ -86,18 +140,9 @@ def import_company_tb(
         df = read_trial_balance(path, sheet_name=sheet_name)
 
     df = _normalize_columns(df)
+    warnings.extend(validate_tb(df))
 
-    # Sjekk om IB finnes (ikke bare nuller)
     has_ib = (df["ib"].abs() > 0.005).any()
-    if not has_ib:
-        warnings.append("Ingen IB-verdier funnet — kun UB/netto er tilgjengelig.")
-
-    # Sjekk umappede / rare kontoer
-    non_digit = df[~df["konto"].str.match(r"^\d+$")]
-    if len(non_digit) > 0:
-        warnings.append(
-            f"{len(non_digit)} konto(er) med ikke-numerisk kontonummer."
-        )
 
     company = CompanyTB(
         name=company_name.strip(),

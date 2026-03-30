@@ -75,7 +75,7 @@ class TestProjectSaveLoad:
         proj = ConsolidationProject(client="JsonTest", year="2025")
         path = storage.save_project(proj)
         raw = json.loads(path.read_text(encoding="utf-8"))
-        assert raw["schema_version"] == 1
+        assert raw["schema_version"] == 2
         assert raw["client"] == "JsonTest"
 
     def test_delete_project(self, _mock_years_dir):

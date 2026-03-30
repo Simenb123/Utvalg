@@ -9,9 +9,11 @@ from consolidation.models import (  # noqa: F401
     ConsolidationProject,
     EliminationJournal,
     EliminationLine,
+    EliminationSuggestion,
     MappingConfig,
     RunResult,
     SCHEMA_VERSION,
+    SUGGESTION_KINDS,
     project_from_dict,
     project_to_dict,
 )
@@ -50,4 +52,11 @@ from consolidation.engine import (  # noqa: F401
 from consolidation.export import (  # noqa: F401
     build_consolidation_workbook,
     save_consolidation_workbook,
+)
+
+from consolidation.suggestions import (  # noqa: F401
+    create_journal_from_suggestion,
+    generate_suggestions,
+    ignore_suggestion,
+    unignore_suggestion,
 )

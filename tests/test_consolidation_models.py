@@ -57,7 +57,7 @@ class TestProjectRoundTrip:
     def test_serialize_deserialize(self):
         proj = _sample_project()
         d = project_to_dict(proj)
-        assert d["schema_version"] == 1
+        assert d["schema_version"] == 2
         assert d["client"] == "Test AS"
         assert len(d["companies"]) == 2
         assert len(d["eliminations"]) == 1
