@@ -63,6 +63,12 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "openingbalance",
         "opening balance",
         "startbalance",
+        "saldo i fjor",
+        "saldoifjor",
+        "saldo forrige år",
+        "forrige år",
+        "prior year",
+        "prioryear",
     ],
     "ub": [
         "ub",
@@ -73,6 +79,13 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "closing balance",
         "endbalance",
         "sluttbalanse",
+        "saldo i år",
+        "saldoiår",
+        "saldo i aar",
+        "saldoiaar",
+        "saldo dette år",
+        "this year",
+        "current year",
     ],
     "netto": [
         "netto",
@@ -82,6 +95,12 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "periode",
         "change",
         "delta",
+        "årets bevegelse",
+        "aarets bevegelse",
+        "årets endring",
+        "aarets endring",
+        "periodens bevegelse",
+        "bevegelse",
     ],
     "debet": ["debet", "debit"],
     "kredit": ["kredit", "credit"],
@@ -242,7 +261,13 @@ def _standardize(df: "pd.DataFrame", cols: TrialBalanceColumns) -> "pd.DataFrame
         # Kredit skal være negativt fortegn i GUI
         netto = deb - kred
 
-    # Deriver manglende
+    # Deriver manglende — sørg for at alle tre (ib, ub, netto) er tilgjengelig.
+    # Spesialtilfelle: kun netto er kjent (f.eks. fra debet/kredit uten IB/UB).
+    # Da antar vi IB=0 og UB=netto, som er en TB-snapshot av periodens bevegelse.
+    if ib is None and ub is None and netto is not None:
+        ib = pd.Series([0.0] * len(df), dtype="float64")
+        ub = netto.copy()
+
     if netto is None and ib is not None and ub is not None:
         netto = ub.fillna(0.0) - ib.fillna(0.0)
     if ub is None and ib is not None and netto is not None:
@@ -371,3 +396,107 @@ def _score_aliases(norm: str, aliases: Sequence[str]) -> int:
         elif an in norm:
             best = max(best, 10)
     return best
+
+
+# ---------------------------------------------------------------------------
+# Year-number column detection (e.g. "2025" → UB, "2024" → IB)
+# ---------------------------------------------------------------------------
+
+def _detect_year_columns(
+    columns: Iterable[str],
+) -> Dict[str, str]:
+    """Detect columns that look like year numbers (e.g. "2025", "2024").
+
+    Returns a mapping of {original_column_name: canonical_key} where
+    canonical_key is "ub" (most recent year) or "ib" (previous year).
+    Only returns results if exactly two year-like columns are found.
+    """
+    year_cols: List[tuple] = []
+    for c in columns:
+        s = str(c).strip()
+        if re.fullmatch(r"\d{4}", s):
+            year_cols.append((int(s), c))
+
+    if len(year_cols) != 2:
+        return {}
+
+    year_cols.sort(key=lambda t: t[0])
+    # Older year → IB, newer year → UB
+    return {year_cols[0][1]: "ib", year_cols[1][1]: "ub"}
+
+
+# ---------------------------------------------------------------------------
+# Raw reading (for preview dialogs — no normalization)
+# ---------------------------------------------------------------------------
+
+def read_raw_trial_balance(
+    path: str | Path,
+    *,
+    sheet_name: Optional[str] = None,
+    max_rows: int = 50,
+) -> "pd.DataFrame":
+    """Read a TB file without normalizing — returns the raw DataFrame.
+
+    Useful for preview dialogs where the user needs to see and correct
+    column mappings before committing to a full import.
+    """
+    import pandas as pd
+
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(str(p))
+
+    if p.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
+        sn = sheet_name or _guess_sheet_name(p)
+        df = pd.read_excel(p, sheet_name=sn, nrows=max_rows)
+    else:
+        df = pd.read_csv(p, nrows=max_rows, sep=None, engine="python")
+
+    return _clean_frame(df)
+
+
+def infer_columns_with_year_detection(
+    df: "pd.DataFrame",
+) -> tuple["TrialBalanceColumns", Dict[str, str]]:
+    """Like infer_trial_balance_columns but also tries year-column detection.
+
+    Returns (columns, year_map) where year_map is the result of
+    _detect_year_columns (may be empty).
+
+    If standard alias matching fails to find IB/UB but year columns exist,
+    the year columns are used as fallback.
+    """
+    year_map = _detect_year_columns(df.columns)
+
+    # First try standard inference
+    try:
+        cols = infer_trial_balance_columns(df)
+        return cols, year_map
+    except ValueError:
+        pass
+
+    # If standard failed, try again with year columns injected
+    if not year_map:
+        raise ValueError(
+            "Fant ikke nødvendige kolonner og ingen årstall-kolonner detektert."
+        )
+
+    # Build a temporary DataFrame with renamed year columns for inference
+    rename = {}
+    for orig, canonical in year_map.items():
+        rename[orig] = canonical
+    df2 = df.rename(columns=rename)
+
+    cols = infer_trial_balance_columns(df2)
+
+    # Map back to original column names
+    reverse = {v: k for k, v in rename.items()}
+    return TrialBalanceColumns(
+        konto=cols.konto,
+        kontonavn=cols.kontonavn,
+        ib=reverse.get(cols.ib, cols.ib) if cols.ib else None,
+        ub=reverse.get(cols.ub, cols.ub) if cols.ub else None,
+        netto=reverse.get(cols.netto, cols.netto) if cols.netto else None,
+        debet=cols.debet,
+        kredit=cols.kredit,
+    ), year_map
