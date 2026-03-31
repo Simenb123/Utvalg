@@ -40,7 +40,7 @@ def journals_to_dataframe(
         for line in j.lines:
             rows.append({
                 "journal_id": j.journal_id,
-                "journal_name": j.name,
+                "journal_name": j.display_label,
                 "regnr": line.regnr,
                 "company_id": line.company_id,
                 "amount": line.amount,

@@ -353,6 +353,7 @@ def create_journal_from_suggestion(
         name = f"Elim: {suggestion.line_name_a} / {suggestion.line_name_b}"
 
     journal = EliminationJournal(
+        voucher_no=project.next_elimination_voucher_no(),
         name=name,
         kind="template" if suggestion.kind == "investment_equity" else "from_suggestion",
         source_suggestion_key=suggestion.suggestion_key,
@@ -367,6 +368,8 @@ def create_journal_from_suggestion(
             for line in suggestion.journal_draft_lines
         ],
     )
+    if not journal.name:
+        journal.name = journal.display_label
 
     # Oppdater project state
     if suggestion.suggestion_key not in project.applied_suggestion_keys:

@@ -119,7 +119,10 @@ def load_project(client: str, year: str) -> Optional[ConsolidationProject]:
     if not d:
         return None
     try:
-        return project_from_dict(d)
+        project = project_from_dict(d)
+        if project.ensure_elimination_voucher_numbers():
+            save_project(project)
+        return project
     except Exception:
         logger.exception("Failed to load consolidation project from %s", path)
         return None

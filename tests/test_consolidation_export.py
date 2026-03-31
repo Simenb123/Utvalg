@@ -155,6 +155,27 @@ class TestElimineringer:
         ws = wb["Elimineringer"]
         assert ws.cell(row=1, column=1).value == "Internhandel"
 
+    def test_voucher_label_present_when_available(self):
+        wb = build_consolidation_workbook(
+            _sample_result_df(),
+            _sample_companies(),
+            [
+                EliminationJournal(
+                    journal_id="e1",
+                    voucher_no=1,
+                    name="Internhandel",
+                    lines=[
+                        EliminationLine(regnr=11, company_id="a", amount=50.0, description="Salg"),
+                        EliminationLine(regnr=11, company_id="b", amount=-50.0, description="Kjop"),
+                    ],
+                ),
+            ],
+            _sample_mapped_tbs(),
+            _sample_run_result(),
+        )
+        ws = wb["Elimineringer"]
+        assert ws.cell(row=1, column=1).value == "Bilag 1"
+
     def test_no_eliminations(self):
         wb = build_consolidation_workbook(
             _sample_result_df(), _sample_companies(), [],

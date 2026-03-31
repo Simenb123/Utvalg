@@ -98,6 +98,10 @@ class TestProjectRoundTrip:
 
 
 class TestEliminationJournal:
+    def test_display_label_prefers_voucher_no(self):
+        j = EliminationJournal(voucher_no=7, name="Internhandel")
+        assert j.display_label == "Bilag 7"
+
     def test_balanced_journal(self):
         j = EliminationJournal(
             name="Test",
@@ -146,3 +150,21 @@ class TestProjectHelpers:
         time.sleep(0.01)
         proj.touch()
         assert proj.updated_at > old_ts
+
+    def test_ensure_elimination_voucher_numbers_backfills(self):
+        proj = _sample_project()
+        proj.eliminations.append(
+            EliminationJournal(journal_id="e2", name="", voucher_no=0),
+        )
+
+        changed = proj.ensure_elimination_voucher_numbers()
+
+        assert changed is True
+        assert [j.voucher_no for j in proj.eliminations] == [1, 2]
+        assert proj.eliminations[1].name == "Bilag 2"
+
+    def test_next_elimination_voucher_no_after_backfill(self):
+        proj = _sample_project()
+        proj.ensure_elimination_voucher_numbers()
+
+        assert proj.next_elimination_voucher_no() == 2

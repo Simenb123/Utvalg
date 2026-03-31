@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
 
@@ -12,6 +14,8 @@ from consolidation.models import (
     EliminationLine,
     MappingConfig,
 )
+from types import SimpleNamespace
+
 from consolidation.engine import run_consolidation
 from consolidation.mapping import ConfigNotLoadedError
 
@@ -540,6 +544,31 @@ class TestExportHideZero:
 
         assert rows_filt < rows_all
 
+    def test_main_sheet_places_parent_company_first(self, _mock_config):
+        """Konsernoppstilling should always place parent company first among company columns."""
+        from consolidation.export import build_consolidation_workbook
+
+        proj = _sample_project(with_elimination=False)
+        proj.parent_company_id = "a"
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, run_result = run_consolidation(proj, tbs)
+
+        wb = build_consolidation_workbook(
+            result_df,
+            proj.companies,
+            [],
+            {},
+            run_result,
+            parent_company_id=proj.parent_company_id,
+        )
+        ws = wb["Konsernoppstilling"]
+
+        headers = [ws.cell(row=4, column=col).value for col in range(1, ws.max_column + 1)]
+        parent_idx = headers.index("Morselskap AS")
+        child_idx = headers.index("Datter AS")
+
+        assert parent_idx < child_idx
+
 
 # ---------------------------------------------------------------------------
 # P6: Norwegian amount formatting
@@ -571,7 +600,7 @@ class TestFmtNo:
 # ---------------------------------------------------------------------------
 
 class TestParentMappingFromAnalyse:
-    """Verify _get_effective_company_overrides merges Analyse + local correctly."""
+    """Verify parent uses Analyse as source of truth while daughters use consolidation overrides."""
 
     def _make_page(self, *, analyse_overrides=None, local_overrides=None):
         from unittest.mock import MagicMock, patch
@@ -603,8 +632,8 @@ class TestParentMappingFromAnalyse:
 
         assert result == {"1000": 10, "2000": 11}
 
-    def test_local_override_wins_over_analyse(self):
-        """Local consolidation override should take precedence over Analyse."""
+    def test_parent_ignores_local_consolidation_override(self):
+        """Parent should ignore local consolidation overrides and use Analyse only."""
         from unittest.mock import patch
 
         page = self._make_page(
@@ -615,8 +644,7 @@ class TestParentMappingFromAnalyse:
         with patch("regnskap_client_overrides.load_account_overrides", return_value=self._analyse_overrides):
             result = page._get_effective_company_overrides("parent")
 
-        # 1000 overridden locally to 99, 2000 inherited from Analyse
-        assert result == {"1000": 99, "2000": 11}
+        assert result == {"1000": 10, "2000": 11}
 
     def test_daughter_does_not_inherit_analyse(self):
         """Daughter companies should NOT get Analyse overrides."""
@@ -1270,3 +1298,1515 @@ class TestEliminationRerunAlwaysTriggers:
 
         # Elimination moved 25 into regnr 10, so removing it changes the value
         assert kons_10_with == pytest.approx(kons_10_without + 25.0)
+
+
+# ---------------------------------------------------------------------------
+# Per selskap view — engine produces company columns
+# ---------------------------------------------------------------------------
+
+class TestPerSelskapView:
+    """Verify engine output has individual company columns usable for Per selskap mode."""
+
+    def test_get_per_company_columns_order(self, _mock_config):
+        """_get_per_company_columns should return Mor first, then daughters, then elim+kons."""
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        proj = _sample_project(with_elimination=False)
+        proj.parent_company_id = "a"
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, _ = run_consolidation(proj, tbs)
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._consolidated_result_df = result_df
+
+        cols = page._get_per_company_columns()
+        assert cols[0] == "Morselskap AS"
+        assert cols[1] == "Datter AS"
+        assert cols[-2] == "eliminering"
+        assert cols[-1] == "konsolidert"
+
+    def test_result_has_company_name_columns(self, _mock_config):
+        """Result df should contain a column per company name."""
+        proj = _sample_project(with_elimination=False)
+        proj.parent_company_id = "a"
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+
+        result_df, _ = run_consolidation(proj, tbs)
+
+        assert "Morselskap AS" in result_df.columns
+        assert "Datter AS" in result_df.columns
+
+    def test_per_company_columns_match_mor_doetre(self, _mock_config):
+        """Sum of company columns should equal sum_foer_elim for leaf lines."""
+        proj = _sample_project(with_elimination=False)
+        proj.parent_company_id = "a"
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+
+        result_df, _ = run_consolidation(proj, tbs)
+
+        leaf = result_df[~result_df["sumpost"]]
+        for _, row in leaf.iterrows():
+            company_sum = row["Morselskap AS"] + row["Datter AS"]
+            assert company_sum == pytest.approx(row["sum_foer_elim"])
+
+    def test_mor_column_equals_parent_company(self, _mock_config):
+        """Mor column should equal the parent company column."""
+        proj = _sample_project(with_elimination=False)
+        proj.parent_company_id = "a"
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+
+        result_df, _ = run_consolidation(proj, tbs)
+
+        leaf = result_df[~result_df["sumpost"]]
+        for _, row in leaf.iterrows():
+            assert row["Mor"] == pytest.approx(row["Morselskap AS"])
+
+
+# ---------------------------------------------------------------------------
+# Grunnlag drilldown — account_details filtering
+# ---------------------------------------------------------------------------
+
+class TestGrunnlagDrilldown:
+    """Verify account_details can be filtered by regnr for drilldown view."""
+
+    def test_account_details_has_required_columns(self, _mock_config):
+        """account_details should contain all columns needed for Grunnlag view."""
+        proj = _sample_project(with_elimination=False)
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        _, run_result = run_consolidation(proj, tbs)
+
+        ad = run_result.account_details
+        assert ad is not None
+        for col in ("selskap", "konto", "kontonavn", "regnr", "regnskapslinje",
+                     "ib", "ub_original", "ub", "valuta", "kurs"):
+            assert col in ad.columns, f"Missing column: {col}"
+
+    def test_filter_by_regnr_returns_correct_accounts(self, _mock_config):
+        """Filtering account_details by regnr should return only matching accounts."""
+        proj = _sample_project(with_elimination=False)
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        _, run_result = run_consolidation(proj, tbs)
+
+        ad = run_result.account_details
+        # regnr 10 maps to kontoer 1000-1999
+        regnr10 = ad[ad["regnr"].astype(float) == 10]
+        assert len(regnr10) > 0
+        for _, row in regnr10.iterrows():
+            assert 1000 <= int(row["konto"]) <= 1999
+
+    def test_filter_by_regnr_has_both_companies(self, _mock_config):
+        """Both companies should appear in drilldown for a shared regnr."""
+        proj = _sample_project(with_elimination=False)
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        _, run_result = run_consolidation(proj, tbs)
+
+        ad = run_result.account_details
+        regnr10 = ad[ad["regnr"].astype(float) == 10]
+        companies = set(regnr10["selskap"].unique())
+        assert "Morselskap AS" in companies
+        assert "Datter AS" in companies
+
+    def test_currency_columns_in_account_details(self, _mock_config):
+        """Currency details (kurs, ub_original, ub) should be present and consistent."""
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            parent_company_id="a",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+                CompanyTB(
+                    company_id="b", name="DKK", row_count=2,
+                    currency_code="DKK", closing_rate=1.5, average_rate=1.4,
+                ),
+            ],
+        )
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        _, run_result = run_consolidation(proj, tbs)
+
+        ad = run_result.account_details
+        dkk_rows = ad[ad["valuta"] == "DKK"]
+        assert len(dkk_rows) > 0
+
+        for _, row in dkk_rows.iterrows():
+            if pd.notna(row["regnr"]):
+                kurs = float(row["kurs"])
+                ub_orig = float(row["ub_original"])
+                ub_conv = float(row["ub"])
+                assert ub_conv == pytest.approx(ub_orig * kurs)
+
+    def test_valutaeffekt_is_zero_for_nok(self, _mock_config):
+        """NOK accounts should have zero valutaeffekt (kurs=1)."""
+        proj = _sample_project(with_elimination=False)
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        _, run_result = run_consolidation(proj, tbs)
+
+        ad = run_result.account_details
+        for _, row in ad.iterrows():
+            if pd.notna(row["regnr"]):
+                ub_orig = float(row["ub_original"])
+                ub_conv = float(row["ub"])
+                assert ub_conv == pytest.approx(ub_orig)  # kurs = 1
+
+
+# ---------------------------------------------------------------------------
+# FX mode — consolidated view before/after/effect
+# ---------------------------------------------------------------------------
+
+class TestFxColumnsBuildCompanyResult:
+    """Verify _build_company_result produces correct FX columns."""
+
+    def _make_fx_page(self, _mock_config):
+        """Build a page-like object with FX companies and a run result."""
+        from consolidation.mapping import map_company_tb, load_shared_config
+        from page_consolidation import ConsolidationPage
+
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            parent_company_id="a",
+            reporting_currency="NOK",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+                CompanyTB(
+                    company_id="b", name="DKK", row_count=2,
+                    currency_code="DKK", closing_rate=1.5, average_rate=1.4,
+                ),
+            ],
+        )
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, run_result = run_consolidation(proj, tbs)
+
+        intervals, regnskapslinjer = load_shared_config()
+        mapped_tbs = {}
+        for c in proj.companies:
+            tb = tbs[c.company_id]
+            mapped_df, _ = map_company_tb(
+                tb, None, intervals=intervals, regnskapslinjer=regnskapslinjer,
+            )
+            mapped_tbs[c.company_id] = mapped_df
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._consolidated_result_df = result_df
+        page._last_run_result = run_result
+        page._regnskapslinjer = _regnskapslinjer_df()
+        page._regnr_to_name = {10: "Eiendeler", 11: "Inntekter", 20: "SUM"}
+        page._mapped_tbs = mapped_tbs
+        page._company_result_df = None
+
+        return page, result_df, run_result
+
+    def test_dkk_company_ub_has_converted_values(self, _mock_config):
+        """UB column should show after-conversion amounts for DKK company."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        page._build_company_result("b")
+        df = page._company_result_df
+        assert df is not None
+
+        leaf = df[~df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        # DKK company b: regnr 10 has ub=50, average_rate=1.4 → 70
+        assert r10["UB"] == pytest.approx(70.0)
+        r11 = leaf[leaf["regnr"] == 11].iloc[0]
+        # regnr 11: ub=-100, average_rate=1.4 → -140
+        assert r11["UB"] == pytest.approx(-140.0)
+
+    def test_dkk_company_foer_has_original_values(self, _mock_config):
+        """Før column should show pre-conversion amounts."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        page._build_company_result("b")
+        df = page._company_result_df
+
+        leaf = df[~df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        assert r10["Før"] == pytest.approx(50.0)
+        r11 = leaf[leaf["regnr"] == 11].iloc[0]
+        assert r11["Før"] == pytest.approx(-100.0)
+
+    def test_dkk_company_kurs_values(self, _mock_config):
+        """Kurs column should show rate per regnr line."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        page._build_company_result("b")
+        df = page._company_result_df
+
+        leaf = df[~df["sumpost"]]
+        # Both regnr 10, 11 are < 500 → average_rate = 1.4
+        for regnr in [10, 11]:
+            row = leaf[leaf["regnr"] == regnr].iloc[0]
+            assert row["Kurs"] == pytest.approx(1.4)
+
+        # Sum lines should have NaN for Kurs
+        sum_rows = df[df["sumpost"]]
+        for _, row in sum_rows.iterrows():
+            assert pd.isna(row["Kurs"])
+
+    def test_dkk_company_valutaeffekt(self, _mock_config):
+        """Valutaeffekt = UB - Før for leaf lines."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        page._build_company_result("b")
+        df = page._company_result_df
+
+        leaf = df[~df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        # 70 - 50 = 20
+        assert r10["Valutaeffekt"] == pytest.approx(20.0)
+        r11 = leaf[leaf["regnr"] == 11].iloc[0]
+        # -140 - (-100) = -40
+        assert r11["Valutaeffekt"] == pytest.approx(-40.0)
+
+    def test_nok_company_no_fx_effect(self, _mock_config):
+        """NOK company should have UB == Før, Kurs == 1, Valutaeffekt == 0."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        page._build_company_result("a")
+        df = page._company_result_df
+
+        leaf = df[~df["sumpost"]]
+        for regnr in [10, 11]:
+            row = leaf[leaf["regnr"] == regnr].iloc[0]
+            assert row["UB"] == pytest.approx(row["Før"])
+            assert row["Kurs"] == pytest.approx(1.0)
+            assert abs(row["Valutaeffekt"]) < 0.01
+
+
+class TestFxColumnsConsolidated:
+    """Verify _ensure_consolidated_fx_cols produces correct Mor/Doetre FX cols."""
+
+    def _make_fx_page(self, _mock_config):
+        """Build a page-like object with FX companies and a run result."""
+        from page_consolidation import ConsolidationPage
+
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            parent_company_id="a",
+            reporting_currency="NOK",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+                CompanyTB(
+                    company_id="b", name="DKK", row_count=2,
+                    currency_code="DKK", closing_rate=1.5, average_rate=1.4,
+                ),
+            ],
+        )
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, run_result = run_consolidation(proj, tbs)
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._consolidated_result_df = result_df
+        page._last_run_result = run_result
+        page._regnskapslinjer = _regnskapslinjer_df()
+        page._regnr_to_name = {10: "Eiendeler", 11: "Inntekter", 20: "SUM"}
+
+        return page, result_df, run_result
+
+    def test_doetre_foer_shows_original_amounts(self, _mock_config):
+        """Doetre_foer should show pre-conversion amounts for child companies."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        fx_df = page._ensure_consolidated_fx_cols(show_before=True, show_effect=False)
+
+        leaf = fx_df[~fx_df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        # DKK company b (child): regnr 10 original ub=50
+        assert r10["Doetre_foer"] == pytest.approx(50.0)
+        # Doetre (after) should still be 70
+        assert r10["Doetre"] == pytest.approx(70.0)
+
+    def test_mor_foer_shows_original_amounts(self, _mock_config):
+        """Mor_foer should equal Mor for NOK parent (no conversion)."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        fx_df = page._ensure_consolidated_fx_cols(show_before=True, show_effect=False)
+
+        leaf = fx_df[~fx_df["sumpost"]]
+        for regnr in [10, 11]:
+            row = leaf[leaf["regnr"] == regnr].iloc[0]
+            assert row["Mor_foer"] == pytest.approx(row["Mor"])
+
+    def test_effect_cols(self, _mock_config):
+        """Mor_effekt and Doetre_effekt should show etter - foer."""
+        page, _, _ = self._make_fx_page(_mock_config)
+        fx_df = page._ensure_consolidated_fx_cols(show_before=True, show_effect=True)
+
+        leaf = fx_df[~fx_df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        # Mor (NOK): no effect
+        assert abs(r10["Mor_effekt"]) < 0.01
+        # Doetre (DKK): 70 - 50 = 20
+        assert r10["Doetre_effekt"] == pytest.approx(20.0)
+
+    def test_nok_only_no_effect(self, _mock_config):
+        """For NOK-only project, all FX effect columns should be zero."""
+        from page_consolidation import ConsolidationPage
+
+        proj = _sample_project(with_elimination=False)
+        proj.parent_company_id = "a"
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, run_result = run_consolidation(proj, tbs)
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._consolidated_result_df = result_df
+        page._last_run_result = run_result
+        page._regnskapslinjer = _regnskapslinjer_df()
+
+        fx_df = page._ensure_consolidated_fx_cols(show_before=True, show_effect=True)
+        leaf = fx_df[~fx_df["sumpost"]]
+        for regnr in [10, 11]:
+            row = leaf[leaf["regnr"] == regnr].iloc[0]
+            assert abs(row["Mor_effekt"]) < 0.01
+            assert abs(row["Doetre_effekt"]) < 0.01
+
+
+class TestShowResultRebuildsCompanyResult:
+    """Verify _show_result rebuilds _company_result_df for selected company."""
+
+    def test_show_result_refreshes_company_result(self, _mock_config):
+        """After consolidation, _company_result_df should use fresh run_result."""
+        from unittest.mock import MagicMock, patch
+        from consolidation.mapping import map_company_tb, load_shared_config
+        from page_consolidation import ConsolidationPage
+
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            parent_company_id="a",
+            reporting_currency="NOK",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+                CompanyTB(
+                    company_id="b", name="DKK", row_count=2,
+                    currency_code="DKK", closing_rate=1.5, average_rate=1.4,
+                ),
+            ],
+        )
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+
+        intervals, regnskapslinjer = load_shared_config()
+        mapped_tbs = {}
+        for c in proj.companies:
+            tb = tbs[c.company_id]
+            mapped_df, _ = map_company_tb(
+                tb, None, intervals=intervals, regnskapslinjer=regnskapslinjer,
+            )
+            mapped_tbs[c.company_id] = mapped_df
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._consolidated_result_df = None
+        page._last_run_result = None
+        page._regnskapslinjer = _regnskapslinjer_df()
+        page._regnr_to_name = {10: "Eiendeler", 11: "Inntekter", 20: "SUM"}
+        page._mapped_tbs = mapped_tbs
+        page._company_result_df = None
+        page._current_detail_cid = "b"
+        page._preview_result_df = None
+        page._result_mode_var = MagicMock()
+        page._preview_label_var = MagicMock()
+        page._right_nb = MagicMock()
+
+        # Build company result BEFORE consolidation → no account_details → fallback
+        page._build_company_result("b")
+        df_before_run = page._company_result_df
+        assert df_before_run is not None
+        leaf = df_before_run[~df_before_run["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        # Without run_result, UB == Før (fallback)
+        assert r10["UB"] == pytest.approx(r10["Før"])
+
+        # Now run consolidation and call _show_result
+        result_df, run_result = run_consolidation(proj, tbs)
+        page._last_run_result = run_result
+
+        # Mock _refresh_result_view to avoid GUI calls
+        page._refresh_result_view = MagicMock()
+        page._show_result(result_df)
+
+        # _company_result_df should now have fresh data with actual conversion
+        df_after_run = page._company_result_df
+        assert df_after_run is not None
+        leaf2 = df_after_run[~df_after_run["sumpost"]]
+        r10_2 = leaf2[leaf2["regnr"] == 10].iloc[0]
+        # Now UB should be converted: 50 * 1.4 = 70, Før = 50
+        assert r10_2["UB"] == pytest.approx(70.0)
+        assert r10_2["Før"] == pytest.approx(50.0)
+        assert r10_2["Kurs"] == pytest.approx(1.4)
+
+
+class TestInvalidateRunCache:
+    """Verify _invalidate_run_cache clears all run state."""
+
+    def test_invalidate_clears_all_cache(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._result_df = pd.DataFrame()
+        page._consolidated_result_df = pd.DataFrame()
+        page._company_result_df = pd.DataFrame()
+        page._preview_result_df = pd.DataFrame()
+        page._last_run_result = "something"
+
+        page._invalidate_run_cache()
+
+        assert page._result_df is None
+        assert page._consolidated_result_df is None
+        assert page._company_result_df is None
+        assert page._preview_result_df is None
+        assert page._last_run_result is None
+
+    def test_rerun_invalidates_and_runs(self, _mock_config):
+        """_rerun_consolidation should invalidate cache and call _on_run."""
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._result_df = pd.DataFrame()
+        page._consolidated_result_df = pd.DataFrame()
+        page._company_result_df = pd.DataFrame()
+        page._preview_result_df = pd.DataFrame()
+        page._last_run_result = "something"
+        page._project = _sample_project(with_elimination=False)
+        page._company_tbs = {"a": _company_a_tb()}
+        page._on_run = MagicMock()
+
+        page._rerun_consolidation()
+
+        # Cache should be cleared before _on_run is called
+        assert page._consolidated_result_df is None
+        page._on_run.assert_called_once()
+
+
+class TestEliminationRerunOnCreateDelete:
+    """Verify elimination create/delete forces actual rerun."""
+
+    def test_create_elim_invalidates_and_reruns(self, _mock_config):
+        """_on_create_simple_elim should call _rerun_consolidation (not just _ensure)."""
+        from unittest.mock import MagicMock, patch
+        from page_consolidation import ConsolidationPage
+
+        proj = _sample_project(with_elimination=False)
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, run_result = run_consolidation(proj, tbs)
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._result_df = result_df
+        page._consolidated_result_df = result_df
+        page._company_result_df = None
+        page._preview_result_df = None
+        page._last_run_result = run_result
+        page._company_tbs = tbs
+        page._regnr_to_name = {10: "Eiendeler", 11: "Inntekter", 20: "SUM"}
+        page._draft_lines = [
+            {"regnr": 10, "name": "Eiendeler", "amount": 50.0, "desc": "D"},
+            {"regnr": 11, "name": "Inntekter", "amount": -50.0, "desc": "K"},
+        ]
+        page._draft_edit_idx = None
+        page._draft_source_journal_id = None
+        page._draft_voucher_no = 1
+        page._refresh_draft_tree = MagicMock()
+        page._refresh_simple_elim_tree = MagicMock()
+        page._refresh_journal_tree = MagicMock()
+        page._update_status = MagicMock()
+        page._clear_preview = MagicMock()
+        # Mock _on_run to just set result back
+        page._on_run = MagicMock()
+
+        with patch("page_consolidation.storage") as mock_storage:
+            page._on_create_simple_elim()
+
+        # Should have created the journal
+        assert len(proj.eliminations) == 1
+        assert proj.eliminations[0].voucher_no == 1
+        assert proj.eliminations[0].name == "Bilag 1"
+
+        # Cache should have been invalidated before _on_run
+        assert page._consolidated_result_df is None
+        assert page._last_run_result is None
+        page._on_run.assert_called_once()
+
+
+class TestRunRefreshesMappingState:
+    """Verify _on_run refreshes external Analyse-driven mapping state first."""
+
+    def test_on_run_recomputes_mapping_status_before_preflight(self, _mock_config):
+        from unittest.mock import MagicMock, patch
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        proj = ConsolidationProject(
+            client="Test",
+            year="2025",
+            parent_company_id="mor",
+            companies=[CompanyTB(company_id="mor", name="Mor", row_count=1)],
+        )
+        tb = pd.DataFrame(
+            {
+                "konto": ["1000"],
+                "kontonavn": ["Bank"],
+                "ib": [0.0],
+                "ub": [100.0],
+                "netto": [100.0],
+            }
+        )
+
+        page._project = proj
+        page._company_tbs = {"mor": tb}
+        page._compute_mapping_status = MagicMock()
+        page._prepare_tbs_for_run = MagicMock(return_value={"mor": tb})
+        page._get_effective_company_overrides = MagicMock(return_value={})
+        page._build_unmapped_warnings = MagicMock(return_value=[])
+        page._show_result = MagicMock()
+        page._update_status = MagicMock()
+
+        with patch("page_consolidation.messagebox") as mock_mb:
+            mock_mb.askyesno.return_value = True
+            with patch(
+                "consolidation_readiness.build_readiness_report",
+                return_value=SimpleNamespace(issues=[]),
+            ):
+                with patch("consolidation.engine.run_consolidation") as mock_run:
+                    mock_run.return_value = (
+                        pd.DataFrame({"regnr": [10], "konsolidert": [100.0]}),
+                        SimpleNamespace(warnings=[], input_digest=""),
+                    )
+                    with patch("page_consolidation.storage") as mock_storage:
+                        page._on_run()
+
+        page._compute_mapping_status.assert_called_once()
+        mock_run.assert_called_once()
+        mock_storage.save_project.assert_called_once()
+
+
+class TestShowElimDetail:
+    """Verify _show_elim_detail populates elimination line details."""
+
+    def test_show_lines_for_selected_journal(self, _mock_config):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        proj = _sample_project(with_elimination=True)
+        journal = proj.eliminations[0]
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._regnr_to_name = {10: "Eiendeler", 11: "Inntekter", 20: "SUM"}
+
+        # Mock the detail treeview
+        tree_mock = MagicMock()
+        page._tree_elim_detail = tree_mock
+
+        page._show_elim_detail(journal.journal_id)
+
+        # Should have cleared and inserted lines
+        tree_mock.delete.assert_called_once()
+        assert tree_mock.insert.call_count == len(journal.lines)
+
+        # Verify first line values
+        first_call_values = tree_mock.insert.call_args_list[0][1]["values"]
+        assert first_call_values[0] == 11  # regnr
+        assert first_call_values[1] == "Inntekter"  # rl name
+
+
+class TestGrunnlagContextFiltering:
+    """Verify Grunnlag filters by company in Valgt selskap mode."""
+
+    def _make_page_with_run(self, _mock_config):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            parent_company_id="a",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+                CompanyTB(company_id="b", name="Datter", row_count=2),
+            ],
+        )
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, run_result = run_consolidation(proj, tbs)
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = proj
+        page._consolidated_result_df = result_df
+        page._last_run_result = run_result
+        page._regnr_to_name = {10: "Eiendeler", 11: "Inntekter", 20: "SUM"}
+        page._tree_grunnlag = MagicMock()
+        page._grunnlag_label_var = MagicMock()
+        page._result_mode_var = MagicMock()
+        page._current_detail_cid = None
+
+        return page, run_result
+
+    def test_konsolidert_mode_shows_all_companies(self, _mock_config):
+        page, run = self._make_page_with_run(_mock_config)
+        page._result_mode_var.get.return_value = "Konsolidert"
+
+        page._populate_grunnlag(10)
+
+        # Should show all companies (both a and b have regnr 10)
+        calls = page._tree_grunnlag.insert.call_args_list
+        assert len(calls) == 2
+
+    def test_valgt_selskap_mode_filters_to_company(self, _mock_config):
+        page, run = self._make_page_with_run(_mock_config)
+        page._result_mode_var.get.return_value = "Valgt selskap"
+        page._current_detail_cid = "a"
+
+        page._populate_grunnlag(10)
+
+        # Should only show company "a" (Mor)
+        calls = page._tree_grunnlag.insert.call_args_list
+        assert len(calls) == 1
+        first_values = calls[0][1]["values"]
+        assert first_values[0] == "Mor"
+
+
+class TestRefreshFromSessionClearsCache:
+    """Verify refresh_from_session clears run state."""
+
+    def test_session_reload_invalidates_cache(self, _mock_config):
+        from unittest.mock import MagicMock, patch
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = True
+        page._status_var = MagicMock()
+        page._result_df = pd.DataFrame()
+        page._consolidated_result_df = pd.DataFrame()
+        page._company_result_df = pd.DataFrame()
+        page._preview_result_df = pd.DataFrame()
+        page._last_run_result = "something"
+        page._current_detail_cid = "xyz"
+        page._tree_result = MagicMock()
+        page._preview_label_var = MagicMock()
+        page._lbl_statusbar = MagicMock()
+        page._result_mode_var = MagicMock()
+        page._result_mode_var.get.return_value = "Konsolidert"
+        page._hide_zero_var = MagicMock()
+        page._hide_zero_var.get.return_value = False
+        page._update_session_tb_button = MagicMock()
+
+        sess = MagicMock()
+        sess.client = ""
+        sess.year = ""
+
+        with patch("page_consolidation.storage"):
+            page.refresh_from_session(sess)
+
+        assert page._result_df is None
+        assert page._consolidated_result_df is None
+        assert page._company_result_df is None
+        assert page._last_run_result is None
+        assert page._current_detail_cid is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: _on_show_unmapped handler
+# ---------------------------------------------------------------------------
+
+class TestOnShowUnmapped:
+    """Verify Vis umappede handler navigates to Mapping tab with filter."""
+
+    def test_show_unmapped_calls_detail_and_switches_tab(self, _mock_config):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_companies = MagicMock()
+        page._tree_companies.selection.return_value = ["c1"]
+        page._show_company_detail = MagicMock()
+        page._mapping_tab = MagicMock()
+        page._right_nb = MagicMock()
+
+        page._on_show_unmapped()
+
+        page._show_company_detail.assert_called_once_with("c1")
+        page._mapping_tab.show_unmapped.assert_called_once()
+        page._right_nb.select.assert_called_once_with(1)
+
+    def test_show_unmapped_no_selection_does_nothing(self, _mock_config):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_companies = MagicMock()
+        page._tree_companies.selection.return_value = []
+        page._show_company_detail = MagicMock()
+        page._mapping_tab = MagicMock()
+        page._right_nb = MagicMock()
+
+        page._on_show_unmapped()
+
+        page._show_company_detail.assert_not_called()
+        page._mapping_tab.show_unmapped.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: _build_unmapped_warnings
+# ---------------------------------------------------------------------------
+
+class TestBuildUnmappedWarnings:
+    """Verify unmapped account warnings include amounts."""
+
+    def test_warns_about_unmapped_kontos_with_amounts(self, _mock_config):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+        from consolidation.models import CompanyTB, ConsolidationProject
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = ConsolidationProject(
+            companies=[CompanyTB(company_id="a", name="Mor", row_count=3)],
+        )
+        page._mapping_unmapped = {"a": ["5000", "6000"]}
+
+        tb = pd.DataFrame({
+            "konto": ["1000", "5000", "6000"],
+            "kontonavn": ["Bank", "Skatt", "Annet"],
+            "ub": [100.0, 50000.0, 0.0],
+        })
+        tbs = {"a": tb}
+
+        warnings = page._build_unmapped_warnings(tbs)
+
+        assert len(warnings) == 1
+        assert "Mor" in warnings[0]
+        assert "5000" in warnings[0]
+        # konto 6000 has ub=0 so should not be listed
+        assert "6000" not in warnings[0]
+        assert "1 umappede" in warnings[0]
+
+    def test_no_warnings_when_all_mapped(self, _mock_config):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+        from consolidation.models import CompanyTB, ConsolidationProject
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = ConsolidationProject(
+            companies=[CompanyTB(company_id="a", name="Mor", row_count=2)],
+        )
+        page._mapping_unmapped = {"a": []}
+
+        tbs = {"a": pd.DataFrame({"konto": ["1000"], "ub": [100.0]})}
+        warnings = page._build_unmapped_warnings(tbs)
+
+        assert warnings == []
+
+    def test_no_warnings_when_no_project(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = None
+
+        warnings = page._build_unmapped_warnings({})
+        assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: export stale-state guard
+# ---------------------------------------------------------------------------
+
+class TestExportStaleGuard:
+    """Verify export warns when run state is stale."""
+
+    def test_export_warns_when_consolidated_result_is_none(self, _mock_config):
+        from unittest.mock import MagicMock, patch
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._result_df = pd.DataFrame({"regnr": [10]})
+        page._project = MagicMock()
+        page._project.client = "Test"
+        page._project.year = "2025"
+        page._consolidated_result_df = None  # stale!
+
+        with patch("page_consolidation.messagebox") as mock_mb:
+            mock_mb.askyesno.return_value = True
+            page._rerun_consolidation = MagicMock()
+            # After rerun, result_df becomes None (no TBs) — should bail
+            def _clear_result():
+                page._result_df = None
+            page._rerun_consolidation.side_effect = _clear_result
+
+            page._on_export()
+
+            mock_mb.askyesno.assert_called_once()
+            page._rerun_consolidation.assert_called_once()
+
+    def test_export_proceeds_when_user_declines_rerun(self, _mock_config):
+        from unittest.mock import MagicMock, patch
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._result_df = pd.DataFrame({"regnr": [10]})
+        page._project = MagicMock()
+        page._project.client = "Test"
+        page._project.year = "2025"
+        page._project.runs = []
+        page._consolidated_result_df = None  # stale
+
+        with patch("page_consolidation.messagebox") as mock_mb, \
+             patch("page_consolidation.filedialog") as mock_fd:
+            mock_mb.askyesno.return_value = False  # user says no
+            # No runs → run_result is None → early return
+            page._on_export()
+
+            mock_mb.askyesno.assert_called_once()
+            # Should not have asked for file (no runs available)
+
+    def test_export_skips_guard_when_not_stale(self, _mock_config):
+        from unittest.mock import MagicMock, patch
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._result_df = pd.DataFrame({"regnr": [10]})
+        page._project = MagicMock()
+        page._project.client = "Test"
+        page._project.year = "2025"
+        page._project.runs = [MagicMock()]
+        page._consolidated_result_df = pd.DataFrame()  # NOT stale
+        page._mapped_tbs = {}
+        page._regnr_to_name = {}
+        page._hide_zero_var = MagicMock()
+        page._hide_zero_var.get.return_value = False
+
+        with patch("page_consolidation.messagebox") as mock_mb, \
+             patch("page_consolidation.filedialog") as mock_fd:
+            mock_fd.asksaveasfilename.return_value = ""  # user cancels
+            page._on_export()
+
+            # No stale warning dialog
+            mock_mb.askyesno.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Sorting wiring (Del A)
+# ---------------------------------------------------------------------------
+
+class TestSortingWiring:
+    """Verify enable_treeview_sorting is called on tree builds."""
+
+    def test_page_imports_sorting(self, _mock_config):
+        import page_consolidation
+        assert hasattr(page_consolidation, "enable_treeview_sorting")
+
+    def test_mapping_tab_imports_sorting(self, _mock_config):
+        import consolidation_mapping_tab
+        assert hasattr(consolidation_mapping_tab, "enable_treeview_sorting")
+
+    def test_reset_sort_state_clears_state(self, _mock_config):
+        from page_consolidation import _reset_sort_state
+        from types import SimpleNamespace
+
+        tree = MagicMock()
+        tree._sort_state = SimpleNamespace(last_col="konto", descending=True)
+        _reset_sort_state(tree)
+        assert tree._sort_state.last_col is None
+        assert tree._sort_state.descending is False
+
+    def test_reset_sort_state_no_state_is_harmless(self, _mock_config):
+        from page_consolidation import _reset_sort_state
+
+        tree = MagicMock(spec=[])  # no _sort_state
+        _reset_sort_state(tree)  # should not raise
+
+    def test_mapping_tab_reset_sort_state(self, _mock_config):
+        from consolidation_mapping_tab import _reset_sort_state
+        from types import SimpleNamespace
+
+        tree = MagicMock()
+        tree._sort_state = SimpleNamespace(last_col="x", descending=True)
+        _reset_sort_state(tree)
+        assert tree._sort_state.last_col is None
+        assert tree._sort_state.descending is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: Sumpost drilldown (Del C)
+# ---------------------------------------------------------------------------
+
+class TestSumpostDrilldown:
+    """Verify _populate_grunnlag expands sumposter to leaf lines."""
+
+    def _make_page(self):
+        from unittest.mock import MagicMock
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_grunnlag = MagicMock()
+        page._tree_grunnlag.get_children.return_value = []
+        page._grunnlag_label_var = MagicMock()
+        page._result_mode_var = MagicMock()
+        page._result_mode_var.get.return_value = "Konsolidert"
+        page._regnr_to_name = {
+            10: "Eiendeler", 11: "Inntekter", 20: "SUM",
+        }
+        page._regnskapslinjer = _regnskapslinjer_df()
+        page._last_run_result = None
+        return page
+
+    def test_sumpost_false_uses_single_regnr(self, _mock_config):
+        page = self._make_page()
+
+        # With no run result, just check label is set correctly
+        page._populate_grunnlag(10, is_sumpost=False)
+        label_text = page._grunnlag_label_var.set.call_args[0][0]
+        assert "10" in label_text
+        assert "underliggende" not in label_text
+
+    def test_sumpost_true_expands_leaf_lines(self, _mock_config):
+        from consolidation.models import RunResult
+
+        page = self._make_page()
+
+        # Create account_details that cover leaf-lines 10 and 11
+        details = pd.DataFrame({
+            "selskap": ["Mor", "Mor", "Datter"],
+            "konto": ["1000", "3000", "1500"],
+            "kontonavn": ["Bank", "Salg", "Varelager"],
+            "regnr": [10.0, 11.0, 10.0],
+            "regnskapslinje": ["Eiendeler", "Inntekter", "Eiendeler"],
+            "ib": [0.0, 0.0, 0.0],
+            "netto": [100.0, -200.0, 50.0],
+            "ub_original": [100.0, -200.0, 50.0],
+            "valuta": ["NOK", "NOK", "NOK"],
+            "kurs": [1.0, 1.0, 1.0],
+            "ub": [100.0, -200.0, 50.0],
+        })
+        run_result = MagicMock()
+        run_result.account_details = details
+        page._last_run_result = run_result
+
+        page._populate_grunnlag(20, is_sumpost=True)
+
+        # Should show "2 underliggende linjer" in label
+        label_text = page._grunnlag_label_var.set.call_args[0][0]
+        assert "underliggende" in label_text
+
+        # All 3 rows should be inserted (regnr 10 and 11 are both leaf lines of sumpost 20)
+        insert_calls = page._tree_grunnlag.insert.call_args_list
+        assert len(insert_calls) == 3
+
+    def test_sumpost_no_regnskapslinjer_falls_back(self, _mock_config):
+        page = self._make_page()
+        page._regnskapslinjer = None  # no regnskapslinjer loaded
+
+        details = pd.DataFrame({
+            "selskap": ["Mor"],
+            "konto": ["1000"],
+            "kontonavn": ["Bank"],
+            "regnr": [20.0],
+            "regnskapslinje": ["SUM"],
+            "ib": [0.0],
+            "netto": [100.0],
+            "ub_original": [100.0],
+            "valuta": ["NOK"],
+            "kurs": [1.0],
+            "ub": [100.0],
+        })
+        run_result = MagicMock()
+        run_result.account_details = details
+        page._last_run_result = run_result
+
+        # With is_sumpost=True but no regnskapslinjer, should fallback to [regnr]
+        page._populate_grunnlag(20, is_sumpost=True)
+
+        # Label should NOT mention "underliggende" since we couldn't expand
+        label_text = page._grunnlag_label_var.set.call_args[0][0]
+        assert "underliggende" not in label_text
+
+    def test_on_result_line_select_detects_sumpost_tag(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_result = MagicMock()
+        page._tree_result.selection.return_value = ["item1"]
+        page._tree_result.item.side_effect = lambda iid, key: {
+            "values": (20, "SUM", "100", "-200"),
+            "tags": ("sumline",),
+        }[key]
+        page._left_nb = MagicMock()
+        page._populate_grunnlag = MagicMock()
+
+        page._on_result_line_select()
+
+        page._populate_grunnlag.assert_called_once_with(20, is_sumpost=True)
+        page._left_nb.select.assert_called_once_with(2)
+
+    def test_on_result_line_select_leaf_line(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_result = MagicMock()
+        page._tree_result.selection.return_value = ["item1"]
+        page._tree_result.item.side_effect = lambda iid, key: {
+            "values": (10, "Eiendeler", "100"),
+            "tags": (),
+        }[key]
+        page._left_nb = MagicMock()
+        page._populate_grunnlag = MagicMock()
+
+        page._on_result_line_select()
+
+        page._populate_grunnlag.assert_called_once_with(10, is_sumpost=False)
+
+    def test_on_result_line_select_no_selection(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_result = MagicMock()
+        page._tree_result.selection.return_value = []
+        page._populate_grunnlag = MagicMock()
+
+        page._on_result_line_select()
+
+        page._populate_grunnlag.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Right-click routing (Del B)
+# ---------------------------------------------------------------------------
+
+class TestRightClickRouting:
+    """Verify header right-clicks route to column manager, data clicks to context menu."""
+
+    def test_company_right_click_heading_shows_col_menu(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_companies = MagicMock()
+        page._tree_companies.identify_region.return_value = "heading"
+        page._companies_col_mgr = MagicMock()
+        page._company_menu = MagicMock()
+        event = MagicMock()
+
+        page._on_company_right_click(event)
+
+        page._companies_col_mgr.show_header_menu.assert_called_once_with(event)
+        page._company_menu.post.assert_not_called()
+
+    def test_company_right_click_cell_shows_context_menu(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_companies = MagicMock()
+        page._tree_companies.identify_region.return_value = "cell"
+        page._tree_companies.identify_row.return_value = "item1"
+        page._companies_col_mgr = MagicMock()
+        page._company_menu = MagicMock()
+        event = MagicMock()
+
+        page._on_company_right_click(event)
+
+        page._companies_col_mgr.show_header_menu.assert_not_called()
+        page._company_menu.post.assert_called_once()
+
+    def test_detail_right_click_heading_shows_col_menu(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_detail = MagicMock()
+        page._tree_detail.identify_region.return_value = "heading"
+        page._detail_col_mgr = MagicMock()
+        page._detail_menu = MagicMock()
+        event = MagicMock()
+
+        page._on_detail_right_click(event)
+
+        page._detail_col_mgr.show_header_menu.assert_called_once_with(event)
+        page._detail_menu.post.assert_not_called()
+
+    def test_detail_right_click_cell_replaces_selection(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_detail = MagicMock()
+        page._tree_detail.identify_region.return_value = "cell"
+        page._tree_detail.identify_row.return_value = "6510"
+        page._detail_col_mgr = MagicMock()
+        page._detail_menu = MagicMock()
+        event = MagicMock()
+
+        page._on_detail_right_click(event)
+
+        page._tree_detail.selection_set.assert_called_once_with("6510")
+        page._detail_menu.post.assert_called_once()
+
+    def test_result_right_click_delegates_to_col_mgr(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        mock_mgr = MagicMock()
+        page._result_col_mgrs = {"company": mock_mgr, "consolidated": mock_mgr, "per_company": mock_mgr}
+        page._result_mode_var = MagicMock()
+        page._result_mode_var.get.return_value = "Valgt selskap"
+        event = MagicMock()
+
+        page._on_result_right_click(event)
+
+        mock_mgr.on_right_click.assert_called_once_with(event)
+
+
+# ---------------------------------------------------------------------------
+# Tests: Per-mode result column profiles (P2)
+# ---------------------------------------------------------------------------
+
+class TestResultColumnProfiles:
+    """Verify each result mode uses its own column manager."""
+
+    def test_three_separate_managers_created(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+
+        # Simulate the dict that _build_result_tab creates
+        mgr_a = MagicMock()
+        mgr_b = MagicMock()
+        mgr_c = MagicMock()
+        page._result_col_mgrs = {
+            "company": mgr_a,
+            "consolidated": mgr_b,
+            "per_company": mgr_c,
+        }
+        page._result_mode_var = MagicMock()
+
+        page._result_mode_var.get.return_value = "Valgt selskap"
+        assert page._result_col_mgr is mgr_a
+
+        page._result_mode_var.get.return_value = "Konsolidert"
+        assert page._result_col_mgr is mgr_b
+
+        page._result_mode_var.get.return_value = "Per selskap"
+        assert page._result_col_mgr is mgr_c
+
+    def test_mode_keys_mapping(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        assert ConsolidationPage._RESULT_MODE_KEYS == {
+            "Valgt selskap": "company",
+            "Konsolidert": "consolidated",
+            "Per selskap": "per_company",
+        }
+
+    def test_different_modes_use_different_pref_keys(self, _mock_config):
+        """Each mode manager should persist under a unique view_id."""
+        from treeview_column_manager import TreeviewColumnManager
+
+        tree = MagicMock()
+        tree.__setitem__ = MagicMock()
+
+        with patch.object(TreeviewColumnManager, "load_from_preferences"):
+            mgr_co = TreeviewColumnManager(tree, view_id="result.company", all_cols=())
+            mgr_con = TreeviewColumnManager(tree, view_id="result.consolidated", all_cols=())
+            mgr_pc = TreeviewColumnManager(tree, view_id="result.per_company", all_cols=())
+
+        assert mgr_co._pref_key != mgr_con._pref_key
+        assert mgr_con._pref_key != mgr_pc._pref_key
+        assert mgr_co._order_key != mgr_con._order_key
+
+    def test_update_columns_only_affects_active_mode(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+
+        mgr_a = MagicMock()
+        mgr_b = MagicMock()
+        mgr_c = MagicMock()
+        page._result_col_mgrs = {
+            "company": mgr_a,
+            "consolidated": mgr_b,
+            "per_company": mgr_c,
+        }
+        page._result_mode_var = MagicMock()
+        page._result_mode_var.get.return_value = "Konsolidert"
+
+        # Simulate what _populate_result_tree does
+        page._result_col_mgr.update_columns(["regnr", "regnskapslinje", "Mor", "Doetre"])
+
+        mgr_b.update_columns.assert_called_once_with(["regnr", "regnskapslinje", "Mor", "Doetre"])
+        mgr_a.update_columns.assert_not_called()
+        mgr_c.update_columns.assert_not_called()
+
+
+class _StrictResultTree:
+    """Minimal tree that fails if stale displaycolumns survive a column rebuild."""
+
+    def __init__(self):
+        self.columns = ()
+        self.displaycolumns = ("regnr", "regnskapslinje", "Mor")
+        self.rows = []
+
+    def __setitem__(self, key, value):
+        if key == "displaycolumns":
+            self.displaycolumns = value
+            return
+        if key == "columns":
+            if self.displaycolumns != "#all":
+                active = tuple(self.displaycolumns)
+                invalid = next((c for c in active if c not in value), None)
+                if invalid is not None:
+                    raise RuntimeError(f"Invalid column index {invalid}")
+            self.columns = tuple(value)
+            return
+        raise KeyError(key)
+
+    def __getitem__(self, key):
+        if key == "columns":
+            return self.columns
+        if key == "displaycolumns":
+            return self.displaycolumns
+        raise KeyError(key)
+
+    def delete(self, *_a, **_k):
+        self.rows.clear()
+
+    def get_children(self, *_a, **_k):
+        return []
+
+    def heading(self, *_a, **_k):
+        return None
+
+    def column(self, *_a, **_k):
+        return None
+
+    def insert(self, *_a, **_k):
+        self.rows.append((_a, _k))
+
+
+class TestResultTreeColumnReset:
+    def test_populate_result_tree_resets_stale_displaycolumns_before_columns(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_result = _StrictResultTree()
+        page._hide_zero_var = MagicMock()
+        page._hide_zero_var.get.return_value = False
+        page._result_mode_var = MagicMock()
+        page._result_mode_var.get.return_value = "Valgt selskap"
+        active_mgr = MagicMock()
+        page._result_col_mgrs = {
+            "company": active_mgr,
+            "consolidated": MagicMock(),
+            "per_company": MagicMock(),
+        }
+
+        df = pd.DataFrame({
+            "regnr": [145],
+            "regnskapslinje": ["Annen rentekostnad"],
+            "sumpost": [False],
+            "formel": [None],
+            "UB": [784896.95],
+        })
+
+        with patch("page_consolidation.enable_treeview_sorting", None):
+            page._populate_result_tree(df, ["UB"])
+
+        assert page._tree_result.displaycolumns == "#all"
+        assert page._tree_result.columns == ("regnr", "regnskapslinje", "UB")
+        active_mgr.update_columns.assert_called_once_with(["regnr", "regnskapslinje", "UB"])
+
+
+class TestConsolidationControlRows:
+    def test_append_control_rows_builds_balance_and_disposition_rows(self):
+        from consolidation.control_rows import append_control_rows
+
+        df = pd.DataFrame(
+            {
+                "regnr": [280, 350, 665, 850],
+                "regnskapslinje": [
+                    "Årsresultat",
+                    "Sum overføringer",
+                    "Sum eiendeler",
+                    "Sum egenkapital og gjeld",
+                ],
+                "sumpost": [True, True, True, True],
+                "formel": ["", "", "", ""],
+                "Ortomedic AS": [-100.0, 100.0, 500.0, -500.0],
+                "Micromedic AB": [250.0, -245.0, 800.0, -790.0],
+                "konsolidert": [150.0, -145.0, 1300.0, -1290.0],
+            }
+        )
+
+        out = append_control_rows(df)
+        assert out is not None
+
+        ctrl_balance = out.loc[out["regnr"] == 9010].iloc[0]
+        ctrl_disp = out.loc[out["regnr"] == 9020].iloc[0]
+        ctrl_sum = out.loc[out["regnr"] == 9030].iloc[0]
+
+        assert ctrl_balance["regnskapslinje"] == "Kontroll eiendeler / EK + Gjeld"
+        assert ctrl_balance["Ortomedic AS"] == pytest.approx(0.0)
+        assert ctrl_balance["Micromedic AB"] == pytest.approx(10.0)
+        assert ctrl_balance["konsolidert"] == pytest.approx(10.0)
+
+        assert ctrl_disp["regnskapslinje"] == "Kontroll Årsresultat / Sum overføringer"
+        assert ctrl_disp["Ortomedic AS"] == pytest.approx(0.0)
+        assert ctrl_disp["Micromedic AB"] == pytest.approx(5.0)
+        assert ctrl_disp["konsolidert"] == pytest.approx(5.0)
+
+        assert ctrl_sum["regnskapslinje"] == "Sumkontroll"
+        assert ctrl_sum["Ortomedic AS"] == pytest.approx(0.0)
+        assert ctrl_sum["Micromedic AB"] == pytest.approx(15.0)
+        assert ctrl_sum["konsolidert"] == pytest.approx(15.0)
+
+    def test_export_appends_control_rows_to_main_sheet(self, _mock_config):
+        from consolidation.export import build_consolidation_workbook
+        from consolidation.models import RunResult
+
+        result_df = pd.DataFrame(
+            {
+                "regnr": [280, 350, 665, 850],
+                "regnskapslinje": [
+                    "Årsresultat",
+                    "Sum overføringer",
+                    "Sum eiendeler",
+                    "Sum egenkapital og gjeld",
+                ],
+                "sumpost": [True, True, True, True],
+                "formel": ["", "", "", ""],
+                "Ortomedic AS": [-100.0, 100.0, 500.0, -500.0],
+                "Micromedic AB": [250.0, -245.0, 800.0, -790.0],
+                "Mor": [-100.0, 100.0, 500.0, -500.0],
+                "Doetre": [250.0, -245.0, 800.0, -790.0],
+                "sum_foer_elim": [150.0, -145.0, 1300.0, -1290.0],
+                "eliminering": [0.0, 0.0, 0.0, 0.0],
+                "konsolidert": [150.0, -145.0, 1300.0, -1290.0],
+            }
+        )
+        run_result = RunResult(company_ids=["a"], account_details=pd.DataFrame())
+
+        wb = build_consolidation_workbook(
+            result_df, [], [], {},
+            run_result,
+        )
+        ws = wb["Konsernoppstilling"]
+
+        labels = {
+            ws.cell(row=row_idx, column=2).value: row_idx
+            for row_idx in range(5, ws.max_row + 1)
+            if ws.cell(row=row_idx, column=2).value
+        }
+
+        assert "Kontroll eiendeler / EK + Gjeld" in labels
+        assert "Kontroll Årsresultat / Sum overføringer" in labels
+        assert "Sumkontroll" in labels
+
+
+class _SettableVar:
+    def __init__(self):
+        self.value = None
+
+    def set(self, value):
+        self.value = value
+
+
+class TestDetailTreeAggregation:
+    def test_populate_detail_tree_aggregates_duplicate_accounts(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_detail = MagicMock()
+        page._tree_detail.get_children.return_value = []
+        page._mapping_unmapped = {}
+        page._mapping_review_accounts = {}
+        page._detail_hide_zero_var = MagicMock()
+        page._detail_hide_zero_var.get.return_value = False
+        page._detail_count_var = _SettableVar()
+        page._regnr_to_name = {695: "Annen egenkapital"}
+
+        tb = pd.DataFrame(
+            {
+                "konto": ["6510", "6510"],
+                "kontonavn": ["Registreret kapital mv.", "Annen egenkapital"],
+                "regnr": [695, 695],
+                "ib": [0.0, 0.0],
+                "netto": [100.0, 200.0],
+                "ub": [100.0, 200.0],
+            }
+        )
+
+        page._populate_detail_tree(tb, "d1")
+
+        page._tree_detail.insert.assert_called_once()
+        _, kwargs = page._tree_detail.insert.call_args
+        assert kwargs["iid"] == "6510"
+        assert kwargs["values"][0] == "6510"
+        assert kwargs["values"][2] == 695
+        assert kwargs["values"][5] == "300,00"
+        assert kwargs["values"][6] == "300,00"
+        assert page._detail_count_var.value == "1 kontoer"
+
+    def test_change_mapping_deduplicates_selected_accounts(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._project = MagicMock()
+        page._tree_companies = MagicMock()
+        page._tree_companies.selection.return_value = ["d1"]
+        page._tree_detail = MagicMock()
+        page._tree_detail.selection.return_value = ["row1", "row2"]
+        page._tree_detail.item.side_effect = [
+            ("6510", "Registreret kapital mv.", "670"),
+            ("6510", "Annen egenkapital", "695"),
+        ]
+        page._regnskapslinjer = pd.DataFrame(
+            {
+                "regnr": [695],
+                "regnskapslinje": ["Annen egenkapital"],
+                "sumpost": [False],
+            }
+        )
+
+        fake_dialog = MagicMock()
+        label_calls = []
+
+        def _fake_label(*_args, **kwargs):
+            label_calls.append(kwargs)
+            widget = MagicMock()
+            widget.pack = MagicMock()
+            return widget
+
+        def _fake_widget(*_args, **_kwargs):
+            widget = MagicMock()
+            widget.pack = MagicMock()
+            return widget
+
+        with patch("page_consolidation.tk.Toplevel", return_value=fake_dialog), \
+             patch("page_consolidation.ttk.Label", side_effect=_fake_label), \
+             patch("page_consolidation.ttk.Combobox", side_effect=_fake_widget), \
+             patch("page_consolidation.ttk.Frame", side_effect=_fake_widget), \
+             patch("page_consolidation.ttk.Button", side_effect=_fake_widget), \
+             patch("page_consolidation.tk.StringVar", return_value=MagicMock()):
+            page._on_change_mapping()
+
+        first_label = next(call for call in label_calls if call.get("font") == ("", 10, "bold"))
+        assert first_label["text"] == "Konto: 6510 — Registreret kapital mv."

@@ -88,6 +88,7 @@ class EliminationJournal:
     """En navngitt elimineringsbatch (justeringslag over raa TB)."""
 
     journal_id: str = field(default_factory=_new_id)
+    voucher_no: int = 0
     name: str = ""
     created_at: float = field(default_factory=_now)
     lines: list[EliminationLine] = field(default_factory=list)
@@ -104,6 +105,20 @@ class EliminationJournal:
     @property
     def net(self) -> float:
         return sum(line.amount for line in self.lines)
+
+    @property
+    def total_debet(self) -> float:
+        return sum(max(float(line.amount), 0.0) for line in self.lines)
+
+    @property
+    def total_kredit(self) -> float:
+        return sum(abs(min(float(line.amount), 0.0)) for line in self.lines)
+
+    @property
+    def display_label(self) -> str:
+        if int(self.voucher_no or 0) > 0:
+            return f"Bilag {int(self.voucher_no)}"
+        return self.name or self.journal_id
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +193,7 @@ class RunResult:
     elimination_ids: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     result_hash: str = ""
+    input_digest: str = ""
     currency_details: list[CurrencyDetail] = field(default_factory=list)
     account_details: Any = field(default=None)  # pd.DataFrame, flat per-company per-account
 
@@ -223,6 +239,39 @@ class ConsolidationProject:
             if j.journal_id == journal_id:
                 return j
         return None
+
+    def ensure_elimination_voucher_numbers(self) -> bool:
+        """Sikre stabile løpenummer på elimineringsbilag."""
+        changed = False
+        used: set[int] = set()
+        next_no = 1
+
+        for journal in self.eliminations:
+            raw_no = int(journal.voucher_no or 0)
+            if raw_no > 0 and raw_no not in used:
+                used.add(raw_no)
+                next_no = max(next_no, raw_no + 1)
+                continue
+
+            while next_no in used:
+                next_no += 1
+            journal.voucher_no = next_no
+            used.add(next_no)
+            next_no += 1
+            changed = True
+
+            if not str(journal.name or "").strip():
+                journal.name = journal.display_label
+                changed = True
+
+        return changed
+
+    def next_elimination_voucher_no(self) -> int:
+        self.ensure_elimination_voucher_numbers()
+        highest = 0
+        for journal in self.eliminations:
+            highest = max(highest, int(journal.voucher_no or 0))
+        return highest + 1
 
     def touch(self) -> None:
         """Oppdater updated_at til naa."""

@@ -19,6 +19,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from consolidation.elimination import journals_to_dataframe
+from consolidation.control_rows import append_control_rows
 from consolidation.models import CompanyTB, CurrencyDetail, EliminationJournal, RunResult
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,15 @@ def build_consolidation_workbook(
     """Bygg komplett konsoliderings-arbeidsbok."""
     wb = Workbook()
 
-    _build_konsernoppstilling(wb, result_df, client=client, year=year, hide_zero=hide_zero)
+    _build_konsernoppstilling(
+        wb,
+        result_df,
+        client=client,
+        year=year,
+        companies=companies,
+        parent_company_id=parent_company_id,
+        hide_zero=hide_zero,
+    )
     company_names = {c.company_id: c.name for c in companies}
     _build_elimineringer(wb, eliminations, company_names=company_names)
     # Sortér: parent først, resten alfabetisk
@@ -114,8 +123,13 @@ def _build_konsernoppstilling(
     *,
     client: str | None = None,
     year: str | None = None,
+    companies: list[CompanyTB] | None = None,
+    parent_company_id: str = "",
     hide_zero: bool = False,
 ) -> None:
+    augmented = append_control_rows(result_df)
+    if augmented is not None:
+        result_df = augmented
     ws = wb.active
     ws.title = "Konsernoppstilling"
 
@@ -130,7 +144,33 @@ def _build_konsernoppstilling(
     # Finn alle kolonner
     meta_cols = {"regnr", "regnskapslinje", "sumpost", "formel"}
     data_cols = [c for c in result_df.columns if c not in meta_cols]
-    all_headers = ["Nr", "Regnskapslinje"] + data_cols
+    company_names = {
+        c.name for c in (companies or [])
+        if getattr(c, "name", None)
+    }
+    parent_name = next(
+        (c.name for c in (companies or []) if c.company_id == parent_company_id and c.name),
+        "",
+    )
+    aggregate_order = ["Mor", "Doetre", "sum_foer_elim", "eliminering", "konsolidert"]
+    company_cols = [c for c in data_cols if c in company_names]
+    other_cols = [c for c in data_cols if c not in company_names and c not in aggregate_order]
+
+    ordered_company_cols: list[str] = []
+    if parent_name and parent_name in company_cols:
+        ordered_company_cols.append(parent_name)
+    ordered_company_cols.extend(
+        sorted(
+            (c for c in company_cols if c != parent_name),
+            key=lambda name: str(name).lower(),
+        )
+    )
+    ordered_data_cols = (
+        ordered_company_cols
+        + other_cols
+        + [c for c in aggregate_order if c in data_cols]
+    )
+    all_headers = ["Nr", "Regnskapslinje"] + ordered_data_cols
     total_cols = len(all_headers)
     last_col_letter = _excel_col(total_cols)
 
@@ -162,12 +202,12 @@ def _build_konsernoppstilling(
 
         # Filtrer null-linjer (samme logikk som GUI)
         if hide_zero and not is_sum:
-            data_vals = [_safe_float(row.get(dc)) for dc in data_cols]
+            data_vals = [_safe_float(row.get(dc)) for dc in ordered_data_cols]
             if all(abs(v) < 0.005 for v in data_vals):
                 continue
 
         values = [regnr, str(row.get("regnskapslinje", "") or "")]
-        for dc in data_cols:
+        for dc in ordered_data_cols:
             values.append(_safe_float(row.get(dc)))
 
         for col_idx, value in enumerate(values, start=1):
@@ -215,12 +255,13 @@ def _build_elimineringer(
         return
 
     name_map = company_names or {}
-    headers = ["Journal", "Type", "Regnr", "Selskap", "Beloep", "Beskrivelse"]
+    headers = ["Bilag", "Type", "Regnr", "Selskap", "Beloep", "Beskrivelse"]
     row = 1
 
     for journal in eliminations:
         # Journalnavn som header
-        cell = ws.cell(row=row, column=1, value=journal.name)
+        label = journal.display_label
+        cell = ws.cell(row=row, column=1, value=label)
         cell.font = Font(bold=True, size=12)
         kind_label = _KIND_LABELS.get(journal.kind, journal.kind)
         ws.cell(row=row, column=2, value=kind_label)
@@ -238,7 +279,7 @@ def _build_elimineringer(
 
         # Linjer
         for line in journal.lines:
-            ws.cell(row=row, column=1, value=journal.name).border = _BORDER
+            ws.cell(row=row, column=1, value=label).border = _BORDER
             ws.cell(row=row, column=2, value=kind_label).border = _BORDER
             ws.cell(row=row, column=3, value=line.regnr).border = _BORDER
             company_display = name_map.get(line.company_id, line.company_id[:16])

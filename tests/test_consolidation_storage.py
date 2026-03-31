@@ -89,6 +89,31 @@ class TestProjectSaveLoad:
     def test_delete_nonexistent_returns_false(self, _mock_years_dir):
         assert storage.delete_project("Finnes Ikke", "2099") is False
 
+    def test_load_backfills_missing_voucher_numbers(self, _mock_years_dir):
+        proj = ConsolidationProject(
+            project_id="p1",
+            client="TestKlient",
+            year="2025",
+            eliminations=[
+                EliminationJournal(
+                    journal_id="e1",
+                    name="",
+                    voucher_no=0,
+                    lines=[
+                        EliminationLine(regnr=3000, company_id="c1", amount=-100.0),
+                        EliminationLine(regnr=4000, company_id="c1", amount=100.0),
+                    ],
+                ),
+            ],
+        )
+        storage.save_project(proj)
+
+        loaded = storage.load_project("TestKlient", "2025")
+
+        assert loaded is not None
+        assert loaded.eliminations[0].voucher_no == 1
+        assert loaded.eliminations[0].name == "Bilag 1"
+
 
 class TestCompanyTBParquet:
     def test_save_and_load_tb(self, _mock_years_dir):

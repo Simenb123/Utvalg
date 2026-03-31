@@ -235,7 +235,7 @@ def run_consolidation(
     for j in project.eliminations:
         if not j.is_balanced:
             warnings.append(
-                f"Elimineringsjournal '{j.name}' er ikke balansert (netto {j.net:.2f})."
+                f"Elimineringsjournal '{j.display_label}' er ikke balansert (netto {j.net:.2f})."
             )
 
     # --- 7. Konsolidert ---
