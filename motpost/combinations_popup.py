@@ -419,7 +419,13 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         drill_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=(6, 0))
 
         self._lbl_combo = ttk.Label(drill_container, text="Velg en kombinasjon for drilldown")
-        self._lbl_combo.pack(fill=tk.X, pady=(0, 6))
+        self._lbl_combo.pack(fill=tk.X, pady=(0, 2))
+
+        self._lbl_combo_comment = ttk.Label(
+            drill_container, text="", foreground="#555555",
+            wraplength=800, justify="left",
+        )
+        self._lbl_combo_comment.pack(fill=tk.X, pady=(0, 4))
 
         paned = ttk.PanedWindow(drill_container, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True)
@@ -1385,6 +1391,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         # Åpne kommentarfelt for klikket rad
         if item:
             edit_comment_for_tree_item(self, self._tree_all, item, comment_map=self._combo_comment_map)
+            self._refresh_drilldown_comment()
 
 
     def _on_per_selected_selected(self, _event=None):
@@ -1399,6 +1406,18 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
     def _on_per_selected_doubleclick(self, _event=None):
         self._on_per_selected_selected()
+
+    def _refresh_drilldown_comment(self) -> None:
+        """Oppdater kommentar-label i drilldown basert paa current selection."""
+        sel = self._current_selection
+        combo_key = sel.combo if sel else ""
+        comment = str(self._combo_comment_map.get(combo_key, "") or "").strip()
+        try:
+            self._lbl_combo_comment.config(
+                text=f"Kommentar: {comment}" if comment else "",
+            )
+        except Exception:
+            pass
 
     # ---- Drilldown calculations ----
 
@@ -1446,143 +1465,13 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         if self._current_selection is not None:
             self._update_drilldown(self._current_selection)
 
-    def _update_drilldown(self, selection: _ComboSelection) -> None:
-        self._current_selection = selection
-        combo_key = selection.combo
-
-        bilag_list = self._combo_to_bilag.get(combo_key, [])
-        if not bilag_list:
-            self._lbl_combo.config(text=f"Kombinasjon: {combo_key} | (ingen bilag)")
-            self._clear_tree(self._tree_sel)
-            self._clear_tree(self._tree_mot)
-            self._clear_tree(self._tree_bilag)
-            self._lbl_vis_info.config(text="")
-            self._bilag_rows_cache = None
-            try:
-                self._lbl_sel_total.config(text="")
-                self._lbl_mot_total.config(text="")
-            except Exception:
-                pass
-            return
-
-        df_combo = self._df_scope[self._df_scope["Bilag_str"].isin(bilag_list)].copy()
-
-        # Selection mask: selected accounts + valgt retning (kredit/debet) på disse kontoene
-        sel_mask = df_combo["Konto_str"].isin(self._selected_accounts_set)
-        dir_norm = normalize_direction(self._selected_direction)
-        if dir_norm == "kredit":
-            sel_mask = sel_mask & (df_combo["Beløp_num"] < 0)
-        elif dir_norm == "debet":
-            sel_mask = sel_mask & (df_combo["Beløp_num"] > 0)
-
-        df_sel = df_combo[sel_mask].copy()
-        sum_sel = float(df_sel["Beløp_num"].sum()) if not df_sel.empty else 0.0
-
-        # Motposter = alle øvrige linjer i bilaget (inkl. poster på valgte kontoer i motsatt retning)
-        df_mot = df_combo[~sel_mask].copy()
-        sum_mot = float(df_mot["Beløp_num"].sum()) if not df_mot.empty else 0.0
-        kontroll = sum_sel + sum_mot
-
-        # Summering nederst i tabellene
-        try:
-            self._lbl_sel_total.config(text=f"Sum valgte kontoer: {fmt_amount(sum_sel)}")
-            self._lbl_mot_total.config(text=f"Sum motposter: {fmt_amount(sum_mot)} | Kontroll: {fmt_amount(kontroll)}")
-        except Exception:
-            pass
-
-        # Label
-        dir_txt = self._selected_direction if self._selected_direction != "alle" else "netto"
-        extra = f" | Per valgt konto: {selection.selected_account}" if selection.selected_account else ""
-        self._lbl_combo.config(
-            text=(
-                f"Kombinasjon: {combo_key}{extra}\n"
-                f"Bilag: {len(bilag_list)} | Sum valgte kontoer ({dir_txt}): {fmt_amount(sum_sel)}"
-                f" | Sum motposter: {fmt_amount(sum_mot)} | Kontroll (valgt + mot): {fmt_amount(kontroll)}"
-            )
-        )
-
-        # Populate selected accounts distribution
-        self._populate_account_sum_tree(self._tree_sel, df_sel, base_sum=sum_sel)
-
-        # Populate motposter distribution
-        self._populate_account_sum_tree(self._tree_mot, df_mot, base_sum=sum_sel)
-
-        # Bilag rows (cached) for list
-        self._bilag_rows_cache = build_bilag_rows(df_combo, df_sel, df_mot)
-        self._apply_bilag_limit()
-
     def _populate_account_sum_tree(
         self,
         tree: ttk.Treeview,
         df_lines: pd.DataFrame,
         base_sum: Optional[float] = None,
     ) -> None:
-        """Fyller fordelingstabell (konto, kontonavn, sum, % av valgt).
-
-        - Kontonavn hentes primært fra df (Kontonavn), ellers konto-navn-map.
-        - Percent "% av valgt" beregnes som abs(Sum) / abs(base_sum) * 100 (vises med 2 desimaler).
-        """
-        self._clear_tree(tree)
-        if df_lines is None or df_lines.empty:
-            return
-
-        # Summer per konto
-        by_konto = df_lines.groupby("Konto_str", dropna=False)["Beløp_num"].sum()
-        # Sorter på absoluttverdi (størst først)
-        by_konto = by_konto.reindex(by_konto.abs().sort_values(ascending=False).index)
-
-        # Kontonavn per konto (første ikke-tomme)
-        name_map = {}
-        if "Kontonavn" in df_lines.columns:
-            for konto, s in df_lines.groupby("Konto_str", dropna=False)["Kontonavn"]:
-                name = ""
-                for v in s.tolist():
-                    if v is None:
-                        continue
-                    try:
-                        import pandas as _pd
-                        if _pd.isna(v):
-                            continue
-                    except Exception:
-                        pass
-                    vs = str(v).strip()
-                    if vs and vs.lower() != "nan":
-                        name = vs
-                        break
-                if name:
-                    name_map[str(konto)] = name
-
-        show_pct = base_sum is not None and abs(float(base_sum)) > 1e-12
-
-        for konto, belop in by_konto.items():
-            k = str(konto)
-            name = name_map.get(k) or self._konto_navn_map.get(k, "")
-
-            tags = ()
-            # Dersom vi viser "motposter" som komplementet til valgte linjer,
-            # kan det dukke opp poster på valgte kontoer i motsatt retning.
-            # Merk disse for å gjøre det tydelig i UI.
-            if tree is self._tree_mot and k in self._selected_accounts_set:
-                tags = ("valgt_motsatt",)
-                if name:
-                    name = f"{name} (valgt, motsatt)"
-                else:
-                    name = "(valgt, motsatt)"
-
-            pct_txt = ""
-            if show_pct:
-                pct = (abs(float(belop)) / abs(float(base_sum))) * 100.0
-                pct_txt = fmt_amount(pct, decimals=2)
-
-            tree.insert("", tk.END, values=(k, name, fmt_amount(belop), pct_txt), tags=tags)
-
-    def _populate_account_sum_tree(
-        self,
-        tree: ttk.Treeview,
-        df_lines: pd.DataFrame,
-        base_sum: Optional[float] = None,
-    ) -> None:
-        """Fyller fordelingstabell på konto- eller regnskapslinjenivå."""
+        """Fyller fordelingstabell paa konto- eller regnskapslinjenivaa."""
         self._clear_tree(tree)
         if df_lines is None or df_lines.empty:
             return
@@ -1607,29 +1496,14 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
                 if str(konto).strip()
             }
 
-        amount_col = next(
-            (
-                col
-                for col in ("Beløp_num", "BelÃ¸p_num", "BelÃƒÂ¸p_num")
-                if col in grouped.columns
-            ),
-            None,
-        )
-        if amount_col is None:
+        # Sikre numerisk beloepskolonne
+        if "Beløp_num" not in grouped.columns:
             if "Beløp" in grouped.columns:
                 grouped["Beløp_num"] = grouped["Beløp"].map(_safe_float)
             else:
                 grouped["Beløp_num"] = 0.0
-            amount_col = "Beløp_num"
 
-        if "BelÃ¸p_num" not in grouped.columns and amount_col in grouped.columns:
-            grouped["BelÃ¸p_num"] = grouped[amount_col]
-        if "BelÃƒÂ¸p_num" not in grouped.columns and amount_col in grouped.columns:
-            grouped["BelÃƒÂ¸p_num"] = grouped[amount_col]
-
-        by_key = grouped.groupby("_dist_key", dropna=False)["BelÃ¸p_num"].sum()
-        if "Beløp_num" in grouped.columns:
-            by_key = grouped.groupby("_dist_key", dropna=False)["Beløp_num"].sum()
+        by_key = grouped.groupby("_dist_key", dropna=False)["Beløp_num"].sum()
         by_key = by_key.reindex(by_key.abs().sort_values(ascending=False).index)
 
         name_map = {}
@@ -1640,8 +1514,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
                     if value is None:
                         continue
                     try:
-                        import pandas as _pd
-                        if _pd.isna(value):
+                        if pd.isna(value):
                             continue
                     except Exception:
                         pass
@@ -1789,6 +1662,15 @@ def _popup_update_drilldown(self: _MotkontoCombinationsPopup, selection: _ComboS
 
     payload = self._get_drilldown_payload(combo_key)
     bilag_list = list(payload.get("bilag_list", []) or [])
+    # Vis kommentar for valgt kombinasjon
+    comment = str(self._combo_comment_map.get(combo_key, "") or "").strip()
+    try:
+        self._lbl_combo_comment.config(
+            text=f"Kommentar: {comment}" if comment else "",
+        )
+    except Exception:
+        pass
+
     if not bilag_list:
         self._lbl_combo.config(text=f"Kombinasjon: {combo_key} | (ingen bilag)")
         self._clear_tree(self._tree_sel)

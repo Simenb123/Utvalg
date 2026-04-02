@@ -8,7 +8,12 @@ from .api import (
     suggest_mapping_candidates,
     suggest_mappings,
 )
-from .select import UiSuggestionRow, select_best_suggestion_for_code
+from .select import (
+    UiSuggestionRow,
+    select_batch_suggestions,
+    select_best_suggestion_for_code,
+    select_magic_wand_suggestions,
+)
 
 __all__ = [
     "SuggestConfig",
@@ -16,7 +21,9 @@ __all__ = [
     "UiSuggestionRow",
     "apply_suggestion_to_mapping",
     "load_rulebook",
+    "select_batch_suggestions",
     "select_best_suggestion_for_code",
+    "select_magic_wand_suggestions",
     "suggest_mapping_candidates",
     "suggest_mappings",
 ]

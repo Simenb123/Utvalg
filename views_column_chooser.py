@@ -33,7 +33,7 @@ def open_column_chooser(
         dialog,
         text=(
             "Velg kolonner og rekkefølge.\n"
-            "Tips: Pinned-kolonner vises alltid først."
+            "Låste kolonner plasseres automatisk først."
         ),
         justify="left",
     )

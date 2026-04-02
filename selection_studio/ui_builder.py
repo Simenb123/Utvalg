@@ -137,6 +137,9 @@ def build_ui(studio: Any) -> None:
     frm_top.columnconfigure(0, weight=1)
     ttk.Button(frm_top, text="Vis kontorer", command=studio._show_accounts).grid(row=0, column=1, padx=(6, 0))
     ttk.Button(frm_top, text="Drilldown", command=studio._open_drilldown).grid(row=0, column=2, padx=(6, 0))
+    ttk.Button(frm_top, text="Dokumentkontroll", command=studio._open_document_control).grid(
+        row=0, column=3, padx=(6, 0)
+    )
 
     columns = ("Bilag", "Dato", "Tekst", "SumBeløp", "Gruppe", "Intervall")
     studio.tree = ttk.Treeview(tab_utvalg, columns=columns, show="headings", height=18)

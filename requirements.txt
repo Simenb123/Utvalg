@@ -3,6 +3,11 @@ numpy
 openpyxl
 chardet
 lxml
+pypdf
+PyMuPDF
+pdfplumber
+Pillow
+pytesseract
 pyinstaller
 pytest
 pytest-cov

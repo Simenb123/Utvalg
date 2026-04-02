@@ -619,7 +619,7 @@ def test_build_control_selected_account_df_filters_accounts_for_selected_code() 
     )
 
     assert out["Konto"].tolist() == ["5000", "5001"]
-    assert out.columns.tolist() == ["Konto", "Navn", "Endring"]
+    assert out.columns.tolist() == ["Konto", "Navn", "IB", "Endring", "UB"]
 
 
 def test_filter_control_gl_df_supports_search_and_only_unmapped() -> None:
@@ -665,7 +665,7 @@ def test_filter_control_queue_df_and_bucket_summary_group_rows_for_human_workflo
 
     assert next_rows["Kode"].tolist() == ["telefon", "pensjon"]
     assert manual_rows["Kode"].tolist() == ["pensjon"]
-    assert summary == "Ferdig 1 | Vurdering 1 | Manuell 1"
+    assert summary == "Låste 0 | Ferdig 1 | Vurdering 1 | Manuell 1"
 
 
 def test_build_control_queue_df_sorts_by_work_priority_then_amount() -> None:
@@ -943,6 +943,102 @@ def test_apply_best_suggestion_for_selected_code_guides_when_missing() -> None:
 
     assert statuses == ["Fant ikke et forslag for valgt kode."]
     assert focused == ["a07"]
+
+
+def test_apply_best_suggestion_for_selected_code_blocks_locked_code() -> None:
+    focused: list[str] = []
+    statuses: list[str] = []
+
+    class DummyTree:
+        def focus_set(self) -> None:
+            focused.append("a07")
+
+    class DummyPage:
+        tree_a07 = DummyTree()
+        workspace = SimpleNamespace(suggestions=pd.DataFrame([{"Kode": "fastloenn", "WithinTolerance": True}]), locks={"fastloenn"})
+
+        def _selected_control_code(self):
+            return "fastloenn"
+
+        def _notify_inline(self, message: str, *, focus_widget=None) -> None:
+            statuses.append(message)
+            if focus_widget is not None:
+                focus_widget.focus_set()
+
+    page_a07.A07Page._apply_best_suggestion_for_selected_code(DummyPage())
+
+    assert statuses == ["Valgt kode er låst. Lås opp før du bruker forslag."]
+    assert focused == ["a07"]
+
+
+def test_assign_selected_control_mapping_blocks_when_target_code_is_locked() -> None:
+    statuses: list[str] = []
+    focused: list[str] = []
+
+    class DummyTree:
+        def focus_set(self) -> None:
+            focused.append("a07")
+
+    class DummyPage:
+        tree_control_gl = object()
+        tree_a07 = DummyTree()
+        workspace = SimpleNamespace(mapping={}, locks={"fastloenn"})
+
+        def _selected_control_gl_accounts(self):
+            return ["5000"]
+
+        def _selected_control_code(self):
+            return "fastloenn"
+
+        def _notify_inline(self, message: str, *, focus_widget=None) -> None:
+            statuses.append(message)
+            if focus_widget is not None:
+                focus_widget.focus_set()
+
+    page_a07.A07Page._assign_selected_control_mapping(DummyPage())
+
+    assert statuses == ["Endringen berorer laaste koder: fastloenn. Laas opp for du endrer mapping."]
+    assert focused == ["a07"]
+
+
+def test_remove_selected_group_blocks_when_group_is_still_used_in_mapping() -> None:
+    statuses: list[str] = []
+    focused_codes: list[str] = []
+
+    class DummyPage:
+        tree_groups = object()
+        workspace = SimpleNamespace(
+            mapping={"5000": "A07_GROUP:fastloenn+timeloenn"},
+            groups={"A07_GROUP:fastloenn+timeloenn": object()},
+            locks=set(),
+        )
+
+        def _selected_group_id(self):
+            return "A07_GROUP:fastloenn+timeloenn"
+
+        def _notify_inline(self, message: str, *, focus_widget=None) -> None:
+            statuses.append(message)
+
+        def _focus_control_code(self, code):
+            focused_codes.append(code)
+
+    page_a07.A07Page._remove_selected_group(DummyPage())
+
+    assert statuses == ["Kan ikke oppløse gruppe som fortsatt brukes i mapping (1 konto). Fjern eller flytt mapping først."]
+    assert focused_codes == ["A07_GROUP:fastloenn+timeloenn"]
+
+
+def test_locked_mapping_conflicts_uses_effective_group_mapping_and_membership() -> None:
+    dummy = type("DummyPage", (), {})()
+    dummy.workspace = SimpleNamespace(
+        mapping={"5000": "fastloenn"},
+        membership={"fastloenn": "A07_GROUP:lonn"},
+        locks={"A07_GROUP:lonn"},
+    )
+
+    conflicts = page_a07.A07Page._locked_mapping_conflicts(dummy, ["5000"], target_code="fastloenn")
+
+    assert conflicts == ["A07_GROUP:lonn"]
 
 
 def test_sync_active_tb_clicked_guides_user_inline_when_no_active_trial_balance() -> None:
@@ -1227,7 +1323,7 @@ def test_select_magic_wand_suggestion_rows_uses_within_tolerance_without_score_g
         unresolved_codes=["fastloenn", "telefon", "bonus", "pensjon"],
     )
 
-    assert out == [0, 2]
+    assert out == [1, 2]
 
 
 def test_create_app_exposes_a07_page() -> None:
@@ -1315,3 +1411,92 @@ def test_build_control_accounts_summary_handles_empty_state() -> None:
         page_a07.build_control_accounts_summary(pd.DataFrame(), None)
         == "Velg kode i hoyre liste for aa se mappede kontoer."
     )
+
+
+def test_poll_support_refresh_clears_state_for_stale_generation() -> None:
+    dummy = SimpleNamespace(
+        _refresh_generation=3,
+        _support_refresh_thread="thread",
+        _support_refresh_result={"token": 2},
+        _support_views_ready=True,
+    )
+
+    page_a07.A07Page._poll_support_refresh(dummy, 2)
+
+    assert dummy._support_refresh_thread is None
+    assert dummy._support_refresh_result is None
+    assert dummy._support_views_ready is False
+
+
+def test_refresh_support_views_renders_current_tab_when_payload_is_ready() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _support_views_ready=True,
+        _support_views_dirty=False,
+        _refresh_in_progress=False,
+        _support_refresh_thread=None,
+        _render_active_support_tab=lambda: calls.append("render"),
+        _schedule_support_refresh=lambda: calls.append("schedule"),
+        _start_support_refresh=lambda: calls.append("start"),
+    )
+
+    page_a07.A07Page._refresh_support_views(dummy)
+
+    assert calls == ["render"]
+
+
+def test_selected_suggestion_row_prefers_control_support_notebook() -> None:
+    tab_suggestions = object()
+    tree_control = object()
+    tree_support = object()
+
+    class _Notebook:
+        def select(self) -> str:
+            return "suggestions"
+
+        def nametowidget(self, name: str) -> object:
+            assert name == "suggestions"
+            return tab_suggestions
+
+    def _row_from_tree(tree: object):
+        if tree is tree_support:
+            return {"Kode": "bonus"}
+        return None
+
+    dummy = SimpleNamespace(
+        control_support_nb=_Notebook(),
+        tab_suggestions=tab_suggestions,
+        tree_control_suggestions=tree_control,
+        tree_suggestions=tree_support,
+        focus_get=lambda: None,
+        _selected_suggestion_row_from_tree=_row_from_tree,
+    )
+
+    out = page_a07.A07Page._selected_suggestion_row(dummy)
+
+    assert out == {"Kode": "bonus"}
+
+
+def test_on_control_selection_changed_skips_hidden_detail_refresh() -> None:
+    calls: list[str] = []
+    workspace = SimpleNamespace(selected_code=None)
+    dummy = SimpleNamespace(
+        _suspend_selection_sync=False,
+        workspace=workspace,
+        _selected_control_code=lambda: "70",
+        _update_history_details_from_selection=lambda: calls.append("history"),
+        _support_views_ready=False,
+        _active_support_tab_key=lambda: "history",
+        _refresh_suggestions_tree=lambda: calls.append("support_suggestions"),
+        _control_details_visible=False,
+        _refresh_control_support_trees=lambda: calls.append("detail_support"),
+        _refresh_control_gl_tree=lambda: calls.append("gl"),
+        _update_control_panel=lambda: calls.append("panel"),
+        _update_control_transfer_buttons=lambda: calls.append("buttons"),
+    )
+
+    page_a07.A07Page._on_control_selection_changed(dummy)
+
+    assert workspace.selected_code == "70"
+    assert "detail_support" not in calls
+    assert calls == ["history", "gl", "panel", "buttons"]

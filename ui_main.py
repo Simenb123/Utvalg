@@ -147,7 +147,8 @@ class App(tk.Tk):
 
         # --- Normal GUI-init ---
         self.title("Utvalg – revisjonsverktøy")
-        self.geometry("1100x700")
+        self.geometry("1280x900")
+        self.minsize(1100, 780)
         try:
             theme.apply_theme(self)
         except Exception:

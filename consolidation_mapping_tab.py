@@ -23,6 +23,20 @@ except Exception:  # pragma: no cover
 
 import pandas as pd
 
+try:
+    from ui_treeview_sort import enable_treeview_sorting
+except Exception:  # pragma: no cover
+    enable_treeview_sorting = None  # type: ignore
+
+from ui_managed_treeview import ColumnSpec, ManagedTreeview
+
+
+def _reset_sort_state(tree) -> None:
+    """Nullstill sorteringstilstand slik at data vises i naturlig rekkefoelje."""
+    if hasattr(tree, "_sort_state"):
+        tree._sort_state.last_col = None
+        tree._sort_state.descending = False
+
 
 def _fmt_no(value: float, decimals: int = 0) -> str:
     """Norsk beloepsformat: mellomrom som tusenskille, komma som desimal."""
@@ -57,19 +71,57 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
         self._mapped_tb: Optional[pd.DataFrame] = None
         self._overrides: dict[str, int] = {}
         self._base_regnr: dict[str, Optional[int]] = {}  # interval-mapping regnr per konto
+        self._review_accounts: set[str] = set()
         self._regnr_to_name: dict[int, str] = {}
         self._rl_rows: list[tuple[int, str]] = []  # (regnr, name) for leaf lines
+        self._read_only_reason: str = ""
 
         self._build_ui()
+
+    def _display_rows(self) -> list[dict[str, object]]:
+        """Aggreger TB til unike kontoer for mapping-visning.
+
+        Mapping er konto-basert. Enkelte importer kan inneholde flere rader
+        med samme konto, og da må visningen summere disse før de rendres.
+        Det hindrer Tkinter-krasj på dupliserte `iid`-verdier og gjør
+        mappingprosent/status faglig riktig.
+        """
+        if self._tb is None or self._tb.empty:
+            return []
+
+        grouped: dict[str, dict[str, object]] = {}
+        for _, row in self._tb.iterrows():
+            konto = str(row.get("konto", "") or "").strip()
+            if not konto:
+                continue
+            kontonavn = str(row.get("kontonavn", "") or "").strip()
+            item = grouped.setdefault(
+                konto,
+                {
+                    "konto": konto,
+                    "kontonavn": kontonavn,
+                    "ib": 0.0,
+                    "ub": 0.0,
+                    "netto": 0.0,
+                },
+            )
+            if kontonavn and not str(item.get("kontonavn", "") or "").strip():
+                item["kontonavn"] = kontonavn
+            for col in ("ib", "ub", "netto"):
+                try:
+                    item[col] = float(item.get(col, 0.0) or 0.0) + float(row.get(col, 0.0) or 0.0)
+                except (ValueError, TypeError):
+                    pass
+        return list(grouped.values())
 
     # ------------------------------------------------------------------
     # UI Build
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        self.columnconfigure(0, weight=4)
+        self.columnconfigure(0, weight=3, minsize=520)
         self.columnconfigure(1, weight=0)
-        self.columnconfigure(2, weight=3)
+        self.columnconfigure(2, weight=5, minsize=420)
         self.rowconfigure(0, weight=1)
 
         # --- Left: Kontoer ---
@@ -126,11 +178,27 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
 
         self._tree_left.tag_configure("unmapped", background="#FCEBD9")
         self._tree_left.tag_configure("override", background="#DDE8F0")
+        self._tree_left.tag_configure("review", background="#FFF4D6")
 
         sb_left = ttk.Scrollbar(left_frm, orient="vertical", command=self._tree_left.yview)
         self._tree_left.configure(yscrollcommand=sb_left.set)
         self._tree_left.grid(row=1, column=0, sticky="nsew")
         sb_left.grid(row=1, column=1, sticky="ns")
+        self._left_tree_mgr = ManagedTreeview(
+            self._tree_left,
+            view_id="mapping_left",
+            pref_prefix="ui",
+            column_specs=[
+                ColumnSpec("konto", "Konto", width=70, anchor="e", pinned=True),
+                ColumnSpec("kontonavn", "Kontonavn", width=120, stretch=True),
+                ColumnSpec("ib", "IB", width=80, anchor="e"),
+                ColumnSpec("netto", "Bevegelse", width=80, anchor="e"),
+                ColumnSpec("ub", "UB", width=80, anchor="e"),
+                ColumnSpec("regnr", "Regnr", width=45, anchor="e"),
+                ColumnSpec("rl_navn", "Regnskapslinje", width=120, stretch=True),
+            ],
+        )
+        self._left_col_mgr = self._left_tree_mgr.column_manager
 
         # --- Center: Buttons ---
         btn_frm = ttk.Frame(self)
@@ -168,12 +236,22 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
         self._tree_right.heading("regnr", text="Nr")
         self._tree_right.heading("regnskapslinje", text="Regnskapslinje")
         self._tree_right.column("regnr", width=50, anchor="e")
-        self._tree_right.column("regnskapslinje", width=180, anchor="w")
+        self._tree_right.column("regnskapslinje", width=280, anchor="w")
 
         sb_right = ttk.Scrollbar(right_frm, orient="vertical", command=self._tree_right.yview)
         self._tree_right.configure(yscrollcommand=sb_right.set)
         self._tree_right.grid(row=1, column=0, sticky="nsew")
         sb_right.grid(row=1, column=1, sticky="ns")
+        self._right_tree_mgr = ManagedTreeview(
+            self._tree_right,
+            view_id="mapping_right",
+            pref_prefix="ui",
+            column_specs=[
+                ColumnSpec("regnr", "Nr", width=50, anchor="e", pinned=True),
+                ColumnSpec("regnskapslinje", "Regnskapslinje", width=280, stretch=True),
+            ],
+        )
+        self._right_col_mgr = self._right_tree_mgr.column_manager
 
         # --- Bottom: Status ---
         self._status_var = tk.StringVar(value="Velg et selskap for aa redigere mapping.")
@@ -193,30 +271,34 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
         overrides: dict[str, int],
         regnskapslinjer: pd.DataFrame,
         regnr_to_name: dict[int, str],
+        review_accounts: Optional[set[str]] = None,
+        read_only_reason: str = "",
     ) -> None:
         """Populate both lists for a company."""
         self._company_id = company_id
         self._tb = tb
         self._mapped_tb = mapped_tb
         self._overrides = dict(overrides)  # work with a copy
+        self._review_accounts = set(review_accounts or set())
         self._regnr_to_name = regnr_to_name
+        self._read_only_reason = str(read_only_reason or "")
 
         # Build base regnr map (from interval mapping, before overrides)
         self._base_regnr.clear()
         if mapped_tb is not None and "regnr" in mapped_tb.columns and "konto" in mapped_tb.columns:
             for _, row in mapped_tb.iterrows():
-                konto = str(row["konto"])
+                konto = str(row["konto"] or "").strip()
+                if not konto:
+                    continue
                 regnr_raw = row["regnr"]
                 try:
                     regnr_val = int(regnr_raw) if pd.notna(regnr_raw) and str(regnr_raw).strip() not in ("", "nan") else None
                 except (ValueError, TypeError):
                     regnr_val = None
-                # Base regnr = interval-mapped value (ignoring overrides)
-                if konto in overrides:
-                    # For overridden kontos, the mapped_tb already reflects the override.
-                    # We store the override value, but mark it as overridden in the tree.
+                existing = self._base_regnr.get(konto)
+                if existing is None and regnr_val is not None:
                     self._base_regnr[konto] = regnr_val
-                else:
+                elif konto not in self._base_regnr:
                     self._base_regnr[konto] = regnr_val
 
         # Build leaf rl list
@@ -230,11 +312,17 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
 
         self._refresh_left_tree()
         self._refresh_right_tree()
+        self._apply_read_only_state()
         self._update_status()
 
     def get_overrides(self) -> dict[str, int]:
         """Return current overrides dict."""
         return dict(self._overrides)
+
+    def show_unmapped(self) -> None:
+        """Aktiver filter for kontoer som krever mapping-gjennomgang."""
+        self._show_unmapped_var.set(True)
+        self._refresh_left_tree()
 
     def clear(self) -> None:
         """Clear all data (e.g. when no company selected)."""
@@ -243,9 +331,12 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
         self._mapped_tb = None
         self._overrides.clear()
         self._base_regnr.clear()
+        self._review_accounts.clear()
         self._rl_rows.clear()
+        self._read_only_reason = ""
         self._tree_left.delete(*self._tree_left.get_children())
         self._tree_right.delete(*self._tree_right.get_children())
+        self._apply_read_only_state()
         self._status_var.set("Velg et selskap for aa redigere mapping.")
 
     # ------------------------------------------------------------------
@@ -254,6 +345,7 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
 
     def _refresh_left_tree(self) -> None:
         tree = self._tree_left
+        _reset_sort_state(tree)
         tree.delete(*tree.get_children())
 
         if self._tb is None:
@@ -263,9 +355,9 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
         show_unmapped_only = self._show_unmapped_var.get()
         hide_zero = self._hide_zero_var.get()
 
-        for _, row in self._tb.iterrows():
-            konto = str(row.get("konto", ""))
-            kontonavn = str(row.get("kontonavn", ""))
+        for row in self._display_rows():
+            konto = str(row.get("konto", "") or "").strip()
+            kontonavn = str(row.get("kontonavn", "") or "").strip()
 
             # Beloep
             try:
@@ -288,7 +380,7 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
                 regnr = None
 
             # Filter: unmapped only
-            if show_unmapped_only and regnr is not None:
+            if show_unmapped_only and regnr is not None and konto not in self._review_accounts:
                 continue
 
             # Filter: text search
@@ -303,6 +395,8 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
             # Tag: unmapped or override
             if regnr is None:
                 tag = ("unmapped",)
+            elif konto in self._review_accounts:
+                tag = ("review",)
             elif konto in self._overrides:
                 tag = ("override",)
             else:
@@ -316,6 +410,7 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
 
     def _refresh_right_tree(self) -> None:
         tree = self._tree_right
+        _reset_sort_state(tree)
         tree.delete(*tree.get_children())
 
         filter_text = self._filter_right_var.get().strip().lower()
@@ -327,29 +422,50 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
                     continue
             tree.insert("", "end", iid=str(regnr), values=(regnr, name))
 
+    def _apply_read_only_state(self) -> None:
+        reason = getattr(self, "_read_only_reason", "")
+        state = "disabled" if reason else "normal"
+        try:
+            self._btn_assign.configure(state=state)
+            self._btn_remove.configure(state=state)
+        except Exception:
+            pass
     def _update_status(self) -> None:
         if self._tb is None:
             self._status_var.set("Velg et selskap for aa redigere mapping.")
             return
 
-        total = len(self._tb)
+        display_rows = self._display_rows()
+        total = len(display_rows)
         mapped = 0
-        for _, row in self._tb.iterrows():
-            konto = str(row.get("konto", ""))
+        review_count = 0
+        for row in display_rows:
+            konto = str(row.get("konto", "") or "").strip()
+            if konto in self._review_accounts:
+                review_count += 1
+                continue
             if konto in self._overrides:
                 mapped += 1
             elif konto in self._base_regnr and self._base_regnr[konto] is not None:
                 mapped += 1
 
         pct = int(mapped * 100 / total) if total > 0 else 0
-        self._status_var.set(f"{mapped}/{total} kontoer mappet ({pct}%)")
-
+        if review_count:
+            status = f"{mapped}/{total} kontoer mappet ({pct}%) | {review_count} mappeavvik"
+        else:
+            status = f"{mapped}/{total} kontoer mappet ({pct}%)"
+        reason = getattr(self, "_read_only_reason", "")
+        if reason:
+            status = f"{status} | {reason}"
+        self._status_var.set(status)
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def _on_assign(self) -> None:
         """Assign selected accounts to selected regnskapslinje."""
+        if getattr(self, "_read_only_reason", ""):
+            return
         if self._company_id is None:
             return
 
@@ -385,6 +501,8 @@ class MappingTab(ttk.Frame):  # type: ignore[misc]
 
     def _on_remove(self) -> None:
         """Remove override for selected accounts (revert to interval mapping)."""
+        if getattr(self, "_read_only_reason", ""):
+            return
         if self._company_id is None:
             return
 

@@ -79,8 +79,8 @@ def build_bilag_rows(df_combo: pd.DataFrame, df_sel: pd.DataFrame, df_mot: pd.Da
     idx = sorted(df_combo["Bilag_str"].dropna().unique().tolist())
     df_rows = pd.DataFrame(index=idx)
     df_rows["Bilag"] = df_rows.index
-    df_rows["Dato"] = date_by_bilag.reindex(idx) if date_by_bilag is not None else ""
-    df_rows["Tekst"] = text_by_bilag.reindex(idx) if text_by_bilag is not None else ""
+    df_rows["Dato"] = date_by_bilag.reindex(idx).fillna("") if date_by_bilag is not None else ""
+    df_rows["Tekst"] = text_by_bilag.reindex(idx).fillna("") if text_by_bilag is not None else ""
     df_rows["Beløp_valgt"] = sel_by_bilag.reindex(idx).fillna(0.0)
     df_rows["Motbeløp"] = mot_by_bilag.reindex(idx).fillna(0.0)
     df_rows["Kontoer"] = konto_count.reindex(idx).fillna(0).astype(int)

@@ -345,6 +345,9 @@ class SelectionStudio(ttk.Frame):
     def _show_accounts(self) -> None:
         _actions.show_accounts(self)
 
+    def _open_document_control(self) -> None:
+        _actions.open_document_control(self)
+
     def _open_drilldown(self) -> None:
         _actions.open_drilldown(self, open_dialog=_open_bilag_drill_dialog)
 

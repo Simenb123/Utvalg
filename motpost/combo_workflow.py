@@ -342,7 +342,8 @@ def find_expected_combos_by_netting_regnskapslinjer(
     other_mask = ~(selected_focus_mask | expected_mask)
 
     expected_by_bilag = df.loc[expected_mask].groupby("Bilag_str")[belop_col].sum()
-    other_by_bilag = df.loc[other_mask].groupby("Bilag_str")[belop_col].apply(lambda s: s.abs().max())
+    # Netto av "andre" linjer — tillater intern balansering (f.eks. MVA + leverandoergjeld)
+    other_net_by_bilag = df.loc[other_mask].groupby("Bilag_str")[belop_col].sum()
     expected_presence = df.loc[expected_mask].groupby("Bilag_str").size()
     selected_presence = df.loc[selected_focus_mask].groupby("Bilag_str").size()
 
@@ -354,7 +355,7 @@ def find_expected_combos_by_netting_regnskapslinjer(
     bilag_eval["Kombinasjon"] = [str(bilag_to_combo.get(_bilag_str(v), empty_label) or "").strip() for v in bilag_values]
     bilag_eval["SelectedNet"] = selected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
     bilag_eval["ExpectedSum"] = expected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
-    bilag_eval["OtherMaxAbs"] = other_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
+    bilag_eval["OtherNetAbs"] = other_net_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).abs().values
     bilag_eval["HasExpected"] = expected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
     bilag_eval["HasSelected"] = selected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
     bilag_eval["Residual"] = bilag_eval["SelectedNet"] + bilag_eval["ExpectedSum"]
@@ -364,7 +365,7 @@ def find_expected_combos_by_netting_regnskapslinjer(
         & bilag_eval["HasSelected"]
         & bilag_eval["HasExpected"]
         & bilag_eval["Residual"].abs().le(tolerance_value)
-        & bilag_eval["OtherMaxAbs"].le(tolerance_value)
+        & bilag_eval["OtherNetAbs"].le(tolerance_value)
     )
 
     matched_set: set[str] = set()

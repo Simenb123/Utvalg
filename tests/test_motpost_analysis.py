@@ -300,7 +300,8 @@ def test_find_expected_combos_by_netting_regnskapslinjer_uses_selected_source_re
     assert matched == ["1400"]
 
 
-def test_find_expected_combos_by_netting_regnskapslinjer_allows_small_rounding_lines_per_line_threshold() -> None:
+def test_find_expected_combos_by_netting_regnskapslinjer_balanced_rounding_lines_always_pass() -> None:
+    """Rounding lines that net to 0 should never block a match, regardless of tolerance."""
     combos = ["1400, 6800, 6900"]
     rl_map = {
         "4000": "20 Varekostnad",
@@ -313,6 +314,38 @@ def test_find_expected_combos_by_netting_regnskapslinjer_allows_small_rounding_l
             "Bilag": [1, 1, 1, 1],
             "Konto": ["4000", "1400", "6800", "6900"],
             "Beløp": [1000.0, -1000.0, -0.6, 0.6],
+        }
+    )
+
+    matched = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        selected_regnskapslinjer=["20 Varekostnad"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=0.5,
+    )
+
+    # Other lines (6800 + 6900) net to 0 → passes even with strict tolerance
+    assert matched == ["1400, 6800, 6900"]
+
+
+def test_find_expected_combos_by_netting_unbalanced_rounding_lines_blocked_by_tolerance() -> None:
+    """A single unbalanced 'other' line creates a net residual that tolerance catches."""
+    combos = ["1400, 6800"]
+    rl_map = {
+        "4000": "20 Varekostnad",
+        "1400": "146 Varelager",
+        "6800": "70 Annen driftskostnad",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1],
+            "Konto": ["4000", "1400", "6800"],
+            # Selected 1000 + Expected -999 = Residual 1, Other -1 (net)
+            "Beløp": [1000.0, -999.0, -1.0],
         }
     )
 
@@ -337,11 +370,14 @@ def test_find_expected_combos_by_netting_regnskapslinjer_allows_small_rounding_l
         tolerance=0.5,
     )
 
-    assert matched_loose == ["1400, 6800, 6900"]
+    # Residual = 1.0, OtherNet = 1.0 — loose (1.0) passes, strict (0.5) fails
+    assert matched_loose == ["1400, 6800"]
     assert matched_strict == []
 
 
-def test_find_expected_combos_by_netting_regnskapslinjer_rejects_large_unexpected_lines_even_if_they_net_to_zero() -> None:
+def test_find_expected_combos_by_netting_regnskapslinjer_accepts_balanced_other_lines() -> None:
+    """Other lines that net to zero (e.g. 6800: -100, 6900: +100) should NOT block
+    a match — the selected/expected offset is clean and the 'noise' cancels out."""
     combos = ["1400, 6800, 6900"]
     rl_map = {
         "1400": "146 Varelager",
@@ -366,7 +402,109 @@ def test_find_expected_combos_by_netting_regnskapslinjer_rejects_large_unexpecte
         tolerance=1.0,
     )
 
+    # Other lines net to 0 → should match
+    assert matched == ["1400, 6800, 6900"]
+
+
+def test_find_expected_combos_by_netting_regnskapslinjer_rejects_unbalanced_other_lines() -> None:
+    """When other lines do NOT net to ~0, the combo should be rejected."""
+    combos = ["1400, 6800"]
+    rl_map = {
+        "1400": "146 Varelager",
+        "6800": "70 Annen driftskostnad",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1],
+            "Konto": ["4000", "1400", "6800"],
+            "Beløp": [1000.0, -900.0, -100.0],
+        }
+    )
+
+    matched = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+
+    # Residual = 1000 + (-900) = 100, OtherNet = -100 → both exceed tolerance
     assert matched == []
+
+
+def test_find_expected_combos_by_netting_mva_scenario() -> None:
+    """Classic purchase: varekostnad D, varelager K, MVA D, leverandoergjeld K.
+    MVA + leverandoergjeld net to 0 and should not block the match."""
+    combos = ["1400, 2400, 2710"]  # sorted order from build_bilag_to_motkonto_combo
+    rl_map = {
+        "4000": "20 Varekostnad",
+        "1400": "146 Varelager",
+        "2710": "170 Inngaaende merverdiavgift",
+        "2400": "230 Leverandoergjeld",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 1],
+            "Konto": ["4000", "1400", "2710", "2400"],
+            "Beløp": [800.0, -800.0, 200.0, -200.0],
+        }
+    )
+
+    matched = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+
+    assert matched == ["1400, 2400, 2710"]
+
+
+def test_find_expected_combos_by_netting_mva_with_rounding() -> None:
+    """MVA-scenario with small rounding difference in the offset."""
+    combos = ["1400, 2400, 2710"]
+    rl_map = {
+        "4000": "20 Varekostnad",
+        "1400": "146 Varelager",
+        "2710": "170 Inngaaende merverdiavgift",
+        "2400": "230 Leverandoergjeld",
+    }
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1, 1],
+            "Konto": ["4000", "1400", "2710", "2400"],
+            # varekostnad og varelager har 0.50 differanse
+            "Beløp": [800.0, -799.5, 200.0, -200.0],
+        }
+    )
+
+    matched_loose = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=1.0,
+    )
+    matched_strict = find_expected_combos_by_netting_regnskapslinjer(
+        combos,
+        df_scope=df,
+        selected_accounts=["4000"],
+        expected_regnskapslinjer=["146 Varelager"],
+        konto_regnskapslinje_map=rl_map,
+        selected_direction="Debet",
+        tolerance=0.1,
+    )
+
+    assert matched_loose == ["1400, 2400, 2710"]
+    assert matched_strict == []
 
 
 def _find_header_row(ws, must_contain: set[str]) -> int:

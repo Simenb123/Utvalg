@@ -302,14 +302,28 @@ def _open_entry_editor(parent: Any, *, entry: Optional[dict],
     ttk.Entry(dlg, textvariable=var_beskr, width=40).grid(row=row, column=1, sticky="ew", padx=4, pady=4)
 
     row += 1
+    var_error = tk.StringVar(value="")
+    ttk.Label(dlg, textvariable=var_error, foreground="red").grid(
+        row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(2, 0),
+    )
+
+    row += 1
     btn_frame = ttk.Frame(dlg)
-    btn_frame.grid(row=row, column=0, columnspan=2, sticky="e", padx=12, pady=(8, 12))
+    btn_frame.grid(row=row, column=0, columnspan=2, sticky="e", padx=12, pady=(4, 12))
 
     def _ok() -> None:
+        konto = var_konto.get().strip()
+        if not konto:
+            var_error.set("Konto er påkrevd.")
+            return
         try:
             raw = var_belop.get().strip().replace(" ", "").replace(",", ".")
             amount = float(raw)
         except (ValueError, TypeError):
+            var_error.set("Ugyldig beløp.")
+            return
+        if abs(amount) < 0.005:
+            var_error.set("Beløp kan ikke være null.")
             return
         if var_side.get() == "Kredit":
             amount = -abs(amount)
@@ -317,7 +331,7 @@ def _open_entry_editor(parent: Any, *, entry: Optional[dict],
             amount = abs(amount)
         result = {
             "bilag": var_bilag.get().strip(),
-            "konto": var_konto.get().strip(),
+            "konto": konto,
             "belop": amount,
             "beskrivelse": var_beskr.get().strip(),
         }

@@ -19,6 +19,9 @@ import pandas as pd
 from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
 
+import session
+from document_control_dialog import DocumentControlDialog
+from document_control_service import normalize_bilag_key
 from controller_export import export_to_excel
 from .helpers import fmt_amount_no, fmt_int_no
 
@@ -233,6 +236,48 @@ def open_drilldown(studio: Any, *, open_dialog: Any) -> None:
             messagebox.showerror("Drilldown", f"Kunne ikke åpne drilldown.\n\n{e}")
     except Exception as e:
         messagebox.showerror("Drilldown", f"Kunne ikke åpne drilldown.\n\n{e}")
+
+
+def open_document_control(studio: Any) -> None:
+    """Open document control dialog for the selected bilag."""
+
+    selection = studio.tree.selection()
+    if not selection:
+        messagebox.showinfo("Dokumentkontroll", "Velg et bilag i tabellen fÃ¸rst.")
+        return
+
+    values = studio.tree.item(selection[0], "values")
+    if not values:
+        messagebox.showinfo("Dokumentkontroll", "Fant ikke valgt bilag.")
+        return
+
+    bilag = normalize_bilag_key(values[0])
+    if not bilag:
+        messagebox.showinfo("Dokumentkontroll", "Bilagsnummer mangler for valgt rad.")
+        return
+
+    df_source = getattr(studio, "_df_all", None)
+    if df_source is None or getattr(df_source, "empty", True):
+        df_source = getattr(studio, "_df_base", None)
+
+    if df_source is None or getattr(df_source, "empty", True) or "Bilag" not in df_source.columns:
+        messagebox.showinfo("Dokumentkontroll", "Fant ikke bilagslinjer i aktivt datasett.")
+        return
+
+    bilag_series = df_source["Bilag"].map(normalize_bilag_key)
+    df_bilag = df_source.loc[bilag_series == bilag].copy()
+    if df_bilag.empty:
+        messagebox.showinfo("Dokumentkontroll", "Fant ingen regnskapslinjer for valgt bilag.")
+        return
+
+    dialog = DocumentControlDialog(
+        studio,
+        bilag=bilag,
+        df_bilag=df_bilag,
+        client=getattr(session, "client", None),
+        year=getattr(session, "year", None),
+    )
+    dialog.wait_window()
 
 
 def sample_size_touched(studio: Any) -> None:

@@ -16,6 +16,7 @@ class UiSuggestionRow:
     combo_size: int = 1
     within_tolerance: bool = False
     hit_tokens: list[str] = field(default_factory=list)
+    source_index: int | None = None
 
 
 def select_best_suggestion_for_code(
@@ -80,3 +81,122 @@ def select_best_suggestion_for_code(
         ):
             best = suggestion
     return best
+
+
+def _normalized_mapping(mapping_existing: dict[str, str] | None) -> dict[str, str]:
+    return {
+        str(account).strip(): str(code).strip()
+        for account, code in (mapping_existing or {}).items()
+        if str(account).strip() and str(code).strip()
+    }
+
+
+def _normalized_accounts(suggestion: UiSuggestionRow) -> list[str]:
+    return [
+        str(account).strip()
+        for account in getattr(suggestion, "gl_kontoer", ()) or ()
+        if str(account).strip()
+    ]
+
+
+def _score(suggestion: UiSuggestionRow) -> float:
+    try:
+        value = getattr(suggestion, "score", 0.0)
+        return 0.0 if value is None else float(value)
+    except Exception:
+        return 0.0
+
+
+def _ordered_codes(suggestions: Sequence[UiSuggestionRow]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for suggestion in suggestions or ():
+        code = str(getattr(suggestion, "kode", "")).strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        ordered.append(code)
+    return ordered
+
+
+def select_batch_suggestions(
+    suggestions: Sequence[UiSuggestionRow],
+    mapping_existing: dict[str, str] | None,
+    *,
+    min_score: float = 0.85,
+    locked_codes: set[str] | None = None,
+) -> list[UiSuggestionRow]:
+    mapping_nonempty = _normalized_mapping(mapping_existing)
+    reserved_accounts: set[str] = set()
+    selected: list[UiSuggestionRow] = []
+
+    for code in _ordered_codes(suggestions):
+        best = select_best_suggestion_for_code(suggestions, code, locked_codes=locked_codes)
+        if best is None:
+            continue
+        if _score(best) < float(min_score):
+            continue
+
+        accounts = _normalized_accounts(best)
+        if not accounts:
+            continue
+
+        conflict = False
+        for account in accounts:
+            existing_code = mapping_nonempty.get(account)
+            if existing_code and existing_code != code:
+                conflict = True
+                break
+            if account in reserved_accounts:
+                conflict = True
+                break
+        if conflict:
+            continue
+
+        selected.append(best)
+        reserved_accounts.update(accounts)
+    return selected
+
+
+def select_magic_wand_suggestions(
+    suggestions: Sequence[UiSuggestionRow],
+    mapping_existing: dict[str, str] | None,
+    *,
+    unresolved_codes: Sequence[object] | None = None,
+    locked_codes: set[str] | None = None,
+) -> list[UiSuggestionRow]:
+    unresolved = {
+        str(code).strip()
+        for code in (unresolved_codes or ())
+        if str(code).strip()
+    }
+    mapping_nonempty = _normalized_mapping(mapping_existing)
+    reserved_accounts: set[str] = set()
+    selected: list[UiSuggestionRow] = []
+
+    for code in _ordered_codes(suggestions):
+        if unresolved and code not in unresolved:
+            continue
+        best = select_best_suggestion_for_code(suggestions, code, locked_codes=locked_codes)
+        if best is None:
+            continue
+
+        accounts = _normalized_accounts(best)
+        if not accounts:
+            continue
+
+        conflict = False
+        for account in accounts:
+            existing_code = mapping_nonempty.get(account)
+            if existing_code and existing_code != code:
+                conflict = True
+                break
+            if account in reserved_accounts:
+                conflict = True
+                break
+        if conflict:
+            continue
+
+        selected.append(best)
+        reserved_accounts.update(accounts)
+    return selected

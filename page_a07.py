@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import copy
 import json
+import threading
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 import shutil
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Callable, Sequence
 
 import pandas as pd
@@ -14,16 +16,30 @@ import pandas as pd
 import app_paths
 import session
 from a07_feature import (
+    A07Group,
     A07WorkspaceData,
     SuggestConfig,
+    UiSuggestionRow,
+    apply_groups_to_mapping,
     apply_suggestion_to_mapping,
+    build_grouped_a07_df,
+    derive_groups_path,
     export_a07_workbook,
     from_trial_balance,
+    load_a07_groups,
+    load_locks,
     load_mapping,
+    load_project_state,
     mapping_to_assigned_df,
     parse_a07_json,
     reconcile_a07_vs_gl,
+    save_a07_groups,
+    save_locks,
     save_mapping,
+    save_project_state,
+    select_batch_suggestions,
+    select_best_suggestion_for_code,
+    select_magic_wand_suggestions,
     suggest_mapping_candidates,
     unmapped_accounts_df,
 )
@@ -46,24 +62,33 @@ _A07_COLUMNS = (
 )
 
 _CONTROL_COLUMNS = (
-    ("Kode", "Kode", 360, "w"),
-    ("Belop", "Belop", 130, "e"),
-    ("Status", "Status", 95, "w"),
+    ("Kode", "Kode", 220, "w"),
+    ("Navn", "Navn", 220, "w"),
+    ("A07_Belop", "A07", 120, "e"),
+    ("GL_Belop", "GL", 120, "e"),
+    ("Diff", "Diff", 120, "e"),
+    ("AntallKontoer", "Antall", 90, "e"),
+    ("Status", "Status", 90, "w"),
     ("Anbefalt", "Neste", 110, "w"),
 )
 
 _CONTROL_GL_COLUMNS = (
     ("Konto", "Konto", 80, "w"),
-    ("Navn", "Navn", 300, "w"),
+    ("Navn", "Navn", 260, "w"),
+    ("IB", "IB", 100, "e"),
     ("Endring", "Endring", 110, "e"),
+    ("UB", "UB", 100, "e"),
+    ("Kode", "Kode", 160, "w"),
 )
 
 _CONTROL_GL_DATA_COLUMNS = ("Konto", "Navn", "IB", "Endring", "UB", "Kode")
 
 _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
     ("Konto", "Konto", 90, "w"),
-    ("Navn", "Navn", 320, "w"),
+    ("Navn", "Navn", 250, "w"),
+    ("IB", "IB", 110, "e"),
     ("Endring", "Endring", 120, "e"),
+    ("UB", "UB", 110, "e"),
 )
 
 _CONTROL_SUGGESTION_COLUMNS = (
@@ -73,7 +98,20 @@ _CONTROL_SUGGESTION_COLUMNS = (
     ("WithinTolerance", "Innenfor", 80, "center"),
 )
 
-_CONTROL_EXTRA_COLUMNS = ("Navn", "DagensMapping", "Arbeidsstatus", "NesteHandling")
+_CONTROL_EXTRA_COLUMNS = (
+    "DagensMapping",
+    "Arbeidsstatus",
+    "ReconcileStatus",
+    "NesteHandling",
+    "Locked",
+)
+
+_GROUP_COLUMNS = (
+    ("GroupId", "Gruppe", 180, "w"),
+    ("Navn", "Navn", 220, "w"),
+    ("Members", "Medlemmer", 280, "w"),
+    ("Locked", "Låst", 70, "center"),
+)
 
 _SUGGESTION_COLUMNS = (
     ("Kode", "Kode", 140, "w"),
@@ -143,6 +181,12 @@ _SUGGESTION_SCOPE_LABELS = {
     "alle": "Alle forslag",
 }
 
+_BASIS_LABELS = {
+    "Endring": "Endring",
+    "UB": "UB",
+    "IB": "IB",
+}
+
 _CONTROL_DRAG_IDLE_HINT = "Velg kode og konto, eller dra konto inn."
 
 _NUMERIC_COLUMNS_ZERO_DECIMALS = {"AntallKontoer"}
@@ -207,6 +251,10 @@ def _empty_unmapped_df() -> pd.DataFrame:
 
 def _empty_history_df() -> pd.DataFrame:
     return pd.DataFrame(columns=[c[0] for c in _HISTORY_COLUMNS])
+
+
+def _empty_groups_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=[c[0] for c in _GROUP_COLUMNS])
 
 
 def _path_name(value: str | Path | None, *, empty: str = "ikke valgt") -> str:
@@ -407,6 +455,22 @@ def default_a07_source_path(client: str | None, year: str | int | None) -> Path:
     return get_a07_workspace_dir(client, year) / "a07_source.json"
 
 
+def default_a07_mapping_path(client: str | None, year: str | int | None) -> Path:
+    return get_a07_workspace_dir(client, year) / "a07_mapping.json"
+
+
+def default_a07_groups_path(client: str | None, year: str | int | None) -> Path:
+    return get_a07_workspace_dir(client, year) / "a07_groups.json"
+
+
+def default_a07_locks_path(client: str | None, year: str | int | None) -> Path:
+    return get_a07_workspace_dir(client, year) / "a07_locks.json"
+
+
+def default_a07_project_path(client: str | None, year: str | int | None) -> Path:
+    return get_a07_workspace_dir(client, year) / "a07_project.json"
+
+
 def default_global_rulebook_path() -> Path:
     return app_paths.data_dir() / "a07" / "global_full_a07_rulebook.json"
 
@@ -464,7 +528,7 @@ def suggest_default_mapping_path(
     client_s = _clean_context_value(client)
     year_s = _clean_context_value(year)
     if client_s and year_s:
-        return get_a07_workspace_dir(client_s, year_s) / "a07_mapping.json"
+        return default_a07_mapping_path(client_s, year_s)
 
     if a07_path:
         source = Path(a07_path)
@@ -529,16 +593,15 @@ def get_active_trial_balance_path_for_context(
 def get_context_snapshot(
     client: str | None,
     year: str | int | None,
-) -> tuple[
-    tuple[str | None, int | None, int | None],
-    tuple[str | None, int | None, int | None],
-    tuple[str | None, int | None, int | None],
-]:
+) -> tuple[tuple[str | None, int | None, int | None], ...]:
     client_s = _clean_context_value(client)
     year_s = _clean_context_value(year)
 
     source_path = None
     mapping_path = None
+    groups_path = None
+    locks_path = None
+    project_path = None
     if client_s and year_s:
         source_candidate = default_a07_source_path(client_s, year_s)
         if source_candidate.exists():
@@ -552,12 +615,47 @@ def get_context_snapshot(
         if mapping_candidate.exists():
             mapping_path = mapping_candidate
 
+        groups_candidate = default_a07_groups_path(client_s, year_s)
+        if groups_candidate.exists():
+            groups_path = groups_candidate
+
+        locks_candidate = default_a07_locks_path(client_s, year_s)
+        if locks_candidate.exists():
+            locks_path = locks_candidate
+
+        project_candidate = default_a07_project_path(client_s, year_s)
+        if project_candidate.exists():
+            project_path = project_candidate
+
     tb_path = get_active_trial_balance_path_for_context(client_s, year_s)
     return (
         _path_signature(tb_path),
         _path_signature(source_path),
         _path_signature(mapping_path),
+        _path_signature(groups_path),
+        _path_signature(locks_path),
+        _path_signature(project_path),
     )
+
+
+def build_groups_df(groups: dict[str, A07Group], *, locked_codes: set[str] | None = None) -> pd.DataFrame:
+    if not groups:
+        return _empty_groups_df()
+
+    locked = {str(code).strip() for code in (locked_codes or set()) if str(code).strip()}
+    rows: list[dict[str, object]] = []
+    for group_id, group in sorted(groups.items(), key=lambda item: item[0]):
+        members = [str(code).strip() for code in (group.member_codes or []) if str(code).strip()]
+        rows.append(
+            {
+                "GroupId": str(group_id),
+                "Navn": str(group.group_name or group_id).strip() or str(group_id),
+                "Members": ", ".join(members),
+                "Locked": str(group_id).strip() in locked,
+            }
+        )
+
+    return pd.DataFrame(rows, columns=[c[0] for c in _GROUP_COLUMNS])
 
 
 def load_active_trial_balance_for_context(
@@ -842,7 +940,12 @@ def save_matcher_settings(data: object, path: str | Path | None = None) -> Path:
     return target
 
 
-def build_suggest_config(rulebook_path: str | Path | None, matcher_settings: object) -> SuggestConfig:
+def build_suggest_config(
+    rulebook_path: str | Path | None,
+    matcher_settings: object,
+    *,
+    basis_col: str | None = None,
+) -> SuggestConfig:
     settings = normalize_matcher_settings(matcher_settings)
     return SuggestConfig(
         rulebook_path=str(rulebook_path) if rulebook_path else None,
@@ -853,6 +956,8 @@ def build_suggest_config(rulebook_path: str | Path | None, matcher_settings: obj
         top_suggestions_per_code=int(settings["top_suggestions_per_code"]),
         historical_account_boost=float(settings["historical_account_boost"]),
         historical_combo_boost=float(settings["historical_combo_boost"]),
+        basis_strategy="fixed" if basis_col else "per_code",
+        basis=str(basis_col or "Endring"),
     )
 
 
@@ -996,15 +1101,21 @@ def build_a07_overview_df(a07_df: pd.DataFrame, reconcile_df: pd.DataFrame) -> p
         belop = row.get("Belop")
         status = "Ikke mappet"
         kontoer = ""
+        gl_belop = None
+        diff = None
+        account_count = 0
 
         if code.lower() in EXCLUDED_A07_CODES:
             status = "Ekskludert"
         elif code in reconcile_lookup:
             reconcile_row = reconcile_lookup[code]
             kontoer = str(reconcile_row.get("Kontoer") or "").strip()
+            gl_belop = reconcile_row.get("GL_Belop")
+            diff = reconcile_row.get("Diff")
+            account_count = int(reconcile_row.get("AntallKontoer", 0) or 0)
             if bool(reconcile_row.get("WithinTolerance", False)):
                 status = "OK"
-            elif int(reconcile_row.get("AntallKontoer", 0) or 0) > 0:
+            elif account_count > 0:
                 status = "Avvik"
 
         rows.append(
@@ -1012,12 +1123,18 @@ def build_a07_overview_df(a07_df: pd.DataFrame, reconcile_df: pd.DataFrame) -> p
                 "Kode": code,
                 "Navn": navn,
                 "Belop": belop,
+                "GL_Belop": gl_belop,
+                "Diff": diff,
+                "AntallKontoer": account_count,
                 "Status": status,
                 "Kontoer": kontoer,
             }
         )
 
-    return pd.DataFrame(rows, columns=["Kode", "Navn", "Belop", "Status", "Kontoer"])
+    return pd.DataFrame(
+        rows,
+        columns=["Kode", "Navn", "Belop", "GL_Belop", "Diff", "AntallKontoer", "Status", "Kontoer"],
+    )
 
 
 def count_unsolved_a07_codes(a07_overview_df: pd.DataFrame) -> int:
@@ -1208,15 +1325,83 @@ def select_safe_history_codes(history_compare_df: pd.DataFrame) -> list[str]:
     return selected
 
 
-def best_suggestion_row_for_code(suggestions_df: pd.DataFrame, code: str | None) -> pd.Series | None:
+def _ui_suggestion_row_from_series(row: pd.Series) -> UiSuggestionRow:
+    accounts = _parse_konto_tokens(row.get("ForslagKontoer"))
+    try:
+        a07_belop = float(row.get("A07_Belop") or 0.0)
+    except Exception:
+        a07_belop = 0.0
+    try:
+        gl_sum = float(row.get("GL_Sum") or 0.0)
+    except Exception:
+        gl_sum = 0.0
+    try:
+        diff = float(row.get("Diff") or 0.0)
+    except Exception:
+        diff = 0.0
+    try:
+        score = float(row.get("Score") or 0.0)
+    except Exception:
+        score = 0.0
+    try:
+        combo_size = int(row.get("ComboSize") or len(accounts) or 1)
+    except Exception:
+        combo_size = max(len(accounts), 1)
+    hit_raw = row.get("HitTokens")
+    if isinstance(hit_raw, (list, tuple, set)):
+        hit_tokens = [str(value).strip() for value in hit_raw if str(value).strip()]
+    else:
+        hit_tokens = [token.strip() for token in str(hit_raw or "").replace(";", ",").split(",") if token.strip()]
+    return UiSuggestionRow(
+        kode=str(row.get("Kode") or "").strip(),
+        kode_navn=str(row.get("KodeNavn") or row.get("Navn") or row.get("Kode") or "").strip(),
+        a07_belop=a07_belop,
+        gl_kontoer=accounts,
+        gl_sum=gl_sum,
+        diff=diff,
+        score=score,
+        combo_size=combo_size,
+        within_tolerance=bool(row.get("WithinTolerance", False)),
+        hit_tokens=hit_tokens,
+        source_index=int(row.name) if isinstance(row.name, (int, float)) else None,
+    )
+
+
+def best_suggestion_row_for_code(
+    suggestions_df: pd.DataFrame,
+    code: str | None,
+    *,
+    locked_codes: set[str] | None = None,
+) -> pd.Series | None:
     code_s = str(code or "").strip()
     if not code_s or suggestions_df is None or suggestions_df.empty or "Kode" not in suggestions_df.columns:
         return None
 
-    matches = suggestions_df.loc[suggestions_df["Kode"].astype(str).str.strip() == code_s]
+    matches = suggestions_df.loc[suggestions_df["Kode"].astype(str).str.strip() == code_s].copy()
     if matches.empty:
         return None
-    return matches.iloc[0]
+
+    ui_rows = [_ui_suggestion_row_from_series(row) for _, row in matches.iterrows()]
+    best_ui = select_best_suggestion_for_code(ui_rows, code_s, locked_codes=locked_codes)
+    if best_ui is None:
+        return None
+
+    if best_ui.source_index is not None and best_ui.source_index in matches.index:
+        try:
+            return matches.loc[best_ui.source_index]
+        except Exception:
+            pass
+
+    for _, row in matches.iterrows():
+        ui_row = _ui_suggestion_row_from_series(row)
+        if (
+            ui_row.kode == best_ui.kode
+            and ui_row.gl_kontoer == best_ui.gl_kontoer
+            and abs(ui_row.diff - best_ui.diff) < 1e-9
+            and abs((ui_row.score or 0.0) - (best_ui.score or 0.0)) < 1e-9
+        ):
+            return row
+    return None
 
 
 # Compact control summaries keep the workspace readable in the pilot UI.
@@ -1264,7 +1449,12 @@ def build_control_suggestion_effect_summary(
     return f"Erstatter {current_text} med {suggested_text} | Diff {diff} | {status_text}"
 
 
-def build_control_accounts_summary(accounts_df: pd.DataFrame, code: str | None) -> str:
+def build_control_accounts_summary(
+    accounts_df: pd.DataFrame,
+    code: str | None,
+    *,
+    basis_col: str = "Endring",
+) -> str:
     code_s = str(code or "").strip()
     if not code_s:
         return "Velg kode i hoyre liste for aa se mappede kontoer."
@@ -1272,7 +1462,10 @@ def build_control_accounts_summary(accounts_df: pd.DataFrame, code: str | None) 
         return f"Ingen kontoer er mappet til {code_s} enna."
 
     count = int(len(accounts_df))
-    total_raw = accounts_df.get("Endring", pd.Series(dtype=object)).sum()
+    value_column = str(basis_col or "Endring").strip()
+    if value_column not in accounts_df.columns:
+        value_column = "Endring"
+    total_raw = accounts_df.get(value_column, pd.Series(dtype=object)).sum()
     try:
         total_endring = _format_picker_amount(float(total_raw)) or "-"
     except Exception:
@@ -1283,7 +1476,7 @@ def build_control_accounts_summary(accounts_df: pd.DataFrame, code: str | None) 
     if not kontoer:
         kontoer = "-"
     suffix = "konto" if count == 1 else "kontoer"
-    return f"{count} {suffix} | Endring {total_endring} | {kontoer}"
+    return f"{count} {suffix} | {value_column} {total_endring} | {kontoer}"
 
 
 def control_recommendation_label(
@@ -1405,7 +1598,7 @@ def filter_control_queue_df(control_df: pd.DataFrame, view_key: str | None) -> p
     elif view_s == "manuell":
         mask = statuses == "Trenger manuell mapping"
     elif view_s == "ferdig":
-        mask = statuses == "Ferdig"
+        mask = statuses.isin(["Ferdig", "Låst"])
     else:
         return control_df.reset_index(drop=True)
     return control_df.loc[mask].reset_index(drop=True)
@@ -1435,15 +1628,17 @@ def build_control_queue_df(
     mapping_current: dict[str, str],
     mapping_previous: dict[str, str],
     gl_df: pd.DataFrame,
+    locked_codes: set[str] | None = None,
 ) -> pd.DataFrame:
     if a07_overview_df is None or a07_overview_df.empty:
         return _empty_control_df()
 
+    locked = {str(code).strip() for code in (locked_codes or set()) if str(code).strip()}
     rows: list[dict[str, object]] = []
     for _, row in a07_overview_df.iterrows():
         code = str(row.get("Kode") or "").strip()
         navn = str(row.get("Navn") or "").strip()
-        status = str(row.get("Status") or "").strip()
+        reconcile_status = str(row.get("Status") or "").strip()
         current_accounts = accounts_for_code(mapping_current, code)
         history_accounts = safe_previous_accounts_for_code(
             code,
@@ -1451,19 +1646,23 @@ def build_control_queue_df(
             mapping_previous=mapping_previous,
             gl_df=gl_df,
         )
-        best_row = best_suggestion_row_for_code(suggestions_df, code)
+        best_row = best_suggestion_row_for_code(suggestions_df, code, locked_codes=locked)
         next_action = control_next_action_label(
-            status,
+            reconcile_status,
             has_history=bool(history_accounts),
             best_suggestion=best_row,
         )
-        if status in {"OK", "Ekskludert"}:
+        if code in locked:
+            work_status = "Låst"
+        elif reconcile_status in {"OK", "Ekskludert"}:
             work_status = "Ferdig"
         elif next_action in {"Bruk historikk.", "Bruk beste forslag."}:
             work_status = "Trenger vurdering"
         else:
             work_status = "Trenger manuell mapping"
-        if work_status == "Ferdig":
+        if work_status == "Låst":
+            display_status = "Låst"
+        elif work_status == "Ferdig":
             display_status = "Ferdig"
         elif work_status == "Trenger vurdering":
             display_status = "Vurdering"
@@ -1479,12 +1678,17 @@ def build_control_queue_df(
             {
                 "Kode": code,
                 "Navn": navn,
-                "Belop": row.get("Belop"),
+                "A07_Belop": row.get("Belop"),
+                "GL_Belop": row.get("GL_Belop"),
+                "Diff": row.get("Diff"),
+                "AntallKontoer": row.get("AntallKontoer"),
                 "Status": display_status,
                 "DagensMapping": ", ".join(current_accounts),
                 "Anbefalt": recommended,
                 "NesteHandling": next_action,
                 "Arbeidsstatus": work_status,
+                "ReconcileStatus": reconcile_status,
+                "Locked": code in locked,
             }
         )
 
@@ -1493,12 +1697,15 @@ def build_control_queue_df(
         return out
 
     status_priority = {
+        "Låst": 0,
         "Trenger manuell mapping": 0,
         "Trenger vurdering": 1,
         "Ferdig": 2,
     }
     work_status = out.get("Arbeidsstatus", pd.Series(index=out.index, dtype="object")).fillna("").astype(str)
-    belop_abs = pd.to_numeric(out.get("Belop"), errors="coerce").abs().fillna(0)
+    diff_abs = pd.to_numeric(out.get("Diff"), errors="coerce").abs()
+    a07_abs = pd.to_numeric(out.get("A07_Belop"), errors="coerce").abs()
+    belop_abs = diff_abs.where(diff_abs.notna() & diff_abs.ne(0), a07_abs).fillna(0)
     sort_df = out.assign(
         _status_priority=work_status.map(status_priority).fillna(9),
         _belop_abs=belop_abs,
@@ -1589,17 +1796,20 @@ def filter_control_gl_df(
 
 def build_control_bucket_summary(control_df: pd.DataFrame) -> str:
     if control_df is None or control_df.empty or "Arbeidsstatus" not in control_df.columns:
-        return "Ferdig 0 | Vurdering 0 | Manuell 0"
+        return "Låste 0 | Ferdig 0 | Vurdering 0 | Manuell 0"
 
     statuses = control_df["Arbeidsstatus"].astype(str).str.strip()
+    locked = int((statuses == "Låst").sum())
     done = int((statuses == "Ferdig").sum())
     review = int((statuses == "Trenger vurdering").sum())
     manual = int((statuses == "Trenger manuell mapping").sum())
-    return f"Ferdig {done} | Vurdering {review} | Manuell {manual}"
+    return f"Låste {locked} | Ferdig {done} | Vurdering {review} | Manuell {manual}"
 
 
 def control_tree_tag(work_status: object) -> str:
     status_s = str(work_status or "").strip()
+    if status_s == "Låst":
+        return "control_done"
     if status_s == "Ferdig":
         return "control_done"
     if status_s == "Trenger vurdering":
@@ -1701,57 +1911,22 @@ def select_batch_suggestion_rows(
     mapping_existing: dict[str, str],
     *,
     min_score: float = 0.85,
+    locked_codes: set[str] | None = None,
 ) -> list[int]:
     if suggestions_df is None or suggestions_df.empty:
         return []
 
-    mapping_nonempty = {
-        str(account).strip(): str(code).strip()
-        for account, code in (mapping_existing or {}).items()
-        if str(account).strip() and str(code).strip()
-    }
-
-    selected_rows: list[int] = []
-    seen_codes: set[str] = set()
-    reserved_accounts: set[str] = set()
-
-    for idx, row in suggestions_df.iterrows():
-        code = str(row.get("Kode") or "").strip()
-        if not code or code in seen_codes:
-            continue
-
-        if not bool(row.get("WithinTolerance", False)):
-            continue
-
-        try:
-            score = float(row.get("Score") or 0.0)
-        except Exception:
-            score = 0.0
-        if score < float(min_score):
-            continue
-
-        accounts = _parse_konto_tokens(row.get("ForslagKontoer"))
-        if not accounts:
-            continue
-
-        conflict = False
-        for account in accounts:
-            existing_code = mapping_nonempty.get(account)
-            if existing_code and existing_code != code:
-                conflict = True
-                break
-            if account in reserved_accounts:
-                conflict = True
-                break
-
-        if conflict:
-            continue
-
-        selected_rows.append(int(idx))
-        seen_codes.add(code)
-        reserved_accounts.update(accounts)
-
-    return selected_rows
+    selected_rows = select_batch_suggestions(
+        [_ui_suggestion_row_from_series(row) for _, row in suggestions_df.iterrows()],
+        mapping_existing,
+        min_score=min_score,
+        locked_codes=locked_codes,
+    )
+    return [
+        int(row.source_index)
+        for row in selected_rows
+        if row.source_index is not None
+    ]
 
 
 def select_magic_wand_suggestion_rows(
@@ -1759,57 +1934,22 @@ def select_magic_wand_suggestion_rows(
     mapping_existing: dict[str, str],
     *,
     unresolved_codes: Sequence[object] | None = None,
+    locked_codes: set[str] | None = None,
 ) -> list[int]:
     if suggestions_df is None or suggestions_df.empty:
         return []
 
-    unresolved_set = {
-        str(code).strip()
-        for code in (unresolved_codes or ())
-        if str(code).strip()
-    }
-
-    mapping_nonempty = {
-        str(account).strip(): str(code).strip()
-        for account, code in (mapping_existing or {}).items()
-        if str(account).strip() and str(code).strip()
-    }
-
-    selected_rows: list[int] = []
-    seen_codes: set[str] = set()
-    reserved_accounts: set[str] = set()
-
-    for idx, row in suggestions_df.iterrows():
-        code = str(row.get("Kode") or "").strip()
-        if not code or code in seen_codes:
-            continue
-        if unresolved_set and code not in unresolved_set:
-            continue
-        if not bool(row.get("WithinTolerance", False)):
-            continue
-
-        accounts = _parse_konto_tokens(row.get("ForslagKontoer"))
-        if not accounts:
-            continue
-
-        conflict = False
-        for account in accounts:
-            existing_code = mapping_nonempty.get(account)
-            if existing_code and existing_code != code:
-                conflict = True
-                break
-            if account in reserved_accounts:
-                conflict = True
-                break
-
-        if conflict:
-            continue
-
-        selected_rows.append(int(idx))
-        seen_codes.add(code)
-        reserved_accounts.update(accounts)
-
-    return selected_rows
+    selected_rows = select_magic_wand_suggestions(
+        [_ui_suggestion_row_from_series(row) for _, row in suggestions_df.iterrows()],
+        mapping_existing,
+        unresolved_codes=unresolved_codes,
+        locked_codes=locked_codes,
+    )
+    return [
+        int(row.source_index)
+        for row in selected_rows
+        if row.source_index is not None
+    ]
 
 
 def open_manual_mapping_dialog(
@@ -2009,6 +2149,7 @@ class A07Page(ttk.Frame):
         self.workspace = A07WorkspaceData(
             a07_df=_empty_a07_df(),
             gl_df=_empty_gl_df(),
+            source_a07_df=_empty_a07_df(),
             mapping={},
             suggestions=None,
         )
@@ -2016,6 +2157,7 @@ class A07Page(ttk.Frame):
         self.control_df = _empty_control_df()
         self.control_gl_df = pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
         self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
+        self.groups_df = _empty_groups_df()
         self.reconcile_df = _empty_reconcile_df()
         self.mapping_df = _empty_mapping_df()
         self.unmapped_df = _empty_unmapped_df()
@@ -2026,6 +2168,9 @@ class A07Page(ttk.Frame):
         self.a07_path: Path | None = None
         self.tb_path: Path | None = None
         self.mapping_path: Path | None = None
+        self.groups_path: Path | None = None
+        self.locks_path: Path | None = None
+        self.project_path: Path | None = None
         self.rulebook_path: Path | None = None
         self.previous_mapping_path: Path | None = None
         self.previous_mapping_year: str | None = None
@@ -2037,6 +2182,22 @@ class A07Page(ttk.Frame):
         self._drag_unmapped_account: str | None = None
         self._drag_control_accounts: list[str] = []
         self._control_details_auto_revealed = False
+        self._session_refresh_job: str | None = None
+        self._support_refresh_job: str | None = None
+        self._refresh_in_progress = False
+        self._pending_session_refresh = False
+        self._support_views_ready = False
+        self._support_views_dirty = True
+        self._refresh_generation = 0
+        self._restore_thread: threading.Thread | None = None
+        self._restore_result: dict[str, object] | None = None
+        self._core_refresh_thread: threading.Thread | None = None
+        self._core_refresh_result: dict[str, object] | None = None
+        self._support_refresh_thread: threading.Thread | None = None
+        self._support_refresh_result: dict[str, object] | None = None
+        self._loaded_support_tabs: set[str] = set()
+        self._pending_focus_code: str | None = None
+        self._suspend_selection_sync = False
 
         self.summary_var = tk.StringVar(value="Ingen A07-data lastet ennå.")
         self.status_var = tk.StringVar(value="Last A07 JSON for aa starte.")
@@ -2061,6 +2222,7 @@ class A07Page(ttk.Frame):
         self.control_accounts_summary_var = tk.StringVar(value="Velg kode i hoyre liste for aa se mappede kontoer.")
         self.control_drag_var = tk.StringVar(value=_CONTROL_DRAG_IDLE_HINT)
         self.control_bucket_var = tk.StringVar(value="Ferdig 0 | Vurdering 0 | Manuell 0")
+        self.basis_var = tk.StringVar(value=_BASIS_LABELS["Endring"])
         self.a07_filter_var = tk.StringVar(value="neste")
         self.a07_filter_label_var = tk.StringVar(value=_CONTROL_VIEW_LABELS["neste"])
         self.control_code_filter_var = tk.StringVar(value="")
@@ -2076,9 +2238,12 @@ class A07Page(ttk.Frame):
             parent.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
         except Exception:
             pass
-        self.refresh_from_session()
+        self._schedule_session_refresh()
 
     def refresh_from_session(self, session_module=session) -> None:
+        if self._refresh_in_progress:
+            self._pending_session_refresh = True
+            return
         context = self._session_context(session_module)
         snapshot = get_context_snapshot(*context)
         if context != self._context_key or snapshot != self._context_snapshot:
@@ -2088,8 +2253,463 @@ class A07Page(ttk.Frame):
             return
         self._update_summary()
 
+    def _schedule_session_refresh(self, delay_ms: int = 1) -> None:
+        if self._session_refresh_job is not None:
+            try:
+                self.after_cancel(self._session_refresh_job)
+            except Exception:
+                pass
+            self._session_refresh_job = None
+
+        def _run() -> None:
+            self._session_refresh_job = None
+            self.refresh_from_session()
+
+        try:
+            self._session_refresh_job = self.after(delay_ms, _run)
+        except Exception:
+            self.refresh_from_session()
+
+    def _cancel_support_refresh(self) -> None:
+        if self._support_refresh_job is None:
+            return
+        try:
+            self.after_cancel(self._support_refresh_job)
+        except Exception:
+            pass
+        self._support_refresh_job = None
+
+    def _schedule_support_refresh(self) -> None:
+        if self._support_views_ready and not self._support_views_dirty:
+            if self._active_support_tab_key() in self._loaded_support_tabs:
+                self._render_active_support_tab(force=True)
+            return
+        self._cancel_support_refresh()
+
+        def _run() -> None:
+            self._support_refresh_job = None
+            self._refresh_support_views()
+
+        try:
+            self._support_refresh_job = self.after(60, _run)
+        except Exception:
+            self._refresh_support_views()
+
+    def _next_refresh_generation(self) -> int:
+        self._refresh_generation += 1
+        return self._refresh_generation
+
+    def _start_context_restore(self, client: str | None, year: str | None) -> None:
+        token = self._next_refresh_generation()
+        self.status_var.set("Laster A07-kontekst...")
+        self.details_var.set("Laster saldobalanse, mapping og prosjektoppsett i bakgrunnen...")
+        result_box: dict[str, object] = {"token": token}
+
+        def _worker() -> None:
+            try:
+                gl_df, tb_path = load_active_trial_balance_for_context(client, year)
+                source_a07_df = _empty_a07_df()
+                a07_df = _empty_a07_df()
+                a07_path: Path | None = None
+                source_path = default_a07_source_path(client, year)
+                if source_path.exists():
+                    try:
+                        source_a07_df = parse_a07_json(source_path)
+                        a07_df = source_a07_df.copy()
+                        a07_path = source_path
+                    except Exception:
+                        source_a07_df = _empty_a07_df()
+                        a07_df = _empty_a07_df()
+                        a07_path = None
+
+                mapping: dict[str, str] = {}
+                mapping_path: Path | None = None
+                mapping_candidate = suggest_default_mapping_path(a07_path, client=client, year=year)
+                if mapping_candidate.exists():
+                    try:
+                        mapping = load_mapping(mapping_candidate)
+                        mapping_path = mapping_candidate
+                    except Exception:
+                        mapping = {}
+                        mapping_path = None
+
+                groups: dict[str, A07Group] = {}
+                groups_path: Path | None = None
+                locks: set[str] = set()
+                locks_path: Path | None = None
+                project_meta: dict[str, object] = {}
+                project_path: Path | None = None
+                if client and year:
+                    try:
+                        groups_path = default_a07_groups_path(client, year)
+                        groups = load_a07_groups(groups_path)
+                    except Exception:
+                        groups = {}
+                        groups_path = None
+                    try:
+                        locks_path = default_a07_locks_path(client, year)
+                        locks = load_locks(locks_path)
+                    except Exception:
+                        locks = set()
+                        locks_path = None
+                    try:
+                        project_path = default_a07_project_path(client, year)
+                        project_meta = load_project_state(project_path)
+                    except Exception:
+                        project_meta = {}
+                        project_path = None
+
+                basis_col = str(project_meta.get("basis_col") or "Endring").strip()
+                if basis_col not in _BASIS_LABELS:
+                    basis_col = "Endring"
+
+                (
+                    previous_mapping,
+                    previous_mapping_path,
+                    previous_mapping_year,
+                ) = load_previous_year_mapping_for_context(client, year)
+
+                result_box["payload"] = {
+                    "gl_df": gl_df,
+                    "tb_path": tb_path,
+                    "source_a07_df": source_a07_df,
+                    "a07_df": a07_df,
+                    "a07_path": a07_path,
+                    "mapping": mapping,
+                    "mapping_path": mapping_path,
+                    "groups": groups,
+                    "groups_path": groups_path,
+                    "locks": locks,
+                    "locks_path": locks_path,
+                    "project_meta": project_meta,
+                    "project_path": project_path,
+                    "basis_col": basis_col,
+                    "previous_mapping": previous_mapping,
+                    "previous_mapping_path": previous_mapping_path,
+                    "previous_mapping_year": previous_mapping_year,
+                    "rulebook_path": resolve_rulebook_path(client, year),
+                    "pending_focus_code": str(project_meta.get("selected_code") or "").strip() or None,
+                }
+            except Exception as exc:
+                result_box["error"] = exc
+
+        thread = threading.Thread(target=_worker, name=f"A07ContextRestore-{token}", daemon=True)
+        self._restore_thread = thread
+        self._restore_result = result_box
+        thread.start()
+        self.after(25, lambda: self._poll_context_restore(token))
+
+    def _poll_context_restore(self, token: int) -> None:
+        if token != self._refresh_generation:
+            self._restore_thread = None
+            self._restore_result = None
+            return
+        thread = self._restore_thread
+        if thread is not None and thread.is_alive():
+            self.after(25, lambda: self._poll_context_restore(token))
+            return
+        result = self._restore_result or {}
+        self._restore_thread = None
+        self._restore_result = None
+        error = result.get("error")
+        if error is not None:
+            self._refresh_in_progress = False
+            self.status_var.set("A07-kontekst kunne ikke lastes.")
+            self.details_var.set(str(error))
+            if self._pending_session_refresh:
+                self._pending_session_refresh = False
+                self._schedule_session_refresh()
+            return
+        payload = result.get("payload")
+        if isinstance(payload, dict):
+            self._apply_context_restore_payload(payload)
+
+    def _apply_context_restore_payload(self, payload: dict[str, object]) -> None:
+        self.workspace.gl_df = payload["gl_df"]
+        self.tb_path = payload["tb_path"]
+        self.workspace.source_a07_df = payload["source_a07_df"]
+        self.workspace.a07_df = payload["a07_df"]
+        self.a07_path = payload["a07_path"]
+        self.workspace.mapping = payload["mapping"]
+        self.mapping_path = payload["mapping_path"]
+        self.workspace.groups = payload["groups"]
+        self.groups_path = payload["groups_path"]
+        self.workspace.locks = payload["locks"]
+        self.locks_path = payload["locks_path"]
+        self.workspace.project_meta = payload["project_meta"]
+        self.project_path = payload["project_path"]
+        self.workspace.basis_col = payload["basis_col"]
+        self.basis_var.set(_BASIS_LABELS[self.workspace.basis_col])
+        self.previous_mapping = payload["previous_mapping"]
+        self.previous_mapping_path = payload["previous_mapping_path"]
+        self.previous_mapping_year = payload["previous_mapping_year"]
+        self.rulebook_path = payload["rulebook_path"]
+        self._pending_focus_code = payload["pending_focus_code"]
+        self._start_core_refresh()
+
+    def _start_core_refresh(self) -> None:
+        token = self._next_refresh_generation()
+        client, year = self._session_context(session)
+        source_a07_df = (
+            self.workspace.source_a07_df.copy()
+            if self.workspace.source_a07_df is not None
+            else self.workspace.a07_df.copy()
+        )
+        gl_df = self.workspace.gl_df.copy()
+        groups = copy.deepcopy(self.workspace.groups)
+        mapping = dict(self.workspace.mapping)
+        basis_col = str(self.workspace.basis_col or "Endring")
+        locks = set(self.workspace.locks)
+
+        self.status_var.set("Oppdaterer A07...")
+        self.details_var.set("Beregner kontroll- og forslagstabeller i bakgrunnen...")
+
+        result_box: dict[str, object] = {"token": token}
+
+        def _worker() -> None:
+            try:
+                rulebook_path = resolve_rulebook_path(client, year)
+                matcher_settings = load_matcher_settings()
+                (
+                    previous_mapping,
+                    previous_mapping_path,
+                    previous_mapping_year,
+                ) = load_previous_year_mapping_for_context(client, year)
+                grouped_a07_df, membership = build_grouped_a07_df(source_a07_df, groups)
+                effective_mapping = apply_groups_to_mapping(mapping, membership)
+                effective_previous_mapping = apply_groups_to_mapping(previous_mapping, membership)
+
+                suggestions = _empty_suggestions_df()
+                if not grouped_a07_df.empty and not gl_df.empty:
+                    suggestions = suggest_mapping_candidates(
+                        a07_df=grouped_a07_df,
+                        gl_df=gl_df,
+                        mapping_existing=effective_mapping,
+                        config=build_suggest_config(
+                            rulebook_path,
+                            matcher_settings,
+                            basis_col=basis_col,
+                        ),
+                        mapping_prior=effective_previous_mapping,
+                    ).reset_index(drop=True)
+
+                control_gl_df = build_control_gl_df(gl_df, effective_mapping).reset_index(drop=True)
+                a07_overview_df = build_a07_overview_df(grouped_a07_df, _empty_reconcile_df())
+                control_df = build_control_queue_df(
+                    a07_overview_df,
+                    suggestions if suggestions is not None else _empty_suggestions_df(),
+                    mapping_current=effective_mapping,
+                    mapping_previous=effective_previous_mapping,
+                    gl_df=gl_df,
+                    locked_codes=locks,
+                ).reset_index(drop=True)
+                groups_df = build_groups_df(groups, locked_codes=locks).reset_index(drop=True)
+
+                result_box["payload"] = {
+                    "rulebook_path": rulebook_path,
+                    "matcher_settings": matcher_settings,
+                    "previous_mapping": previous_mapping,
+                    "previous_mapping_path": previous_mapping_path,
+                    "previous_mapping_year": previous_mapping_year,
+                    "grouped_a07_df": grouped_a07_df.reset_index(drop=True),
+                    "membership": membership,
+                    "suggestions": suggestions,
+                    "control_gl_df": control_gl_df,
+                    "a07_overview_df": a07_overview_df,
+                    "control_df": control_df,
+                    "groups_df": groups_df,
+                }
+            except Exception as exc:
+                result_box["error"] = exc
+
+        thread = threading.Thread(target=_worker, name=f"A07CoreRefresh-{token}", daemon=True)
+        self._core_refresh_thread = thread
+        self._core_refresh_result = result_box
+        thread.start()
+        self.after(25, lambda: self._poll_core_refresh(token))
+
+    def _poll_core_refresh(self, token: int) -> None:
+        if token != self._refresh_generation:
+            self._core_refresh_thread = None
+            self._core_refresh_result = None
+            return
+        thread = self._core_refresh_thread
+        if thread is not None and thread.is_alive():
+            self.after(25, lambda: self._poll_core_refresh(token))
+            return
+        result = self._core_refresh_result or {}
+        self._core_refresh_thread = None
+        self._core_refresh_result = None
+        error = result.get("error")
+        if error is not None:
+            self._refresh_in_progress = False
+            self.status_var.set("A07-oppdatering feilet.")
+            self.details_var.set(str(error))
+            if self._pending_session_refresh:
+                self._pending_session_refresh = False
+                self._schedule_session_refresh()
+            return
+        payload = result.get("payload")
+        if isinstance(payload, dict):
+            self._apply_core_refresh_payload(payload)
+
+    def _apply_core_refresh_payload(self, payload: dict[str, object]) -> None:
+        self.rulebook_path = payload["rulebook_path"]
+        self.matcher_settings = payload["matcher_settings"]
+        self.previous_mapping = payload["previous_mapping"]
+        self.previous_mapping_path = payload["previous_mapping_path"]
+        self.previous_mapping_year = payload["previous_mapping_year"]
+        self.workspace.a07_df = payload["grouped_a07_df"]
+        self.workspace.membership = payload["membership"]
+        self.workspace.suggestions = payload["suggestions"]
+        self.control_gl_df = payload["control_gl_df"]
+        self.a07_overview_df = payload["a07_overview_df"]
+        self.control_df = payload["control_df"]
+        self.groups_df = payload["groups_df"]
+        self.reconcile_df = _empty_reconcile_df()
+        self.unmapped_df = _empty_unmapped_df()
+        self.mapping_df = _empty_mapping_df()
+        self.history_compare_df = _empty_history_df()
+
+        self._refresh_control_gl_tree()
+        self._refresh_a07_tree()
+        self._fill_tree(self.tree_groups, self.groups_df, _GROUP_COLUMNS, iid_column="GroupId")
+        self._fill_tree(self.tree_control_suggestions, _empty_suggestions_df(), _CONTROL_SUGGESTION_COLUMNS)
+        self._fill_tree(
+            self.tree_control_accounts,
+            pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]),
+            _CONTROL_SELECTED_ACCOUNT_COLUMNS,
+            iid_column="Konto",
+        )
+        self.control_suggestion_summary_var.set("Laster forslag...")
+        self.control_suggestion_effect_var.set("Laster forslag...")
+        self.control_accounts_summary_var.set("Laster mappede kontoer...")
+        self._update_control_panel()
+        self._update_control_transfer_buttons()
+        self._update_summary()
+        pending_focus_code = (self._pending_focus_code or "").strip()
+        self._pending_focus_code = None
+        if pending_focus_code:
+            try:
+                self._focus_control_code(pending_focus_code)
+            except Exception:
+                pass
+        self._support_views_ready = False
+        self._support_views_dirty = True
+        self._loaded_support_tabs.clear()
+
+        self._refresh_in_progress = False
+        if self._pending_session_refresh:
+            self._pending_session_refresh = False
+            self._schedule_session_refresh()
+
+    def _start_support_refresh(self) -> None:
+        token = self._refresh_generation
+        gl_df = self.workspace.gl_df.copy()
+        a07_df = self.workspace.a07_df.copy()
+        effective_mapping = dict(self._effective_mapping())
+        effective_previous_mapping = dict(self._effective_previous_mapping())
+        basis_col = str(self.workspace.basis_col or "Endring")
+
+        result_box: dict[str, object] = {"token": token}
+
+        def _worker() -> None:
+            try:
+                mapping_df = mapping_to_assigned_df(
+                    mapping=effective_mapping,
+                    gl_df=gl_df,
+                    include_empty=False,
+                    basis_col=basis_col,
+                ).reset_index(drop=True)
+                history_compare_df = build_history_comparison_df(
+                    a07_df,
+                    gl_df,
+                    mapping_current=effective_mapping,
+                    mapping_previous=effective_previous_mapping,
+                ).reset_index(drop=True)
+                reconcile_df = _empty_reconcile_df()
+                unmapped_df = _empty_unmapped_df()
+                if not a07_df.empty and not gl_df.empty:
+                    reconcile_df = reconcile_a07_vs_gl(
+                        a07_df=a07_df,
+                        gl_df=gl_df,
+                        mapping=effective_mapping,
+                        basis_col=basis_col,
+                    ).reset_index(drop=True)
+                    unmapped_df = unmapped_accounts_df(
+                        gl_df=gl_df,
+                        mapping=effective_mapping,
+                        basis_col=basis_col,
+                    ).reset_index(drop=True)
+                result_box["payload"] = {
+                    "mapping_df": mapping_df,
+                    "history_compare_df": history_compare_df,
+                    "reconcile_df": reconcile_df,
+                    "unmapped_df": unmapped_df,
+                }
+            except Exception as exc:
+                result_box["error"] = exc
+
+        thread = threading.Thread(target=_worker, name=f"A07SupportRefresh-{token}", daemon=True)
+        self._support_refresh_thread = thread
+        self._support_refresh_result = result_box
+        thread.start()
+        self.after(25, lambda: self._poll_support_refresh(token))
+
+    def _poll_support_refresh(self, token: int) -> None:
+        if token != self._refresh_generation:
+            self._support_refresh_thread = None
+            self._support_refresh_result = None
+            self._support_views_ready = False
+            return
+        thread = self._support_refresh_thread
+        if thread is not None and thread.is_alive():
+            self.after(25, lambda: self._poll_support_refresh(token))
+            return
+        result = self._support_refresh_result or {}
+        self._support_refresh_thread = None
+        self._support_refresh_result = None
+        error = result.get("error")
+        if error is not None:
+            self._support_views_ready = False
+            self.status_var.set("A07-stottevisninger feilet.")
+            self.details_var.set(str(error))
+            return
+        payload = result.get("payload")
+        if isinstance(payload, dict):
+            self._apply_support_refresh_payload(payload)
+
+    def _apply_support_refresh_payload(self, payload: dict[str, object]) -> None:
+        self.mapping_df = payload["mapping_df"]
+        self.history_compare_df = payload["history_compare_df"]
+        self.reconcile_df = payload["reconcile_df"]
+        self.unmapped_df = payload["unmapped_df"]
+
+        self._support_views_ready = True
+        self._support_views_dirty = False
+        self._loaded_support_tabs.clear()
+        active_tab = self._active_support_tab_key()
+        if active_tab in self._loaded_support_tabs:
+            self._render_active_support_tab(force=True)
+        if bool(getattr(self, "_control_details_visible", False)):
+            self._refresh_control_support_trees()
+        self._update_history_details_from_selection()
+        self._update_control_panel()
+        self._update_control_transfer_buttons()
+        self._update_summary()
+
     def _on_visible(self, _event: tk.Event | None = None) -> None:
-        self.refresh_from_session()
+        try:
+            if _event is not None and getattr(_event, "widget", None) is not self:
+                return
+        except Exception:
+            pass
+        try:
+            if not self.winfo_viewable():
+                return
+        except Exception:
+            pass
+        self._schedule_session_refresh(delay_ms=50)
 
     def _on_notebook_tab_changed(self, event: tk.Event | None = None) -> None:
         if event is None:
@@ -2100,7 +2720,7 @@ class A07Page(ttk.Frame):
         except Exception:
             return
         if selected is self:
-            self.refresh_from_session()
+            self._schedule_session_refresh(delay_ms=50)
 
     def _build_ui(self) -> None:
         toolbar = ttk.Frame(self, padding=8)
@@ -2110,6 +2730,16 @@ class A07Page(ttk.Frame):
         ttk.Button(toolbar, text="Oppdater", command=self._refresh_clicked).pack(side="left", padx=(6, 0))
         ttk.Button(toolbar, text="Tryllestav", command=self._magic_match_clicked).pack(side="left", padx=(6, 0))
         ttk.Button(toolbar, text="Eksporter", command=self._export_clicked).pack(side="left", padx=(6, 0))
+        ttk.Label(toolbar, text="Basis:").pack(side="right", padx=(12, 4))
+        self.basis_widget = ttk.Combobox(
+            toolbar,
+            state="readonly",
+            width=10,
+            values=[_BASIS_LABELS[key] for key in _BASIS_LABELS],
+            textvariable=self.basis_var,
+        )
+        self.basis_widget.pack(side="right")
+        self.basis_widget.bind("<<ComboboxSelected>>", lambda _event: self._on_basis_changed())
 
         tools_btn = ttk.Menubutton(toolbar, text="Mer...")
         tools_menu = tk.Menu(tools_btn, tearoff=0)
@@ -2127,6 +2757,12 @@ class A07Page(ttk.Frame):
         tools_menu.add_command(label="Bruk valgt forslag", command=self._apply_selected_suggestion)
         tools_menu.add_command(label="Bruk sikre forslag", command=self._apply_batch_suggestions_clicked)
         tools_menu.add_command(label="Bruk sikre historikkmappinger", command=self._apply_batch_history_mappings)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Opprett A07-gruppe fra valgt kodeutvalg", command=self._create_group_from_selection)
+        tools_menu.add_command(label="Oppløs valgt A07-gruppe", command=self._remove_selected_group)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Lås valgt kode", command=self._lock_selected_code)
+        tools_menu.add_command(label="Lås opp valgt kode", command=self._unlock_selected_code)
         tools_btn["menu"] = tools_menu
         tools_btn.pack(side="left", padx=(12, 0))
 
@@ -2142,17 +2778,7 @@ class A07Page(ttk.Frame):
 
         tab_control = ttk.Frame(workspace_host)
         tab_control.pack(fill="both", expand=True)
-        support_host = ttk.Frame(self)
-        tab_history = ttk.Frame(support_host)
-        tab_suggestions = ttk.Frame(support_host)
-        tab_reconcile = ttk.Frame(support_host)
-        tab_unmapped = ttk.Frame(support_host)
-        tab_mapping = ttk.Frame(support_host)
         self.tab_control = tab_control
-        self.tab_history = tab_history
-        self.tab_suggestions = tab_suggestions
-        self.tab_unmapped = tab_unmapped
-        self.tab_mapping = tab_mapping
 
         a07_actions = ttk.Frame(tab_control, padding=(0, 8, 0, 0))
         a07_actions.pack(fill="x")
@@ -2193,15 +2819,29 @@ class A07Page(ttk.Frame):
         control_workspace.pack(fill="both", expand=True, pady=(8, 0))
         self.control_workspace = control_workspace
 
-        control_top = ttk.Panedwindow(control_workspace, orient="horizontal")
+        # Use a real vertical pane split so the user gets a stable layout and
+        # can reclaim workspace without the old double-geometry bug.
+        control_vertical = ttk.Panedwindow(control_workspace, orient="vertical")
+        control_vertical.pack(fill="both", expand=True)
+        control_top_host = ttk.Frame(control_vertical)
+        control_lower = ttk.Frame(control_vertical)
+        control_vertical.add(control_top_host, weight=5)
+        control_vertical.add(control_lower, weight=2)
+        self.control_vertical_panes = control_vertical
+
+        control_top = ttk.Panedwindow(control_top_host, orient="horizontal")
         control_top.pack(fill="both", expand=True)
 
         control_gl_panel = ttk.LabelFrame(control_top, text="1. Velg konto", padding=(8, 8))
-        control_assign_panel = ttk.Frame(control_top, padding=(2, 10, 2, 0))
-        control_a07_panel = ttk.LabelFrame(control_top, text="2. Velg kode i arbeidskø", padding=(8, 8))
-        control_top.add(control_gl_panel, weight=3)
+        control_assign_panel = ttk.Frame(control_top, width=32, padding=(0, 2, 0, 0))
+        control_a07_panel = ttk.LabelFrame(control_top, text="2. A07 avstemming", padding=(8, 8))
+        control_top.add(control_gl_panel, weight=4)
         control_top.add(control_assign_panel, weight=0)
-        control_top.add(control_a07_panel, weight=4)
+        control_top.add(control_a07_panel, weight=5)
+        try:
+            control_assign_panel.pack_propagate(False)
+        except Exception:
+            pass
 
         control_gl_filters = ttk.Frame(control_gl_panel)
         control_gl_filters.pack(fill="x", pady=(0, 6))
@@ -2235,6 +2875,7 @@ class A07Page(ttk.Frame):
             pass
 
         self.tree_a07 = self._build_tree_tab(control_a07_panel, _CONTROL_COLUMNS)
+        self.tree_a07.configure(selectmode="extended")
         try:
             self.tree_a07.tag_configure("control_done", background="#E2F1EB", foreground="#256D5A")
             self.tree_a07.tag_configure("control_review", background="#FCEBD9", foreground="#9F5B2E")
@@ -2243,34 +2884,35 @@ class A07Page(ttk.Frame):
         except Exception:
             pass
 
-        ttk.Label(
-            control_assign_panel,
-            text="3. Tildel",
-            style="Muted.TLabel",
-            justify="center",
-        ).pack(fill="x", pady=(0, 8))
+        groups_panel = ttk.LabelFrame(control_a07_panel, text="A07-grupper", padding=(8, 6))
+        groups_panel.pack(fill="x", pady=(8, 0))
+        groups_actions = ttk.Frame(groups_panel)
+        groups_actions.pack(fill="x", pady=(0, 6))
+        ttk.Button(groups_actions, text="Opprett gruppe", command=self._create_group_from_selection).pack(side="left")
+        ttk.Button(groups_actions, text="Oppløs gruppe", command=self._remove_selected_group).pack(side="left", padx=(6, 0))
+        self.tree_groups = self._build_tree_tab(groups_panel, _GROUP_COLUMNS)
+        self.tree_groups.configure(height=4)
 
         self.btn_control_assign = ttk.Button(
             control_assign_panel,
-            text="Tildel ->",
+            text="→",
+            width=4,
             command=self._assign_selected_control_mapping,
         )
-        self.btn_control_assign.pack(fill="x")
+        self.btn_control_assign.pack(fill="x", pady=(28, 0))
         self.btn_control_clear = ttk.Button(
             control_assign_panel,
-            text="Fjern",
+            text="←",
+            width=4,
             command=self._clear_selected_control_mapping,
         )
         self.btn_control_clear.pack(fill="x", pady=(8, 0))
         for button in (self.btn_control_assign, self.btn_control_clear):
             button.state(["disabled"])
-
-        control_lower = ttk.Frame(control_workspace)
-        control_lower.pack(fill="x", pady=(8, 0))
         self.control_lower_panel = control_lower
 
-        control_status = ttk.LabelFrame(control_lower, text="Neste steg", padding=(8, 5))
-        control_status.pack(fill="x")
+        control_status = ttk.LabelFrame(control_lower, text="Oppsummering", padding=(8, 4))
+        control_status.pack(fill="x", pady=(4, 0))
         self.control_panel = control_status
         control_status.columnconfigure(0, weight=1)
         control_status.columnconfigure(1, weight=0)
@@ -2283,14 +2925,7 @@ class A07Page(ttk.Frame):
             style="Section.TLabel",
             wraplength=900,
             justify="left",
-        ).pack(anchor="w", pady=(4, 0))
-        ttk.Label(
-            control_status_left,
-            textvariable=self.control_meta_var,
-            style="Muted.TLabel",
-            wraplength=900,
-            justify="left",
-        ).pack(anchor="w", pady=(2, 0))
+        ).pack(anchor="w")
 
         control_actions = ttk.Frame(control_status)
         control_actions.grid(row=0, column=1, sticky="ne", padx=(12, 0))
@@ -2309,24 +2944,10 @@ class A07Page(ttk.Frame):
         for button in (self.btn_control_best, self.btn_control_history):
             button.state(["disabled"])
 
-        ttk.Label(
-            control_status,
-            textvariable=self.control_match_var,
-            style="Muted.TLabel",
-            wraplength=1180,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        self.lbl_control_drag = ttk.Label(
-            control_status,
-            textvariable=self.control_drag_var,
-            style="Muted.TLabel",
-            wraplength=1180,
-            justify="left",
-        )
-        self.lbl_control_drag.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        self.lbl_control_drag = ttk.Label(control_status, text="", style="Muted.TLabel")
 
         control_detail_panes = ttk.Panedwindow(control_lower, orient="vertical")
-        control_detail_panes.pack(fill="both", expand=True, pady=(6, 0))
+        control_detail_panes.pack(fill="x", expand=False, pady=(4, 0))
         self.control_detail_panes = control_detail_panes
 
         control_suggest_panel = ttk.LabelFrame(control_detail_panes, text="Forslag", padding=(8, 8))
@@ -2341,15 +2962,8 @@ class A07Page(ttk.Frame):
             side="right",
             padx=(0, 6),
         )
-        ttk.Label(
-            control_suggest_panel,
-            textvariable=self.control_suggestion_effect_var,
-            style="Muted.TLabel",
-            wraplength=1180,
-            justify="left",
-        ).pack(anchor="w", pady=(0, 4))
         self.tree_control_suggestions = self._build_tree_tab(control_suggest_panel, _CONTROL_SUGGESTION_COLUMNS)
-        self.tree_control_suggestions.configure(height=4)
+        self.tree_control_suggestions.configure(height=3)
         try:
             self.tree_control_suggestions.tag_configure("suggestion_ok", background="#E2F1EB", foreground="#256D5A")
             self.tree_control_suggestions.tag_configure(
@@ -2392,22 +3006,76 @@ class A07Page(ttk.Frame):
         )
         self.tree_control_accounts.configure(height=3)
 
+        control_support_nb = ttk.Notebook(control_lower)
+        control_support_nb.pack(fill="both", expand=True, pady=(4, 0))
+        tab_history = ttk.Frame(control_support_nb)
+        tab_suggestions = ttk.Frame(control_support_nb)
+        tab_reconcile = ttk.Frame(control_support_nb)
+        tab_unmapped = ttk.Frame(control_support_nb)
+        tab_mapping = ttk.Frame(control_support_nb)
+        self.tab_history = tab_history
+        self.tab_suggestions = tab_suggestions
+        self.tab_reconcile = tab_reconcile
+        self.tab_unmapped = tab_unmapped
+        self.tab_mapping = tab_mapping
+
         self.tree_history = self._build_tree_tab(tab_history, _HISTORY_COLUMNS)
+        self.tree_history.configure(height=5)
         self.tree_suggestions = self._build_tree_tab(tab_suggestions, _SUGGESTION_COLUMNS)
+        self.tree_suggestions.configure(height=5)
         try:
             self.tree_suggestions.tag_configure("suggestion_ok", background="#E2F1EB", foreground="#256D5A")
             self.tree_suggestions.tag_configure("suggestion_review", background="#FCEBD9", foreground="#9F5B2E")
             self.tree_suggestions.tag_configure("suggestion_default", background="#FFFFFF", foreground="#1F2430")
         except Exception:
             pass
+        ttk.Label(
+            tab_reconcile,
+            text="A07 vs GL for valgt basis. Diff og antall kontoer brukes som primær avstemmingsflate.",
+            style="Muted.TLabel",
+            wraplength=1180,
+            justify="left",
+        ).pack(anchor="w", fill="x", padx=8, pady=(8, 4))
         self.tree_reconcile = self._build_tree_tab(tab_reconcile, _RECONCILE_COLUMNS)
+        self.tree_reconcile.configure(height=5)
         try:
             self.tree_reconcile.tag_configure("reconcile_ok", background="#E2F1EB", foreground="#256D5A")
             self.tree_reconcile.tag_configure("reconcile_diff", background="#FCE4D6", foreground="#8A3B12")
         except Exception:
             pass
+        ttk.Label(
+            tab_unmapped,
+            text="Umappede GL-kontoer for valgt basis. Brukes til opprydding og drag/drop mot valgt kode.",
+            style="Muted.TLabel",
+            wraplength=1180,
+            justify="left",
+        ).pack(anchor="w", fill="x", padx=8, pady=(8, 4))
         self.tree_unmapped = self._build_tree_tab(tab_unmapped, _UNMAPPED_COLUMNS)
+        self.tree_unmapped.configure(height=5)
+        ttk.Label(
+            tab_mapping,
+            textvariable=self.control_mapping_var,
+            style="Muted.TLabel",
+            wraplength=1180,
+            justify="left",
+        ).pack(anchor="w", fill="x", padx=8, pady=(8, 4))
         self.tree_mapping = self._build_tree_tab(tab_mapping, _MAPPING_COLUMNS)
+        self.tree_mapping.configure(height=5)
+        for detail_tab in (tab_history, tab_suggestions, tab_reconcile, tab_unmapped, tab_mapping):
+            try:
+                for child in detail_tab.winfo_children():
+                    if isinstance(child, ttk.Label):
+                        child.pack_forget()
+            except Exception:
+                pass
+
+        control_support_nb.add(tab_history, text="Historikk")
+        control_support_nb.add(tab_reconcile, text="Reconcile")
+        control_support_nb.add(tab_unmapped, text="Umappede")
+        control_support_nb.add(tab_mapping, text="Mapping")
+        control_support_nb.add(tab_suggestions, text="Forslag+")
+        self.control_support_nb = control_support_nb
+        self.control_support_nb.bind("<<NotebookTabChanged>>", lambda _event: self._on_support_tab_changed(), add="+")
 
         self.tree_control_gl.bind("<<TreeviewSelect>>", lambda _event: self._on_control_gl_selection_changed())
         self.tree_control_gl.bind("<Double-1>", lambda _event: self._run_selected_control_gl_action())
@@ -2429,6 +3097,8 @@ class A07Page(ttk.Frame):
         self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._focus_selected_control_account_in_gl())
         self.tree_control_accounts.bind("<Double-1>", lambda _event: self._open_manual_mapping_clicked())
         self.tree_control_accounts.bind("<Delete>", lambda _event: self._remove_selected_control_accounts())
+        self.tree_groups.bind("<<TreeviewSelect>>", lambda _event: self._on_group_selection_changed())
+        self.tree_groups.bind("<Double-1>", lambda _event: self._focus_selected_group_code())
         self.tree_reconcile.bind("<<TreeviewSelect>>", lambda _event: self._update_history_details_from_selection())
         self.tree_unmapped.bind("<B1-Motion>", self._start_unmapped_drag, add="+")
         self.tree_unmapped.bind("<Double-1>", lambda _event: self._map_selected_unmapped())
@@ -2466,6 +3136,10 @@ class A07Page(ttk.Frame):
         ).pack(anchor="w", pady=(4, 0))
 
         self._set_control_details_visible(False)
+        try:
+            self.after_idle(self._stabilize_control_layout)
+        except Exception:
+            pass
 
         ttk.Label(
             self,
@@ -2475,6 +3149,22 @@ class A07Page(ttk.Frame):
             justify="left",
             padding=(10, 0, 10, 8),
         ).pack(fill="x")
+
+    def _stabilize_control_layout(self) -> None:
+        panes = getattr(self, "control_vertical_panes", None)
+        if panes is None:
+            return
+        try:
+            total_height = int(panes.winfo_height() or 0)
+        except Exception:
+            total_height = 0
+        if total_height <= 0:
+            return
+        target = max(360, total_height - 280)
+        try:
+            panes.sashpos(0, target)
+        except Exception:
+            pass
 
     def _build_tree_tab(self, parent: ttk.Frame, columns: Sequence[tuple[str, str, int, str]]) -> ttk.Treeview:
         frame = ttk.Frame(parent)
@@ -2638,12 +3328,13 @@ class A07Page(ttk.Frame):
                 children = ()
         if code_s not in children:
             return
-        try:
-            self.tree_a07.selection_set(code_s)
-            self.tree_a07.focus(code_s)
-            self.tree_a07.see(code_s)
-        except Exception:
+        if not self._set_tree_selection(self.tree_a07, code_s):
             return
+        try:
+            if code_s in self.tree_groups.get_children():
+                self._set_tree_selection(self.tree_groups, code_s)
+        except Exception:
+            pass
         self._on_control_selection_changed()
 
     def _selected_control_account_ids(self) -> list[str]:
@@ -2672,12 +3363,16 @@ class A07Page(ttk.Frame):
             children = ()
         if konto_s not in children:
             return
+        selector = getattr(self, "_set_tree_selection", None)
+        if callable(selector):
+            selector(self.tree_control_accounts, konto_s)
+            return
         try:
             self.tree_control_accounts.selection_set(konto_s)
             self.tree_control_accounts.focus(konto_s)
             self.tree_control_accounts.see(konto_s)
         except Exception:
-            return
+            pass
 
     def _focus_selected_control_account_in_gl(self) -> None:
         accounts = self._selected_control_account_ids()
@@ -2719,12 +3414,7 @@ class A07Page(ttk.Frame):
         konto_s = str(konto or "").strip()
         if not konto_s:
             return
-        try:
-            self.tree_unmapped.selection_set(konto_s)
-            self.tree_unmapped.focus(konto_s)
-            self.tree_unmapped.see(konto_s)
-        except Exception:
-            return
+        self._set_tree_selection(self.tree_unmapped, konto_s)
 
     def _start_unmapped_drag(self, event: tk.Event | None = None) -> None:
         account = self._tree_iid_from_event(self.tree_unmapped, event)
@@ -2741,12 +3431,7 @@ class A07Page(ttk.Frame):
         if not accounts:
             account = self._tree_iid_from_event(self.tree_control_gl, event)
             if account:
-                try:
-                    self.tree_control_gl.selection_set(account)
-                    self.tree_control_gl.focus(account)
-                    self.tree_control_gl.see(account)
-                except Exception:
-                    pass
+                self._set_tree_selection(self.tree_control_gl, account)
                 accounts = [account]
         self._drag_control_accounts = [str(account).strip() for account in accounts if str(account).strip()]
         self._drag_unmapped_account = None
@@ -2793,12 +3478,16 @@ class A07Page(ttk.Frame):
         code = self._tree_iid_from_event(self.tree_a07, event)
         if not code:
             return
-        try:
-            self.tree_a07.selection_set(code)
-            self.tree_a07.focus(code)
-            self.tree_a07.see(code)
-        except Exception:
-            pass
+        selector = getattr(self, "_set_tree_selection", None)
+        if callable(selector):
+            selector(self.tree_a07, code)
+        else:
+            try:
+                self.tree_a07.selection_set(code)
+                self.tree_a07.focus(code)
+                self.tree_a07.see(code)
+            except Exception:
+                pass
         if len(accounts) == 1:
             hint = f"Slipp konto {accounts[0]} paa kode {code}."
         else:
@@ -2816,6 +3505,9 @@ class A07Page(ttk.Frame):
         *,
         source_label: str = "Mapping satt",
     ) -> None:
+        conflicts = A07Page._locked_mapping_conflicts(self, [konto], target_code=kode)
+        if A07Page._notify_locked_conflicts(self, conflicts, focus_widget=self.tree_a07):
+            return
         konto_s, kode_s = apply_manual_mapping_choice(self.workspace.mapping, konto, kode)
         autosaved = self._autosave_mapping()
         self._refresh_all()
@@ -2839,6 +3531,9 @@ class A07Page(ttk.Frame):
             return
         if not code:
             self._notify_inline("Velg en A07-kode til hoyre forst.", focus_widget=self.tree_a07)
+            return
+        conflicts = A07Page._locked_mapping_conflicts(self, accounts, target_code=code)
+        if A07Page._notify_locked_conflicts(self, conflicts, focus_widget=self.tree_a07):
             return
 
         try:
@@ -2884,6 +3579,9 @@ class A07Page(ttk.Frame):
                 focus_widget=self.tree_control_gl,
             )
             return
+        conflicts = A07Page._locked_mapping_conflicts(self, accounts)
+        if A07Page._notify_locked_conflicts(self, conflicts, focus_widget=self.tree_control_gl):
+            return
 
         try:
             autosaved = self._autosave_mapping()
@@ -2914,6 +3612,9 @@ class A07Page(ttk.Frame):
             self.tree_a07.selection_set(code)
             self.tree_a07.focus(code)
             self.tree_a07.see(code)
+            conflicts = A07Page._locked_mapping_conflicts(self, accounts, target_code=code)
+            if A07Page._notify_locked_conflicts(self, conflicts, focus_widget=self.tree_a07):
+                return
             if len(accounts) == 1:
                 self._apply_account_code_mapping(accounts[0], code, source_label="Drag-and-drop")
             else:
@@ -2966,7 +3667,11 @@ class A07Page(ttk.Frame):
 
     def _selected_suggestion_row(self) -> pd.Series | None:
         try:
-            current_tab = self.nb.nametowidget(self.nb.select())
+            support_nb = getattr(self, "control_support_nb", None)
+            if support_nb is not None:
+                current_tab = support_nb.nametowidget(support_nb.select())
+            else:
+                current_tab = None
         except Exception:
             current_tab = None
 
@@ -2982,10 +3687,6 @@ class A07Page(ttk.Frame):
                 return row
         if focused is self.tree_suggestions:
             row = self._selected_suggestion_row_from_tree(self.tree_suggestions)
-            if row is not None:
-                return row
-        if current_tab is self.tab_control:
-            row = self._selected_suggestion_row_from_tree(self.tree_control_suggestions)
             if row is not None:
                 return row
         if current_tab is self.tab_suggestions:
@@ -3041,6 +3742,11 @@ class A07Page(ttk.Frame):
                         detail_panes.pack_forget()
             except Exception:
                 pass
+        if self._control_details_visible:
+            try:
+                self._refresh_control_support_trees()
+            except Exception:
+                pass
         if toggle_button is not None:
             try:
                 toggle_button.configure(text="Skjul detaljer" if self._control_details_visible else "Vis detaljer")
@@ -3058,7 +3764,8 @@ class A07Page(ttk.Frame):
 
         accounts = self._selected_control_gl_accounts()
         code = self._selected_control_code()
-        has_mapped_account = any(str(self.workspace.mapping.get(account) or "").strip() for account in accounts)
+        effective_mapping = self._effective_mapping()
+        has_mapped_account = any(str(effective_mapping.get(account) or "").strip() for account in accounts)
 
         try:
             if assign_button is not None:
@@ -3099,6 +3806,126 @@ class A07Page(ttk.Frame):
 
         fallback = str(self.suggestion_scope_var.get() or "").strip().lower()
         return fallback or "valgt_kode"
+
+    def _selected_basis(self) -> str:
+        try:
+            label = str(self.basis_widget.get() or "").strip()
+        except Exception:
+            label = ""
+
+        for key, value in _BASIS_LABELS.items():
+            if value == label:
+                return key
+
+        fallback = str(self.basis_var.get() or "").strip()
+        return fallback if fallback in _BASIS_LABELS else "Endring"
+
+    def _selected_control_codes(self) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        try:
+            selection = self.tree_a07.selection()
+        except Exception:
+            selection = ()
+        for item in selection or ():
+            code = str(item or "").strip()
+            if not code or code in seen:
+                continue
+            out.append(code)
+            seen.add(code)
+        return out
+
+    def _selected_group_id(self) -> str | None:
+        try:
+            selection = self.tree_groups.selection()
+        except Exception:
+            selection = ()
+        if not selection:
+            return None
+        group_id = str(selection[0] or "").strip()
+        return group_id or None
+
+    def _next_group_id(self, codes: Sequence[str]) -> str:
+        code_tokens = [str(code).strip() for code in codes if str(code).strip()]
+        slug = "+".join(code_tokens[:4]) or "group"
+        base = f"A07_GROUP:{slug}"
+        if base not in self.workspace.groups:
+            return base
+        idx = 2
+        while f"{base}:{idx}" in self.workspace.groups:
+            idx += 1
+        return f"{base}:{idx}"
+
+    def _effective_mapping(self) -> dict[str, str]:
+        return apply_groups_to_mapping(self.workspace.mapping, self.workspace.membership)
+
+    def _effective_previous_mapping(self) -> dict[str, str]:
+        return apply_groups_to_mapping(self.previous_mapping, self.workspace.membership)
+
+    def _locked_codes(self) -> set[str]:
+        workspace = getattr(self, "workspace", None)
+        locked = getattr(workspace, "locks", None)
+        if not locked:
+            return set()
+        return {str(code).strip() for code in locked if str(code).strip()}
+
+    def _locked_mapping_conflicts(
+        self,
+        accounts: Sequence[object] | None = None,
+        *,
+        target_code: object | None = None,
+    ) -> list[str]:
+        locked = A07Page._locked_codes(self)
+        if not locked:
+            return []
+
+        workspace = getattr(self, "workspace", None)
+        mapping = getattr(workspace, "mapping", None) or {}
+        membership = getattr(workspace, "membership", None) or {}
+        try:
+            effective_mapping = A07Page._effective_mapping(self)
+        except Exception:
+            effective_mapping = {
+                str(account).strip(): str(code).strip()
+                for account, code in mapping.items()
+                if str(account).strip()
+            }
+        conflicts: list[str] = []
+
+        target_code_s = str(target_code or "").strip()
+        if target_code_s and target_code_s in locked:
+            conflicts.append(target_code_s)
+        target_group_code = str(membership.get(target_code_s) or "").strip()
+        if target_group_code and target_group_code in locked and target_group_code not in conflicts:
+            conflicts.append(target_group_code)
+
+        for account in accounts or ():
+            account_s = str(account or "").strip()
+            if not account_s:
+                continue
+            current_code = str(effective_mapping.get(account_s) or mapping.get(account_s) or "").strip()
+            if current_code and current_code in locked and current_code not in conflicts:
+                conflicts.append(current_code)
+
+        return conflicts
+
+    def _notify_locked_conflicts(
+        self,
+        conflicts: Sequence[object],
+        *,
+        focus_widget: object | None = None,
+    ) -> bool:
+        codes = [str(code).strip() for code in conflicts if str(code).strip()]
+        if not codes:
+            return False
+        preview = ", ".join(codes[:3])
+        if len(codes) > 3:
+            preview += ", ..."
+        self._notify_inline(
+            f"Endringen berorer laaste koder: {preview}. Laas opp for du endrer mapping.",
+            focus_widget=focus_widget,
+        )
+        return True
 
     def _notify_inline(self, message: str, *, focus_widget: object | None = None) -> None:
         self.status_var.set(str(message or "").strip())
@@ -3143,32 +3970,20 @@ class A07Page(ttk.Frame):
                 pass
             filtered = filter_control_queue_df(self.control_df, "ferdig")
             filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
-        for item in self.tree_a07.get_children():
-            self.tree_a07.delete(item)
-
-        if filtered is not None and not filtered.empty:
-            for idx, row in filtered.iterrows():
-                values = [self._format_value(row.get(column_id), column_id) for column_id, *_rest in _CONTROL_COLUMNS]
-                iid = str(row.get("Kode") or "").strip() or str(idx)
-                self.tree_a07.insert(
-                    "",
-                    "end",
-                    iid=iid,
-                    values=values,
-                    tags=(control_tree_tag(row.get("Arbeidsstatus")),),
-                )
+        self._fill_tree(
+            self.tree_a07,
+            filtered,
+            _CONTROL_COLUMNS,
+            iid_column="Kode",
+            row_tag_fn=lambda row: control_tree_tag(row.get("Arbeidsstatus")),
+        )
 
         children = self.tree_a07.get_children()
         if not children:
             return
 
         target = selected_code if selected_code and selected_code in children else children[0]
-        try:
-            self.tree_a07.selection_set(target)
-            self.tree_a07.focus(target)
-            self.tree_a07.see(target)
-        except Exception:
-            return
+        self._set_tree_selection(self.tree_a07, target)
 
     def _refresh_control_gl_tree(self) -> None:
         selected_account = self._selected_control_gl_account()
@@ -3194,12 +4009,7 @@ class A07Page(ttk.Frame):
             return
 
         target = selected_account if selected_account and selected_account in children else children[0]
-        try:
-            self.tree_control_gl.selection_set(target)
-            self.tree_control_gl.focus(target)
-            self.tree_control_gl.see(target)
-        except Exception:
-            return
+        self._set_tree_selection(self.tree_control_gl, target)
 
     def _on_control_gl_filter_changed(self) -> None:
         self._refresh_control_gl_tree()
@@ -3227,12 +4037,7 @@ class A07Page(ttk.Frame):
             return
 
         target = selected_id if selected_id and selected_id in children else children[0]
-        try:
-            self.tree_suggestions.selection_set(target)
-            self.tree_suggestions.focus(target)
-            self.tree_suggestions.see(target)
-        except Exception:
-            return
+        self._set_tree_selection(self.tree_suggestions, target)
 
     def _refresh_control_support_trees(self) -> None:
         selected_code = self._selected_code_from_tree(self.tree_a07)
@@ -3260,12 +4065,7 @@ class A07Page(ttk.Frame):
         children = self.tree_control_suggestions.get_children()
         if children:
             target = selected_id if selected_id and selected_id in children else children[0]
-            try:
-                self.tree_control_suggestions.selection_set(target)
-                self.tree_control_suggestions.focus(target)
-                self.tree_control_suggestions.see(target)
-            except Exception:
-                pass
+            self._set_tree_selection(self.tree_control_suggestions, target)
         selected_row = self._selected_suggestion_row_from_tree(self.tree_control_suggestions)
         self.control_suggestion_summary_var.set(
             build_control_suggestion_summary(selected_code, control_suggestions, selected_row)
@@ -3273,18 +4073,31 @@ class A07Page(ttk.Frame):
         self.control_suggestion_effect_var.set(
             build_control_suggestion_effect_summary(
                 selected_code,
-                accounts_for_code(self.workspace.mapping, selected_code),
+                accounts_for_code(self._effective_mapping(), selected_code),
                 selected_row,
             )
         )
 
-        self.control_selected_accounts_df = build_control_selected_account_df(
-            self.workspace.gl_df,
-            self.workspace.mapping,
-            selected_code,
-        )
+        if self.control_gl_df is not None and not self.control_gl_df.empty and selected_code:
+            selected_accounts = self.control_gl_df.loc[
+                self.control_gl_df["Kode"].astype(str).str.strip() == str(selected_code).strip()
+            ].copy()
+            if selected_accounts.empty:
+                self.control_selected_accounts_df = pd.DataFrame(
+                    columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]
+                )
+            else:
+                self.control_selected_accounts_df = selected_accounts[
+                    [c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]
+                ].reset_index(drop=True)
+        else:
+            self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
         self.control_accounts_summary_var.set(
-            build_control_accounts_summary(self.control_selected_accounts_df, selected_code)
+            build_control_accounts_summary(
+                self.control_selected_accounts_df,
+                selected_code,
+                basis_col=self.workspace.basis_col,
+            )
         )
         self._fill_tree(
             self.tree_control_accounts,
@@ -3298,24 +4111,60 @@ class A07Page(ttk.Frame):
             or self._selected_control_gl_account()
         )
         if target_account and target_account in children:
-            try:
-                self.tree_control_accounts.selection_set(target_account)
-                self.tree_control_accounts.focus(target_account)
-                self.tree_control_accounts.see(target_account)
-            except Exception:
-                pass
+            self._set_tree_selection(self.tree_control_accounts, target_account)
+
+    def _active_support_tab_key(self) -> str | None:
+        notebook = getattr(self, "control_support_nb", None)
+        if notebook is None:
+            return None
+        try:
+            current_tab = notebook.nametowidget(notebook.select())
+        except Exception:
+            return None
+        if current_tab is self.tab_history:
+            return "history"
+        if current_tab is self.tab_reconcile:
+            return "reconcile"
+        if current_tab is self.tab_unmapped:
+            return "unmapped"
+        if current_tab is self.tab_mapping:
+            return "mapping"
+        if current_tab is self.tab_suggestions:
+            return "suggestions"
+        return None
+
+    def _render_active_support_tab(self, *, force: bool = False) -> None:
+        tab_key = self._active_support_tab_key()
+        if not tab_key:
+            return
+        if not force and tab_key in self._loaded_support_tabs:
+            return
+        if tab_key == "history":
+            self._fill_tree(self.tree_history, self.history_compare_df, _HISTORY_COLUMNS, iid_column="Kode")
+            self._update_history_details_from_selection()
+        elif tab_key == "reconcile":
+            self._fill_tree(self.tree_reconcile, self.reconcile_df, _RECONCILE_COLUMNS, row_tag_fn=reconcile_tree_tag)
+        elif tab_key == "unmapped":
+            self._fill_tree(self.tree_unmapped, self.unmapped_df, _UNMAPPED_COLUMNS, iid_column="Konto")
+        elif tab_key == "mapping":
+            self._fill_tree(self.tree_mapping, self.mapping_df, _MAPPING_COLUMNS, iid_column="Konto")
+        elif tab_key == "suggestions":
+            self._refresh_suggestions_tree()
+        self._loaded_support_tabs.add(tab_key)
 
     def _update_history_details(self, code: str | None) -> None:
         self.history_details_var.set(
             build_mapping_history_details(
                 code,
-                mapping_current=self.workspace.mapping,
-                mapping_previous=self.previous_mapping,
+                mapping_current=self._effective_mapping(),
+                mapping_previous=self._effective_previous_mapping(),
                 previous_year=self.previous_mapping_year,
             )
         )
 
     def _update_history_details_from_selection(self) -> None:
+        if bool(getattr(self, "_suspend_selection_sync", False)):
+            return
         code = (
             self._selected_code_from_tree(self.tree_a07)
             or self._selected_code_from_tree(self.tree_history)
@@ -3330,7 +4179,7 @@ class A07Page(ttk.Frame):
             self.control_intro_var.set("Velg kode i høyre liste.")
             self.control_summary_var.set("Slik jobber du")
             self.control_meta_var.set("1. Velg konto og kode")
-            self.control_match_var.set("2. Trykk Tildel eller dra konto til valgt kode")
+            self.control_match_var.set("2. Trykk -> eller dra konto til valgt kode")
             self.control_mapping_var.set("")
             self.control_history_var.set("")
             self.control_best_var.set("")
@@ -3338,7 +4187,7 @@ class A07Page(ttk.Frame):
             self.control_drag_var.set("Vis detaljer bare ved behov for forslag og mappede kontoer.")
             self.control_suggestion_effect_var.set("Velg forslag for aa se effekt.")
             try:
-                self.control_panel.configure(text="Neste steg")
+                self.control_panel.configure(text="Oppsummering")
                 self.btn_control_best.state(["disabled"])
                 self.btn_control_history.state(["disabled"])
                 self.lbl_control_drag.configure(style="Muted.TLabel")
@@ -3366,14 +4215,18 @@ class A07Page(ttk.Frame):
         status = str((overview_row.get("Status") if overview_row is not None else "") or "").strip() or "Ukjent"
         navn = str((overview_row.get("Navn") if overview_row is not None else "") or "").strip() or code
         belop = self._format_value(overview_row.get("Belop") if overview_row is not None else None, "Belop")
-        current_accounts = accounts_for_code(self.workspace.mapping, code)
+        current_accounts = accounts_for_code(self._effective_mapping(), code)
         history_accounts = safe_previous_accounts_for_code(
             code,
-            mapping_current=self.workspace.mapping,
-            mapping_previous=self.previous_mapping,
+            mapping_current=self._effective_mapping(),
+            mapping_previous=self._effective_previous_mapping(),
             gl_df=self.workspace.gl_df,
         )
-        best_row = best_suggestion_row_for_code(self.workspace.suggestions, code)
+        best_row = best_suggestion_row_for_code(
+            self.workspace.suggestions,
+            code,
+            locked_codes=A07Page._locked_codes(self),
+        )
 
         def _compact_accounts(values: Sequence[object]) -> str:
             tokens = [str(value).strip() for value in values if str(value).strip()]
@@ -3401,12 +4254,16 @@ class A07Page(ttk.Frame):
         )
         self.control_summary_var.set(" | ".join(summary_parts))
         # Build one compact meta line: status, amount, GL diff
-        meta_parts = [work_label, f"Belop {belop or '-'}"]
+        meta_parts = [work_label, f"Basis {self.workspace.basis_col}", f"A07 {belop or '-'}"]
         if reconcile_row is not None:
             gl_belop = self._format_value(reconcile_row.get("GL_Belop"), "GL_Belop")
             diff_belop = self._format_value(reconcile_row.get("Diff"), "Diff")
             meta_parts.append(f"GL {gl_belop or '-'}")
             meta_parts.append(f"Diff {diff_belop or '-'}")
+            antall = self._format_value(reconcile_row.get("AntallKontoer"), "AntallKontoer")
+            meta_parts.append(f"Kontoer {antall or '-'}")
+        if code in A07Page._locked_codes(self):
+            meta_parts.append("Låst")
         compact_next = compact_control_next_action(next_action)
         if compact_next.casefold() != work_label.casefold():
             meta_parts.append(f"Neste {compact_next}")
@@ -3445,26 +4302,54 @@ class A07Page(ttk.Frame):
             else:
                 self.btn_control_history.state(["disabled"])
             if not self._current_drag_accounts():
-                self.control_drag_var.set(f"Dra konto fra venstre til {code}, eller bruk Tildel.")
+                self.control_drag_var.set(f"Dra konto fra venstre til {code}, eller bruk ->.")
                 self.lbl_control_drag.configure(style="Muted.TLabel")
         except Exception:
             pass
         self._update_control_transfer_buttons()
 
     def _on_control_selection_changed(self) -> None:
-        code = self._selected_control_code()
+        if bool(getattr(self, "_suspend_selection_sync", False)):
+            return
+        self.workspace.selected_code = self._selected_control_code()
         self._update_history_details_from_selection()
-        if self._selected_suggestion_scope() == "valgt_kode":
+        if self._support_views_ready and self._active_support_tab_key() == "suggestions":
             self._refresh_suggestions_tree()
-        self._refresh_control_support_trees()
+        if bool(getattr(self, "_control_details_visible", False)):
+            self._refresh_control_support_trees()
         self._refresh_control_gl_tree()
         self._update_control_panel()
         self._update_control_transfer_buttons()
 
+    def _on_support_tab_changed(self) -> None:
+        if self._support_views_ready:
+            self._render_active_support_tab()
+            return
+        self._schedule_support_refresh()
+
     def _selected_control_code(self) -> str | None:
         return self._selected_code_from_tree(self.tree_a07)
 
+    def _set_tree_selection(self, tree: ttk.Treeview, target: str | None) -> bool:
+        target_s = str(target or "").strip()
+        if not target_s:
+            return False
+        previous = bool(getattr(self, "_suspend_selection_sync", False))
+        self._suspend_selection_sync = True
+        try:
+            tree.selection_set(target_s)
+            tree.focus(target_s)
+            tree.see(target_s)
+            return True
+        except Exception:
+            return False
+        finally:
+            self._suspend_selection_sync = previous
+
     def _on_control_gl_selection_changed(self) -> None:
+        if bool(getattr(self, "_suspend_selection_sync", False)):
+            self._update_control_transfer_buttons()
+            return
         account = self._selected_control_gl_account()
         if not account or self.control_gl_df is None or self.control_gl_df.empty:
             self._update_control_transfer_buttons()
@@ -3487,10 +4372,9 @@ class A07Page(ttk.Frame):
                     pass
                 self._refresh_a07_tree()
             if code in self.tree_a07.get_children():
-                self.tree_a07.selection_set(code)
-                self.tree_a07.focus(code)
-                self.tree_a07.see(code)
-                self._on_control_selection_changed()
+                if code != self._selected_code_from_tree(self.tree_a07):
+                    if self._set_tree_selection(self.tree_a07, code):
+                        self._on_control_selection_changed()
         except Exception:
             return
         finally:
@@ -3504,7 +4388,14 @@ class A07Page(ttk.Frame):
 
     def _apply_best_suggestion_for_selected_code(self) -> None:
         code = self._selected_control_code()
-        best_row = best_suggestion_row_for_code(self.workspace.suggestions, code)
+        if code in A07Page._locked_codes(self):
+            self._notify_inline("Valgt kode er låst. Lås opp før du bruker forslag.", focus_widget=self.tree_a07)
+            return
+        best_row = best_suggestion_row_for_code(
+            self.workspace.suggestions,
+            code,
+            locked_codes=A07Page._locked_codes(self),
+        )
         if code is None or best_row is None:
             self._notify_inline("Fant ikke et forslag for valgt kode.", focus_widget=self.tree_a07)
             return
@@ -3533,10 +4424,13 @@ class A07Page(ttk.Frame):
         if not code:
             self._notify_inline("Velg en A07-kode til hoyre forst.", focus_widget=self.tree_a07)
             return
+        if code in A07Page._locked_codes(self):
+            self._notify_inline("Valgt kode er låst. Lås opp før du bruker historikk.", focus_widget=self.tree_a07)
+            return
         accounts = safe_previous_accounts_for_code(
             code,
-            mapping_current=self.workspace.mapping,
-            mapping_previous=self.previous_mapping,
+            mapping_current=self._effective_mapping(),
+            mapping_previous=self._effective_previous_mapping(),
             gl_df=self.workspace.gl_df,
         )
         if not accounts:
@@ -3566,6 +4460,9 @@ class A07Page(ttk.Frame):
         code = self._selected_control_code()
         if not code:
             return
+        if code in A07Page._locked_codes(self):
+            self._notify_inline("Valgt kode er låst. Lås opp før du bruker automatikk.", focus_widget=self.tree_a07)
+            return
 
         overview_row = None
         if self.a07_overview_df is not None and not self.a07_overview_df.empty:
@@ -3579,15 +4476,19 @@ class A07Page(ttk.Frame):
 
         history_accounts = safe_previous_accounts_for_code(
             code,
-            mapping_current=self.workspace.mapping,
-            mapping_previous=self.previous_mapping,
+            mapping_current=self._effective_mapping(),
+            mapping_previous=self._effective_previous_mapping(),
             gl_df=self.workspace.gl_df,
         )
         if history_accounts:
             self._apply_history_for_selected_code()
             return
 
-        best_row = best_suggestion_row_for_code(self.workspace.suggestions, code)
+        best_row = best_suggestion_row_for_code(
+            self.workspace.suggestions,
+            code,
+            locked_codes=A07Page._locked_codes(self),
+        )
         if best_row is not None and bool(best_row.get("WithinTolerance", False)):
             self._apply_best_suggestion_for_selected_code()
             return
@@ -3597,10 +4498,12 @@ class A07Page(ttk.Frame):
         except Exception:
             pass
         self.status_var.set(
-            f"Ingen trygg automatikk for {code}. Velg konto(er) til venstre og bruk Tildel, eller bruk Avansert mapping under Mer."
+            f"Ingen trygg automatikk for {code}. Velg konto(er) til venstre og bruk ->, eller bruk Avansert mapping under Mer."
         )
 
     def _on_suggestion_selected(self) -> None:
+        if bool(getattr(self, "_suspend_selection_sync", False)):
+            return
         self._update_selected_suggestion_details()
         self._refresh_control_gl_tree()
         if getattr(self, "tree_control_suggestions", None) is not None:
@@ -3618,7 +4521,7 @@ class A07Page(ttk.Frame):
             self.control_suggestion_effect_var.set(
                 build_control_suggestion_effect_summary(
                     selected_code,
-                    accounts_for_code(self.workspace.mapping, selected_code),
+                    accounts_for_code(self._effective_mapping(), selected_code),
                     selected_row,
                 )
             )
@@ -3634,12 +4537,23 @@ class A07Page(ttk.Frame):
         pass
 
     def _restore_context_state(self, client: str | None, year: str | None) -> None:
+        self._refresh_in_progress = True
+        self._cancel_support_refresh()
+        self._support_views_ready = False
+        self._support_views_dirty = True
+        self._loaded_support_tabs.clear()
         self.workspace.a07_df = _empty_a07_df()
+        self.workspace.source_a07_df = _empty_a07_df()
         self.a07_overview_df = _empty_a07_df()
         self.control_df = _empty_control_df()
         self.control_gl_df = pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
         self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
+        self.groups_df = _empty_groups_df()
         self.workspace.mapping = {}
+        self.workspace.groups = {}
+        self.workspace.locks = set()
+        self.workspace.membership = {}
+        self.workspace.project_meta = {}
         self.workspace.suggestions = _empty_suggestions_df()
         self.reconcile_df = _empty_reconcile_df()
         self.mapping_df = _empty_mapping_df()
@@ -3647,32 +4561,37 @@ class A07Page(ttk.Frame):
         self.history_compare_df = _empty_history_df()
         self.a07_path = None
         self.mapping_path = None
+        self.groups_path = None
+        self.locks_path = None
+        self.project_path = None
         self.rulebook_path = resolve_rulebook_path(client, year)
         self.previous_mapping = {}
         self.previous_mapping_path = None
         self.previous_mapping_year = None
         self.history_details_var.set("Velg en kode for aa se historikk.")
-        self.control_summary_var.set("Slik jobber du")
+        self.control_summary_var.set("Velg kode i hoyre liste.")
         self.control_intro_var.set("Velg kode i høyre liste.")
-        self.control_meta_var.set("1. Velg konto og kode")
-        self.control_match_var.set("2. Trykk Tildel eller dra konto til valgt kode")
+        self.control_meta_var.set("")
+        self.control_match_var.set("")
         self.control_mapping_var.set("")
         self.control_history_var.set("")
         self.control_best_var.set("")
         self.control_suggestion_summary_var.set("Velg kode i hoyre liste for aa se forslag.")
-        self.control_suggestion_effect_var.set("Velg forslag for aa se effekt.")
-        self.control_next_var.set("Velg kode for aa starte.")
-        self.control_drag_var.set("Vis detaljer bare ved behov for forslag og mappede kontoer.")
+        self.control_suggestion_effect_var.set("")
+        self.control_next_var.set("")
+        self.control_drag_var.set("")
         self.control_bucket_var.set("Ferdig 0 | Vurdering 0 | Manuell 0")
         self.control_code_filter_var.set("")
         self._control_details_auto_revealed = False
         try:
-            self.control_panel.configure(text="Neste steg")
+            self.control_panel.configure(text="Oppsummering")
             self.lbl_control_drag.configure(style="Muted.TLabel")
         except Exception:
             pass
         self.a07_filter_var.set("neste")
         self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["neste"])
+        self.basis_var.set(_BASIS_LABELS["Endring"])
+        self.workspace.basis_col = "Endring"
         self.suggestion_scope_var.set("valgt_kode")
         self.suggestion_scope_label_var.set(_SUGGESTION_SCOPE_LABELS["valgt_kode"])
         try:
@@ -3683,52 +4602,27 @@ class A07Page(ttk.Frame):
             self.suggestion_scope_widget.set(_SUGGESTION_SCOPE_LABELS["valgt_kode"])
         except Exception:
             pass
+        self._fill_tree(self.tree_control_gl, self.control_gl_df, _CONTROL_GL_COLUMNS)
+        self._fill_tree(self.tree_a07, self.a07_overview_df, _A07_COLUMNS, iid_column="regnr")
+        self._fill_tree(self.tree_groups, self.groups_df, _GROUP_COLUMNS, iid_column="group_id")
+        for tab_key in tuple(self._loaded_support_tabs):
+            if tab_key == "history":
+                self._fill_tree(self.tree_history, _empty_history_df(), _HISTORY_COLUMNS, iid_column="Kode")
+            elif tab_key == "reconcile":
+                self._fill_tree(self.tree_reconcile, _empty_reconcile_df(), _RECONCILE_COLUMNS)
+            elif tab_key == "unmapped":
+                self._fill_tree(self.tree_unmapped, _empty_unmapped_df(), _UNMAPPED_COLUMNS, iid_column="Konto")
+            elif tab_key == "mapping":
+                self._fill_tree(self.tree_mapping, _empty_mapping_df(), _MAPPING_COLUMNS, iid_column="Konto")
+            elif tab_key == "suggestions":
+                self._fill_tree(self.tree_suggestions, _empty_suggestions_df(), _SUGGESTION_COLUMNS)
+        self._update_selected_suggestion_details()
+        self._update_control_panel()
+        self._update_control_transfer_buttons()
+        self._update_summary()
 
-        self.workspace.gl_df, self.tb_path = load_active_trial_balance_for_context(client, year)
-
-        source_path = default_a07_source_path(client, year)
-        if source_path.exists():
-            try:
-                self.workspace.a07_df = parse_a07_json(source_path)
-                self.a07_path = source_path
-            except Exception:
-                self.workspace.a07_df = _empty_a07_df()
-                self.a07_path = None
-
-        mapping_path = suggest_default_mapping_path(
-            self.a07_path,
-            client=client,
-            year=year,
-        )
-        if mapping_path.exists():
-            try:
-                self.workspace.mapping = load_mapping(mapping_path)
-                self.mapping_path = mapping_path
-            except Exception:
-                self.workspace.mapping = {}
-                self.mapping_path = None
-
-        (
-            self.previous_mapping,
-            self.previous_mapping_path,
-            self.previous_mapping_year,
-        ) = load_previous_year_mapping_for_context(client, year)
-
-        self._refresh_all()
         self._context_snapshot = get_context_snapshot(client, year)
-
-        client_s = _clean_context_value(client)
-        year_s = _clean_context_value(year)
-        if client_s and year_s and self.tb_path is None:
-            self.status_var.set(
-                "Ingen aktiv saldobalanse for valgt klient/aar. Bruk Versjoner i Dataset-fanen."
-            )
-        elif client_s and year_s:
-            self.status_var.set("A07-kontekst er oppdatert fra klient/aar i Utvalg.")
-        else:
-            self.status_var.set(
-                "Velg klient og aar i Dataset-fanen for aa bruke aktiv saldobalanse og klientlagret mapping."
-            )
+        self._start_context_restore(client, year)
 
     def _sync_active_tb_clicked(self) -> None:
         ok = self._sync_active_trial_balance(refresh=True)
@@ -3747,6 +4641,29 @@ class A07Page(ttk.Frame):
             self._refresh_all()
         return not self.workspace.gl_df.empty
 
+    def _current_project_state(self) -> dict[str, object]:
+        return {
+            "basis_col": self.workspace.basis_col,
+            "selected_code": self._selected_control_code(),
+            "selected_group": self._selected_group_id(),
+        }
+
+    def _autosave_workspace_state(self) -> bool:
+        client, year = self._session_context(session)
+        client_s = _clean_context_value(client)
+        year_s = _clean_context_value(year)
+        if not client_s or not year_s:
+            return False
+
+        self.groups_path = default_a07_groups_path(client_s, year_s)
+        self.locks_path = default_a07_locks_path(client_s, year_s)
+        self.project_path = default_a07_project_path(client_s, year_s)
+        save_a07_groups(self.workspace.groups, self.groups_path)
+        save_locks(self.locks_path, self.workspace.locks)
+        save_project_state(self.project_path, self._current_project_state())
+        self._context_snapshot = get_context_snapshot(client_s, year_s)
+        return True
+
     def _autosave_mapping(self) -> bool:
         client, year = self._session_context(session)
         save_path = resolve_autosave_mapping_path(
@@ -3761,6 +4678,8 @@ class A07Page(ttk.Frame):
         saved = save_mapping(save_path, self.workspace.mapping)
         self.mapping_path = Path(saved)
         self.mapping_path_var.set(f"Mapping: {self.mapping_path}")
+        self._autosave_workspace_state()
+        self._context_snapshot = get_context_snapshot(client, year)
         return True
 
     def _load_a07_clicked(self) -> None:
@@ -3777,7 +4696,8 @@ class A07Page(ttk.Frame):
 
         try:
             stored_path = copy_a07_source_to_workspace(path, client=client, year=year)
-            self.workspace.a07_df = parse_a07_json(stored_path)
+            self.workspace.source_a07_df = parse_a07_json(stored_path)
+            self.workspace.a07_df = self.workspace.source_a07_df.copy()
             self.a07_path = Path(stored_path)
             self.a07_path_var.set(f"A07: {self.a07_path}")
             self._refresh_all()
@@ -3812,6 +4732,17 @@ class A07Page(ttk.Frame):
         try:
             self.workspace.mapping = load_mapping(path)
             self.mapping_path = Path(path)
+            if client and year:
+                try:
+                    self.groups_path = default_a07_groups_path(client, year)
+                    self.workspace.groups = load_a07_groups(self.groups_path)
+                except Exception:
+                    self.workspace.groups = {}
+                try:
+                    self.locks_path = default_a07_locks_path(client, year)
+                    self.workspace.locks = load_locks(self.locks_path)
+                except Exception:
+                    self.workspace.locks = set()
             self.mapping_path_var.set(f"Mapping: {self.mapping_path}")
             self._refresh_all()
             self.status_var.set(f"Lastet mapping fra {self.mapping_path.name}.")
@@ -3842,9 +4773,96 @@ class A07Page(ttk.Frame):
             saved = save_mapping(out_path, self.workspace.mapping)
             self.mapping_path = Path(saved)
             self.mapping_path_var.set(f"Mapping: {self.mapping_path}")
+            self._autosave_workspace_state()
             self.status_var.set(f"Lagret mapping til {self.mapping_path.name}.")
         except Exception as exc:
             messagebox.showerror("A07", f"Kunne ikke lagre mapping:\n{exc}")
+
+    def _on_basis_changed(self) -> None:
+        basis = self._selected_basis()
+        if basis == self.workspace.basis_col:
+            return
+        self.workspace.basis_col = basis
+        self._refresh_all()
+        self._autosave_workspace_state()
+        self.status_var.set(f"A07 bruker nå basis {basis}.")
+
+    def _create_group_from_selection(self) -> None:
+        codes = [code for code in self._selected_control_codes() if code and not code.startswith("A07_GROUP:")]
+        if len(codes) < 2:
+            self._notify_inline("Marker minst to A07-koder for å opprette en gruppe.", focus_widget=self.tree_a07)
+            return
+
+        default_name = " + ".join(codes[:3]) + (" ..." if len(codes) > 3 else "")
+        name = simpledialog.askstring("A07-gruppe", "Navn på gruppen:", parent=self, initialvalue=default_name)
+        if name is None:
+            return
+
+        group_id = self._next_group_id(codes)
+        self.workspace.groups[group_id] = A07Group(
+            group_id=group_id,
+            group_name=str(name).strip() or default_name,
+            member_codes=list(dict.fromkeys(codes)),
+        )
+        self._autosave_workspace_state()
+        self._refresh_all()
+        self._focus_control_code(group_id)
+        self.status_var.set(f"Opprettet A07-gruppe {group_id}.")
+
+    def _remove_selected_group(self) -> None:
+        group_id = self._selected_group_id()
+        if not group_id:
+            self._notify_inline("Velg en A07-gruppe først.", focus_widget=self.tree_groups)
+            return
+        in_use = [
+            str(account).strip()
+            for account, code in (self.workspace.mapping or {}).items()
+            if str(code or "").strip() == group_id and str(account).strip()
+        ]
+        if in_use:
+            account_label = "konto" if len(in_use) == 1 else "kontoer"
+            self._notify_inline(
+                f"Kan ikke oppløse gruppe som fortsatt brukes i mapping ({len(in_use)} {account_label}). Fjern eller flytt mapping først.",
+                focus_widget=self.tree_groups,
+            )
+            self._focus_control_code(group_id)
+            return
+        self.workspace.groups.pop(group_id, None)
+        self.workspace.locks.discard(group_id)
+        self._autosave_workspace_state()
+        self._refresh_all()
+        self.status_var.set(f"Oppløste A07-gruppe {group_id}.")
+
+    def _on_group_selection_changed(self) -> None:
+        self._focus_selected_group_code()
+
+    def _focus_selected_group_code(self) -> None:
+        group_id = self._selected_group_id()
+        if not group_id:
+            return
+        self._focus_control_code(group_id)
+
+    def _lock_selected_code(self) -> None:
+        code = self._selected_control_code()
+        if not code:
+            self._notify_inline("Velg en kode eller gruppe å låse først.", focus_widget=self.tree_a07)
+            return
+        self.workspace.locks.add(code)
+        self._autosave_workspace_state()
+        self._refresh_all()
+        self._focus_control_code(code)
+        self.status_var.set(f"Låste {code}.")
+
+    def _unlock_selected_code(self) -> None:
+        code = self._selected_control_code()
+        if not code:
+            self._notify_inline("Velg en kode eller gruppe å låse opp først.", focus_widget=self.tree_a07)
+            return
+        self.workspace.locks.discard(code)
+        self._autosave_workspace_state()
+        self._refresh_all()
+        self._focus_control_code(code)
+        self.status_var.set(f"Låste opp {code}.")
 
     def _export_clicked(self) -> None:
         if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
@@ -4438,12 +5456,16 @@ class A07Page(ttk.Frame):
     def _apply_safe_history_mappings(self) -> tuple[int, int]:
         applied_codes = 0
         applied_accounts = 0
+        effective_mapping = self._effective_mapping()
+        effective_previous_mapping = self._effective_previous_mapping()
         codes = select_safe_history_codes(self.history_compare_df)
         for code in codes:
+            if code in A07Page._locked_codes(self):
+                continue
             accounts = safe_previous_accounts_for_code(
                 code,
-                mapping_current=self.workspace.mapping,
-                mapping_previous=self.previous_mapping,
+                mapping_current=effective_mapping,
+                mapping_previous=effective_previous_mapping,
                 gl_df=self.workspace.gl_df,
             )
             if not accounts:
@@ -4471,11 +5493,15 @@ class A07Page(ttk.Frame):
         applied_accounts = 0
         row_indexes = select_batch_suggestion_rows(
             self.workspace.suggestions,
-            self.workspace.mapping,
+            self._effective_mapping(),
             min_score=0.85,
+            locked_codes=A07Page._locked_codes(self),
         )
         for idx in row_indexes:
             row = self.workspace.suggestions.iloc[int(idx)]
+            code = str(row.get("Kode") or "").strip()
+            if code in A07Page._locked_codes(self):
+                continue
             before = {str(k): str(v) for k, v in self.workspace.mapping.items()}
             apply_suggestion_to_mapping(self.workspace.mapping, row)
             after_accounts = {
@@ -4503,12 +5529,15 @@ class A07Page(ttk.Frame):
         applied_code_values: set[str] = set()
         row_indexes = select_magic_wand_suggestion_rows(
             self.workspace.suggestions,
-            self.workspace.mapping,
+            self._effective_mapping(),
             unresolved_codes=unresolved_codes_list,
+            locked_codes=A07Page._locked_codes(self),
         )
         for idx in row_indexes:
             row = self.workspace.suggestions.iloc[int(idx)]
             code = str(row.get("Kode") or "").strip()
+            if code in A07Page._locked_codes(self):
+                continue
             before = {str(k): str(v) for k, v in self.workspace.mapping.items()}
             apply_suggestion_to_mapping(self.workspace.mapping, row)
             after_accounts = {
@@ -4583,7 +5612,7 @@ class A07Page(ttk.Frame):
             )
             return
 
-        account_options = build_gl_picker_options(self.workspace.gl_df, basis_col="Endring")
+        account_options = build_gl_picker_options(self.workspace.gl_df, basis_col=self.workspace.basis_col)
         code_options = build_a07_picker_options(self.workspace.a07_df)
         if not account_options or not code_options:
             self._notify_inline("Fant ikke nok data til aa bygge avansert mapping.", focus_widget=self)
@@ -4628,6 +5657,9 @@ class A07Page(ttk.Frame):
 
         try:
             code = str(row.get("Kode") or "").strip() or self._selected_control_code()
+            if code in A07Page._locked_codes(self):
+                self._notify_inline("Valgt kode er låst. Lås opp før du bruker forslag.", focus_widget=self.tree_a07)
+                return
             apply_suggestion_to_mapping(self.workspace.mapping, row)
             autosaved = self._autosave_mapping()
             self._refresh_all()
@@ -4647,10 +5679,13 @@ class A07Page(ttk.Frame):
             return
 
         code = self._selected_code_from_tree(self.tree_history)
+        if code in A07Page._locked_codes(self):
+            self._notify_inline("Valgt kode er låst. Lås opp før du bruker historikk.", focus_widget=self.tree_history)
+            return
         accounts = safe_previous_accounts_for_code(
             code,
-            mapping_current=self.workspace.mapping,
-            mapping_previous=self.previous_mapping,
+            mapping_current=self._effective_mapping(),
+            mapping_previous=self._effective_previous_mapping(),
             gl_df=self.workspace.gl_df,
         )
         if not code or not accounts:
@@ -4722,8 +5757,9 @@ class A07Page(ttk.Frame):
 
         row_indexes = select_batch_suggestion_rows(
             self.workspace.suggestions,
-            self.workspace.mapping,
+            self._effective_mapping(),
             min_score=0.85,
+            locked_codes=A07Page._locked_codes(self),
         )
         if not row_indexes:
             self._notify_inline(
@@ -4752,6 +5788,9 @@ class A07Page(ttk.Frame):
         if not selection:
             self._notify_inline("Velg en eller flere mapping-rader forst.", focus_widget=self.tree_mapping)
             return
+        conflicts = A07Page._locked_mapping_conflicts(self, selection)
+        if A07Page._notify_locked_conflicts(self, conflicts, focus_widget=self.tree_mapping):
+            return
 
         removed = 0
         for konto in selection:
@@ -4774,73 +5813,27 @@ class A07Page(ttk.Frame):
             messagebox.showerror("A07", f"Kunne ikke oppdatere etter sletting:\n{exc}")
 
     def _refresh_all(self) -> None:
-        a07_df = self.workspace.a07_df.copy()
-        gl_df = self.workspace.gl_df.copy()
-        client, year = self._session_context(session)
-        self.rulebook_path = resolve_rulebook_path(client, year)
-        self.matcher_settings = load_matcher_settings()
-        (
-            self.previous_mapping,
-            self.previous_mapping_path,
-            self.previous_mapping_year,
-        ) = load_previous_year_mapping_for_context(client, year)
+        if self._refresh_in_progress:
+            self._pending_session_refresh = True
+            return
+        self._refresh_in_progress = True
+        self._cancel_support_refresh()
+        self._support_views_ready = False
+        self._start_core_refresh()
 
-        self.workspace.suggestions = _empty_suggestions_df()
-        self.reconcile_df = _empty_reconcile_df()
-        self.unmapped_df = _empty_unmapped_df()
-
-        if not a07_df.empty and not gl_df.empty:
-            self.workspace.suggestions = suggest_mapping_candidates(
-                a07_df=a07_df,
-                gl_df=gl_df,
-                mapping_existing=self.workspace.mapping,
-                config=build_suggest_config(self.rulebook_path, self.matcher_settings),
-                mapping_prior=self.previous_mapping,
-            ).reset_index(drop=True)
-            self.reconcile_df = reconcile_a07_vs_gl(
-                a07_df=a07_df,
-                gl_df=gl_df,
-                mapping=self.workspace.mapping,
-                basis_col="Endring",
-            ).reset_index(drop=True)
-            self.unmapped_df = unmapped_accounts_df(
-                gl_df=gl_df,
-                mapping=self.workspace.mapping,
-                basis_col="Endring",
-            ).reset_index(drop=True)
-
-        self.mapping_df = mapping_to_assigned_df(
-            mapping=self.workspace.mapping,
-            gl_df=gl_df,
-            include_empty=False,
-        ).reset_index(drop=True)
-        self.control_gl_df = build_control_gl_df(gl_df, self.workspace.mapping).reset_index(drop=True)
-        self.a07_overview_df = build_a07_overview_df(a07_df, self.reconcile_df)
-        self.control_df = build_control_queue_df(
-            self.a07_overview_df,
-            self.workspace.suggestions if self.workspace.suggestions is not None else _empty_suggestions_df(),
-            mapping_current=self.workspace.mapping,
-            mapping_previous=self.previous_mapping,
-            gl_df=gl_df,
-        ).reset_index(drop=True)
-        self.history_compare_df = build_history_comparison_df(
-            a07_df,
-            gl_df,
-            mapping_current=self.workspace.mapping,
-            mapping_previous=self.previous_mapping,
-        ).reset_index(drop=True)
-
-        self._refresh_control_gl_tree()
-        self._refresh_a07_tree()
-        self._fill_tree(self.tree_history, self.history_compare_df, _HISTORY_COLUMNS, iid_column="Kode")
-        self._refresh_suggestions_tree()
-        self._refresh_control_support_trees()
-        self._fill_tree(self.tree_reconcile, self.reconcile_df, _RECONCILE_COLUMNS, row_tag_fn=reconcile_tree_tag)
-        self._fill_tree(self.tree_unmapped, self.unmapped_df, _UNMAPPED_COLUMNS, iid_column="Konto")
-        self._fill_tree(self.tree_mapping, self.mapping_df, _MAPPING_COLUMNS, iid_column="Konto")
-        self._update_selected_suggestion_details()
-        self._on_control_selection_changed()
-        self._update_summary()
+    def _refresh_support_views(self) -> None:
+        active_tab_getter = getattr(self, "_active_support_tab_key", None)
+        loaded_tabs = getattr(self, "_loaded_support_tabs", set())
+        if self._support_views_ready and not self._support_views_dirty:
+            if not callable(active_tab_getter) or active_tab_getter() in loaded_tabs:
+                self._render_active_support_tab()
+            return
+        if self._refresh_in_progress:
+            self._schedule_support_refresh()
+            return
+        if self._support_refresh_thread is not None:
+            return
+        self._start_support_refresh()
 
     def _fill_tree(
         self,
@@ -4851,8 +5844,9 @@ class A07Page(ttk.Frame):
         iid_column: str | None = None,
         row_tag_fn: Callable[[pd.Series], str | None] | None = None,
     ) -> None:
-        for item in tree.get_children():
-            tree.delete(item)
+        children = tree.get_children()
+        if children:
+            tree.delete(*children)
 
         if df is None or df.empty:
             return
@@ -4885,6 +5879,8 @@ class A07Page(ttk.Frame):
                     f"Uløste {unsolved_count}",
                     f"Umappede {len(self.unmapped_df)}",
                     f"Forslag {suggestion_count}",
+                    f"Grupper {len(self.workspace.groups)}",
+                    f"Låste {len(self.workspace.locks)}",
                 ]
             )
         )
