@@ -218,6 +218,26 @@ def refresh_pivot(*, page: Any) -> None:
     pivot_df = build_pivot_by_account(df_filtered)
     pivot_df = _merge_effective_sb_into_account_pivot(page=page, pivot_df=pivot_df)
 
+    show_only_unmapped = False
+    try:
+        var = getattr(page, "_var_show_only_unmapped", None)
+        if var is not None:
+            show_only_unmapped = bool(var.get())
+    except Exception:
+        show_only_unmapped = False
+    if show_only_unmapped:
+        wanted = {
+            str(v).strip()
+            for v in getattr(page, "_mapping_problem_accounts", []) or []
+            if str(v).strip()
+        }
+        if wanted:
+            pivot_df = pivot_df.loc[
+                pivot_df["Konto"].astype(str).str.strip().isin(wanted)
+            ].copy()
+        else:
+            pivot_df = pivot_df.iloc[0:0].copy()
+
     # Skjul nullsaldo-kontoer om brukeren har valgt det
     hide_zero = False
     try:
@@ -285,6 +305,30 @@ def refresh_pivot(*, page: Any) -> None:
         selected_accounts=selected_accounts,
         focused_account=focused_account,
     )
+
+    if show_only_unmapped:
+        try:
+            current_sel = list(tree.selection())
+        except Exception:
+            current_sel = []
+        if not current_sel:
+            try:
+                first = next(iter(tree.get_children("")), "")
+            except Exception:
+                first = ""
+            if first:
+                try:
+                    tree.selection_set((first,))
+                except Exception:
+                    pass
+                try:
+                    tree.focus(first)
+                except Exception:
+                    pass
+                try:
+                    tree.see(first)
+                except Exception:
+                    pass
 
 
 def select_all_accounts(*, page: Any) -> None:

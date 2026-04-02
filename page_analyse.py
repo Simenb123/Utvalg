@@ -168,8 +168,12 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._rl_regnskapslinjer = None
             self._rl_sb_df = None
             self._rl_mapping_warning = ""
+            self._mapping_warning = ""
+            self._mapping_issues = []
+            self._mapping_problem_accounts = []
             self._var_hide_sumposter = None
             self._var_include_ao = None
+            self._var_show_only_unmapped = None
             self._tx_col_widths = {}
             self._pivot_col_widths = {}
             self._pivot_visible_cols = list(self.PIVOT_COLS_DEFAULT_VISIBLE)
@@ -179,6 +183,8 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._tx_frame = None
             self._tx_header_drag = None
             self._pivot_balance_after_id = None
+            self._mapping_warning_var = None
+            self._mapping_banner_frame = None
             self._detail_selected_account = ""
             self._detail_accounts_df = None
             self._detail_suggestions_by_account = {}
@@ -210,6 +216,9 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._series_vars = [tk.IntVar(value=0) for _ in range(10)]
         self._mva_code_values: List[str] = [self.MVA_CODE_ALL_LABEL]
         self._rl_mapping_warning: str = ""
+        self._mapping_warning: str = ""
+        self._mapping_issues: List[object] = []
+        self._mapping_problem_accounts: List[str] = []
         self._detail_selected_account: str = ""
         self._detail_accounts_df: Optional[pd.DataFrame] = None
         self._detail_suggestions_by_account: dict[str, object] = {}
@@ -223,7 +232,9 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._var_hide_sumposter = tk.BooleanVar(value=False)
         self._var_include_ao = tk.BooleanVar(value=False)
         self._var_hide_zero = tk.BooleanVar(value=False)
+        self._var_show_only_unmapped = tk.BooleanVar(value=False)
         self._var_data_level = tk.StringVar(value="")
+        self._mapping_warning_var = tk.StringVar(value="")
 
         # --- RL config cache ---
         self._rl_intervals = None
@@ -253,6 +264,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._tx_header_drag = None
         self._pivot_balance_after_id = None
         self._lbl_tx_summary = None
+        self._mapping_banner_frame = None
         self._detail_panel = None
         self._detail_accounts_tree = None
         self._detail_suggestion_tree = None
@@ -694,6 +706,10 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         UI (page_analyse_ui) binder <<TreeviewSelect>> til denne hooken.
         """
         try:
+            self._update_mapping_warning_banner()
+        except Exception:
+            pass
+        try:
             self._refresh_transactions_view()
         except Exception:
             # Skal aldri krasje GUI på event-binding.
@@ -802,6 +818,61 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             import logging
             logging.getLogger("app").error("Tilleggsposteringer error: %s", exc)
 
+    def _open_disponering_via_ao(self) -> None:
+        """Open a simple disposition helper backed by supplementary entries."""
+        try:
+            import session as _session
+            from tkinter import messagebox
+
+            import analyse_disponering_dialog
+            import regnskap_client_overrides
+            import tilleggsposteringer
+
+            client = getattr(_session, "client", None) or ""
+            year = getattr(_session, "year", None) or ""
+            if not client or not year:
+                messagebox.showinfo("Disponering via AO", "Ingen aktiv klient/ar.", parent=self)
+                return
+
+            self._reload_rl_config()
+            intervals = getattr(self, "_rl_intervals", None)
+            regnskapslinjer = getattr(self, "_rl_regnskapslinjer", None)
+            sb_df = getattr(self, "_rl_sb_df", None)
+            if intervals is None or regnskapslinjer is None or sb_df is None:
+                messagebox.showwarning(
+                    "Disponering via AO",
+                    "Manglende mapping- eller saldobalansegrunnlag for a apne disponeringshjelpen.",
+                    parent=self,
+                )
+                return
+
+            ao_entries = regnskap_client_overrides.load_supplementary_entries(client, year)
+            effective_sb = tilleggsposteringer.apply_to_sb(sb_df, ao_entries)
+            overrides = regnskap_client_overrides.load_account_overrides(client, year=str(year))
+
+            def _after_changed() -> None:
+                try:
+                    if getattr(self, "_var_include_ao", None) is not None:
+                        self._var_include_ao.set(True)
+                except Exception:
+                    pass
+                self._refresh_analysis_views_after_adjustment_change()
+
+            analyse_disponering_dialog.open_dialog(
+                self,
+                client=client,
+                year=str(year),
+                hb_df=getattr(self, "dataset", None),
+                effective_sb_df=effective_sb,
+                intervals=intervals,
+                regnskapslinjer=regnskapslinjer,
+                account_overrides=overrides,
+                on_changed=_after_changed,
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger("app").error("Disponering via AO error: %s", exc)
+
     def _on_max_rows_changed(self, _event=None) -> None:
         """Endring i "Vis" skal oppdatere transaksjonslisten.
 
@@ -863,8 +934,222 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     # -----------------------------------------------------------------
 
     def _refresh_pivot(self) -> None:
+        try:
+            self._refresh_mapping_issues()
+        except Exception:
+            pass
         page_analyse_pivot.refresh_pivot(page=self)
         self._update_ao_count_label()
+        try:
+            self._update_mapping_warning_banner()
+        except Exception:
+            pass
+
+    def _refresh_mapping_issues(self) -> None:
+        try:
+            import analyse_mapping_service
+            issues = analyse_mapping_service.build_page_mapping_issues(self)
+            problems = analyse_mapping_service.problem_mapping_issues(issues)
+            summary = analyse_mapping_service.summarize_mapping_issues(issues)
+            accounts = analyse_mapping_service.get_problem_accounts(issues)
+        except Exception:
+            issues = []
+            problems = []
+            summary = ""
+            accounts = []
+        self._mapping_issues = list(issues)
+        self._mapping_problem_accounts = list(accounts)
+        self._mapping_warning = str(summary or "")
+        if getattr(self, "_mapping_warning_var", None) is not None:
+            try:
+                self._mapping_warning_var.set(self._mapping_warning)
+            except Exception:
+                pass
+        self._update_mapping_warning_banner(problem_count=len(problems))
+
+    def _update_mapping_warning_banner(self, *, problem_count: Optional[int] = None) -> None:
+        frame = getattr(self, "_mapping_banner_frame", None)
+        if frame is None:
+            return
+        summary = str(getattr(self, "_mapping_warning", "") or "").strip()
+        if problem_count is None:
+            try:
+                import analyse_mapping_service
+                problem_count = len(
+                    analyse_mapping_service.problem_mapping_issues(
+                        getattr(self, "_mapping_issues", []) or []
+                    )
+                )
+            except Exception:
+                problem_count = 0
+        try:
+            if summary:
+                frame.grid()
+            else:
+                frame.grid_remove()
+        except Exception:
+            pass
+
+        selected_rows = self._get_selected_problem_account_rows()
+        try:
+            btn_show = getattr(self, "_btn_show_only_unmapped", None)
+            if btn_show is not None:
+                if problem_count:
+                    btn_show.state(["!disabled"])
+                else:
+                    btn_show.state(["disabled"])
+            btn_map = getattr(self, "_btn_map_selected_problem", None)
+            if btn_map is not None:
+                if selected_rows:
+                    btn_map.state(["!disabled"])
+                else:
+                    btn_map.state(["disabled"])
+            btn_bulk = getattr(self, "_btn_bulk_map_problem", None)
+            if btn_bulk is not None:
+                if selected_rows:
+                    btn_bulk.state(["!disabled"])
+                else:
+                    btn_bulk.state(["disabled"])
+        except Exception:
+            pass
+
+    def _get_selected_problem_account_rows(self) -> List[tuple[str, str]]:
+        rows: List[tuple[str, str]] = []
+        wanted = {str(v).strip() for v in getattr(self, "_mapping_problem_accounts", []) if str(v).strip()}
+        if not wanted:
+            return rows
+        tree = getattr(self, "_pivot_tree", None)
+        if tree is None:
+            return rows
+        try:
+            selected = list(tree.selection())
+        except Exception:
+            selected = []
+        if not selected:
+            try:
+                focused = tree.focus()
+            except Exception:
+                focused = ""
+            if focused:
+                selected = [focused]
+        for item in selected:
+            try:
+                konto = str(tree.set(item, "Konto") or "").strip()
+            except Exception:
+                konto = ""
+            if not konto or konto not in wanted:
+                continue
+            try:
+                kontonavn = str(tree.set(item, "Kontonavn") or "").strip()
+            except Exception:
+                kontonavn = ""
+            rows.append((konto, kontonavn))
+        return rows
+
+    def _focus_problem_account(self, konto: str) -> None:
+        tree = getattr(self, "_pivot_tree", None)
+        if tree is None:
+            return
+        target = str(konto or "").strip()
+        if not target:
+            return
+        try:
+            items = tree.get_children("")
+        except Exception:
+            items = ()
+        for item in items:
+            try:
+                value = str(tree.set(item, "Konto") or "").strip()
+            except Exception:
+                value = ""
+            if value != target:
+                continue
+            try:
+                tree.selection_set((item,))
+            except Exception:
+                pass
+            try:
+                tree.focus(item)
+            except Exception:
+                pass
+            try:
+                tree.see(item)
+            except Exception:
+                pass
+            break
+        self._update_mapping_warning_banner()
+        try:
+            self._refresh_transactions_view()
+        except Exception:
+            pass
+
+    def _show_only_unmapped_accounts(self) -> None:
+        try:
+            self._var_aggregering.set("Konto")
+        except Exception:
+            pass
+        try:
+            if self._var_tx_view_mode is not None:
+                self._var_tx_view_mode.set("Saldobalansekontoer")
+        except Exception:
+            pass
+        try:
+            if self._var_show_only_unmapped is not None:
+                self._var_show_only_unmapped.set(True)
+        except Exception:
+            pass
+        try:
+            self._refresh_pivot()
+        except Exception:
+            pass
+        accounts = [str(v).strip() for v in getattr(self, "_mapping_problem_accounts", []) if str(v).strip()]
+        if accounts:
+            self._focus_problem_account(accounts[0])
+
+    def _on_show_only_unmapped_changed(self, _event=None) -> None:
+        try:
+            if self._var_show_only_unmapped is not None and bool(self._var_show_only_unmapped.get()):
+                self._var_aggregering.set("Konto")
+        except Exception:
+            pass
+        try:
+            self._refresh_pivot()
+        except Exception:
+            pass
+        try:
+            self._refresh_transactions_view()
+        except Exception:
+            pass
+
+    def _map_selected_problem_account(self) -> None:
+        rows = self._get_selected_problem_account_rows()
+        if not rows:
+            return
+        import page_analyse_sb
+
+        konto, kontonavn = rows[0]
+        page_analyse_sb.remap_sb_account(page=self, konto=konto, kontonavn=kontonavn)
+        try:
+            self._refresh_mapping_issues()
+            self._refresh_pivot()
+            self._focus_problem_account(konto)
+        except Exception:
+            pass
+
+    def _bulk_map_selected_problem_accounts(self) -> None:
+        rows = self._get_selected_problem_account_rows()
+        if not rows:
+            return
+        import page_analyse_sb
+
+        page_analyse_sb._remap_multiple_sb_accounts(page=self, kontoer=rows)
+        try:
+            self._refresh_mapping_issues()
+            self._refresh_pivot()
+            if rows:
+                self._focus_problem_account(rows[0][0])
+        except Exception:
+            pass
 
     def _update_ao_count_label(self) -> None:
         """Vis antall tilleggsposteringer ved ÅO-checkboxen."""
@@ -1324,6 +1609,437 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         if messagebox is not None:
             try:
                 messagebox.showinfo("Eksport", f"Regnskapsoppstilling lagret til:\n{saved}")
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Nøkkeltallsrapport (HTML)
+    # ------------------------------------------------------------------
+
+    def _export_nokkeltall_html(self) -> None:
+        try:
+            from tkinter import filedialog
+        except Exception:
+            filedialog = None  # type: ignore
+
+        if filedialog is None:
+            return
+
+        payload = page_analyse_export.prepare_regnskapsoppstilling_export_data(page=self)
+        rl_df = payload.get("rl_df")
+        if not isinstance(rl_df, pd.DataFrame) or rl_df.empty:
+            if messagebox is not None:
+                try:
+                    messagebox.showinfo("Eksport", "Fant ingen regnskapsdata for nøkkeltallsrapport.")
+                except Exception:
+                    pass
+            return
+
+        # Legg til fjorårskolonner hvis tilgjengelig
+        pivot_df = getattr(self, "_pivot_df_last", None)
+        if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
+            rl_df = rl_df.copy()
+            for col in ("UB_fjor", "Endring_fjor", "Endring_pct"):
+                if col in pivot_df.columns and col not in rl_df.columns:
+                    merged = pivot_df[["regnr", col]].drop_duplicates(subset=["regnr"])
+                    rl_df = rl_df.merge(merged, on="regnr", how="left")
+
+        client = str(payload.get("client") or "").strip()
+        year = str(payload.get("year") or "").strip()
+        base_name = "Nokkeltall"
+        if client:
+            safe_client = "".join(ch if ch.isalnum() or ch in {" ", "_", "-"} else "_" for ch in client).strip()
+            if safe_client:
+                base_name += f" {safe_client}"
+        if year:
+            base_name += f" {year}"
+
+        try:
+            path = filedialog.asksaveasfilename(
+                parent=self,
+                title="Eksporter nøkkeltallsrapport",
+                defaultextension=".html",
+                filetypes=[("HTML-rapport", "*.html"), ("Alle filer", "*.*")],
+                initialfile=base_name + ".html",
+            )
+        except Exception:
+            path = ""
+
+        if not path:
+            return
+
+        try:
+            import nokkeltall_report
+
+            saved = nokkeltall_report.save_report_html(
+                path,
+                rl_df=rl_df,
+                transactions_df=payload.get("transactions_df"),
+                client=client,
+                year=year,
+            )
+        except Exception as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror("Eksport", f"Kunne ikke generere nøkkeltallsrapport.\n\n{exc}")
+                except Exception:
+                    pass
+            return
+
+        # Åpne i browser
+        try:
+            import webbrowser
+            from pathlib import Path
+            webbrowser.open(Path(saved).as_uri())
+        except Exception:
+            pass
+
+        if messagebox is not None:
+            try:
+                messagebox.showinfo("Eksport", f"Nøkkeltallsrapport lagret og åpnet:\n{saved}")
+            except Exception:
+                pass
+
+    def _export_nokkeltall_pdf(self) -> None:
+        try:
+            from tkinter import filedialog
+        except Exception:
+            filedialog = None  # type: ignore
+
+        if filedialog is None:
+            return
+
+        payload = page_analyse_export.prepare_regnskapsoppstilling_export_data(page=self)
+        rl_df = payload.get("rl_df")
+        if not isinstance(rl_df, pd.DataFrame) or rl_df.empty:
+            if messagebox is not None:
+                try:
+                    messagebox.showinfo("Eksport", "Fant ingen regnskapsdata for nøkkeltallsrapport.")
+                except Exception:
+                    pass
+            return
+
+        # Legg til fjorårskolonner hvis tilgjengelig
+        pivot_df = getattr(self, "_pivot_df_last", None)
+        if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
+            rl_df = rl_df.copy()
+            for col in ("UB_fjor", "Endring_fjor", "Endring_pct"):
+                if col in pivot_df.columns and col not in rl_df.columns:
+                    merged = pivot_df[["regnr", col]].drop_duplicates(subset=["regnr"])
+                    rl_df = rl_df.merge(merged, on="regnr", how="left")
+
+        client = str(payload.get("client") or "").strip()
+        year = str(payload.get("year") or "").strip()
+        base_name = "Nokkeltall"
+        if client:
+            safe_client = "".join(ch if ch.isalnum() or ch in {" ", "_", "-"} else "_" for ch in client).strip()
+            if safe_client:
+                base_name += f" {safe_client}"
+        if year:
+            base_name += f" {year}"
+
+        try:
+            path = filedialog.asksaveasfilename(
+                parent=self,
+                title="Eksporter nøkkeltallsrapport (PDF)",
+                defaultextension=".pdf",
+                filetypes=[("PDF-rapport", "*.pdf"), ("Alle filer", "*.*")],
+                initialfile=base_name + ".pdf",
+            )
+        except Exception:
+            path = ""
+
+        if not path:
+            return
+
+        try:
+            import nokkeltall_report
+
+            saved = nokkeltall_report.save_report_pdf(
+                path,
+                rl_df=rl_df,
+                transactions_df=payload.get("transactions_df"),
+                client=client,
+                year=year,
+            )
+        except ImportError as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror(
+                        "Mangler playwright",
+                        f"PDF-eksport krever playwright.\n\nInstaller med:\n"
+                        f"pip install playwright\n"
+                        f"python -m playwright install chromium\n\n{exc}",
+                    )
+                except Exception:
+                    pass
+            return
+        except Exception as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror("Eksport", f"Kunne ikke generere PDF-rapport.\n\n{exc}")
+                except Exception:
+                    pass
+            return
+
+        # Åpne PDF
+        try:
+            import os
+            os.startfile(saved)
+        except Exception:
+            pass
+
+        if messagebox is not None:
+            try:
+                messagebox.showinfo("Eksport", f"Nøkkeltallsrapport (PDF) lagret:\n{saved}")
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------
+    # Motpost-flytdiagram (HTML/PDF)
+    # ------------------------------------------------------------------
+
+    def _build_konto_to_rl(self) -> dict | None:
+        """Bygg mapping konto_str → (regnr, rl_name) fra sidens RL-intervaller.
+
+        Returnerer None dersom RL-modus ikke er aktiv eller intervaller mangler.
+        Returnerer tom dict dersom mapping ikke kan bygges (fall back til kontonivå).
+        """
+        agg_var = getattr(self, "_var_aggregering", None)
+        if agg_var is None:
+            return None
+        try:
+            mode = str(agg_var.get())
+        except Exception:
+            return None
+        if mode != "Regnskapslinje":
+            return None
+
+        intervals = getattr(self, "_rl_intervals", None)
+        regnskapslinjer = getattr(self, "_rl_regnskapslinjer", None)
+        df = getattr(self, "_df_filtered", None)
+
+        if intervals is None or not isinstance(df, pd.DataFrame) or df.empty:
+            return {}
+
+        try:
+            from regnskap_mapping import apply_interval_mapping
+            import page_analyse_rl
+
+            # Bygg rl_name oppslag: regnr → navn
+            rl_name_map: dict[int, str] = {}
+            if isinstance(regnskapslinjer, pd.DataFrame) and not regnskapslinjer.empty:
+                for _, row in regnskapslinjer.iterrows():
+                    try:
+                        rl_name_map[int(row["regnr"])] = str(row.get("regnskapslinje", "") or "")
+                    except Exception:
+                        pass
+
+            # Hent unike kontoer fra HB
+            kontos = df["Konto"].dropna().astype(str).str.strip().unique().tolist()
+            probe = pd.DataFrame({"konto": kontos})
+            result = apply_interval_mapping(probe, intervals, konto_col="konto")
+            mapped = result.mapped.dropna(subset=["regnr"])
+
+            konto_to_rl: dict[str, tuple[int, str]] = {}
+            for _, row in mapped.iterrows():
+                try:
+                    regnr = int(row["regnr"])
+                    rl_name = rl_name_map.get(regnr, str(regnr))
+                    konto_to_rl[str(row["konto"])] = (regnr, rl_name)
+                except Exception:
+                    pass
+
+            return konto_to_rl
+        except Exception:
+            return {}
+
+    def _export_motpost_flowchart_html(self) -> None:
+        """Eksporter motpost-flytdiagram som HTML for valgte kontoer."""
+        try:
+            from tkinter import filedialog
+        except Exception:
+            filedialog = None  # type: ignore
+        if filedialog is None:
+            return
+
+        accounts = self._get_selected_accounts()
+        if not accounts:
+            if messagebox is not None:
+                try:
+                    messagebox.showinfo("Motpost-flytdiagram", "Velg minst én konto i pivoten først.")
+                except Exception:
+                    pass
+            return
+
+        df = getattr(self, "_df_filtered", None)
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            if messagebox is not None:
+                try:
+                    messagebox.showinfo("Motpost-flytdiagram", "Ingen transaksjonsdata tilgjengelig.")
+                except Exception:
+                    pass
+            return
+
+        try:
+            import session
+            client = str(getattr(session, "client", "") or "").strip()
+            year = str(getattr(session, "year", "") or "").strip()
+        except Exception:
+            client, year = "", ""
+
+        base_name = "Motpost-flytdiagram"
+        if client:
+            safe_client = "".join(ch if ch.isalnum() or ch in {" ", "_", "-"} else "_" for ch in client).strip()
+            if safe_client:
+                base_name += f" {safe_client}"
+        if year:
+            base_name += f" {year}"
+
+        try:
+            path = filedialog.asksaveasfilename(
+                parent=self,
+                title="Eksporter motpost-flytdiagram",
+                defaultextension=".html",
+                filetypes=[("HTML-rapport", "*.html"), ("Alle filer", "*.*")],
+                initialfile=base_name + ".html",
+            )
+        except Exception:
+            path = ""
+
+        if not path:
+            return
+
+        try:
+            from motpost_flowchart_report import save_flowchart_html
+
+            saved = save_flowchart_html(
+                path,
+                df=df,
+                start_accounts=accounts,
+                max_depth=2,
+                client=client,
+                year=year,
+                konto_to_rl=self._build_konto_to_rl(),
+            )
+        except Exception as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror("Motpost-flytdiagram", f"Kunne ikke generere flytdiagram.\n\n{exc}")
+                except Exception:
+                    pass
+            return
+
+        try:
+            import webbrowser
+            from pathlib import Path
+            webbrowser.open(Path(saved).as_uri())
+        except Exception:
+            pass
+
+        if messagebox is not None:
+            try:
+                messagebox.showinfo("Motpost-flytdiagram", f"Flytdiagram lagret og åpnet:\n{saved}")
+            except Exception:
+                pass
+
+    def _export_motpost_flowchart_pdf(self) -> None:
+        """Eksporter motpost-flytdiagram som PDF for valgte kontoer."""
+        try:
+            from tkinter import filedialog
+        except Exception:
+            filedialog = None  # type: ignore
+        if filedialog is None:
+            return
+
+        accounts = self._get_selected_accounts()
+        if not accounts:
+            if messagebox is not None:
+                try:
+                    messagebox.showinfo("Motpost-flytdiagram", "Velg minst én konto i pivoten først.")
+                except Exception:
+                    pass
+            return
+
+        df = getattr(self, "_df_filtered", None)
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            if messagebox is not None:
+                try:
+                    messagebox.showinfo("Motpost-flytdiagram", "Ingen transaksjonsdata tilgjengelig.")
+                except Exception:
+                    pass
+            return
+
+        try:
+            import session
+            client = str(getattr(session, "client", "") or "").strip()
+            year = str(getattr(session, "year", "") or "").strip()
+        except Exception:
+            client, year = "", ""
+
+        base_name = "Motpost-flytdiagram"
+        if client:
+            safe_client = "".join(ch if ch.isalnum() or ch in {" ", "_", "-"} else "_" for ch in client).strip()
+            if safe_client:
+                base_name += f" {safe_client}"
+        if year:
+            base_name += f" {year}"
+
+        try:
+            path = filedialog.asksaveasfilename(
+                parent=self,
+                title="Eksporter motpost-flytdiagram (PDF)",
+                defaultextension=".pdf",
+                filetypes=[("PDF-rapport", "*.pdf"), ("Alle filer", "*.*")],
+                initialfile=base_name + ".pdf",
+            )
+        except Exception:
+            path = ""
+
+        if not path:
+            return
+
+        try:
+            from motpost_flowchart_report import save_flowchart_pdf
+
+            saved = save_flowchart_pdf(
+                path,
+                df=df,
+                start_accounts=accounts,
+                max_depth=2,
+                client=client,
+                year=year,
+                konto_to_rl=self._build_konto_to_rl(),
+            )
+        except ImportError as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror(
+                        "Mangler playwright",
+                        f"PDF-eksport krever playwright.\n\nInstaller med:\n"
+                        f"pip install playwright\n"
+                        f"python -m playwright install chromium\n\n{exc}",
+                    )
+                except Exception:
+                    pass
+            return
+        except Exception as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror("Motpost-flytdiagram", f"Kunne ikke generere PDF.\n\n{exc}")
+                except Exception:
+                    pass
+            return
+
+        try:
+            import os
+            os.startfile(saved)
+        except Exception:
+            pass
+
+        if messagebox is not None:
+            try:
+                messagebox.showinfo("Motpost-flytdiagram", f"Flytdiagram (PDF) lagret:\n{saved}")
             except Exception:
                 pass
 

@@ -470,6 +470,30 @@ def build_ui(
     else:
         actions_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", state="disabled")
 
+    export_nk_cmd = getattr(page, "_export_nokkeltall_html", None)
+    if callable(export_nk_cmd):
+        actions_menu.add_command(label="Nøkkeltallsrapport (HTML)", command=export_nk_cmd)
+    else:
+        actions_menu.add_command(label="Nøkkeltallsrapport (HTML)", state="disabled")
+
+    export_nk_pdf_cmd = getattr(page, "_export_nokkeltall_pdf", None)
+    if callable(export_nk_pdf_cmd):
+        actions_menu.add_command(label="Nøkkeltallsrapport (PDF)", command=export_nk_pdf_cmd)
+    else:
+        actions_menu.add_command(label="Nøkkeltallsrapport (PDF)", state="disabled")
+
+    flowchart_html_cmd = getattr(page, "_export_motpost_flowchart_html", None)
+    if callable(flowchart_html_cmd):
+        actions_menu.add_command(label="Motpost-flytdiagram (HTML)", command=flowchart_html_cmd)
+    else:
+        actions_menu.add_command(label="Motpost-flytdiagram (HTML)", state="disabled")
+
+    flowchart_pdf_cmd = getattr(page, "_export_motpost_flowchart_pdf", None)
+    if callable(flowchart_pdf_cmd):
+        actions_menu.add_command(label="Motpost-flytdiagram (PDF)", command=flowchart_pdf_cmd)
+    else:
+        actions_menu.add_command(label="Motpost-flytdiagram (PDF)", state="disabled")
+
     ib_ub_cmd = getattr(page, "_export_ib_ub_control", None)
     if callable(ib_ub_cmd):
         actions_menu.add_command(label="SB/HB Avstemming (IB/UB-kontroll)", command=ib_ub_cmd)
@@ -493,6 +517,12 @@ def build_ui(
         actions_menu.add_command(label="Tilleggsposteringer (\u00c5O)\u2026", command=ao_cmd)
     else:
         actions_menu.add_command(label="Tilleggsposteringer (\u00c5O)\u2026", state="disabled")
+
+    disposition_cmd = getattr(page, "_open_disponering_via_ao", None)
+    if callable(disposition_cmd):
+        actions_menu.add_command(label="Disponering via \u00c5O\u2026", command=disposition_cmd)
+    else:
+        actions_menu.add_command(label="Disponering via \u00c5O\u2026", state="disabled")
 
     actions_menu.add_separator()
 
@@ -614,7 +644,17 @@ def build_ui(
         ao_count_label.grid(row=0, column=14, sticky="w", padx=(2, 0))
         page._ao_count_label = ao_count_label
 
-    row2.grid_columnconfigure(15, weight=1)
+    var_show_only_unmapped = getattr(page, "_var_show_only_unmapped", None)
+    if var_show_only_unmapped is not None:
+        cb_unmapped = ttk.Checkbutton(
+            row2, text="Vis kun umappede",
+            variable=var_show_only_unmapped,
+            command=page._on_show_only_unmapped_changed,
+        )
+        cb_unmapped.grid(row=0, column=15, sticky="w", padx=(8, 0))
+        page._cb_show_only_unmapped = cb_unmapped
+
+    row2.grid_columnconfigure(16, weight=1)
 
     row3 = ttk.Frame(filter_frame)
     row3.pack(fill="x", pady=(4, 0))
@@ -730,15 +770,37 @@ def build_ui(
     body = ttk.Frame(page)
     body.pack(fill="both", expand=True, padx=6, pady=(2, 6))
     body.columnconfigure(0, weight=1)
-    body.rowconfigure(1, weight=1)
+    body.rowconfigure(2, weight=1)
 
     lbl_tx_summary = ttk.Label(body, text="Ingen kontoer valgt.")
     lbl_tx_summary.grid(row=0, column=0, sticky="w", pady=(0, 4))
 
+    mapping_banner = ttk.Frame(body, style="Card.TFrame")
+    mapping_banner.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+    mapping_banner.grid_remove()
+    mapping_banner.columnconfigure(1, weight=1)
+    ttk.Label(mapping_banner, text="Mappingkontroll:", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(8, 6), pady=6)
+    lbl_mapping_warning = ttk.Label(
+        mapping_banner,
+        textvariable=getattr(page, "_mapping_warning_var", None),
+        foreground="#9C1C1C",
+    )
+    lbl_mapping_warning.grid(row=0, column=1, sticky="w", pady=6)
+    btn_show_unmapped = ttk.Button(mapping_banner, text="Vis umappede", command=page._show_only_unmapped_accounts)
+    btn_show_unmapped.grid(row=0, column=2, sticky="e", padx=(8, 4), pady=4)
+    btn_map_problem = ttk.Button(mapping_banner, text="Map valgt konto...", command=page._map_selected_problem_account)
+    btn_map_problem.grid(row=0, column=3, sticky="e", padx=4, pady=4)
+    btn_bulk_problem = ttk.Button(mapping_banner, text="Flytt valgte...", command=page._bulk_map_selected_problem_accounts)
+    btn_bulk_problem.grid(row=0, column=4, sticky="e", padx=(4, 8), pady=4)
+    page._mapping_banner_frame = mapping_banner
+    page._btn_show_only_unmapped = btn_show_unmapped
+    page._btn_map_selected_problem = btn_map_problem
+    page._btn_bulk_map_problem = btn_bulk_problem
+
     paned_cls = getattr(ttk, "Panedwindow", None)
     if paned_cls is not None:
         split_body = paned_cls(body, orient="horizontal")
-        split_body.grid(row=1, column=0, sticky="nsew")
+        split_body.grid(row=2, column=0, sticky="nsew")
         pivot_frame = ttk.Frame(split_body)
         tx_frame = ttk.Frame(split_body)
         try:
@@ -753,9 +815,9 @@ def build_ui(
         body.columnconfigure(0, weight=1, uniform="analyse")
         body.columnconfigure(1, weight=3, uniform="analyse")
         pivot_frame = ttk.Frame(body)
-        pivot_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
+        pivot_frame.grid(row=2, column=0, sticky="nsew", padx=(0, 6))
         tx_frame = ttk.Frame(body)
-        tx_frame.grid(row=1, column=1, sticky="nsew")
+        tx_frame.grid(row=2, column=1, sticky="nsew")
         split_body = None
 
     # Pivot (konto-sammendrag)
@@ -982,6 +1044,7 @@ def build_ui(
             _tx_mode_cb.bind("<<ComboboxSelected>>", lambda _e: _on_tx_mode_fn())
     else:
         ttk.Label(tx_header, text="Transaksjoner").grid(row=0, column=1, sticky="w")
+
 
     tx_outer.rowconfigure(1, weight=1)
     tx_outer.columnconfigure(0, weight=1)
