@@ -39,6 +39,9 @@ dist_exe/
 # Binary test/doc data
 doc/*.xlsx
 
+# Sensitiv klientdata — skal ALDRI commites
+doc/files/
+
 # OS cruft
 Thumbs.db
 Desktop.ini

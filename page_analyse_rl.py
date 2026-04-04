@@ -913,6 +913,13 @@ def refresh_rl_pivot(*, page: Any) -> None:
         except Exception:
             continue
 
+    # Auto-juster kolonnene dersom fjorårsdata akkurat ble lastet
+    try:
+        import page_analyse_columns as _pac
+        _pac.update_pivot_columns_for_prev_year(page=page)
+    except Exception:
+        pass
+
     maybe_auto_fit = getattr(page, "_maybe_auto_fit_pivot_tree", None)
     if callable(maybe_auto_fit):
         try:

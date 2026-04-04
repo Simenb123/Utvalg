@@ -111,6 +111,156 @@ _MVA_FILTER_OPTIONS: List[str] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Nøkkeltall inline rendering helpers
+# ---------------------------------------------------------------------------
+
+def _nk_write(widget, msg: str) -> None:
+    """Skriv enkel tekstmelding til nk_text-widgeten."""
+    try:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("end", msg)
+        widget.configure(state="disabled")
+    except Exception:
+        pass
+
+
+def _nk_render(widget, result) -> None:  # noqa: ANN001
+    """Rendrer NokkeltallResult til nk_text-widgeten med formattering."""
+    try:
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+
+        # Sett opp tags
+        widget.tag_configure("title", font=("TkDefaultFont", 13, "bold"), spacing3=6)
+        widget.tag_configure("section", font=("TkDefaultFont", 11, "bold"), spacing1=12, spacing3=4)
+        widget.tag_configure("sep", foreground="#CCCCCC")
+        widget.tag_configure("label", font=("TkDefaultFont", 10))
+        widget.tag_configure("val", font=("TkFixedFont", 10), foreground="#1A237E")
+        widget.tag_configure("val_prev", font=("TkFixedFont", 10), foreground="#888888")
+        widget.tag_configure("bold_label", font=("TkDefaultFont", 10, "bold"))
+        widget.tag_configure("bold_val", font=("TkFixedFont", 10, "bold"), foreground="#1A237E")
+        widget.tag_configure("pos_chg", font=("TkFixedFont", 9), foreground="#2E7D32")
+        widget.tag_configure("neg_chg", font=("TkFixedFont", 9), foreground="#C62828")
+        widget.tag_configure("na", font=("TkDefaultFont", 10), foreground="#AAAAAA")
+
+        # Tittel
+        title = "Nøkkeltall"
+        if result.client:
+            title += f"  —  {result.client}"
+        if result.year:
+            title += f"  {result.year}"
+        widget.insert("end", title + "\n", "title")
+        widget.insert("end", "─" * 60 + "\n\n", "sep")
+
+        # --- KPI-nøkkeltall ---
+        widget.insert("end", "Sentrale nøkkeltall\n", "section")
+        widget.insert("end", "─" * 40 + "\n", "sep")
+        has_kpi = False
+        for card in result.kpi_cards:
+            has_kpi = True
+            label = str(card.get("label", ""))
+            formatted = str(card.get("formatted", "–"))
+            chg = card.get("change_pct")
+            widget.insert("end", f"  {label:<32}", "label")
+            widget.insert("end", f"{formatted:>12}", "val")
+            if chg is not None:
+                chg_str = f"  ({chg:+.1f} %)"
+                tag = "pos_chg" if chg >= 0 else "neg_chg"
+                widget.insert("end", chg_str, tag)
+            widget.insert("end", "\n")
+        if not has_kpi:
+            widget.insert("end", "  – (ingen data) –\n", "na")
+
+        # --- Nøkkeltall-tabell (Lønnsomhet, Likviditet, Soliditet, Effektivitet) ---
+        categories = {}
+        for m in result.metrics:
+            categories.setdefault(m.category, []).append(m)
+
+        for cat, items in categories.items():
+            any_data = any(m.value is not None for m in items)
+            if not any_data:
+                continue
+            widget.insert("end", f"\n{cat}\n", "section")
+            widget.insert("end", "─" * 40 + "\n", "sep")
+            for m in items:
+                if m.value is None:
+                    continue
+                label = m.label
+                val_str = m.formatted
+                widget.insert("end", f"  {label:<38}", "label")
+                widget.insert("end", f"{val_str:>12}", "val")
+                if result.has_prev_year and m.prev_value is not None:
+                    prev_str = m.formatted_prev
+                    widget.insert("end", f"   fjor: {prev_str}", "val_prev")
+                    chg = m.change_pct
+                    if chg is not None:
+                        tag = "pos_chg" if chg >= 0 else "neg_chg"
+                        widget.insert("end", f"  ({chg:+.1f} %)", tag)
+                widget.insert("end", "\n")
+
+        # --- Resultatregnskap ---
+        if result.pl_summary:
+            widget.insert("end", "\nResultatregnskap\n", "section")
+            widget.insert("end", "─" * 60 + "\n", "sep")
+            header = f"  {'':38}{'I år':>14}"
+            if result.has_prev_year:
+                header += f"{'Fjor':>14}{'Endring':>12}"
+            widget.insert("end", header + "\n", "val_prev")
+            for row in result.pl_summary:
+                is_sum = row.get("is_sum", False)
+                label_tag = "bold_label" if is_sum else "label"
+                val_tag = "bold_val" if is_sum else "val"
+                name = str(row.get("name", ""))
+                formatted = str(row.get("formatted", "–"))
+                widget.insert("end", f"  {name:<38}", label_tag)
+                widget.insert("end", f"{formatted:>14}", val_tag)
+                if result.has_prev_year:
+                    prev_fmt = row.get("prev_formatted") or "–"
+                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
+                    chg_amt = row.get("change_amount_formatted")
+                    if chg_amt:
+                        chg = row.get("change_amount", 0) or 0
+                        tag = "pos_chg" if chg >= 0 else "neg_chg"
+                        widget.insert("end", f"{chg_amt:>12}", tag)
+                widget.insert("end", "\n")
+
+        # --- Balanse ---
+        if result.bs_summary:
+            widget.insert("end", "\nBalanse\n", "section")
+            widget.insert("end", "─" * 60 + "\n", "sep")
+            header = f"  {'':38}{'I år':>14}"
+            if result.has_prev_year:
+                header += f"{'Fjor':>14}{'Endring':>12}"
+            widget.insert("end", header + "\n", "val_prev")
+            for row in result.bs_summary:
+                is_sum = row.get("is_sum", False)
+                label_tag = "bold_label" if is_sum else "label"
+                val_tag = "bold_val" if is_sum else "val"
+                name = str(row.get("name", ""))
+                formatted = str(row.get("formatted", "–"))
+                widget.insert("end", f"  {name:<38}", label_tag)
+                widget.insert("end", f"{formatted:>14}", val_tag)
+                if result.has_prev_year:
+                    prev_fmt = row.get("prev_formatted") or "–"
+                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
+                    chg_amt = row.get("change_amount_formatted")
+                    if chg_amt:
+                        chg = row.get("change_amount", 0) or 0
+                        tag = "pos_chg" if chg >= 0 else "neg_chg"
+                        widget.insert("end", f"{chg_amt:>12}", tag)
+                widget.insert("end", "\n")
+
+        widget.configure(state="disabled")
+    except Exception as exc:
+        try:
+            widget.configure(state="disabled")
+        except Exception:
+            pass
+        log.warning("_nk_render error: %s", exc)
+
+
 class AnalysePage(ttk.Frame):  # type: ignore[misc]
     """GUI-side for analyse."""
 
@@ -212,7 +362,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._var_mva_code = tk.StringVar(value=self.MVA_CODE_ALL_LABEL)
         self._var_mva_mode = tk.StringVar(value=self.MVA_FILTER_OPTIONS[0])
         self._var_max_rows = tk.IntVar(value=200)
-        self._var_aggregering = tk.StringVar(value="Konto")
+        self._var_aggregering = tk.StringVar(value="Regnskapslinje")
         self._series_vars = [tk.IntVar(value=0) for _ in range(10)]
         self._mva_code_values: List[str] = [self.MVA_CODE_ALL_LABEL]
         self._rl_mapping_warning: str = ""
@@ -253,7 +403,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._tx_first_load = True
 
         # --- SB/transaksjonsvisning toggle ---
-        self._var_tx_view_mode = tk.StringVar(value="Transaksjoner")
+        self._var_tx_view_mode = tk.StringVar(value="Saldobalansekontoer")
 
         # --- UI refs ---
         self._pivot_tree = None
@@ -1235,10 +1385,56 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             page_analyse_sb.refresh_sb_view(page=self)
             return
 
+        if mode == "Nøkkeltall":
+            page_analyse_sb.show_nk_view(page=self)
+            self._refresh_nokkeltall_view()
+            return
+
         # Bytt tilbake til TX-modus
         page_analyse_sb.show_tx_tree(page=self)
         self._configure_tx_tree_columns()
         page_analyse_transactions.refresh_transactions_view(page=self)
+
+    def _refresh_nokkeltall_view(self) -> None:
+        """Beregn og vis nøkkeltall inline i _nk_text-widgeten."""
+        nk_text = getattr(self, "_nk_text", None)
+        if nk_text is None:
+            return
+
+        try:
+            import nokkeltall_engine
+        except Exception:
+            return
+
+        # Hent rl_df via eksisterende eksport-logikk
+        try:
+            payload = page_analyse_export.prepare_regnskapsoppstilling_export_data(page=self)
+        except Exception:
+            payload = {}
+        rl_df = payload.get("rl_df")
+        if not isinstance(rl_df, pd.DataFrame) or rl_df.empty:
+            _nk_write(nk_text, "Ingen regnskapsdata tilgjengelig.\n\nLast inn HB-data og velg klient.")
+            return
+
+        # Legg til fjorårskolonner hvis tilgjengelig
+        pivot_df = getattr(self, "_pivot_df_last", None)
+        if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
+            rl_df = rl_df.copy()
+            for col in ("UB_fjor", "Endring_fjor", "Endring_pct"):
+                if col in pivot_df.columns and col not in rl_df.columns:
+                    merged = pivot_df[["regnr", col]].drop_duplicates(subset=["regnr"])
+                    rl_df = rl_df.merge(merged, on="regnr", how="left")
+
+        client = str(payload.get("client") or "").strip()
+        year = str(payload.get("year") or "").strip()
+
+        try:
+            result = nokkeltall_engine.compute_nokkeltall(rl_df, client=client, year=year)
+        except Exception as exc:
+            _nk_write(nk_text, f"Feil ved beregning av nøkkeltall:\n{exc}")
+            return
+
+        _nk_render(nk_text, result)
 
     def _refresh_detail_panel(self) -> None:
         page_analyse_detail_panel.refresh_detail_panel(self)
@@ -1823,17 +2019,20 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             return {}
 
         try:
-            from regnskap_mapping import apply_interval_mapping
-            import page_analyse_rl
+            from regnskap_mapping import apply_interval_mapping, normalize_regnskapslinjer
 
-            # Bygg rl_name oppslag: regnr → navn
+            # Bygg rl_name oppslag: regnr → navn (normaliser rådata først)
             rl_name_map: dict[int, str] = {}
             if isinstance(regnskapslinjer, pd.DataFrame) and not regnskapslinjer.empty:
-                for _, row in regnskapslinjer.iterrows():
-                    try:
-                        rl_name_map[int(row["regnr"])] = str(row.get("regnskapslinje", "") or "")
-                    except Exception:
-                        pass
+                try:
+                    regn = normalize_regnskapslinjer(regnskapslinjer)
+                    for _, row in regn.iterrows():
+                        try:
+                            rl_name_map[int(row["regnr"])] = str(row.get("regnskapslinje", "") or "")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
             # Hent unike kontoer fra HB
             kontos = df["Konto"].dropna().astype(str).str.strip().unique().tolist()

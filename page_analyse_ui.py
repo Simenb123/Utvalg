@@ -1032,7 +1032,7 @@ def build_ui(
         _tx_mode_cb = ttk.Combobox(
             tx_header,
             textvariable=_var_tx_mode,
-            values=["Transaksjoner", "Saldobalansekontoer"],
+            values=["Transaksjoner", "Saldobalansekontoer", "Nøkkeltall"],
             state="readonly",
             width=20,
         )
@@ -1045,6 +1045,51 @@ def build_ui(
     else:
         ttk.Label(tx_header, text="Transaksjoner").grid(row=0, column=1, sticky="w")
 
+    # Knapp: Klassifiser kontoer (åpner konto-gruppe editor)
+    def _open_klassifisering() -> None:
+        try:
+            import session as _session
+            import views_konto_klassifisering as _vkk
+            _client = getattr(_session, "client", None) or ""
+            _sb_df = getattr(page, "_rl_sb_df", None)
+            kontoer: list[tuple[str, str]] = []
+            if _sb_df is not None and not _sb_df.empty:
+                from page_analyse_sb import _resolve_sb_columns
+                _col_map = _resolve_sb_columns(_sb_df)
+                _k = _col_map.get("konto", "")
+                _n = _col_map.get("kontonavn", "")
+                if _k:
+                    seen: set[str] = set()
+                    for _, row in _sb_df[[_k] + ([_n] if _n else [])].drop_duplicates().iterrows():
+                        kstr = str(row[_k]).strip()
+                        nstr = str(row[_n]).strip() if _n else ""
+                        if kstr and kstr not in seen:
+                            seen.add(kstr)
+                            kontoer.append((kstr, nstr))
+                    kontoer.sort(key=lambda x: (int(x[0]) if x[0].isdigit() else 0))
+            _vkk.open_klassifisering_editor(
+                page,
+                client=_client,
+                kontoer=kontoer,
+                on_save=lambda: _refresh_sb_after_klassifisering(page),
+            )
+        except Exception as _e:
+            import logging
+            logging.getLogger(__name__).warning("Klassifisering feilet: %s", _e)
+
+    def _refresh_sb_after_klassifisering(p: Any) -> None:
+        """Refresh SB-visning etter at klassifisering er lagret."""
+        try:
+            from page_analyse_sb import refresh_sb_view
+            refresh_sb_view(page=p)
+        except Exception:
+            pass
+
+    ttk.Button(
+        tx_header,
+        text="Klassifiser kontoer\u2026",
+        command=_open_klassifisering,
+    ).grid(row=0, column=2, padx=(12, 0), sticky="w")
 
     tx_outer.rowconfigure(1, weight=1)
     tx_outer.columnconfigure(0, weight=1)
@@ -1106,6 +1151,32 @@ def build_ui(
     except Exception:
         page._sb_frame = None
         page._sb_tree = None
+
+    # --- NK-frame (nøkkeltall) ---
+    try:
+        nk_frame = ttk.Frame(tx_outer)
+        nk_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        nk_frame.rowconfigure(0, weight=1)
+        nk_frame.columnconfigure(0, weight=1)
+        nk_frame.grid_remove()  # Skjult som standard
+        nk_text = tk.Text(
+            nk_frame,
+            wrap="word",
+            state="disabled",
+            relief="flat",
+            bg="#FAFAFA",
+            padx=14,
+            pady=10,
+        )
+        nk_text.grid(row=0, column=0, sticky="nsew")
+        nk_scroll = ttk.Scrollbar(nk_frame, orient="vertical", command=nk_text.yview)
+        nk_scroll.grid(row=0, column=1, sticky="ns")
+        nk_text.configure(yscrollcommand=nk_scroll.set)
+        page._nk_frame = nk_frame
+        page._nk_text = nk_text
+    except Exception:
+        page._nk_frame = None
+        page._nk_text = None
 
     # Analyse skal holdes som en ren analyseflate.
     # Mapping-/forslagspanelene bygges fortsatt her som kompatibilitets-shim,

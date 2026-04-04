@@ -99,8 +99,16 @@ def build_dataset(req: BuildRequest) -> BuildResult:
             import client_store
             import dataset_cache_sqlite
 
+            # For SAF-T-filer: inkluder saft_reader-versjon i signaturen
+            # slik at nye felter i readeren invaliderer cachen automatisk.
+            _extra_mapping = dict(req.mapping)
+            if is_saft_path(req.path):
+                try:
+                    _extra_mapping["__saft_reader_version__"] = saft_reader.READER_VERSION
+                except Exception:
+                    pass
             cache_signature = dataset_cache_sqlite.build_signature(
-                mapping=req.mapping,
+                mapping=_extra_mapping,
                 sheet_name=req.sheet_name,
                 header_row=req.header_row,
             )

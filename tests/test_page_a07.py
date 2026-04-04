@@ -1080,6 +1080,17 @@ def test_focus_selected_control_account_in_gl_focuses_first_account() -> None:
     assert calls == ["5000"]
 
 
+def test_focus_control_code_defers_while_refresh_is_running() -> None:
+    dummy = SimpleNamespace(
+        _refresh_in_progress=True,
+        _pending_focus_code=None,
+    )
+
+    page_a07.A07Page._focus_control_code(dummy, "fastloenn")
+
+    assert dummy._pending_focus_code == "fastloenn"
+
+
 def test_sync_control_account_selection_selects_account_when_present() -> None:
     class DummyTree:
         def __init__(self) -> None:
@@ -1431,6 +1442,7 @@ def test_poll_support_refresh_clears_state_for_stale_generation() -> None:
 def test_refresh_support_views_renders_current_tab_when_payload_is_ready() -> None:
     calls: list[str] = []
     dummy = SimpleNamespace(
+        _control_details_visible=True,
         _support_views_ready=True,
         _support_views_dirty=False,
         _refresh_in_progress=False,
@@ -1443,6 +1455,47 @@ def test_refresh_support_views_renders_current_tab_when_payload_is_ready() -> No
     page_a07.A07Page._refresh_support_views(dummy)
 
     assert calls == ["render"]
+
+
+def test_refresh_support_views_skips_when_details_are_hidden() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _control_details_visible=False,
+        _pending_support_refresh=True,
+        _support_views_ready=False,
+        _support_views_dirty=True,
+        _refresh_in_progress=False,
+        _support_refresh_thread=None,
+        _render_active_support_tab=lambda: calls.append("render"),
+        _schedule_support_refresh=lambda: calls.append("schedule"),
+        _start_support_refresh=lambda: calls.append("start"),
+    )
+
+    page_a07.A07Page._refresh_support_views(dummy)
+
+    assert calls == []
+    assert dummy._pending_support_refresh is False
+
+
+def test_refresh_support_views_skips_when_support_not_requested() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _control_details_visible=True,
+        _support_requested=False,
+        _pending_support_refresh=True,
+        _support_views_ready=False,
+        _support_views_dirty=True,
+        _refresh_in_progress=False,
+        _support_refresh_thread=None,
+        _render_active_support_tab=lambda: calls.append("render"),
+        _schedule_support_refresh=lambda: calls.append("schedule"),
+        _start_support_refresh=lambda: calls.append("start"),
+    )
+
+    page_a07.A07Page._refresh_support_views(dummy)
+
+    assert calls == []
+    assert dummy._pending_support_refresh is False
 
 
 def test_selected_suggestion_row_prefers_control_support_notebook() -> None:
@@ -1490,6 +1543,7 @@ def test_on_control_selection_changed_skips_hidden_detail_refresh() -> None:
         _refresh_suggestions_tree=lambda: calls.append("support_suggestions"),
         _control_details_visible=False,
         _refresh_control_support_trees=lambda: calls.append("detail_support"),
+        _retag_control_gl_tree=lambda: False,
         _refresh_control_gl_tree=lambda: calls.append("gl"),
         _update_control_panel=lambda: calls.append("panel"),
         _update_control_transfer_buttons=lambda: calls.append("buttons"),
@@ -1500,3 +1554,249 @@ def test_on_control_selection_changed_skips_hidden_detail_refresh() -> None:
     assert workspace.selected_code == "70"
     assert "detail_support" not in calls
     assert calls == ["history", "gl", "panel", "buttons"]
+
+
+def test_schedule_control_selection_followup_skips_support_when_not_requested() -> None:
+    calls: list[str] = []
+
+    class _Dummy:
+        _skip_initial_control_followup = False
+        _control_details_visible = True
+        _support_requested = False
+        _support_views_ready = False
+
+        def _cancel_scheduled_job(self, *_args, **_kwargs):
+            return None
+
+        def after(self, _delay, callback):
+            callback()
+            return "job"
+
+        def _diag(self, _message):
+            return None
+
+        def _active_support_tab_key(self):
+            return "history"
+
+        def _refresh_suggestions_tree(self):
+            calls.append("suggestions")
+
+        def _refresh_control_support_trees(self):
+            calls.append("support")
+
+        def _schedule_support_refresh(self):
+            calls.append("schedule_support")
+
+        def _retag_control_gl_tree(self):
+            calls.append("retag")
+            return True
+
+        def _schedule_control_gl_refresh(self, delay_ms=0):
+            calls.append(f"gl:{delay_ms}")
+
+        def _update_control_transfer_buttons(self):
+            calls.append("buttons")
+
+    page_a07.A07Page._schedule_control_selection_followup(_Dummy())
+
+    assert calls == ["retag", "buttons"]
+
+
+def test_on_control_gl_selection_changed_skips_code_sync_while_refresh_runs() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _suspend_selection_sync=False,
+        _refresh_in_progress=True,
+        control_gl_df=pd.DataFrame([{"Konto": "5000", "Kode": "70"}]),
+        _selected_control_gl_account=lambda: "5000",
+        _sync_control_account_selection=lambda konto: calls.append(f"sync:{konto}"),
+        _update_control_transfer_buttons=lambda: calls.append("buttons"),
+    )
+
+    page_a07.A07Page._on_control_gl_selection_changed(dummy)
+
+    assert calls == ["sync:5000", "buttons"]
+
+
+def test_on_control_selection_changed_prefers_retagging_gl_tree() -> None:
+    calls: list[str] = []
+    workspace = SimpleNamespace(selected_code=None)
+    dummy = SimpleNamespace(
+        _suspend_selection_sync=False,
+        workspace=workspace,
+        _selected_control_code=lambda: "70",
+        _update_history_details_from_selection=lambda: calls.append("history"),
+        _support_views_ready=False,
+        _active_support_tab_key=lambda: "history",
+        _refresh_suggestions_tree=lambda: calls.append("support_suggestions"),
+        _control_details_visible=False,
+        _refresh_control_support_trees=lambda: calls.append("detail_support"),
+        _retag_control_gl_tree=lambda: True,
+        _refresh_control_gl_tree=lambda: calls.append("gl"),
+        _update_control_panel=lambda: calls.append("panel"),
+        _update_control_transfer_buttons=lambda: calls.append("buttons"),
+    )
+
+    page_a07.A07Page._on_control_selection_changed(dummy)
+
+    assert workspace.selected_code == "70"
+    assert calls == ["history", "panel", "buttons"]
+
+
+def test_on_suggestion_selected_prefers_retagging_gl_tree() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _suspend_selection_sync=False,
+        _update_selected_suggestion_details=lambda: calls.append("details"),
+        _retag_control_gl_tree=lambda: True,
+        _refresh_control_gl_tree=lambda: calls.append("gl"),
+        tree_control_suggestions=None,
+        _update_history_details_from_selection=lambda: calls.append("history"),
+    )
+
+    page_a07.A07Page._on_suggestion_selected(dummy)
+
+    assert calls == ["details", "history"]
+
+
+def test_apply_core_refresh_payload_clears_pending_support_refresh() -> None:
+    scheduled: list[str] = []
+
+    class _Var:
+        def __init__(self) -> None:
+            self.value = None
+
+        def set(self, value):
+            self.value = value
+
+    class _Tree:
+        def __init__(self) -> None:
+            self._children = ()
+
+        def get_children(self):
+            return self._children
+
+    dummy = SimpleNamespace(
+        rulebook_path=None,
+        matcher_settings={},
+        previous_mapping={},
+        previous_mapping_path=None,
+        previous_mapping_year=None,
+        workspace=SimpleNamespace(
+            a07_df=pd.DataFrame(),
+            membership={},
+            suggestions=pd.DataFrame(),
+            basis_col="Endring",
+        ),
+        control_gl_df=pd.DataFrame(),
+        a07_overview_df=pd.DataFrame(),
+        control_df=pd.DataFrame(columns=["Kode"]),
+        groups_df=pd.DataFrame(),
+        reconcile_df=pd.DataFrame(),
+        unmapped_df=pd.DataFrame(),
+        mapping_df=pd.DataFrame(),
+        history_compare_df=pd.DataFrame(),
+        tree_groups=_Tree(),
+        tree_control_suggestions=_Tree(),
+        tree_control_accounts=_Tree(),
+        control_suggestion_summary_var=_Var(),
+        control_suggestion_effect_var=_Var(),
+        control_accounts_summary_var=_Var(),
+        status_var=_Var(),
+        details_var=_Var(),
+        _refresh_control_gl_tree=lambda: scheduled.append("gl"),
+        _refresh_a07_tree=lambda: scheduled.append("a07"),
+        _fill_tree=lambda *args, **kwargs: scheduled.append("fill"),
+        _update_control_panel=lambda: scheduled.append("panel"),
+        _update_control_transfer_buttons=lambda: scheduled.append("buttons"),
+        _update_summary=lambda: scheduled.append("summary"),
+        _support_views_ready=True,
+        _support_views_dirty=False,
+        _loaded_support_tabs={"history"},
+        _refresh_in_progress=True,
+        _pending_focus_code=None,
+        _pending_support_refresh=True,
+        _control_details_visible=True,
+        after_idle=lambda cb: scheduled.append("after_idle"),
+        _schedule_support_refresh=lambda: scheduled.append("support"),
+        _pending_session_refresh=False,
+    )
+
+    payload = {
+        "rulebook_path": None,
+        "matcher_settings": {},
+        "previous_mapping": {},
+        "previous_mapping_path": None,
+        "previous_mapping_year": None,
+        "grouped_a07_df": pd.DataFrame(),
+        "membership": {},
+        "suggestions": pd.DataFrame(),
+        "control_gl_df": pd.DataFrame(),
+        "a07_overview_df": pd.DataFrame(),
+        "control_df": pd.DataFrame(columns=["Kode"]),
+        "groups_df": pd.DataFrame(),
+    }
+
+    page_a07.A07Page._apply_core_refresh_payload(dummy, payload)
+
+    assert dummy._pending_support_refresh is False
+    assert "support" not in scheduled
+
+
+def test_on_support_tab_changed_requests_support_before_loading() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _control_details_visible=True,
+        _support_requested=False,
+        _support_views_ready=False,
+        _diag=lambda _message: None,
+        _active_support_tab_key=lambda: "history",
+        _render_active_support_tab=lambda: calls.append("render"),
+        _schedule_support_refresh=lambda: calls.append("schedule"),
+    )
+
+    page_a07.A07Page._on_support_tab_changed(dummy)
+
+    assert dummy._support_requested is True
+    assert calls == ["schedule"]
+
+
+def test_refresh_all_cancels_pending_core_jobs_before_starting() -> None:
+    calls: list[str] = []
+    dummy = SimpleNamespace(
+        _refresh_in_progress=False,
+        _pending_session_refresh=True,
+        _pending_support_refresh=True,
+        _cancel_core_refresh_jobs=lambda: calls.append("cancel_core"),
+        _cancel_support_refresh=lambda: calls.append("cancel_support"),
+        _support_views_ready=True,
+        _start_core_refresh=lambda: calls.append("start_core"),
+    )
+
+    page_a07.A07Page._refresh_all(dummy)
+
+    assert calls == ["cancel_core", "cancel_support", "start_core"]
+    assert dummy._refresh_in_progress is True
+    assert dummy._pending_session_refresh is False
+    assert dummy._pending_support_refresh is False
+    assert dummy._support_views_ready is False
+
+
+def test_refresh_clicked_defers_focus_until_refresh_finishes() -> None:
+    calls: list[str] = []
+    workspace = SimpleNamespace(a07_df=pd.DataFrame([{"Kode": "70"}]), gl_df=pd.DataFrame([{"Konto": "5000"}]))
+    dummy = SimpleNamespace(
+        workspace=workspace,
+        _selected_control_code=lambda: "fastloenn",
+        _refresh_all=lambda: calls.append("refresh_all"),
+        _focus_control_code=lambda code: calls.append(f"focus:{code}"),
+        _notify_inline=lambda *args, **kwargs: calls.append("notify"),
+        status_var=SimpleNamespace(set=lambda value: calls.append(f"status:{value}")),
+        _pending_focus_code=None,
+    )
+
+    page_a07.A07Page._refresh_clicked(dummy)
+
+    assert dummy._pending_focus_code == "fastloenn"
+    assert "refresh_all" in calls
+    assert not any(call.startswith("focus:") for call in calls)

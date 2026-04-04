@@ -89,24 +89,40 @@ def _draw_box(
     bg = BG_COLORS[color_idx % len(BG_COLORS)]
 
     # Trunkér langt kontonavn
-    display_name = name
-    if len(display_name) > 20:
-        display_name = display_name[:18] + "…"
+    display_name = name if name and name != konto else ""
+    if len(display_name) > 22:
+        display_name = display_name[:20] + "…"
 
     pct_text = f" ({pct:.0f}%)" if pct is not None else ""
     amount_text = _format_amount(amount)
 
-    return (
+    # Layout: navn bold øverst, regnr/konto liten grå under, beløp nederst
+    parts = [
         f'<rect x="{x:.0f}" y="{y:.0f}" width="{w}" height="{h:.0f}" '
-        f'rx="6" fill="{bg}" stroke="{border}" stroke-width="2"/>'
-        f'<text x="{x + w/2:.0f}" y="{y + 18:.0f}" text-anchor="middle" '
-        f'font-size="11" font-weight="700" fill="{border}">'
-        f'{_esc(konto)}{_esc(pct_text)}</text>'
-        f'<text x="{x + w/2:.0f}" y="{y + 33:.0f}" text-anchor="middle" '
-        f'font-size="9" fill="{TEXT_COLOR}">{_esc(display_name)}</text>'
-        f'<text x="{x + w/2:.0f}" y="{y + 48:.0f}" text-anchor="middle" '
-        f'font-size="12" font-weight="600" fill="{TEXT_COLOR}">{_esc(amount_text)}</text>'
-    )
+        f'rx="6" fill="{bg}" stroke="{border}" stroke-width="2"/>',
+    ]
+
+    if display_name:
+        # Vis RL-navn bold på linje 1, konto+pct liten grå på linje 2, beløp linje 3
+        parts += [
+            f'<text x="{x + w/2:.0f}" y="{y + 17:.0f}" text-anchor="middle" '
+            f'font-size="10" font-weight="700" fill="{border}">{_esc(display_name)}</text>',
+            f'<text x="{x + w/2:.0f}" y="{y + 30:.0f}" text-anchor="middle" '
+            f'font-size="9" fill="#8899AA">{_esc(konto)}{_esc(pct_text)}</text>',
+            f'<text x="{x + w/2:.0f}" y="{y + 47:.0f}" text-anchor="middle" '
+            f'font-size="12" font-weight="600" fill="{TEXT_COLOR}">{_esc(amount_text)}</text>',
+        ]
+    else:
+        # Kun konto (kontonivå): konto+pct bold øverst, beløp nederst
+        parts += [
+            f'<text x="{x + w/2:.0f}" y="{y + 20:.0f}" text-anchor="middle" '
+            f'font-size="11" font-weight="700" fill="{border}">'
+            f'{_esc(konto)}{_esc(pct_text)}</text>',
+            f'<text x="{x + w/2:.0f}" y="{y + 48:.0f}" text-anchor="middle" '
+            f'font-size="12" font-weight="600" fill="{TEXT_COLOR}">{_esc(amount_text)}</text>',
+        ]
+
+    return "".join(parts)
 
 
 def _draw_arrow(

@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 # Hold samme feltsett som resten av appen.
+# Øk denne når saft_reader legger til nye felter, slik at SQLite-cachen
+# invalideres automatisk og SAF-T-filer reparseres med ny kode.
+READER_VERSION = "2"  # BalanceAccount IB/UB + RegistrationNumber + TaxRegistrationNumber
+
 FALLBACK_CANON_FIELDS: list[str] = [
     "Konto",
     "Kontonavn",
@@ -39,8 +43,18 @@ FALLBACK_CANON_FIELDS: list[str] = [
     "Tekst",
     "Kundenr",
     "Kundenavn",
+    "Kundeorgnr",
+    "KundeIB",
+    "KundeUB",
+    "KundeKonto",
+    "KundeMvaReg",
     "Leverandørnr",
     "Leverandørnavn",
+    "Leverandørorgnr",
+    "LeverandørIB",
+    "LeverandørUB",
+    "LeverandørKonto",
+    "LeverandørMvaReg",
     "MVA-kode",
     "MVA-beløp",
     "MVA-prosent",
@@ -73,6 +87,16 @@ class _Lookup:
     accounts: dict[str, str]
     customers: dict[str, str]
     suppliers: dict[str, str]
+    customer_orgnr: dict[str, str]        # CustomerID → RegistrationNumber (orgnr)
+    supplier_orgnr: dict[str, str]        # SupplierID  → RegistrationNumber (orgnr)
+    customer_ib: dict[str, float]         # CustomerID → IB (OpeningDebit - OpeningCredit)
+    customer_ub: dict[str, float]         # CustomerID → UB (ClosingDebit - ClosingCredit)
+    customer_balance_acct: dict[str, str] # CustomerID → BalanceAccount AccountID
+    customer_tax_reg: dict[str, str]      # CustomerID → TaxRegistrationNumber
+    supplier_ib: dict[str, float]
+    supplier_ub: dict[str, float]
+    supplier_balance_acct: dict[str, str]
+    supplier_tax_reg: dict[str, str]
 
 
 def _local_name(tag: str) -> str:
@@ -277,7 +301,14 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
     """Intern: les fra stream."""
 
     canon = _canon_fields()
-    look = _Lookup(accounts={}, customers={}, suppliers={})
+    look = _Lookup(
+        accounts={}, customers={}, suppliers={},
+        customer_orgnr={}, supplier_orgnr={},
+        customer_ib={}, customer_ub={},
+        customer_balance_acct={}, customer_tax_reg={},
+        supplier_ib={}, supplier_ub={},
+        supplier_balance_acct={}, supplier_tax_reg={},
+    )
     rows: list[dict[str, Any]] = []
 
     # iterparse gir lavere minnebruk enn full parse.
@@ -307,6 +338,24 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
                     or _txt(elem.find(".//{*}Name"))
                 )
                 look.customers.setdefault(cid, cname)
+                corgnr = _txt(elem.find(".//{*}RegistrationNumber"))
+                if corgnr:
+                    look.customer_orgnr.setdefault(cid, corgnr)
+                # IB / UB fra BalanceAccount
+                ba = elem.find(".//{*}BalanceAccount")
+                if ba is not None:
+                    look.customer_balance_acct.setdefault(
+                        cid, _txt(ba.find(".//{*}AccountID")))
+                    od = _safe_float(_txt(ba.find(".//{*}OpeningDebitBalance")))  or 0.0
+                    oc = _safe_float(_txt(ba.find(".//{*}OpeningCreditBalance"))) or 0.0
+                    cd = _safe_float(_txt(ba.find(".//{*}ClosingDebitBalance")))  or 0.0
+                    cc = _safe_float(_txt(ba.find(".//{*}ClosingCreditBalance"))) or 0.0
+                    look.customer_ib.setdefault(cid, od - oc)
+                    look.customer_ub.setdefault(cid, cd - cc)
+                # MVA-registrering direkte fra SAF-T
+                tax_reg = _txt(elem.find(".//{*}TaxRegistrationNumber"))
+                if tax_reg:
+                    look.customer_tax_reg.setdefault(cid, tax_reg)
             elem.clear()
             continue
 
@@ -319,6 +368,24 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
                     or _txt(elem.find(".//{*}Name"))
                 )
                 look.suppliers.setdefault(sid, sname)
+                sorgnr = _txt(elem.find(".//{*}RegistrationNumber"))
+                if sorgnr:
+                    look.supplier_orgnr.setdefault(sid, sorgnr)
+                # IB / UB fra BalanceAccount
+                ba = elem.find(".//{*}BalanceAccount")
+                if ba is not None:
+                    look.supplier_balance_acct.setdefault(
+                        sid, _txt(ba.find(".//{*}AccountID")))
+                    od = _safe_float(_txt(ba.find(".//{*}OpeningDebitBalance")))  or 0.0
+                    oc = _safe_float(_txt(ba.find(".//{*}OpeningCreditBalance"))) or 0.0
+                    cd = _safe_float(_txt(ba.find(".//{*}ClosingDebitBalance")))  or 0.0
+                    cc = _safe_float(_txt(ba.find(".//{*}ClosingCreditBalance"))) or 0.0
+                    look.supplier_ib.setdefault(sid, od - oc)
+                    look.supplier_ub.setdefault(sid, cd - cc)
+                # MVA-registrering direkte fra SAF-T
+                tax_reg = _txt(elem.find(".//{*}TaxRegistrationNumber"))
+                if tax_reg:
+                    look.supplier_tax_reg.setdefault(sid, tax_reg)
             elem.clear()
             continue
 
@@ -470,21 +537,32 @@ def _parse_line(
         or _txt(line.find(".//{*}DocumentNo"))
     )
 
+    _NaN = float("nan")
     return {
-        "Konto": acc,
-        "Kontonavn": look.accounts.get(acc, ""),
-        "Bilag": tid,
-        "Referanse": reference,
-        "Beløp": belop,
-        "Dato": tdate,
-        "Tekst": text,
-        "Kundenr": cust_id,
-        "Kundenavn": look.customers.get(cust_id, "") if cust_id else "",
-        "Leverandørnr": supp_id,
-        "Leverandørnavn": look.suppliers.get(supp_id, "") if supp_id else "",
-        "MVA-kode": tax_code,
-        "MVA-beløp": tax_amt,
-        "MVA-prosent": tax_pct,
-        "Valuta": cur,
-        "Valutabeløp": cur_amt,
+        "Konto":          acc,
+        "Kontonavn":      look.accounts.get(acc, ""),
+        "Bilag":          tid,
+        "Referanse":      reference,
+        "Beløp":          belop,
+        "Dato":           tdate,
+        "Tekst":          text,
+        "Kundenr":        cust_id,
+        "Kundenavn":      look.customers.get(cust_id, "")    if cust_id else "",
+        "Kundeorgnr":     look.customer_orgnr.get(cust_id, "") if cust_id else "",
+        "KundeIB":        look.customer_ib.get(cust_id, _NaN) if cust_id else _NaN,
+        "KundeUB":        look.customer_ub.get(cust_id, _NaN) if cust_id else _NaN,
+        "KundeKonto":     look.customer_balance_acct.get(cust_id, "") if cust_id else "",
+        "KundeMvaReg":    "MVA" in look.customer_tax_reg.get(cust_id, "") if cust_id else False,
+        "Leverandørnr":   supp_id,
+        "Leverandørnavn": look.suppliers.get(supp_id, "")    if supp_id else "",
+        "Leverandørorgnr": look.supplier_orgnr.get(supp_id, "") if supp_id else "",
+        "LeverandørIB":   look.supplier_ib.get(supp_id, _NaN) if supp_id else _NaN,
+        "LeverandørUB":   look.supplier_ub.get(supp_id, _NaN) if supp_id else _NaN,
+        "LeverandørKonto": look.supplier_balance_acct.get(supp_id, "") if supp_id else "",
+        "LeverandørMvaReg": "MVA" in look.supplier_tax_reg.get(supp_id, "") if supp_id else False,
+        "MVA-kode":       tax_code,
+        "MVA-beløp":      tax_amt,
+        "MVA-prosent":    tax_pct,
+        "Valuta":         cur,
+        "Valutabeløp":    cur_amt,
     }

@@ -16,11 +16,12 @@ import formatting
 
 
 # Egne kolonner for SB-visning (ingen gjenbruk av TX-kolonner)
-SB_COLS = ("Konto", "Kontonavn", "IB", "Endring", "UB", "Antall")
+SB_COLS = ("Konto", "Kontonavn", "Gruppe", "IB", "Endring", "UB", "Antall")
 
 _SB_COL_WIDTHS = {
     "Konto":     70,
     "Kontonavn": 220,
+    "Gruppe":    150,
     "IB":        110,
     "Endring":   110,
     "UB":        110,
@@ -56,6 +57,11 @@ def create_sb_tree(parent_frame: Any) -> Any:
         tree.column(col, width=_SB_COL_WIDTHS.get(col, 100), anchor=anchor, stretch=stretch)
 
     try:
+        tree.tag_configure("gruppe", foreground="#1A56A0")
+    except Exception:
+        pass
+
+    try:
         tree.tag_configure("neg", foreground="red")
     except Exception:
         pass
@@ -76,28 +82,51 @@ def create_sb_tree(parent_frame: Any) -> Any:
 
 
 def show_sb_tree(*, page: Any) -> None:
-    """Vis SB-treet og skjul TX-treet."""
+    """Vis SB-treet og skjul TX- og NK-treet."""
     sb_frame = getattr(page, "_sb_frame", None)
     tx_frame = getattr(page, "_tx_frame", None)
+    nk_frame = getattr(page, "_nk_frame", None)
     if sb_frame is None:
         return
     try:
         if tx_frame is not None:
             tx_frame.grid_remove()
+        if nk_frame is not None:
+            nk_frame.grid_remove()
         sb_frame.grid()
     except Exception:
         pass
 
 
 def show_tx_tree(*, page: Any) -> None:
-    """Vis TX-treet og skjul SB-treet."""
+    """Vis TX-treet og skjul SB- og NK-treet."""
     sb_frame = getattr(page, "_sb_frame", None)
     tx_frame = getattr(page, "_tx_frame", None)
+    nk_frame = getattr(page, "_nk_frame", None)
     try:
         if sb_frame is not None:
             sb_frame.grid_remove()
+        if nk_frame is not None:
+            nk_frame.grid_remove()
         if tx_frame is not None:
             tx_frame.grid()
+    except Exception:
+        pass
+
+
+def show_nk_view(*, page: Any) -> None:
+    """Vis nøkkeltall-rammen og skjul TX- og SB-treet."""
+    sb_frame = getattr(page, "_sb_frame", None)
+    tx_frame = getattr(page, "_tx_frame", None)
+    nk_frame = getattr(page, "_nk_frame", None)
+    if nk_frame is None:
+        return
+    try:
+        if tx_frame is not None:
+            tx_frame.grid_remove()
+        if sb_frame is not None:
+            sb_frame.grid_remove()
+        nk_frame.grid()
     except Exception:
         pass
 
@@ -426,6 +455,17 @@ def refresh_sb_view(*, page: Any) -> None:
     except Exception:
         pass
 
+    # Last konto-klassifisering (gruppe per konto)
+    gruppe_mapping: dict[str, str] = {}
+    try:
+        import konto_klassifisering as _kk
+        import session as _session  # type: ignore[import]
+        _client = getattr(_session, "client", None) or ""
+        if _client:
+            gruppe_mapping = _kk.load(_client)
+    except Exception:
+        pass
+
     # Sett opp tag for kommenterte rader
     try:
         tree.tag_configure("commented", foreground="#1565C0")
@@ -458,12 +498,22 @@ def refresh_sb_view(*, page: Any) -> None:
             antall_val = tup[antall_idx] if antall_idx >= 0 else 0
 
             comment = account_comments.get(konto, "")
-            tags = ("commented",) if comment else ()
+            gruppe = gruppe_mapping.get(konto, "")
+            tags: tuple
+            if comment and gruppe:
+                tags = ("commented", "gruppe")
+            elif comment:
+                tags = ("commented",)
+            elif gruppe:
+                tags = ("gruppe",)
+            else:
+                tags = ()
             display_name = f"\u270e {navn}  \u2014 {comment}" if comment else navn
 
             tree.insert("", "end", values=(
                 konto,
                 display_name,
+                gruppe,
                 formatting.fmt_amount(ib_val),
                 formatting.fmt_amount(endring_val),
                 formatting.fmt_amount(ub_val),

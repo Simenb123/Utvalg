@@ -48,8 +48,12 @@ def _default_ml_map_path() -> str:
 # reorganiseres etter mapping.
 CANON = [
     "Konto", "Kontonavn", "Bilag", "Beløp", "Dato", "Tekst",
-    "Kundenr", "Kundenavn", "Leverandørnr", "Leverandørnavn",
-    "MVA-kode", "MVA-beløp", "MVA-prosent", "Valuta", "Valutabeløp"
+    "Kundenr", "Kundenavn", "Kundeorgnr", "KundeIB", "KundeUB",
+    "KundeKonto", "KundeMvaReg",
+    "Leverandørnr", "Leverandørnavn", "Leverandørorgnr", "LeverandørIB", "LeverandørUB",
+    "LeverandørKonto", "LeverandørMvaReg",
+    "MVA-kode", "MVA-beløp", "MVA-prosent", "Valuta", "Valutabeløp",
+    "Referanse",
 ]
 
 # Aliaslisten under hjelper til med å matche kolonnenavn i regneark mot

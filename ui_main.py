@@ -25,6 +25,11 @@ from page_utvalg_strata import UtvalgStrataPage
 from page_utvalg import UtvalgPage
 from page_logg import LoggPage
 from page_consolidation import ConsolidationPage
+from page_regnskap import RegnskapPage
+from page_mva import MvaPage
+from page_lonn import LonnPage
+from page_skatt import SkattPage
+from page_reskontro import ReskontroPage
 
 log = logging.getLogger(__name__)
 
@@ -165,14 +170,34 @@ class App(tk.Tk):
         self.page_resultat = UtvalgPage(self.nb)
         self.page_logg = LoggPage(self.nb)
         self.page_consolidation = ConsolidationPage(self.nb)
+        self.page_regnskap = RegnskapPage(self.nb)
+        self.page_mva = MvaPage(self.nb)
+        self.page_lonn = LonnPage(self.nb)
+        self.page_skatt = SkattPage(self.nb)
+        self.page_reskontro = ReskontroPage(self.nb)
 
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
+        self.nb.add(self.page_reskontro, text="Reskontro")
+        self.nb.add(self.page_regnskap, text="Regnskap")
+        self.nb.add(self.page_mva, text="MVA")
+        self.nb.add(self.page_lonn, text="Lønn")
+        self.nb.add(self.page_skatt, text="Skatt")
         self.nb.add(self.page_a07, text="A07")
         self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
         self.nb.add(self.page_logg, text="Logg")
+
+        # Koble RegnskapPage og MvaPage til AnalysePage som datakilde
+        if hasattr(self.page_regnskap, "set_analyse_page"):
+            self.page_regnskap.set_analyse_page(self.page_analyse)
+        if hasattr(self.page_mva, "set_analyse_page"):
+            self.page_mva.set_analyse_page(self.page_analyse)
+        if hasattr(self.page_lonn, "set_analyse_page"):
+            self.page_lonn.set_analyse_page(self.page_analyse)
+        if hasattr(self.page_skatt, "set_analyse_page"):
+            self.page_skatt.set_analyse_page(self.page_analyse)
 
         # Gi AnalysePage callback for "Til utvalg"
         if hasattr(self.page_analyse, "set_utvalg_callback"):
@@ -210,6 +235,11 @@ class App(tk.Tk):
         self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
         self.page_logg = SimpleNamespace()  # type: ignore[assignment]
         self.page_consolidation = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_regnskap = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_mva = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_lonn = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_skatt = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_reskontro = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
 
         # Installer hook slik at testene kan finne dp._on_ready og kalle callback
         self._maybe_install_dataset_ready_hook()
@@ -356,14 +386,59 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Consolidation refresh after dataset load failed")
 
+        def _refresh_regnskap() -> None:
+            try:
+                if hasattr(self.page_regnskap, "refresh_from_session") and callable(getattr(self.page_regnskap, "refresh_from_session")):
+                    self.page_regnskap.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Regnskap refresh after dataset load failed")
+
+        def _refresh_mva() -> None:
+            try:
+                if hasattr(self.page_mva, "refresh_from_session") and callable(getattr(self.page_mva, "refresh_from_session")):
+                    self.page_mva.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("MVA refresh after dataset load failed")
+
+        def _refresh_lonn() -> None:
+            try:
+                if hasattr(self.page_lonn, "refresh_from_session") and callable(getattr(self.page_lonn, "refresh_from_session")):
+                    self.page_lonn.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Lonn refresh after dataset load failed")
+
+        def _refresh_skatt() -> None:
+            try:
+                if hasattr(self.page_skatt, "refresh_from_session") and callable(getattr(self.page_skatt, "refresh_from_session")):
+                    self.page_skatt.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Skatt refresh after dataset load failed")
+
+        def _refresh_reskontro() -> None:
+            try:
+                if hasattr(self.page_reskontro, "refresh_from_session") and callable(getattr(self.page_reskontro, "refresh_from_session")):
+                    self.page_reskontro.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Reskontro refresh after dataset load failed")
+
         try:
             self.after_idle(_refresh_analyse)
             self.after(25, _refresh_resultat)
             self.after(50, _refresh_consolidation)
+            self.after(75, _refresh_regnskap)
+            self.after(100, _refresh_mva)
+            self.after(125, _refresh_lonn)
+            self.after(150, _refresh_skatt)
+            self.after(175, _refresh_reskontro)
         except Exception:
             _refresh_analyse()
             _refresh_resultat()
             _refresh_consolidation()
+            _refresh_regnskap()
+            _refresh_mva()
+            _refresh_lonn()
+            _refresh_skatt()
+            _refresh_reskontro()
 
         # Vis Analyse som neste steg
         try:

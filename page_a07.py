@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
+import tempfile
 import threading
+import time
+import traceback
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -51,6 +55,10 @@ try:
     import client_store
 except Exception:
     client_store = None
+
+
+_A07_DIAGNOSTICS_ENABLED = False
+_A07_DIAGNOSTICS_LOG = Path(tempfile.gettempdir()) / "utvalg_a07_debug.log"
 
 
 _A07_COLUMNS = (
@@ -2186,8 +2194,10 @@ class A07Page(ttk.Frame):
         self._support_refresh_job: str | None = None
         self._refresh_in_progress = False
         self._pending_session_refresh = False
+        self._pending_support_refresh = False
         self._support_views_ready = False
         self._support_views_dirty = True
+        self._support_requested = False
         self._refresh_generation = 0
         self._restore_thread: threading.Thread | None = None
         self._restore_result: dict[str, object] | None = None
@@ -2198,6 +2208,14 @@ class A07Page(ttk.Frame):
         self._loaded_support_tabs: set[str] = set()
         self._pending_focus_code: str | None = None
         self._suspend_selection_sync = False
+        self._suppressed_tree_select_keys: set[str] = set()
+        self._tree_fill_jobs: dict[str, str] = {}
+        self._tree_fill_tokens: dict[str, int] = {}
+        self._control_gl_refresh_job: str | None = None
+        self._a07_refresh_job: str | None = None
+        self._control_selection_followup_job: str | None = None
+        self._skip_initial_control_followup = False
+        self._refresh_watchdog_job: str | None = None
 
         self.summary_var = tk.StringVar(value="Ingen A07-data lastet ennå.")
         self.status_var = tk.StringVar(value="Last A07 JSON for aa starte.")
@@ -2238,7 +2256,87 @@ class A07Page(ttk.Frame):
             parent.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
         except Exception:
             pass
+        self._diag("init complete")
         self._schedule_session_refresh()
+
+    def _diag(self, message: str) -> None:
+        if not _A07_DIAGNOSTICS_ENABLED:
+            return
+        try:
+            stamp = time.strftime("%H:%M:%S")
+            with _A07_DIAGNOSTICS_LOG.open("a", encoding="utf-8") as handle:
+                handle.write(f"[{stamp}] {message}\n")
+        except Exception:
+            pass
+
+    def _tree_debug_name(self, tree: ttk.Treeview | None) -> str:
+        if tree is None:
+            return "<none>"
+        try:
+            return str(tree.winfo_name() or tree)
+        except Exception:
+            return f"tree-{id(tree)}"
+
+    def _cancel_refresh_watchdog(self) -> None:
+        job = getattr(self, "_refresh_watchdog_job", None)
+        if not job:
+            return
+        try:
+            self.after_cancel(job)
+        except Exception:
+            pass
+        self._refresh_watchdog_job = None
+
+    def _schedule_refresh_watchdog(self, label: str, token: int) -> None:
+        if not _A07_DIAGNOSTICS_ENABLED:
+            return
+        self._cancel_refresh_watchdog()
+
+        def _run() -> None:
+            self._refresh_watchdog_job = None
+            if not bool(getattr(self, "_refresh_in_progress", False)):
+                return
+            active_token = int(getattr(self, "_refresh_generation", 0))
+            stack_dump = ""
+            try:
+                current_frames = sys._current_frames()
+                thread_frames: list[str] = []
+                for thread in threading.enumerate():
+                    ident = getattr(thread, "ident", None)
+                    if ident is None:
+                        continue
+                    frame = current_frames.get(ident)
+                    if frame is None:
+                        continue
+                    rendered = "".join(traceback.format_stack(frame, limit=20))
+                    thread_frames.append(
+                        f"--- thread={thread.name} ident={ident} alive={thread.is_alive()} ---\n{rendered}"
+                    )
+                stack_dump = "\n".join(thread_frames).strip()
+            except Exception:
+                stack_dump = ""
+            self._diag(
+                "watchdog "
+                f"{label} token={token} active_token={active_token} "
+                f"pending_session={self._pending_session_refresh} "
+                f"pending_support={self._pending_support_refresh} "
+                f"support_ready={self._support_views_ready} "
+                f"support_dirty={self._support_views_dirty} "
+                f"restore_alive={bool(self._restore_thread and self._restore_thread.is_alive())} "
+                f"core_alive={bool(self._core_refresh_thread and self._core_refresh_thread.is_alive())} "
+                f"support_alive={bool(self._support_refresh_thread and self._support_refresh_thread.is_alive())}"
+            )
+            if stack_dump:
+                self._diag(f"watchdog-stack {label} token={token}\n{stack_dump}")
+            try:
+                self._refresh_watchdog_job = self.after(2000, _run)
+            except Exception:
+                self._refresh_watchdog_job = None
+
+        try:
+            self._refresh_watchdog_job = self.after(2000, _run)
+        except Exception:
+            self._refresh_watchdog_job = None
 
     def refresh_from_session(self, session_module=session) -> None:
         if self._refresh_in_progress:
@@ -2270,6 +2368,83 @@ class A07Page(ttk.Frame):
         except Exception:
             self.refresh_from_session()
 
+    def _cancel_scheduled_job(self, attr_name: str) -> None:
+        job = getattr(self, attr_name, None)
+        if not job:
+            return
+        try:
+            self.after_cancel(job)
+        except Exception:
+            pass
+        setattr(self, attr_name, None)
+
+    def _schedule_control_gl_refresh(
+        self,
+        delay_ms: int = 75,
+        *,
+        on_complete: Callable[[], None] | None = None,
+    ) -> None:
+        self._cancel_scheduled_job("_control_gl_refresh_job")
+
+        def _run() -> None:
+            self._control_gl_refresh_job = None
+            self._refresh_control_gl_tree_chunked(on_complete=on_complete)
+
+        try:
+            self._control_gl_refresh_job = self.after(delay_ms, _run)
+        except Exception:
+            _run()
+
+    def _schedule_a07_refresh(
+        self,
+        delay_ms: int = 75,
+        *,
+        on_complete: Callable[[], None] | None = None,
+    ) -> None:
+        self._cancel_scheduled_job("_a07_refresh_job")
+
+        def _run() -> None:
+            self._a07_refresh_job = None
+            self._refresh_a07_tree_chunked(on_complete=on_complete)
+
+        try:
+            self._a07_refresh_job = self.after(delay_ms, _run)
+        except Exception:
+            _run()
+
+    def _schedule_control_selection_followup(self) -> None:
+        self._cancel_scheduled_job("_control_selection_followup_job")
+
+        def _run() -> None:
+            self._control_selection_followup_job = None
+            if bool(getattr(self, "_skip_initial_control_followup", False)):
+                self._skip_initial_control_followup = False
+                self._diag("skip initial control selection followup")
+                self._update_control_transfer_buttons()
+                return
+            support_requested = bool(getattr(self, "_support_requested", True))
+            if (
+                bool(getattr(self, "_control_details_visible", False))
+                and support_requested
+                and self._support_views_ready
+                and self._active_support_tab_key() == "suggestions"
+            ):
+                self._refresh_suggestions_tree()
+            if bool(getattr(self, "_control_details_visible", False)) and support_requested:
+                if self._support_views_ready:
+                    self._refresh_control_support_trees()
+                else:
+                    self._schedule_support_refresh()
+            if bool(getattr(self, "_control_details_visible", False)) and not self._retag_control_gl_tree():
+                self._schedule_control_gl_refresh(delay_ms=1)
+            else:
+                self._update_control_transfer_buttons()
+
+        try:
+            self._control_selection_followup_job = self.after(40, _run)
+        except Exception:
+            _run()
+
     def _cancel_support_refresh(self) -> None:
         if self._support_refresh_job is None:
             return
@@ -2280,6 +2455,15 @@ class A07Page(ttk.Frame):
         self._support_refresh_job = None
 
     def _schedule_support_refresh(self) -> None:
+        if (
+            not bool(getattr(self, "_control_details_visible", False))
+            or not bool(getattr(self, "_support_requested", True))
+        ):
+            self._pending_support_refresh = False
+            return
+        if self._refresh_in_progress:
+            self._pending_support_refresh = True
+            return
         if self._support_views_ready and not self._support_views_dirty:
             if self._active_support_tab_key() in self._loaded_support_tabs:
                 self._render_active_support_tab(force=True)
@@ -2295,12 +2479,38 @@ class A07Page(ttk.Frame):
         except Exception:
             self._refresh_support_views()
 
+    def _cancel_core_refresh_jobs(self) -> None:
+        for attr_name in (
+            "_session_refresh_job",
+            "_control_gl_refresh_job",
+            "_a07_refresh_job",
+            "_control_selection_followup_job",
+        ):
+            self._cancel_scheduled_job(attr_name)
+
+        for tree_name in ("tree_control_gl", "tree_a07"):
+            tree = getattr(self, tree_name, None)
+            if tree is None:
+                continue
+            try:
+                self._cancel_tree_fill(tree)
+            except Exception:
+                pass
+            key = self._tree_fill_key(tree)
+            try:
+                self._tree_fill_tokens[key] = int(self._tree_fill_tokens.get(key, 0)) + 1
+            except Exception:
+                pass
+
     def _next_refresh_generation(self) -> int:
         self._refresh_generation += 1
         return self._refresh_generation
 
     def _start_context_restore(self, client: str | None, year: str | None) -> None:
         token = self._next_refresh_generation()
+        self._diag(f"start_context_restore token={token} client={client!r} year={year!r}")
+        self._schedule_refresh_watchdog("context-restore", token)
+        self._support_requested = False
         self.status_var.set("Laster A07-kontekst...")
         self.details_var.set("Laster saldobalanse, mapping og prosjektoppsett i bakgrunnen...")
         result_box: dict[str, object] = {"token": token}
@@ -2401,6 +2611,7 @@ class A07Page(ttk.Frame):
 
     def _poll_context_restore(self, token: int) -> None:
         if token != self._refresh_generation:
+            self._diag(f"poll_context_restore stale token={token} active={self._refresh_generation}")
             self._restore_thread = None
             self._restore_result = None
             return
@@ -2413,7 +2624,9 @@ class A07Page(ttk.Frame):
         self._restore_result = None
         error = result.get("error")
         if error is not None:
+            self._diag(f"context_restore error token={token}: {error}")
             self._refresh_in_progress = False
+            self._cancel_refresh_watchdog()
             self.status_var.set("A07-kontekst kunne ikke lastes.")
             self.details_var.set(str(error))
             if self._pending_session_refresh:
@@ -2422,6 +2635,7 @@ class A07Page(ttk.Frame):
             return
         payload = result.get("payload")
         if isinstance(payload, dict):
+            self._diag(f"context_restore complete token={token}")
             self._apply_context_restore_payload(payload)
 
     def _apply_context_restore_payload(self, payload: dict[str, object]) -> None:
@@ -2449,6 +2663,8 @@ class A07Page(ttk.Frame):
 
     def _start_core_refresh(self) -> None:
         token = self._next_refresh_generation()
+        self._diag(f"start_core_refresh token={token}")
+        self._schedule_refresh_watchdog("core-refresh", token)
         client, year = self._session_context(session)
         source_a07_df = (
             self.workspace.source_a07_df.copy()
@@ -2462,7 +2678,7 @@ class A07Page(ttk.Frame):
         locks = set(self.workspace.locks)
 
         self.status_var.set("Oppdaterer A07...")
-        self.details_var.set("Beregner kontroll- og forslagstabeller i bakgrunnen...")
+        self.details_var.set("Beregner kjernevisningene i bakgrunnen...")
 
         result_box: dict[str, object] = {"token": token}
 
@@ -2480,18 +2696,6 @@ class A07Page(ttk.Frame):
                 effective_previous_mapping = apply_groups_to_mapping(previous_mapping, membership)
 
                 suggestions = _empty_suggestions_df()
-                if not grouped_a07_df.empty and not gl_df.empty:
-                    suggestions = suggest_mapping_candidates(
-                        a07_df=grouped_a07_df,
-                        gl_df=gl_df,
-                        mapping_existing=effective_mapping,
-                        config=build_suggest_config(
-                            rulebook_path,
-                            matcher_settings,
-                            basis_col=basis_col,
-                        ),
-                        mapping_prior=effective_previous_mapping,
-                    ).reset_index(drop=True)
 
                 control_gl_df = build_control_gl_df(gl_df, effective_mapping).reset_index(drop=True)
                 a07_overview_df = build_a07_overview_df(grouped_a07_df, _empty_reconcile_df())
@@ -2530,6 +2734,7 @@ class A07Page(ttk.Frame):
 
     def _poll_core_refresh(self, token: int) -> None:
         if token != self._refresh_generation:
+            self._diag(f"poll_core_refresh stale token={token} active={self._refresh_generation}")
             self._core_refresh_thread = None
             self._core_refresh_result = None
             return
@@ -2542,7 +2747,9 @@ class A07Page(ttk.Frame):
         self._core_refresh_result = None
         error = result.get("error")
         if error is not None:
+            self._diag(f"core_refresh error token={token}: {error}")
             self._refresh_in_progress = False
+            self._cancel_refresh_watchdog()
             self.status_var.set("A07-oppdatering feilet.")
             self.details_var.set(str(error))
             if self._pending_session_refresh:
@@ -2551,6 +2758,7 @@ class A07Page(ttk.Frame):
             return
         payload = result.get("payload")
         if isinstance(payload, dict):
+            self._diag(f"core_refresh complete token={token}")
             self._apply_core_refresh_payload(payload)
 
     def _apply_core_refresh_payload(self, payload: dict[str, object]) -> None:
@@ -2571,40 +2779,92 @@ class A07Page(ttk.Frame):
         self.mapping_df = _empty_mapping_df()
         self.history_compare_df = _empty_history_df()
 
-        self._refresh_control_gl_tree()
-        self._refresh_a07_tree()
-        self._fill_tree(self.tree_groups, self.groups_df, _GROUP_COLUMNS, iid_column="GroupId")
-        self._fill_tree(self.tree_control_suggestions, _empty_suggestions_df(), _CONTROL_SUGGESTION_COLUMNS)
-        self._fill_tree(
-            self.tree_control_accounts,
-            pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]),
-            _CONTROL_SELECTED_ACCOUNT_COLUMNS,
-            iid_column="Konto",
-        )
         self.control_suggestion_summary_var.set("Laster forslag...")
         self.control_suggestion_effect_var.set("Laster forslag...")
         self.control_accounts_summary_var.set("Laster mappede kontoer...")
-        self._update_control_panel()
-        self._update_control_transfer_buttons()
-        self._update_summary()
-        pending_focus_code = (self._pending_focus_code or "").strip()
-        self._pending_focus_code = None
-        if pending_focus_code:
-            try:
-                self._focus_control_code(pending_focus_code)
-            except Exception:
-                pass
         self._support_views_ready = False
         self._support_views_dirty = True
         self._loaded_support_tabs.clear()
+        pending_focus_code = (self._pending_focus_code or "").strip()
+        self._pending_focus_code = None
 
-        self._refresh_in_progress = False
-        if self._pending_session_refresh:
-            self._pending_session_refresh = False
-            self._schedule_session_refresh()
+        def _sync_post_core_selection(target_code: str) -> None:
+            self.workspace.selected_code = target_code or None
+            self._update_history_details_from_selection()
+            self._update_control_panel()
+            self._update_control_transfer_buttons()
+
+        def _finalize_core_refresh() -> None:
+            diag = getattr(self, "_diag", lambda *_args, **_kwargs: None)
+            cancel_watchdog = getattr(self, "_cancel_refresh_watchdog", lambda: None)
+            try:
+                diag("finalize_core_refresh start")
+                self._fill_tree(self.tree_groups, self.groups_df, _GROUP_COLUMNS, iid_column="GroupId")
+                self._fill_tree(self.tree_control_suggestions, _empty_suggestions_df(), _CONTROL_SUGGESTION_COLUMNS)
+                self._fill_tree(
+                    self.tree_control_accounts,
+                    pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]),
+                    _CONTROL_SELECTED_ACCOUNT_COLUMNS,
+                    iid_column="Konto",
+                )
+                self._update_control_panel()
+                self._update_control_transfer_buttons()
+                self._update_summary()
+                self.status_var.set("A07 oppdatert.")
+                self.details_var.set("Velg konto og kode for aa jobbe videre. Forslag lastes ved behov.")
+                try:
+                    self._set_control_details_visible(False)
+                except Exception:
+                    pass
+
+                target_code = ""
+                try:
+                    code_children = tuple(self.tree_a07.get_children())
+                except Exception:
+                    code_children = ()
+                if code_children:
+                    if pending_focus_code and pending_focus_code in code_children:
+                        target_code = str(pending_focus_code)
+                    else:
+                        target_code = str(code_children[0])
+                if target_code:
+                    self._skip_initial_control_followup = True
+                    try:
+                        self._set_tree_selection(self.tree_a07, target_code)
+                    except Exception:
+                        pass
+                    try:
+                        _sync_post_core_selection(target_code)
+                    except Exception:
+                        pass
+                self._pending_support_refresh = False
+                if self._pending_session_refresh:
+                    self._pending_session_refresh = False
+                    if self._context_has_changed():
+                        self._schedule_session_refresh()
+                diag("finalize_core_refresh complete")
+            except Exception as exc:
+                diag(f"finalize_core_refresh error: {exc}")
+                diag(traceback.format_exc())
+                self.status_var.set("A07-oppdatering feilet i ferdigstilling.")
+                self.details_var.set(str(exc))
+            finally:
+                self._refresh_in_progress = False
+                cancel_watchdog()
+
+        refresh_control_gl = getattr(self, "_refresh_control_gl_tree_chunked", None)
+        refresh_a07 = getattr(self, "_refresh_a07_tree_chunked", None)
+        if callable(refresh_control_gl) and callable(refresh_a07):
+            refresh_control_gl(on_complete=lambda: refresh_a07(on_complete=_finalize_core_refresh))
+            return
+        self._refresh_control_gl_tree()
+        self._refresh_a07_tree()
+        _finalize_core_refresh()
 
     def _start_support_refresh(self) -> None:
         token = self._refresh_generation
+        self._diag(f"start_support_refresh token={token}")
+        client, year = self._session_context(session)
         gl_df = self.workspace.gl_df.copy()
         a07_df = self.workspace.a07_df.copy()
         effective_mapping = dict(self._effective_mapping())
@@ -2615,6 +2875,21 @@ class A07Page(ttk.Frame):
 
         def _worker() -> None:
             try:
+                rulebook_path = resolve_rulebook_path(client, year)
+                matcher_settings = load_matcher_settings()
+                suggestions = _empty_suggestions_df()
+                if not a07_df.empty and not gl_df.empty:
+                    suggestions = suggest_mapping_candidates(
+                        a07_df=a07_df,
+                        gl_df=gl_df,
+                        mapping_existing=effective_mapping,
+                        config=build_suggest_config(
+                            rulebook_path,
+                            matcher_settings,
+                            basis_col=basis_col,
+                        ),
+                        mapping_prior=effective_previous_mapping,
+                    ).reset_index(drop=True)
                 mapping_df = mapping_to_assigned_df(
                     mapping=effective_mapping,
                     gl_df=gl_df,
@@ -2642,6 +2917,7 @@ class A07Page(ttk.Frame):
                         basis_col=basis_col,
                     ).reset_index(drop=True)
                 result_box["payload"] = {
+                    "suggestions": suggestions,
                     "mapping_df": mapping_df,
                     "history_compare_df": history_compare_df,
                     "reconcile_df": reconcile_df,
@@ -2657,7 +2933,9 @@ class A07Page(ttk.Frame):
         self.after(25, lambda: self._poll_support_refresh(token))
 
     def _poll_support_refresh(self, token: int) -> None:
+        diag = getattr(self, "_diag", lambda *_args, **_kwargs: None)
         if token != self._refresh_generation:
+            diag(f"poll_support_refresh stale token={token} active={self._refresh_generation}")
             self._support_refresh_thread = None
             self._support_refresh_result = None
             self._support_views_ready = False
@@ -2671,15 +2949,18 @@ class A07Page(ttk.Frame):
         self._support_refresh_result = None
         error = result.get("error")
         if error is not None:
+            diag(f"support_refresh error token={token}: {error}")
             self._support_views_ready = False
             self.status_var.set("A07-stottevisninger feilet.")
             self.details_var.set(str(error))
             return
         payload = result.get("payload")
         if isinstance(payload, dict):
+            diag(f"support_refresh complete token={token}")
             self._apply_support_refresh_payload(payload)
 
     def _apply_support_refresh_payload(self, payload: dict[str, object]) -> None:
+        self.workspace.suggestions = payload["suggestions"]
         self.mapping_df = payload["mapping_df"]
         self.history_compare_df = payload["history_compare_df"]
         self.reconcile_df = payload["reconcile_df"]
@@ -2688,15 +2969,21 @@ class A07Page(ttk.Frame):
         self._support_views_ready = True
         self._support_views_dirty = False
         self._loaded_support_tabs.clear()
-        active_tab = self._active_support_tab_key()
-        if active_tab in self._loaded_support_tabs:
-            self._render_active_support_tab(force=True)
-        if bool(getattr(self, "_control_details_visible", False)):
-            self._refresh_control_support_trees()
-        self._update_history_details_from_selection()
-        self._update_control_panel()
-        self._update_control_transfer_buttons()
-        self._update_summary()
+        def _apply_support_ui_updates() -> None:
+            active_tab = self._active_support_tab_key()
+            if bool(getattr(self, "_control_details_visible", False)):
+                self._refresh_control_support_trees()
+                if active_tab:
+                    self._render_active_support_tab(force=True)
+            self._update_history_details_from_selection()
+            self._update_control_panel()
+            self._update_control_transfer_buttons()
+            self._update_summary()
+
+        try:
+            self.after_idle(_apply_support_ui_updates)
+        except Exception:
+            _apply_support_ui_updates()
 
     def _on_visible(self, _event: tk.Event | None = None) -> None:
         try:
@@ -2706,6 +2993,13 @@ class A07Page(ttk.Frame):
             pass
         try:
             if not self.winfo_viewable():
+                return
+        except Exception:
+            pass
+        if self._refresh_in_progress:
+            return
+        try:
+            if not self._context_has_changed():
                 return
         except Exception:
             pass
@@ -2720,6 +3014,13 @@ class A07Page(ttk.Frame):
         except Exception:
             return
         if selected is self:
+            if self._refresh_in_progress:
+                return
+            try:
+                if not self._context_has_changed():
+                    return
+            except Exception:
+                pass
             self._schedule_session_refresh(delay_ms=50)
 
     def _build_ui(self) -> None:
@@ -3007,7 +3308,6 @@ class A07Page(ttk.Frame):
         self.tree_control_accounts.configure(height=3)
 
         control_support_nb = ttk.Notebook(control_lower)
-        control_support_nb.pack(fill="both", expand=True, pady=(4, 0))
         tab_history = ttk.Frame(control_support_nb)
         tab_suggestions = ttk.Frame(control_support_nb)
         tab_reconcile = ttk.Frame(control_support_nb)
@@ -3310,6 +3610,9 @@ class A07Page(ttk.Frame):
         code_s = str(code or "").strip()
         if not code_s:
             return
+        if bool(getattr(self, "_refresh_in_progress", False)):
+            self._pending_focus_code = code_s
+            return
         try:
             children = self.tree_a07.get_children()
         except Exception:
@@ -3321,11 +3624,11 @@ class A07Page(ttk.Frame):
                 self.a07_filter_widget.set(_CONTROL_VIEW_LABELS["alle"])
             except Exception:
                 pass
-            self._refresh_a07_tree()
-            try:
-                children = self.tree_a07.get_children()
-            except Exception:
-                children = ()
+            self._schedule_a07_refresh(
+                delay_ms=1,
+                on_complete=lambda code=code_s: self._focus_control_code(code),
+            )
+            return
         if code_s not in children:
             return
         if not self._set_tree_selection(self.tree_a07, code_s):
@@ -3335,7 +3638,10 @@ class A07Page(ttk.Frame):
                 self._set_tree_selection(self.tree_groups, code_s)
         except Exception:
             pass
-        self._on_control_selection_changed()
+        try:
+            self.after_idle(self._on_control_selection_changed)
+        except Exception:
+            self._on_control_selection_changed()
 
     def _selected_control_account_ids(self) -> list[str]:
         try:
@@ -3375,6 +3681,9 @@ class A07Page(ttk.Frame):
             pass
 
     def _focus_selected_control_account_in_gl(self) -> None:
+        suppressed_check = getattr(self, "_is_tree_selection_suppressed", None)
+        if callable(suppressed_check) and suppressed_check(getattr(self, "tree_control_accounts", None)):
+            return
         accounts = self._selected_control_account_ids()
         if not accounts:
             return
@@ -3730,7 +4039,10 @@ class A07Page(ttk.Frame):
 
     def _set_control_details_visible(self, visible: bool) -> None:
         self._control_details_visible = bool(visible)
+        self._support_requested = self._control_details_visible
+        self._diag(f"set_control_details_visible visible={self._control_details_visible}")
         detail_panes = getattr(self, "control_detail_panes", None)
+        support_nb = getattr(self, "control_support_nb", None)
         toggle_button = getattr(self, "btn_control_toggle_details", None)
         if detail_panes is not None:
             try:
@@ -3742,9 +4054,23 @@ class A07Page(ttk.Frame):
                         detail_panes.pack_forget()
             except Exception:
                 pass
+        if support_nb is not None:
+            try:
+                if self._control_details_visible:
+                    if not support_nb.winfo_manager():
+                        support_nb.pack(fill="both", expand=True, pady=(4, 0))
+                else:
+                    if support_nb.winfo_manager():
+                        support_nb.pack_forget()
+            except Exception:
+                pass
         if self._control_details_visible:
             try:
-                self._refresh_control_support_trees()
+                if self._support_views_ready:
+                    self.after_idle(lambda: self._refresh_control_support_trees())
+                    self.after_idle(lambda: self._render_active_support_tab(force=True))
+                else:
+                    self._schedule_support_refresh()
             except Exception:
                 pass
         if toggle_button is not None:
@@ -3985,6 +4311,55 @@ class A07Page(ttk.Frame):
         target = selected_code if selected_code and selected_code in children else children[0]
         self._set_tree_selection(self.tree_a07, target)
 
+    def _refresh_a07_tree_chunked(self, *, on_complete: Callable[[], None] | None = None) -> None:
+        selected_code = self._selected_code_from_tree(self.tree_a07)
+        filtered = filter_control_queue_df(self.control_df, self._selected_a07_filter())
+        filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
+        if (
+            filtered.empty
+            and self._selected_a07_filter() == "neste"
+            and self.control_df is not None
+            and not self.control_df.empty
+            and count_unsolved_a07_codes(self.a07_overview_df) == 0
+        ):
+            self.a07_filter_var.set("ferdig")
+            self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["ferdig"])
+            try:
+                self.a07_filter_widget.set(_CONTROL_VIEW_LABELS["ferdig"])
+            except Exception:
+                pass
+            filtered = filter_control_queue_df(self.control_df, "ferdig")
+            filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
+
+        def _after_fill() -> None:
+            if not bool(getattr(self, "_refresh_in_progress", False)):
+                children = self.tree_a07.get_children()
+                if children:
+                    target = selected_code if selected_code and selected_code in children else children[0]
+                    self._set_tree_selection(self.tree_a07, target)
+            if on_complete is not None:
+                on_complete()
+
+        if filtered is None or len(filtered.index) <= 500:
+            self._fill_tree(
+                self.tree_a07,
+                filtered,
+                _CONTROL_COLUMNS,
+                iid_column="Kode",
+                row_tag_fn=lambda row: control_tree_tag(row.get("Arbeidsstatus")),
+            )
+            _after_fill()
+            return
+
+        self._fill_tree_chunked(
+            self.tree_a07,
+            filtered,
+            _CONTROL_COLUMNS,
+            iid_column="Kode",
+            row_tag_fn=lambda row: control_tree_tag(row.get("Arbeidsstatus")),
+            on_complete=_after_fill,
+        )
+
     def _refresh_control_gl_tree(self) -> None:
         selected_account = self._selected_control_gl_account()
         selected_code = self._selected_code_from_tree(self.tree_a07)
@@ -4011,13 +4386,100 @@ class A07Page(ttk.Frame):
         target = selected_account if selected_account and selected_account in children else children[0]
         self._set_tree_selection(self.tree_control_gl, target)
 
+    def _refresh_control_gl_tree_chunked(self, *, on_complete: Callable[[], None] | None = None) -> None:
+        selected_account = self._selected_control_gl_account()
+        selected_code = self._selected_code_from_tree(self.tree_a07)
+        suggested_accounts = self._selected_control_suggestion_accounts()
+        search_text, only_unmapped, active_only = self._control_gl_filter_state()
+        filtered_gl_df = filter_control_gl_df(
+            self.control_gl_df,
+            search_text=search_text,
+            only_unmapped=only_unmapped,
+            active_only=active_only,
+        )
+
+        def _after_fill() -> None:
+            if not bool(getattr(self, "_refresh_in_progress", False)):
+                children = self.tree_control_gl.get_children()
+                if children:
+                    target = selected_account if selected_account and selected_account in children else children[0]
+                    self._set_tree_selection(self.tree_control_gl, target)
+            if on_complete is not None:
+                on_complete()
+
+        if filtered_gl_df is None or len(filtered_gl_df.index) <= 1200:
+            self._fill_tree(
+                self.tree_control_gl,
+                filtered_gl_df,
+                _CONTROL_GL_COLUMNS,
+                iid_column="Konto",
+                row_tag_fn=lambda row: control_gl_tree_tag(row, selected_code, suggested_accounts),
+            )
+            _after_fill()
+            return
+
+        self._fill_tree_chunked(
+            self.tree_control_gl,
+            filtered_gl_df,
+            _CONTROL_GL_COLUMNS,
+            iid_column="Konto",
+            row_tag_fn=lambda row: control_gl_tree_tag(row, selected_code, suggested_accounts),
+            on_complete=_after_fill,
+        )
+
+    def _retag_control_gl_tree(self) -> bool:
+        try:
+            tree = self.tree_control_gl
+            children = tuple(tree.get_children())
+        except Exception:
+            return False
+        if not children:
+            return False
+
+        search_text, only_unmapped, active_only = self._control_gl_filter_state()
+        filtered_gl_df = filter_control_gl_df(
+            self.control_gl_df,
+            search_text=search_text,
+            only_unmapped=only_unmapped,
+            active_only=active_only,
+        )
+        if filtered_gl_df is None or filtered_gl_df.empty:
+            return False
+
+        try:
+            filtered_iids = [
+                str(row.get("Konto") or "").strip()
+                for _, row in filtered_gl_df.iterrows()
+                if str(row.get("Konto") or "").strip()
+            ]
+            if tuple(filtered_iids) != children:
+                return False
+        except Exception:
+            return False
+
+        selected_code = self._selected_code_from_tree(self.tree_a07)
+        suggested_accounts = self._selected_control_suggestion_accounts()
+        try:
+            for _, row in filtered_gl_df.iterrows():
+                iid = str(row.get("Konto") or "").strip()
+                if not iid:
+                    continue
+                tag = control_gl_tree_tag(row, selected_code, suggested_accounts)
+                tree.item(iid, tags=((str(tag),) if tag else ()))
+        except Exception:
+            return False
+        return True
+
     def _on_control_gl_filter_changed(self) -> None:
-        self._refresh_control_gl_tree()
+        if bool(getattr(self, "_refresh_in_progress", False)):
+            return
+        self._schedule_control_gl_refresh()
         self._update_control_transfer_buttons()
 
     def _on_control_code_filter_changed(self) -> None:
-        self._refresh_a07_tree()
-        self._on_control_selection_changed()
+        if bool(getattr(self, "_refresh_in_progress", False)):
+            return
+        self._schedule_a07_refresh(on_complete=self._on_control_selection_changed)
 
     def _refresh_suggestions_tree(self) -> None:
         current_selection = self.tree_suggestions.selection()
@@ -4114,6 +4576,8 @@ class A07Page(ttk.Frame):
             self._set_tree_selection(self.tree_control_accounts, target_account)
 
     def _active_support_tab_key(self) -> str | None:
+        if not bool(getattr(self, "_control_details_visible", False)):
+            return None
         notebook = getattr(self, "control_support_nb", None)
         if notebook is None:
             return None
@@ -4134,22 +4598,55 @@ class A07Page(ttk.Frame):
         return None
 
     def _render_active_support_tab(self, *, force: bool = False) -> None:
+        if not bool(getattr(self, "_control_details_visible", False)):
+            return
         tab_key = self._active_support_tab_key()
         if not tab_key:
             return
         if not force and tab_key in self._loaded_support_tabs:
             return
+        def _mark_loaded(current_key: str = tab_key) -> None:
+            self._loaded_support_tabs.add(current_key)
         if tab_key == "history":
-            self._fill_tree(self.tree_history, self.history_compare_df, _HISTORY_COLUMNS, iid_column="Kode")
-            self._update_history_details_from_selection()
+            self._fill_tree_chunked(
+                self.tree_history,
+                self.history_compare_df,
+                _HISTORY_COLUMNS,
+                iid_column="Kode",
+                on_complete=lambda: (_mark_loaded(), self._update_history_details_from_selection()),
+            )
+            return
         elif tab_key == "reconcile":
-            self._fill_tree(self.tree_reconcile, self.reconcile_df, _RECONCILE_COLUMNS, row_tag_fn=reconcile_tree_tag)
+            self._fill_tree_chunked(
+                self.tree_reconcile,
+                self.reconcile_df,
+                _RECONCILE_COLUMNS,
+                row_tag_fn=reconcile_tree_tag,
+                on_complete=_mark_loaded,
+            )
+            return
         elif tab_key == "unmapped":
-            self._fill_tree(self.tree_unmapped, self.unmapped_df, _UNMAPPED_COLUMNS, iid_column="Konto")
+            self._fill_tree_chunked(
+                self.tree_unmapped,
+                self.unmapped_df,
+                _UNMAPPED_COLUMNS,
+                iid_column="Konto",
+                on_complete=_mark_loaded,
+            )
+            return
         elif tab_key == "mapping":
-            self._fill_tree(self.tree_mapping, self.mapping_df, _MAPPING_COLUMNS, iid_column="Konto")
+            self._fill_tree_chunked(
+                self.tree_mapping,
+                self.mapping_df,
+                _MAPPING_COLUMNS,
+                iid_column="Konto",
+                on_complete=_mark_loaded,
+            )
+            return
         elif tab_key == "suggestions":
             self._refresh_suggestions_tree()
+            _mark_loaded()
+            return
         self._loaded_support_tabs.add(tab_key)
 
     def _update_history_details(self, code: str | None) -> None:
@@ -4309,19 +4806,50 @@ class A07Page(ttk.Frame):
         self._update_control_transfer_buttons()
 
     def _on_control_selection_changed(self) -> None:
-        if bool(getattr(self, "_suspend_selection_sync", False)):
+        suppressed_check = getattr(self, "_is_tree_selection_suppressed", None)
+        if bool(getattr(self, "_suspend_selection_sync", False)) or (
+            callable(suppressed_check) and suppressed_check(getattr(self, "tree_a07", None))
+        ):
+            return
+        self._diag(
+            f"control_selection_changed code={self._selected_control_code()!r} "
+            f"refresh_in_progress={self._refresh_in_progress} details_visible={getattr(self, '_control_details_visible', False)}"
+        )
+        if bool(getattr(self, "_skip_initial_control_followup", False)):
+            self.workspace.selected_code = self._selected_control_code()
+            self._update_history_details_from_selection()
+            self._update_control_panel()
+            self._update_control_transfer_buttons()
             return
         self.workspace.selected_code = self._selected_control_code()
         self._update_history_details_from_selection()
+        if bool(getattr(self, "_refresh_in_progress", False)):
+            self._update_control_panel()
+            self._update_control_transfer_buttons()
+            return
+        schedule_followup = getattr(self, "_schedule_control_selection_followup", None)
+        if callable(schedule_followup):
+            self._update_control_panel()
+            self._update_control_transfer_buttons()
+            schedule_followup()
+            return
         if self._support_views_ready and self._active_support_tab_key() == "suggestions":
             self._refresh_suggestions_tree()
         if bool(getattr(self, "_control_details_visible", False)):
             self._refresh_control_support_trees()
-        self._refresh_control_gl_tree()
+        if bool(getattr(self, "_control_details_visible", False)) and not self._retag_control_gl_tree():
+            self._refresh_control_gl_tree()
         self._update_control_panel()
         self._update_control_transfer_buttons()
 
     def _on_support_tab_changed(self) -> None:
+        self._diag(
+            f"support_tab_changed details_visible={getattr(self, '_control_details_visible', False)} "
+            f"ready={self._support_views_ready} active={self._active_support_tab_key()!r}"
+        )
+        if not bool(getattr(self, "_control_details_visible", False)):
+            return
+        self._support_requested = True
         if self._support_views_ready:
             self._render_active_support_tab()
             return
@@ -4330,28 +4858,58 @@ class A07Page(ttk.Frame):
     def _selected_control_code(self) -> str | None:
         return self._selected_code_from_tree(self.tree_a07)
 
+    def _tree_selection_key(self, tree: ttk.Treeview | None) -> str:
+        try:
+            return str(tree) if tree is not None else ""
+        except Exception:
+            return ""
+
+    def _release_tree_selection_suppression(self, tree: ttk.Treeview | None) -> None:
+        key = self._tree_selection_key(tree)
+        if key:
+            self._suppressed_tree_select_keys.discard(key)
+
+    def _is_tree_selection_suppressed(self, tree: ttk.Treeview | None) -> bool:
+        key = self._tree_selection_key(tree)
+        return bool(key) and key in self._suppressed_tree_select_keys
+
     def _set_tree_selection(self, tree: ttk.Treeview, target: str | None) -> bool:
         target_s = str(target or "").strip()
         if not target_s:
             return False
+        key = self._tree_selection_key(tree)
+        if key:
+            self._suppressed_tree_select_keys.add(key)
         previous = bool(getattr(self, "_suspend_selection_sync", False))
         self._suspend_selection_sync = True
         try:
             tree.selection_set(target_s)
             tree.focus(target_s)
             tree.see(target_s)
+            try:
+                self.after_idle(lambda t=tree: self._release_tree_selection_suppression(t))
+            except Exception:
+                self._release_tree_selection_suppression(tree)
             return True
         except Exception:
+            self._release_tree_selection_suppression(tree)
             return False
         finally:
             self._suspend_selection_sync = previous
 
     def _on_control_gl_selection_changed(self) -> None:
-        if bool(getattr(self, "_suspend_selection_sync", False)):
+        suppressed_check = getattr(self, "_is_tree_selection_suppressed", None)
+        if bool(getattr(self, "_suspend_selection_sync", False)) or (
+            callable(suppressed_check) and suppressed_check(getattr(self, "tree_control_gl", None))
+        ):
             self._update_control_transfer_buttons()
             return
         account = self._selected_control_gl_account()
         if not account or self.control_gl_df is None or self.control_gl_df.empty:
+            self._update_control_transfer_buttons()
+            return
+        if bool(getattr(self, "_refresh_in_progress", False)):
+            self._sync_control_account_selection(account)
             self._update_control_transfer_buttons()
             return
         matches = self.control_gl_df.loc[self.control_gl_df["Konto"].astype(str).str.strip() == account]
@@ -4370,11 +4928,18 @@ class A07Page(ttk.Frame):
                     self.a07_filter_widget.set(_CONTROL_VIEW_LABELS["alle"])
                 except Exception:
                     pass
-                self._refresh_a07_tree()
+                self._schedule_a07_refresh(
+                    delay_ms=1,
+                    on_complete=lambda selected_code=code: self._focus_control_code(selected_code),
+                )
+                return
             if code in self.tree_a07.get_children():
                 if code != self._selected_code_from_tree(self.tree_a07):
                     if self._set_tree_selection(self.tree_a07, code):
-                        self._on_control_selection_changed()
+                        try:
+                            self.after_idle(self._on_control_selection_changed)
+                        except Exception:
+                            self._on_control_selection_changed()
         except Exception:
             return
         finally:
@@ -4502,10 +5067,16 @@ class A07Page(ttk.Frame):
         )
 
     def _on_suggestion_selected(self) -> None:
+        suppressed_check = getattr(self, "_is_tree_selection_suppressed", None)
         if bool(getattr(self, "_suspend_selection_sync", False)):
             return
+        if callable(suppressed_check) and suppressed_check(getattr(self, "tree_control_suggestions", None)):
+            return
+        if callable(suppressed_check) and suppressed_check(getattr(self, "tree_suggestions", None)):
+            return
         self._update_selected_suggestion_details()
-        self._refresh_control_gl_tree()
+        if not self._retag_control_gl_tree():
+            self._schedule_control_gl_refresh()
         if getattr(self, "tree_control_suggestions", None) is not None:
             selected_code = self._selected_code_from_tree(self.tree_a07)
             selected_row = self._selected_suggestion_row_from_tree(self.tree_control_suggestions)
@@ -4529,8 +5100,7 @@ class A07Page(ttk.Frame):
 
     def _on_a07_filter_changed(self) -> None:
         self.a07_filter_var.set(self._selected_a07_filter())
-        self._refresh_a07_tree()
-        self._on_control_selection_changed()
+        self._schedule_a07_refresh(on_complete=self._on_control_selection_changed)
 
     def _select_primary_tab(self) -> None:
         """No-op: arbeidsflaten bruker ikke interne tabs som kan byttes."""
@@ -4538,6 +5108,12 @@ class A07Page(ttk.Frame):
 
     def _restore_context_state(self, client: str | None, year: str | None) -> None:
         self._refresh_in_progress = True
+        self._pending_session_refresh = False
+        self._pending_support_refresh = False
+        cancel_job = getattr(self, "_cancel_scheduled_job", None)
+        if callable(cancel_job):
+            cancel_job("_session_refresh_job")
+        self._cancel_core_refresh_jobs()
         self._cancel_support_refresh()
         self._support_views_ready = False
         self._support_views_dirty = True
@@ -4583,6 +5159,10 @@ class A07Page(ttk.Frame):
         self.control_bucket_var.set("Ferdig 0 | Vurdering 0 | Manuell 0")
         self.control_code_filter_var.set("")
         self._control_details_auto_revealed = False
+        try:
+            self._set_control_details_visible(False)
+        except Exception:
+            pass
         try:
             self.control_panel.configure(text="Oppsummering")
             self.lbl_control_drag.configure(style="Muted.TLabel")
@@ -4682,6 +5262,11 @@ class A07Page(ttk.Frame):
         self._context_snapshot = get_context_snapshot(client, year)
         return True
 
+    def _context_has_changed(self) -> bool:
+        context = self._session_context(session)
+        snapshot = get_context_snapshot(*context)
+        return context != self._context_key or snapshot != self._context_snapshot
+
     def _load_a07_clicked(self) -> None:
         client, year = self._session_context(session)
         initialdir = str(get_a07_workspace_dir(client, year))
@@ -4696,6 +5281,7 @@ class A07Page(ttk.Frame):
 
         try:
             stored_path = copy_a07_source_to_workspace(path, client=client, year=year)
+            self._context_snapshot = get_context_snapshot(client, year)
             self.workspace.source_a07_df = parse_a07_json(stored_path)
             self.workspace.a07_df = self.workspace.source_a07_df.copy()
             self.a07_path = Path(stored_path)
@@ -5447,8 +6033,8 @@ class A07Page(ttk.Frame):
 
         try:
             selected_code = self._selected_control_code()
+            self._pending_focus_code = str(selected_code or "").strip() or None
             self._refresh_all()
-            self._focus_control_code(selected_code)
             self.status_var.set("A07-kontroll og forslag er oppdatert.")
         except Exception as exc:
             messagebox.showerror("A07", f"Kunne ikke oppdatere A07-visningen:\n{exc}")
@@ -5817,11 +6403,24 @@ class A07Page(ttk.Frame):
             self._pending_session_refresh = True
             return
         self._refresh_in_progress = True
+        self._pending_session_refresh = False
+        self._pending_support_refresh = False
+        self._support_requested = False
+        cancel_job = getattr(self, "_cancel_scheduled_job", None)
+        if callable(cancel_job):
+            cancel_job("_session_refresh_job")
+        self._cancel_core_refresh_jobs()
         self._cancel_support_refresh()
         self._support_views_ready = False
         self._start_core_refresh()
 
     def _refresh_support_views(self) -> None:
+        if (
+            not bool(getattr(self, "_control_details_visible", False))
+            or not bool(getattr(self, "_support_requested", True))
+        ):
+            self._pending_support_refresh = False
+            return
         active_tab_getter = getattr(self, "_active_support_tab_key", None)
         loaded_tabs = getattr(self, "_loaded_support_tabs", set())
         if self._support_views_ready and not self._support_views_dirty:
@@ -5829,10 +6428,11 @@ class A07Page(ttk.Frame):
                 self._render_active_support_tab()
             return
         if self._refresh_in_progress:
-            self._schedule_support_refresh()
+            self._pending_support_refresh = True
             return
         if self._support_refresh_thread is not None:
             return
+        self._pending_support_refresh = False
         self._start_support_refresh()
 
     def _fill_tree(
@@ -5844,16 +6444,24 @@ class A07Page(ttk.Frame):
         iid_column: str | None = None,
         row_tag_fn: Callable[[pd.Series], str | None] | None = None,
     ) -> None:
+        start_ts = time.perf_counter()
+        tree_name = self._tree_debug_name(tree)
+        row_count = 0 if df is None else int(len(df.index))
+        self._diag(f"fill_tree start tree={tree_name} rows={row_count}")
         children = tree.get_children()
         if children:
             tree.delete(*children)
 
         if df is None or df.empty:
+            self._diag(
+                f"fill_tree done tree={tree_name} rows=0 elapsed_ms={(time.perf_counter() - start_ts) * 1000:.1f}"
+            )
             return
 
+        used_iids: set[str] = set()
         for idx, row in df.iterrows():
             values = [self._format_value(row.get(column_id), column_id) for column_id, *_rest in columns]
-            iid = str(row.get(iid_column)).strip() if iid_column and str(row.get(iid_column, "")).strip() else str(idx)
+            iid = self._normalize_tree_iid(row, idx, iid_column, used_iids)
             tags: tuple[str, ...] = ()
             if row_tag_fn is not None:
                 try:
@@ -5862,14 +6470,151 @@ class A07Page(ttk.Frame):
                     tag = None
                 if tag:
                     tags = (str(tag),)
+            self._insert_tree_row(tree, iid=iid, values=values, tags=tags)
+        self._diag(
+            f"fill_tree done tree={tree_name} rows={row_count} elapsed_ms={(time.perf_counter() - start_ts) * 1000:.1f}"
+        )
+
+    def _tree_fill_key(self, tree: ttk.Treeview) -> str:
+        try:
+            return str(tree)
+        except Exception:
+            return f"tree-{id(tree)}"
+
+    def _cancel_tree_fill(self, tree: ttk.Treeview) -> None:
+        key = self._tree_fill_key(tree)
+        job = self._tree_fill_jobs.pop(key, None)
+        if job is None:
+            return
+        try:
+            self.after_cancel(job)
+        except Exception:
+            pass
+
+    def _normalize_tree_iid(
+        self,
+        row: pd.Series,
+        idx: object,
+        iid_column: str | None,
+        used_iids: set[str],
+    ) -> str:
+        base_iid = str(idx)
+        if iid_column:
+            try:
+                candidate = str(row.get(iid_column, "") or "").strip()
+            except Exception:
+                candidate = ""
+            if candidate:
+                base_iid = candidate
+
+        iid = base_iid
+        suffix = 2
+        while iid in used_iids:
+            iid = f"{base_iid}__{suffix}"
+            suffix += 1
+        used_iids.add(iid)
+        return iid
+
+    def _insert_tree_row(
+        self,
+        tree: ttk.Treeview,
+        *,
+        iid: str,
+        values: Sequence[object],
+        tags: tuple[str, ...],
+    ) -> None:
+        try:
             tree.insert("", "end", iid=iid, values=values, tags=tags)
+        except Exception:
+            try:
+                tree.insert("", "end", values=values, tags=tags)
+            except Exception:
+                pass
+
+    def _fill_tree_chunked(
+        self,
+        tree: ttk.Treeview,
+        df: pd.DataFrame,
+        columns: Sequence[tuple[str, str, int, str]],
+        *,
+        iid_column: str | None = None,
+        row_tag_fn: Callable[[pd.Series], str | None] | None = None,
+        on_complete: Callable[[], None] | None = None,
+        batch_size: int = 60,
+    ) -> None:
+        start_ts = time.perf_counter()
+        tree_name = self._tree_debug_name(tree)
+        self._cancel_tree_fill(tree)
+        key = self._tree_fill_key(tree)
+        token = int(self._tree_fill_tokens.get(key, 0)) + 1
+        self._tree_fill_tokens[key] = token
+
+        children = tree.get_children()
+        if children:
+            tree.delete(*children)
+
+        if df is None or df.empty:
+            self._diag(
+                f"fill_tree_chunked done tree={tree_name} rows=0 elapsed_ms={(time.perf_counter() - start_ts) * 1000:.1f}"
+            )
+            if on_complete is not None:
+                try:
+                    self.after_idle(on_complete)
+                except Exception:
+                    on_complete()
+            return
+
+        total = len(df.index)
+        self._diag(f"fill_tree_chunked start tree={tree_name} rows={total} batch_size={batch_size}")
+        state = {"index": 0, "used_iids": set()}
+        column_ids = [column_id for column_id, *_rest in columns]
+
+        def _run_batch() -> None:
+            if self._tree_fill_tokens.get(key) != token:
+                self._tree_fill_jobs.pop(key, None)
+                return
+            start = int(state["index"])
+            end = min(start + max(1, int(batch_size)), total)
+            chunk = df.iloc[start:end]
+            for idx, row in chunk.iterrows():
+                values = [self._format_value(row.get(column_id), column_id) for column_id in column_ids]
+                iid = self._normalize_tree_iid(row, idx, iid_column, state["used_iids"])
+                tags: tuple[str, ...] = ()
+                if row_tag_fn is not None:
+                    try:
+                        tag = row_tag_fn(row)
+                    except Exception:
+                        tag = None
+                    if tag:
+                        tags = (str(tag),)
+                self._insert_tree_row(tree, iid=iid, values=values, tags=tags)
+            state["index"] = end
+            if end < total:
+                self._tree_fill_jobs[key] = self.after(1, _run_batch)
+                return
+            self._tree_fill_jobs.pop(key, None)
+            self._diag(
+                f"fill_tree_chunked done tree={tree_name} rows={total} elapsed_ms={(time.perf_counter() - start_ts) * 1000:.1f}"
+            )
+            if on_complete is not None:
+                try:
+                    self.after_idle(on_complete)
+                except Exception:
+                    on_complete()
+
+        try:
+            self._tree_fill_jobs[key] = self.after_idle(_run_batch)
+        except Exception:
+            _run_batch()
 
     def _update_summary(self) -> None:
         client, year = self._session_context(session)
         ctx_parts = [x for x in (client, year) if x]
         context_text = " / ".join(ctx_parts) if ctx_parts else "ingen klientkontekst"
 
-        suggestion_count = 0 if self.workspace.suggestions is None else int(len(self.workspace.suggestions))
+        suggestion_count = 0
+        if bool(getattr(self, "_support_views_ready", False)) and self.workspace.suggestions is not None:
+            suggestion_count = int(len(self.workspace.suggestions))
         unsolved_count = count_unsolved_a07_codes(self.a07_overview_df)
         self.summary_var.set(
             " | ".join(

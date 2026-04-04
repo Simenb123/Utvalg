@@ -28,8 +28,25 @@ PIVOT_FILL_WEIGHTS = {"Kontonavn": 7, "Konto": 2, "Sum": 1}
 TX_HEADER_DRAG_THRESHOLD_PX = 10
 
 
+def _has_prev_year(page: Any) -> bool:
+    """Returner True dersom fjorårsdata er lastet og tilgjengelig."""
+    import pandas as pd
+    pivot_df = getattr(page, "_pivot_df_last", None)
+    if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
+        return True
+    sb_prev = getattr(page, "_rl_sb_prev_df", None)
+    if isinstance(sb_prev, pd.DataFrame) and not sb_prev.empty:
+        return True
+    return False
+
+
 def pivot_default_for_mode(*, page: Any) -> tuple[str, ...]:
-    """Returner standard synlige pivot-kolonner for gjeldende aggregeringsmodus."""
+    """Returner standard synlige pivot-kolonner for gjeldende aggregeringsmodus.
+
+    Når fjorårsdata er tilgjengelig i RL-modus:
+    - IB erstattes av UB_fjor (fjorårets saldo er mer relevant som sammenligningspunkt)
+    - Endring_pct legges til
+    """
     agg = ""
     try:
         agg = str(page._var_aggregering.get())
@@ -38,7 +55,21 @@ def pivot_default_for_mode(*, page: Any) -> tuple[str, ...]:
     if agg == "Konto":
         return getattr(page, "PIVOT_COLS_DEFAULT_KONTO", page.PIVOT_COLS_DEFAULT_VISIBLE)
     if agg == "Regnskapslinje":
-        return getattr(page, "PIVOT_COLS_DEFAULT_RL", page.PIVOT_COLS_DEFAULT_VISIBLE)
+        base = getattr(page, "PIVOT_COLS_DEFAULT_RL", page.PIVOT_COLS_DEFAULT_VISIBLE)
+        if _has_prev_year(page):
+            # Bytt IB med UB_fjor, legg til Endring_pct
+            base_list = [c for c in base if c != "IB"]
+            if "UB_fjor" not in base_list:
+                # Sett UB_fjor etter Sum
+                try:
+                    idx = base_list.index("Sum")
+                    base_list.insert(idx + 1, "UB_fjor")
+                except ValueError:
+                    base_list.append("UB_fjor")
+            if "Endring_pct" not in base_list:
+                base_list.append("Endring_pct")
+            return tuple(base_list)
+        return base
     return page.PIVOT_COLS_DEFAULT_VISIBLE
 
 
@@ -220,6 +251,50 @@ def adapt_pivot_columns_for_mode(*, page: Any) -> None:
     page._pivot_visible_cols = new_visible
     apply_pivot_visible_columns(page=page)
     persist_pivot_visible_columns(page=page)
+
+
+def update_pivot_columns_for_prev_year(*, page: Any) -> None:
+    """Kall etter at fjorårsdata er lastet.
+
+    Legger automatisk til UB_fjor og Endring_pct (fjerner IB) i RL-modus
+    dersom brukeren ikke allerede har tilpasset kolonnevalget bort fra default.
+    Gjør ingenting i Konto-modus.
+    """
+    agg = ""
+    try:
+        agg = str(page._var_aggregering.get())
+    except Exception:
+        pass
+    if agg != "Regnskapslinje":
+        return
+
+    if not _has_prev_year(page):
+        return
+
+    visible = list(getattr(page, "_pivot_visible_cols", []))
+
+    changed = False
+    # Fjern IB hvis det er der
+    if "IB" in visible:
+        visible.remove("IB")
+        changed = True
+    # Legg til UB_fjor etter Sum om ikke allerede synlig
+    if "UB_fjor" not in visible:
+        try:
+            idx = visible.index("Sum")
+            visible.insert(idx + 1, "UB_fjor")
+        except ValueError:
+            visible.append("UB_fjor")
+        changed = True
+    # Legg til Endring_pct på slutten om ikke allerede synlig
+    if "Endring_pct" not in visible:
+        visible.append("Endring_pct")
+        changed = True
+
+    if changed:
+        page._pivot_visible_cols = visible
+        apply_pivot_visible_columns(page=page)
+        persist_pivot_visible_columns(page=page)
 
 
 # =====================================================================
