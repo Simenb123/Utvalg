@@ -1,5 +1,26 @@
 # Utvalg
 
+---
+
+## Arbeidsmetode — ideer og oppgaver
+
+Vi bruker to nivåer for å skille mellom det vi drøfter og det vi har besluttet:
+
+| Nivå | Fil | Formål |
+|------|-----|--------|
+| **Ideer** | `doc/*_IDEER.md` | Åpne forslag som trenger drøfting før de eventuelt besluttes. Ingen forpliktelse til å implementere. |
+| **TODO** | `doc/TODO.md` | Besluttede oppgaver vi er enige om å gjøre. Flyttes hit fra IDEER-filer etter drøfting. |
+
+**Flyt:**
+1. Ny ide → skrives inn i relevant `*_IDEER.md` (eller lages en ny)
+2. Ideen drøftes — hvis vi bestemmer oss: flytt til `TODO.md` under «Aktive oppgaver»
+3. Implementert og committet → flytt til «Fullført» i `TODO.md`
+
+Eksisterende IDEER-filer:
+- [`ANALYSE_UX_IDEER.md`](ANALYSE_UX_IDEER.md) — mulige forbedringer til Analyse-siden
+
+---
+
 **Beskrivelse**
 Dette prosjektet er et GUI‑basert verktøy for å analysere og trekke utvalg fra
 regnskapsdata i henhold til norsk revisjonspraksis (NGAAP). Det er basert på
