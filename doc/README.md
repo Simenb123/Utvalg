@@ -18,6 +18,8 @@ Vi bruker to nivåer for å skille mellom det vi drøfter og det vi har beslutte
 
 Eksisterende IDEER-filer:
 - [`ANALYSE_UX_IDEER.md`](ANALYSE_UX_IDEER.md) — mulige forbedringer til Analyse-siden
+- [`KLIENTLISTE_IDEER.md`](KLIENTLISTE_IDEER.md) — integrasjon av CRMSystem klientliste inn i Utvalg (fil-basert sync vs API)
+- [`RISIKOMODUL_IDEER.md`](RISIKOMODUL_IDEER.md) — vesentlighetsgrenser, risikovurdering per regnskapslinje, kobling til eksisterende funksjoner
 
 ---
 
