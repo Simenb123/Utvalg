@@ -31,6 +31,11 @@ from page_lonn import LonnPage
 from page_skatt import SkattPage
 from page_reskontro import ReskontroPage
 
+try:
+    from page_fagchat import FagchatPage
+except Exception:
+    FagchatPage = None  # type: ignore
+
 log = logging.getLogger(__name__)
 
 
@@ -175,6 +180,7 @@ class App(tk.Tk):
         self.page_lonn = LonnPage(self.nb)
         self.page_skatt = SkattPage(self.nb)
         self.page_reskontro = ReskontroPage(self.nb)
+        self.page_fagchat = FagchatPage(self.nb) if FagchatPage is not None else None
 
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
@@ -188,6 +194,8 @@ class App(tk.Tk):
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
         self.nb.add(self.page_logg, text="Logg")
+        if self.page_fagchat is not None:
+            self.nb.add(self.page_fagchat, text="Fagchat")
 
         # Koble RegnskapPage og MvaPage til AnalysePage som datakilde
         if hasattr(self.page_regnskap, "set_analyse_page"):
