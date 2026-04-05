@@ -526,8 +526,9 @@ def build_ui(
 
     actions_menu.add_separator()
 
-    reset_columns_cmd = getattr(page, "_reset_tx_columns_to_default", None)
-    auto_fit_columns_cmd = getattr(page, "_auto_fit_analyse_columns", None)
+    reset_columns_cmd      = getattr(page, "_reset_tx_columns_to_default", None)
+    auto_fit_columns_cmd   = getattr(page, "_auto_fit_analyse_columns",    None)
+    reset_widths_cmd       = getattr(page, "_reset_all_column_widths",     None)
     if callable(columns_cmd):
         actions_menu.add_command(label="Velg kolonner…", command=columns_cmd)
     else:
@@ -542,6 +543,11 @@ def build_ui(
         actions_menu.add_command(label="Autotilpass kolonner", command=auto_fit_columns_cmd)
     else:
         actions_menu.add_command(label="Autotilpass kolonner", state="disabled")
+
+    if callable(reset_widths_cmd):
+        actions_menu.add_command(label="Tilbakestill kolonnebredder", command=reset_widths_cmd)
+    else:
+        actions_menu.add_command(label="Tilbakestill kolonnebredder", state="disabled")
 
     actions_menu.add_separator()
 
@@ -1242,7 +1248,13 @@ def build_ui(
         pivot_tree.bind("<Return>", _open_pivot_drill)
         pivot_tree.bind("<KP_Enter>", _open_pivot_drill)
 
+    _pivot_press_fn   = getattr(page, "_on_pivot_tree_mouse_press",   None)
+    _pivot_drag_fn    = getattr(page, "_on_pivot_tree_mouse_drag",    None)
     _pivot_release_fn = getattr(page, "_on_pivot_tree_mouse_release", None)
+    if callable(_pivot_press_fn):
+        pivot_tree.bind("<ButtonPress-1>",  lambda e: _pivot_press_fn(e))
+    if callable(_pivot_drag_fn):
+        pivot_tree.bind("<B1-Motion>",      lambda e: _pivot_drag_fn(e))
     if callable(_pivot_release_fn):
         pivot_tree.bind("<ButtonRelease-1>", lambda e: _pivot_release_fn(e))
 

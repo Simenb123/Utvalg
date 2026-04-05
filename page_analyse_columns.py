@@ -961,12 +961,186 @@ def on_pivot_tree_mouse_release(*, page: Any, event: Any) -> None:
     tree = getattr(page, "_pivot_tree", None)
     if tree is None or event is None:
         return
+    if _finish_pivot_header_drag(page=page, event=event):
+        return
     try:
         region = str(tree.identify_region(event.x, event.y))
     except Exception:
         region = ""
     if region in {"separator", "heading"}:
         remember_pivot_column_widths(page=page)
+
+
+# =====================================================================
+# Pivot-tree kolonne drag-to-reorder
+# =====================================================================
+
+_PIVOT_DRAG_THRESHOLD_PX = 10
+
+
+def on_pivot_tree_mouse_press(*, page: Any, event: Any) -> None:
+    """Registrer start av mulig kolonndrag på pivot-treet."""
+    tree = getattr(page, "_pivot_tree", None)
+    if tree is None or event is None:
+        setattr(page, "_pivot_header_drag", None)
+        return
+    try:
+        region = str(tree.identify_region(event.x, event.y))
+    except Exception:
+        region = ""
+    if region != "heading":
+        setattr(page, "_pivot_header_drag", None)
+        return
+    col = column_id_from_event(tree, event)
+    if not col:
+        setattr(page, "_pivot_header_drag", None)
+        return
+    # Pinned kolonner kan ikke flyttes
+    pinned = set(getattr(page, "PIVOT_COLS_PINNED", ("Konto", "Kontonavn")))
+    if col in pinned:
+        setattr(page, "_pivot_header_drag", None)
+        return
+    setattr(page, "_pivot_header_drag", {
+        "source": col, "start_x": event.x, "active": False,
+    })
+
+
+def on_pivot_tree_mouse_drag(*, page: Any, event: Any) -> None:
+    """Aktiver drag-modus når muspekeren har beveget seg nok."""
+    drag = getattr(page, "_pivot_header_drag", None)
+    tree = getattr(page, "_pivot_tree", None)
+    if tree is None or event is None or not isinstance(drag, dict):
+        return
+    if drag.get("active"):
+        return
+    if abs(event.x - int(drag.get("start_x", 0) or 0)) >= _PIVOT_DRAG_THRESHOLD_PX:
+        drag["active"] = True
+        setattr(page, "_pivot_header_drag", drag)
+        try:
+            tree.configure(cursor="fleur")
+        except Exception:
+            pass
+
+
+def _finish_pivot_header_drag(*, page: Any, event: Any) -> bool:
+    """Fullfør pivot kolonndrag — flytt kolonne til ny posisjon."""
+    tree = getattr(page, "_pivot_tree", None)
+    drag = getattr(page, "_pivot_header_drag", None)
+    setattr(page, "_pivot_header_drag", None)
+    try:
+        tree.configure(cursor="")
+    except Exception:
+        pass
+    if tree is None or event is None or not isinstance(drag, dict):
+        return False
+    if not drag.get("active"):
+        return False
+
+    source = str(drag.get("source") or "").strip()
+    target = column_id_from_event(tree, event) or ""
+    if not source or not target or source == target:
+        return False
+
+    visible = list(getattr(page, "_pivot_visible_cols", []))
+    pinned  = list(getattr(page, "PIVOT_COLS_PINNED", ("Konto", "Kontonavn")))
+
+    if source not in visible or target not in visible:
+        return False
+    if target in pinned:
+        return False  # kan ikke dra inn i pinned-sonen
+
+    # Flytt source til target-posisjon
+    visible.remove(source)
+    try:
+        target_idx = visible.index(target)
+    except ValueError:
+        target_idx = len(visible)
+    visible.insert(target_idx, source)
+
+    page._pivot_visible_cols = visible
+    apply_pivot_visible_columns(page=page)
+    persist_pivot_visible_columns(page=page)
+
+    # Hindre at sortering trigges etter drag
+    try:
+        setattr(tree, "_suppress_next_heading_sort", True)
+        after_fn = getattr(page, "after_idle", None) or getattr(tree, "after_idle", None)
+        if callable(after_fn):
+            after_fn(lambda: setattr(tree, "_suppress_next_heading_sort", False))
+    except Exception:
+        pass
+    return True
+
+
+# =====================================================================
+# Pivot-sortering: modus-avhengig aktiver/deaktiver
+# =====================================================================
+
+def refresh_pivot_sorting(*, page: Any, enable_fn: Any) -> None:
+    """Slå sortering av/på i pivot-treet basert på aggregeringsmodus.
+
+    Konto-modus   → sortering aktivert (radene er uavhengige kontoer).
+    RL-modus      → sortering deaktivert (rekkefølge er semantisk, med summer).
+    """
+    tree = getattr(page, "_pivot_tree", None)
+    if tree is None:
+        return
+
+    cols = tuple(getattr(page, "PIVOT_COLS", ()))
+    agg  = ""
+    try:
+        agg = str(page._var_aggregering.get())
+    except Exception:
+        pass
+
+    if agg == "Konto" and enable_fn is not None:
+        try:
+            enable_fn(tree, columns=cols)
+        except Exception:
+            pass
+    else:
+        # Deaktiver: erstatt kommando med no-op
+        for col in cols:
+            try:
+                tree.heading(col, command=lambda: None)
+            except Exception:
+                pass
+
+
+# =====================================================================
+# Reset kolonnebredder
+# =====================================================================
+
+def reset_pivot_column_widths(*, page: Any) -> None:
+    """Slett lagrede bredder og bruk standardverdier igjen."""
+    try:
+        import preferences as _prefs
+        _prefs.set("analyse.pivot.widths", {})
+    except Exception:
+        pass
+    if hasattr(page, "_pivot_col_widths"):
+        page._pivot_col_widths = {}
+    # Kjør heading-oppdatering for å trigge default-bredder
+    try:
+        agg = str(page._var_aggregering.get())
+    except Exception:
+        agg = "Regnskapslinje"
+    try:
+        import page_analyse_rl as _rl
+        _rl.update_pivot_headings(page=page, mode=agg if agg else "Regnskapslinje")
+    except Exception:
+        pass
+
+
+def reset_tx_column_widths(*, page: Any) -> None:
+    """Slett lagrede TX-kolonnebredder."""
+    try:
+        import preferences as _prefs
+        _prefs.set("analyse.tx_cols.widths", {})
+    except Exception:
+        pass
+    if hasattr(page, "_tx_col_widths"):
+        page._tx_col_widths = {}
 
 
 # =====================================================================

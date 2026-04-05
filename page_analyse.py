@@ -562,6 +562,8 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._apply_filters_and_refresh()
         # Tilpass synlige kolonner etter pivot-refresh (headings er nå oppdatert)
         self._adapt_pivot_columns_for_mode()
+        # Sortering: aktiver i Konto-modus, deaktiver i RL-modus
+        self._refresh_pivot_sorting()
 
     def _normalize_mva_code_value(self, value: object) -> str:
         text = str(value or "").strip()
@@ -731,6 +733,23 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
     def _on_pivot_tree_mouse_release(self, event=None):
         page_analyse_columns.on_pivot_tree_mouse_release(page=self, event=event)
+
+    def _on_pivot_tree_mouse_press(self, event=None):
+        page_analyse_columns.on_pivot_tree_mouse_press(page=self, event=event)
+
+    def _on_pivot_tree_mouse_drag(self, event=None):
+        page_analyse_columns.on_pivot_tree_mouse_drag(page=self, event=event)
+
+    def _refresh_pivot_sorting(self) -> None:
+        page_analyse_columns.refresh_pivot_sorting(
+            page=self, enable_fn=_enable_treeview_sorting)
+
+    def _reset_pivot_column_widths(self) -> None:
+        page_analyse_columns.reset_pivot_column_widths(page=self)
+
+    def _reset_all_column_widths(self) -> None:
+        page_analyse_columns.reset_pivot_column_widths(page=self)
+        page_analyse_columns.reset_tx_column_widths(page=self)
 
     def _configure_tx_tree_columns(self) -> None:
         page_analyse_columns.configure_tx_tree_columns(page=self)

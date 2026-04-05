@@ -681,12 +681,15 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
     # Juster bredder for RL-modus (defaults – auto-fit kjøres etter data er fylt)
     if mode == "Regnskapslinje":
         try:
-            tree.column("Konto", width=55, minwidth=40, anchor="e")
-            tree.column("Kontonavn", width=240, anchor="w")
-            tree.column("IB", width=115, minwidth=80, stretch=True, anchor="e")
-            tree.column("Endring", width=115, minwidth=80, stretch=True, anchor="e")
-            tree.column("Sum", width=115, minwidth=80, anchor="e")
-            tree.column("Antall", width=60, anchor="e")
+            # Nr-kolonnen er smal — bare et 2-5-sifret RL-nummer
+            tree.column("Konto",    width=44,  minwidth=34,  stretch=False, anchor="e")
+            # Regnskapslinje-navn trenger bredde
+            tree.column("Kontonavn", width=290, minwidth=160, stretch=True,  anchor="w")
+            tree.column("IB",       width=110, minwidth=75,  stretch=False, anchor="e")
+            tree.column("Endring",  width=110, minwidth=75,  stretch=False, anchor="e")
+            tree.column("Sum",      width=115, minwidth=80,  stretch=False, anchor="e")
+            # Antall trenger ikke mye plass
+            tree.column("Antall",   width=48,  minwidth=38,  stretch=False, anchor="e")
         except Exception:
             pass
         # Fjorårskolonner: vis/skjul basert på tilgjengelige data
