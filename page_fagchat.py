@@ -45,19 +45,30 @@ def _find_openai_repo() -> Optional[Path]:
 
 
 _RAG_REPO = _find_openai_repo()
-_RAG_AVAILABLE = False
+_LIBRARY_PATH: Optional[Path] = _RAG_REPO / "kildebibliotek.json" if _RAG_REPO else None
 
-if _RAG_REPO is not None:
+# RAG-modulene lastes lazily første gang brukeren sender en melding,
+# ikke ved appstart — chromadb er tung å importere og ville forsinket oppstart.
+_RAG_AVAILABLE: Optional[bool] = None  # None = ikke sjekket ennå
+
+
+def _ensure_rag() -> bool:
+    """Importer RAG-moduler første gang de trengs. Returnerer True hvis OK."""
+    global _RAG_AVAILABLE
+    if _RAG_AVAILABLE is not None:
+        return _RAG_AVAILABLE
+    if _RAG_REPO is None:
+        _RAG_AVAILABLE = False
+        return False
     src_path = str(_RAG_REPO / "src")
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
     try:
-        from rag_assistant.qa_service import QueryOutcome, run_query  # type: ignore
-        from rag_assistant.env_loader import load_env  # type: ignore
+        import rag_assistant.qa_service  # noqa: F401  # trigger import
         _RAG_AVAILABLE = True
-        _LIBRARY_PATH = _RAG_REPO / "kildebibliotek.json"
     except Exception:
-        pass
+        _RAG_AVAILABLE = False
+    return bool(_RAG_AVAILABLE)
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +108,7 @@ class FagchatPage(ttk.Frame):
 
         self._build_ui()
         self._poll_queue()
-
-        if not _RAG_AVAILABLE:
-            self._show_setup_warning()
+        # RAG lastes lazily ved første Send — ikke her
 
     # ------------------------------------------------------------------
     # UI-bygg
@@ -273,30 +282,37 @@ class FagchatPage(ttk.Frame):
         q = self._input.get().strip()
         if not q:
             return
-        if not _RAG_AVAILABLE:
-            self._show_setup_warning()
-            return
 
         self._input.delete(0, tk.END)
         self._append(f"Du:  {q}", _TAG_USER)
         self._append("Henter faglig kontekst…", _TAG_THINKING)
         self._set_busy(True)
-        self._status_var.set("Søker i fagdatabasen…")
+        self._status_var.set("Laster fagmotor…")
 
         use_llm = self._use_llm.get()
         top_k = max(1, int(self._top_k.get() or 5))
 
         def _worker() -> None:
             try:
+                # Lazy-import: gjøres kun første gang (chromadb er tung)
+                if not _ensure_rag():
+                    self._queue.put(("error",
+                        "RAG-motoren ikke funnet.\n"
+                        f"Forventet openai-repo på: {_RAG_REPO or '../openai'}\n\n"
+                        "Installer: pip install chromadb openai python-dotenv PyPDF2\n"
+                        "Bygg indeks: python run_build_index.py --library kildebibliotek.json --wipe"))
+                    return
+
+                from rag_assistant.qa_service import run_query, QueryOutcome  # type: ignore
+                from rag_assistant.env_loader import load_env  # type: ignore
+
+                import os
                 load_env(_RAG_REPO / ".env")
-                if use_llm:
-                    import os
-                    if not os.environ.get("OPENAI_API_KEY"):
-                        self._queue.put(("error",
-                            "OPENAI_API_KEY mangler.\n"
-                            "Opprett en .env-fil i openai-mappen med:\n"
-                            "OPENAI_API_KEY=sk-..."))
-                        return
+                if not os.environ.get("OPENAI_API_KEY"):
+                    self._queue.put(("error",
+                        "OPENAI_API_KEY mangler.\n"
+                        "Legg til i openai/.env:\n  OPENAI_API_KEY=sk-..."))
+                    return
 
                 outcome: QueryOutcome = run_query(
                     q,
