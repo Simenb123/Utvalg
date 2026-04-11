@@ -200,8 +200,24 @@ def save_document_review(
     raw_text_excerpt: str,
     notes: str,
     analysis: DocumentAnalysisResult | None = None,
+    segments: list[Any] | None = None,
     repository: LocalJsonProfileRepository | None = None,
+    field_hit_indices: dict[str, int] | None = None,
+    field_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Save a document review and update the supplier profile with learned hints.
+
+    ``segments`` should be the TextSegment list from the PDF extraction — when
+    provided, the profile learns page-level location hints for each confirmed
+    field value (coordinate-based learning).
+
+    ``field_hit_indices`` persists the user's chosen hit position per field
+    (which occurrence in the PDF they selected).
+
+    ``field_evidence`` carries the user's confirmed FieldEvidence objects
+    (with page + bbox) so the profile can learn the exact position the user
+    selected, rather than always picking the first match in the segments.
+    """
     repository = repository or LocalJsonProfileRepository()
 
     payload: dict[str, Any] = {
@@ -211,6 +227,8 @@ def save_document_review(
         "raw_text_excerpt": raw_text_excerpt.strip(),
         "notes": notes.strip(),
     }
+    if field_hit_indices:
+        payload["field_hit_indices"] = {k: int(v) for k, v in field_hit_indices.items() if v is not None}
     if analysis is not None:
         payload["analysis_metadata"] = dict(analysis.metadata or {})
         payload["analysis_source"] = analysis.source
@@ -221,7 +239,21 @@ def save_document_review(
         }
         payload["confidence"] = analysis.confidence
 
-    updated_profile = repository.upsert_from_document(payload["fields"], payload["raw_text_excerpt"])
+    # ── Coordinate-based profile learning ────────────────────────────────
+    # Re-extract hints using the actual PDF segments so that page numbers are
+    # recorded alongside labels.  The segments are passed in from the dialog
+    # which runs the analysis just before saving.
+    effective_segments = segments
+    if effective_segments is None and file_path:
+        effective_segments = _load_segments_for_learning(file_path)
+
+    updated_profile = _upsert_profile_with_hints(
+        repository,
+        payload["fields"],
+        payload["raw_text_excerpt"],
+        effective_segments,
+        field_evidence=field_evidence,
+    )
     if updated_profile is not None:
         payload["supplier_profile_key"] = updated_profile.profile_key
         payload["supplier_profile_samples"] = updated_profile.sample_count
@@ -234,12 +266,164 @@ def load_saved_review(client: str | None, year: str | None, bilag: str | None) -
     return load_document_record(client, year, bilag)
 
 
+# ---------------------------------------------------------------------------
+# Voucher PDF auto-lookup
+# ---------------------------------------------------------------------------
+
+def find_or_extract_bilag_document(
+    bilag: str,
+    *,
+    client: str | None,
+    year: str | None,
+    extra_voucher_paths: list[str | Path] | None = None,
+) -> Path | None:
+    """Try to find the bilag document by scanning Tripletex voucher PDFs.
+
+    1. Checks the voucher index/cache for bilag *bilag*.
+    2. If found, extracts the relevant pages to a per-bilag PDF.
+    3. Returns the path to the extracted PDF, or None if not found.
+    """
+    try:
+        from document_control_voucher_index import find_and_extract_bilag
+
+        return find_and_extract_bilag(
+            bilag,
+            client=client,
+            year=year,
+            extra_paths=extra_voucher_paths,
+            use_cache=True,
+        )
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Document status helpers (for status column in selection tables)
+# ---------------------------------------------------------------------------
+
+DOK_STATUS_NOT_LINKED = ""
+DOK_STATUS_LINKED = "Koblet"
+DOK_STATUS_OK = "OK"
+DOK_STATUS_AVVIK = "Avvik"
+
+
+def compute_document_status(record: dict[str, Any] | None) -> str:
+    """Return a single status string for a document control record.
+
+    Returns:
+        ""        – no record or no linked file
+        "Koblet"  – file linked but not yet analysed (no extracted fields)
+        "OK"      – analysed, no validation messages
+        "Avvik"   – analysed, has validation messages
+    """
+    if not record:
+        return DOK_STATUS_NOT_LINKED
+    file_path = str(record.get("file_path", "") or "").strip()
+    if not file_path:
+        return DOK_STATUS_NOT_LINKED
+
+    fields = dict(record.get("fields", {}) or {})
+    has_fields = any(str(value or "").strip() for value in fields.values())
+    if not has_fields:
+        return DOK_STATUS_LINKED
+
+    messages = list(record.get("validation_messages", []) or [])
+    if messages:
+        return DOK_STATUS_AVVIK
+    return DOK_STATUS_OK
+
+
+def load_document_statuses(
+    client: str | None,
+    year: str | None,
+    bilag_keys: list[str],
+) -> dict[str, str]:
+    """Return a dict mapping normalised bilag key → status string.
+
+    Only bilag in *bilag_keys* are checked.  Keys not present in the store
+    get an empty status string (not linked).
+    """
+    if not bilag_keys:
+        return {}
+
+    from document_control_store import load_document_store, record_key
+
+    store = load_document_store()
+    records = store.get("records", {})
+
+    result: dict[str, str] = {}
+    for bilag in bilag_keys:
+        key = record_key(client, year, bilag)
+        record = records.get(key)
+        result[bilag] = compute_document_status(record)
+    return result
+
+
 def export_supplier_profiles(export_path: str | Path) -> dict[str, Any]:
     return export_profiles_to_json(export_path)
 
 
 def import_supplier_profiles(import_path: str | Path, *, merge: bool = True) -> dict[str, Any]:
     return import_profiles_from_json(import_path, merge=merge)
+
+
+def _load_segments_for_learning(file_path: str) -> list[Any] | None:
+    """Extract text segments from *file_path* for profile hint learning.
+
+    Returns None if extraction fails or the file is not a PDF.
+    """
+    try:
+        from document_engine.engine import extract_text_from_file
+        path = Path(file_path)
+        if not path.exists() or path.suffix.lower() != ".pdf":
+            return None
+        result = extract_text_from_file(path)
+        return result.segments or None
+    except Exception:
+        return None
+
+
+def _upsert_profile_with_hints(
+    repository: LocalJsonProfileRepository,
+    fields: dict[str, str],
+    raw_text: str,
+    segments: list[Any] | None,
+    *,
+    field_evidence: dict[str, Any] | None = None,
+) -> Any:
+    """Build/update supplier profile including page-level location hints."""
+    from document_engine.profiles import (
+        build_supplier_profile,
+        infer_field_hints,
+        profile_key_from_fields,
+    )
+
+    profile_key = profile_key_from_fields(fields)
+    if not profile_key:
+        return None
+
+    existing = repository.load_profiles().get(profile_key)
+
+    # Build base profile (name, orgnr, aliases, static fields)
+    profile = build_supplier_profile(fields, raw_text, existing_profile=existing)
+    if profile is None:
+        return None
+
+    # Re-run hint inference with segments (coordinate-aware).
+    # Pass field_evidence so hints use the user's confirmed page+bbox
+    # instead of always picking the first text match in segments.
+    new_hints = infer_field_hints(
+        raw_text, fields, segments=segments, field_evidence=field_evidence,
+    )
+    if new_hints:
+        from document_engine.profiles import _merge_hint_entries
+        merged = dict(profile.field_hints or {})
+        for field_name, hint_list in new_hints.items():
+            current = list(merged.get(field_name, []) or [])
+            merged[field_name] = _merge_hint_entries(current, hint_list)
+        profile.field_hints = merged
+
+    return repository.save_profile(profile)
 
 
 def _append_root(roots: list[tuple[Path, str]], path: Path, label: str) -> None:
@@ -261,6 +445,8 @@ def _normalize_whitespace(value: str) -> str:
 
 def _normalize_date_text(value: str) -> str:
     text = _normalize_whitespace(value)
+    # Strip time component (e.g. "2025.01.31 00:00:00", "2025-01-31T00:00:00+01:00")
+    text = re.sub(r"[T ][\d:Z+\-]+$", "", text).strip()
     text = text.replace("/", ".").replace("-", ".")
     parts = text.split(".")
     if len(parts) != 3:

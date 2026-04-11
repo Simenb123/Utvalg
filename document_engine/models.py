@@ -15,6 +15,8 @@ DOCUMENT_FIELD_ORDER = (
     "vat_amount",
     "total_amount",
     "currency",
+    "description",
+    "period",
 )
 
 
@@ -67,6 +69,8 @@ class DocumentFacts:
     vat_amount: str = ""
     total_amount: str = ""
     currency: str = ""
+    description: str = ""
+    period: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {field_name: str(getattr(self, field_name, "") or "") for field_name in DOCUMENT_FIELD_ORDER}

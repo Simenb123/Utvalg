@@ -42,21 +42,32 @@ _SUBTOTAL_PATTERNS = [
     re.compile(rf"(?is)\b(?:sum\s+eks(?:l|kl)\.?\s*mva|subtotal|netto|net\s+amount|tax\s+exclusive\s+amount)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
 ]
 _VAT_PATTERNS = [
-    re.compile(rf"(?is)\b(?:mva|vat|merverdiavgift|tax\s+amount|vat\s+base)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
+    # Specific VAT-amount labels — allow wider context
+    re.compile(rf"(?is)\b(?:merverdiavgift|tax\s+amount|vat\s+amount)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
+    # "mva:" or "vat:" immediately followed by the amount (colon/space only)
+    re.compile(rf"(?is)\b(?:mva|vat)\s*[:\-]\s*({_NUMBER_FRAGMENT})"),
+    # Generic "mva"/"vat" — tight window to avoid grabbing table base amounts
+    re.compile(rf"(?is)\b(?:mva|vat)\b[^0-9\-]{{0,12}}({_NUMBER_FRAGMENT})"),
 ]
+_TEXT_MONTH_NAMES = (
+    "januar|februar|mars|april|mai|juni|juli|august|september|oktober|november|desember"
+    "|january|february|march|may|june|july|october|december"
+)
 _DATE_PATTERNS = [
     re.compile(r"(?im)\b(?:fakturadato|invoice\s+date|invoice\s+dt|dato)\b[^0-9]{0,20}(\d{1,4}[./-]\d{1,2}[./-]\d{1,4})"),
+    re.compile(r"(?im)\b(?:fakturadato|invoice\s+date|invoice\s+dt|dato)\b.{0,20}(\d{1,2}\.?\s*(?:" + _TEXT_MONTH_NAMES + r")\s+\d{4})", re.IGNORECASE),
 ]
 _DUE_DATE_PATTERNS = [
     re.compile(r"(?im)\b(?:forfallsdato|forfall|due\s+date)\b[^0-9]{0,20}(\d{1,4}[./-]\d{1,2}[./-]\d{1,4})"),
+    re.compile(r"(?im)\b(?:forfallsdato|forfall|due\s+date)\b.{0,20}(\d{1,2}\.?\s*(?:" + _TEXT_MONTH_NAMES + r")\s+\d{4})", re.IGNORECASE),
 ]
 _INVOICE_NUMBER_PATTERNS = [
     re.compile(
         r"(?im)\b(?:faktura\s*nr\.?|fakturanr\.?|fakturanummer|invoice\s*(?:no|number|nr)\.?|vår\s+referanse)\b"
-        r"[^A-Z0-9]{0,10}([A-Z0-9][A-Z0-9\-\/]{2,})"
+        r"[^A-Z0-9]{0,10}((?=[A-Z0-9\-\/]*[0-9])[A-Z0-9][A-Z0-9\-\/]{2,})"
     ),
     re.compile(
-        r"(?im)\binvoice\b(?!\s*(?:date|due|dt))[^A-Z0-9]{0,10}([A-Z0-9][A-Z0-9\-\/]{2,})"
+        r"(?im)\binvoice\b(?!\s*(?:date|due|dt))[^A-Z0-9]{0,10}((?=[A-Z0-9\-\/]*[0-9])[A-Z0-9][A-Z0-9\-\/]{2,})"
     ),
 ]
 _ORGNR_PATTERNS = [
@@ -66,6 +77,14 @@ _ORGNR_PATTERNS = [
 ]
 _CURRENCY_PATTERNS = [
     re.compile(r"(?im)\b(NOK|SEK|DKK|EUR|USD|GBP)\b"),
+]
+_DESCRIPTION_PATTERNS = [
+    re.compile(r"(?im)\b(?:beskrivelse|description|spesifikasjon|specification|ytelse|tjeneste)\b\s*[:\-]?\s*(.{5,120})$"),
+    re.compile(r"(?im)\b(?:vedr(?:ørende)?|gjelder|ang(?:ående)?|ref(?:eranse)?\.?)\b\s*[:\-]?\s*(.{5,120})$"),
+]
+_PERIOD_PATTERNS = [
+    re.compile(r"(?im)\b(?:periode|period|kontraktsperiode|leieperiode|abonnementsperiode)\b\s*[:\-]?\s*(.{4,60})$"),
+    re.compile(r"(?im)\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*(?:[-–]\s*|til\s+)\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"),
 ]
 _SUPPLIER_LABEL_PATTERNS = [
     re.compile(r"(?im)\b(?:leverand[øo]r|supplier|fra)\b\s*[:\-]?\s*(.+)$"),
@@ -96,6 +115,12 @@ _INVOICE_PAGE_NEGATIVE_PATTERNS = (
     r"\bbilagsgrunnlag\b",
     r"\bregnskapslinjer\b",
 )
+
+# Maps field_name → (patterns, normalizer_fn, base_confidence)
+# Used by _apply_supplier_profile_learning to re-run hint-boosted extraction.
+# NOTE: normalizer functions are referenced by name to avoid circular imports;
+#       they are bound below after all functions are defined.
+_FIELD_PATTERNS: dict[str, tuple[list, Any, float]] = {}   # filled at module bottom
 
 _XML_TEXT_TAGS = {
     "ID": "invoice_number",
@@ -200,6 +225,8 @@ def analyze_document(
                 field_evidence,
                 raw_text,
                 profiles,
+                segments=extracted.segments,
+                source_hint=extracted.source,
             )
             metadata.update(profile_metadata)
 
@@ -275,8 +302,56 @@ def extract_invoice_fields_from_text(
         ("vat_amount", _VAT_PATTERNS, _normalize_amount_text, 0.8),
         ("total_amount", _AMOUNT_PATTERNS, _normalize_amount_text, 0.86),
         ("currency", _CURRENCY_PATTERNS, _normalize_currency_text, 0.72),
+        ("description", _DESCRIPTION_PATTERNS, _normalize_whitespace, 0.5),
+        ("period", _PERIOD_PATTERNS, _normalize_whitespace, 0.5),
     ):
         evidence = _first_match_evidence(field_name, patterns, text, ordered_segments, normalizer, score, source_hint)
+        if evidence is not None:
+            evidence_map[field_name] = evidence
+
+    facts = DocumentFacts.from_mapping(
+        {fn: ev.normalized_value for fn, ev in evidence_map.items() if ev.normalized_value}
+    )
+    return facts, evidence_map
+
+
+def extract_invoice_fields_from_text_with_hints(
+    text: str,
+    *,
+    segments: list[TextSegment] | None = None,
+    source_hint: str = "text",
+    profile_hints: dict[str, list[dict[str, Any]]] | None = None,
+) -> tuple[DocumentFacts, dict[str, FieldEvidence]]:
+    """Like extract_invoice_fields_from_text but boosts candidates matching profile hints.
+
+    profile_hints: field_name → list of hint dicts, each with keys:
+        label (str), page (int|None), count (int)
+    """
+    evidence_map: dict[str, FieldEvidence] = {}
+    ordered_segments = _prioritize_segments_for_invoice(list(segments or []), source_hint=source_hint, text=text)
+
+    supplier_evidence = _extract_supplier_evidence(text, ordered_segments, source_hint)
+    if supplier_evidence is not None:
+        evidence_map["supplier_name"] = supplier_evidence
+
+    hints = profile_hints or {}
+    for field_name, patterns, normalizer, score in (
+        ("supplier_orgnr", _ORGNR_PATTERNS, _normalize_orgnr, 0.9),
+        ("invoice_number", _INVOICE_NUMBER_PATTERNS, _normalize_compact_text, 0.8),
+        ("invoice_date", _DATE_PATTERNS, _normalize_date_text, 0.78),
+        ("due_date", _DUE_DATE_PATTERNS, _normalize_date_text, 0.78),
+        ("subtotal_amount", _SUBTOTAL_PATTERNS, _normalize_amount_text, 0.8),
+        ("vat_amount", _VAT_PATTERNS, _normalize_amount_text, 0.8),
+        ("total_amount", _AMOUNT_PATTERNS, _normalize_amount_text, 0.86),
+        ("currency", _CURRENCY_PATTERNS, _normalize_currency_text, 0.72),
+        ("description", _DESCRIPTION_PATTERNS, _normalize_whitespace, 0.5),
+        ("period", _PERIOD_PATTERNS, _normalize_whitespace, 0.5),
+    ):
+        field_hints = hints.get(field_name, [])
+        evidence = _first_match_evidence(
+            field_name, patterns, text, ordered_segments, normalizer, score, source_hint,
+            profile_hints=field_hints,
+        )
         if evidence is not None:
             evidence_map[field_name] = evidence
 
@@ -367,7 +442,10 @@ def build_validation_messages(
         )
 
     if facts.supplier_name:
-        supplier_tokens = [token for token in re.split(r"\s+", facts.supplier_name) if len(token) >= 4]
+        # Use tokens >= 3 chars; if none survive (e.g. "Bhl DA"), fall back to all tokens
+        supplier_tokens = [t for t in re.split(r"\s+", facts.supplier_name) if len(t) >= 3]
+        if not supplier_tokens:
+            supplier_tokens = [t for t in re.split(r"\s+", facts.supplier_name) if t]
         matched = supplier_tokens and any(
             any(token.lower() in text.lower() for token in supplier_tokens) for text in voucher_context.texts
         )
@@ -759,6 +837,8 @@ def _first_match_evidence(
     normalizer,
     score: float,
     source_hint: str,
+    *,
+    profile_hints: list[dict[str, Any]] | None = None,
 ) -> FieldEvidence | None:
     candidates: list[tuple[float, FieldEvidence]] = []
     for segment_index, segment in enumerate(segments or [TextSegment(text=text, source=source_hint)]):
@@ -777,28 +857,124 @@ def _first_match_evidence(
                     page=segment.page,
                     bbox=segment.bbox,
                 )
-                rank = _score_field_match(field_name, evidence, segment_index=segment_index, pattern_index=pattern_index)
+                rank = _score_field_match(
+                    field_name, evidence,
+                    segment_index=segment_index,
+                    pattern_index=pattern_index,
+                    profile_hints=profile_hints or [],
+                    segment_text=segment.text,
+                )
                 candidates.append((rank, evidence))
     if not candidates:
         return None
     return max(candidates, key=lambda item: item[0])[1]
 
 
-def _score_field_match(field_name: str, evidence: FieldEvidence, *, segment_index: int, pattern_index: int) -> float:
+def _score_field_match(
+    field_name: str,
+    evidence: FieldEvidence,
+    *,
+    segment_index: int,
+    pattern_index: int,
+    profile_hints: list[dict[str, Any]] | None = None,
+    segment_text: str = "",
+) -> float:
     rank = 1000.0
     rank -= segment_index * 25.0
-    rank -= pattern_index * 10.0
 
     if field_name in {"total_amount", "subtotal_amount", "vat_amount"}:
-        amount = _parse_amount(evidence.normalized_value)
-        if amount is not None:
-            rank += min(abs(amount), 100000.0) / 100.0
+        rank -= pattern_index * 120.0
     elif field_name == "invoice_number":
+        rank -= pattern_index * 10.0
         rank += min(len(evidence.normalized_value), 20)
     elif field_name == "currency":
+        rank -= pattern_index * 10.0
         rank += 5.0 if evidence.normalized_value in {"NOK", "SEK", "DKK", "EUR", "USD", "GBP"} else 0.0
+    else:
+        rank -= pattern_index * 10.0
+
+    # ── Profile hint boost ────────────────────────────────────────────────
+    # A learned hint records the page and label text where the correct value
+    # was previously confirmed by the user.  We apply a large bonus so that
+    # hints win over the generic pattern ranking, but only when BOTH criteria
+    # match (page AND label present in the segment text).
+    if profile_hints:
+        hint_boost = _profile_hint_boost(evidence, segment_text, profile_hints)
+        rank += hint_boost
 
     return rank
+
+
+def _profile_hint_boost(
+    evidence: FieldEvidence,
+    segment_text: str,
+    hints: list[dict[str, Any]],
+) -> float:
+    """Return a score bonus when this candidate matches a learned profile hint.
+
+    Scoring:
+        page match only          → +150
+        label match only         → +200 (weighted by hint count, up to +350)
+        page + label match       → +500
+        page + label + bbox near → +700 (strongest — exact position confirmed)
+
+    All bonuses are weighted by confirmation count (saturates at 3 saves).
+    """
+    if not hints:
+        return 0.0
+
+    seg_text_norm = re.sub(r"\s+", " ", segment_text).lower()
+    best = 0.0
+
+    for hint in hints:
+        hint_page:  int | None = hint.get("page")
+        hint_label: str       = str(hint.get("label", "") or "").lower().strip()
+        hint_bbox             = hint.get("bbox")
+        hint_count: int       = max(1, int(hint.get("count", 1) or 1))
+        weight = min(hint_count / 3.0, 2.0)   # saturates at 3 confirmed saves
+
+        page_match  = (hint_page is not None and evidence.page is not None
+                       and evidence.page == hint_page)
+        label_match = bool(hint_label and hint_label in seg_text_norm)
+        bbox_near   = _bbox_is_near(evidence.bbox, hint_bbox) if page_match else False
+
+        if page_match and label_match and bbox_near:
+            boost = 700.0 * weight
+        elif page_match and label_match:
+            boost = 500.0 * weight
+        elif page_match and bbox_near:
+            boost = 400.0 * weight
+        elif page_match:
+            boost = 150.0 * weight
+        elif label_match:
+            boost = 200.0 * weight
+        else:
+            boost = 0.0
+
+        best = max(best, boost)
+
+    return best
+
+
+def _bbox_is_near(
+    a: tuple[float, ...] | None,
+    b: tuple[float, ...] | None,
+    threshold: float = 60.0,
+) -> bool:
+    """Check if two bboxes are within *threshold* points of each other.
+
+    Compares top-left corners (x0, y0). A threshold of 60 pt (~21 mm) is
+    generous enough to handle minor OCR drift between invoices from the
+    same supplier.
+    """
+    if a is None or b is None:
+        return False
+    try:
+        dx = abs(float(a[0]) - float(b[0]))
+        dy = abs(float(a[1]) - float(b[1]))
+        return (dx + dy) < threshold
+    except (IndexError, TypeError, ValueError):
+        return False
 
 
 def _prioritize_segments_for_invoice(
@@ -840,9 +1016,29 @@ def _segment_invoice_priority(segment: TextSegment) -> float:
     score += _segment_bonus_count(text, _SUBTOTAL_PATTERNS) * 7.0
     if segment.page and segment.page > 1:
         score += 6.0
-    if "firma:" in lowered and "bilag nummer" in lowered:
-        score -= 20.0
+    # Strong penalty for Tripletex bilagsprint pages (accounting summary printout,
+    # NOT the actual vendor invoice).  These pages must never win over a real invoice.
+    if _is_bilagsprint_segment(text):
+        return -500.0
+    elif "firma:" in lowered and "bilag nummer" in lowered:
+        score -= 40.0
     return score
+
+
+def _is_bilagsprint_segment(text: str) -> bool:
+    """Return True if this page segment is a Tripletex accounting summary (bilagsprint).
+
+    Bilagsprint pages are generated by Tripletex and show the accounting entries
+    for the voucher — they are NOT the actual vendor invoice and should be
+    skipped during field extraction.
+    """
+    lowered = text.lower()
+    has_bilag_nr = bool(re.search(r"bilag\s+nummer\s+\d", lowered))
+    has_kontering = bool(re.search(
+        r"konteringssammendrag|sum\s+debet|sum\s+kredit|kontostrengen",
+        lowered,
+    ))
+    return has_bilag_nr and has_kontering
 
 
 def _segment_bonus_count(text: str, patterns: tuple[re.Pattern[str], ...] | list[re.Pattern[str]]) -> int:
@@ -891,8 +1087,31 @@ def _normalize_orgnr(value: str) -> str:
     return digits[:9] if len(digits) >= 9 else digits
 
 
+_MONTH_NAME_TO_NUM: dict[str, int] = {
+    "januar": 1, "februar": 2, "mars": 3, "april": 4,
+    "mai": 5, "juni": 6, "juli": 7, "august": 8,
+    "september": 9, "oktober": 10, "november": 11, "desember": 12,
+    "january": 1, "february": 2, "march": 3, "may": 5,
+    "june": 6, "july": 7, "october": 10, "december": 12,
+}
+
+_TEXT_DATE_NORM_RE = re.compile(
+    r"(\d{1,2})\.?\s*(" + "|".join(_MONTH_NAME_TO_NUM.keys()) + r")\s+(\d{4})",
+    re.IGNORECASE,
+)
+
+
 def _normalize_date_text(value: str) -> str:
     text = _normalize_whitespace(value)
+
+    # Try text-month format first (e.g. "5. desember 2025")
+    m = _TEXT_DATE_NORM_RE.search(text)
+    if m:
+        day_s, month_name, year_s = m.group(1), m.group(2).lower(), m.group(3)
+        month_num = _MONTH_NAME_TO_NUM.get(month_name)
+        if month_num:
+            return f"{int(day_s):02d}.{month_num:02d}.{int(year_s):04d}"
+
     text = text.replace("/", ".").replace("-", ".")
     parts = text.split(".")
     if len(parts) != 3:
@@ -953,13 +1172,48 @@ def _apply_supplier_profile_learning(
     field_evidence: dict[str, FieldEvidence],
     raw_text: str,
     profiles: dict[str, SupplierProfile],
+    *,
+    segments: list[TextSegment] | None = None,
+    source_hint: str = "text",
 ) -> tuple[DocumentFacts, dict[str, FieldEvidence], str, dict[str, Any]]:
     profile, match_score = match_supplier_profile(profiles, facts.as_dict(), raw_text)
     if profile is None:
         return facts, field_evidence, "none", {}
 
+    # ── Re-run field extraction with profile hints if hints exist ─────────
+    # This allows the engine to boost candidates on the learned page/label,
+    # overriding the generic pattern ranking.
+    profile_hints = dict(profile.field_hints or {})
+    hint_fields: list[str] = []
+    if profile_hints and segments:
+        ordered_segments = _prioritize_segments_for_invoice(
+            list(segments), source_hint=source_hint, text=raw_text
+        )
+        facts_map = facts.as_dict()
+        for field_name in profile_hints:
+            hints = profile_hints[field_name]
+            if not hints:
+                continue
+            # Re-score all candidates for this field using hints
+            if field_name not in _FIELD_PATTERNS:
+                continue
+            patterns, normalizer, base_score = _FIELD_PATTERNS[field_name]
+            new_evidence = _first_match_evidence(
+                field_name, patterns, raw_text, ordered_segments,
+                normalizer, base_score, source_hint,
+                profile_hints=hints,
+            )
+            if new_evidence and new_evidence.normalized_value:
+                old = field_evidence.get(field_name)
+                if old is None or new_evidence.normalized_value != old.normalized_value:
+                    field_evidence[field_name] = new_evidence
+                    facts_map[field_name] = new_evidence.normalized_value
+                    hint_fields.append(field_name)
+        facts = DocumentFacts.from_mapping(facts_map)
+
+    # ── Apply static profile values (supplier_name, orgnr, currency) ─────
     learned_values = apply_supplier_profile(profile, raw_text)
-    applied_fields: list[str] = []
+    applied_fields: list[str] = list(hint_fields)
     facts_map = facts.as_dict()
 
     for field_name, raw_value in learned_values.items():
@@ -985,6 +1239,7 @@ def _apply_supplier_profile_learning(
         "matched_profile_score": match_score,
         "matched_profile_samples": profile.sample_count,
         "profile_applied_fields": applied_fields,
+        "profile_hint_fields": hint_fields,
     }
 
 
@@ -1001,6 +1256,8 @@ def _normalize_field_value(field_name: str, value: str) -> str:
         return _normalize_amount_text(value)
     if field_name == "currency":
         return _normalize_currency_text(value)
+    if field_name in {"description", "period"}:
+        return _normalize_whitespace(value)
     return _normalize_whitespace(value)
 
 
@@ -1009,3 +1266,20 @@ def _mark_validation(evidence: FieldEvidence | None, matched: bool, note: str) -
         return
     evidence.validated_against_voucher = matched
     evidence.validation_note = note
+
+
+# ---------------------------------------------------------------------------
+# _FIELD_PATTERNS — filled after all normalizer functions are defined
+# ---------------------------------------------------------------------------
+_FIELD_PATTERNS.update({
+    "supplier_orgnr":  (_ORGNR_PATTERNS,   _normalize_orgnr,         0.9),
+    "invoice_number":  (_INVOICE_NUMBER_PATTERNS, _normalize_compact_text, 0.8),
+    "invoice_date":    (_DATE_PATTERNS,     _normalize_date_text,     0.78),
+    "due_date":        (_DUE_DATE_PATTERNS, _normalize_date_text,     0.78),
+    "subtotal_amount": (_SUBTOTAL_PATTERNS, _normalize_amount_text,   0.8),
+    "vat_amount":      (_VAT_PATTERNS,      _normalize_amount_text,   0.8),
+    "total_amount":    (_AMOUNT_PATTERNS,   _normalize_amount_text,   0.86),
+    "currency":        (_CURRENCY_PATTERNS, _normalize_currency_text, 0.72),
+    "description":     (_DESCRIPTION_PATTERNS, _normalize_whitespace, 0.5),
+    "period":          (_PERIOD_PATTERNS,      _normalize_whitespace, 0.5),
+})

@@ -203,23 +203,162 @@ def import_profiles_payload(payload: dict[str, Any] | None) -> dict[str, Supplie
     return imported
 
 
-def infer_field_hints(raw_text: str, fields: dict[str, str]) -> dict[str, list[dict[str, Any]]]:
-    lines = _candidate_lines(raw_text)
+def infer_field_hints(
+    raw_text: str,
+    fields: dict[str, str],
+    *,
+    segments: list[Any] | None = None,
+    field_evidence: dict[str, Any] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Build location hints for learnable fields.
+
+    Each hint records:
+      label   – normalised text label preceding the value on the same line
+      page    – page number (1-based) where the value was found, or None
+      bbox    – (x0, y0, x1, y1) coordinates on the page, or None
+      context – first 60 chars of the line, for diagnostic purposes
+      count   – reinforcement counter (incremented on each confirmed save)
+
+    When *field_evidence* is provided the user's confirmed page+bbox is used
+    to select the correct segment match (rather than always the first one).
+    When *segments* is provided, hints are derived per-segment (with page info).
+    Fallback uses the flat raw_text.
+    """
     hints: dict[str, list[dict[str, Any]]] = {}
 
+    if segments:
+        for field_name in LEARNABLE_FIELDS:
+            value = (fields.get(field_name, "") or "").strip()
+            if not value:
+                continue
+            # Use the user's confirmed evidence (page + bbox) to pick the
+            # correct segment instead of blindly taking the first match.
+            ev = (field_evidence or {}).get(field_name)
+            ev_page = _ev_attr(ev, "page")
+            ev_bbox = _ev_attr(ev, "bbox")
+            hint = _find_hint_in_segments(
+                segments, field_name, value,
+                evidence_page=ev_page, evidence_bbox=ev_bbox,
+            )
+            if hint:
+                hints.setdefault(field_name, []).append(hint)
+        return hints
+
+    # Fallback: flat text (no page info)
+    lines = _candidate_lines(raw_text)
     for field_name in LEARNABLE_FIELDS:
         value = (fields.get(field_name, "") or "").strip()
         if not value:
             continue
-
         line, marker = _find_line_with_value(lines, field_name, value)
         if not line or not marker:
             continue
-
         label = _extract_label_from_line(line, marker)
         if label:
-            hints.setdefault(field_name, []).append({"label": label, "count": 1})
+            ev = (field_evidence or {}).get(field_name)
+            ev_bbox = _ev_attr(ev, "bbox")
+            hints.setdefault(field_name, []).append(
+                {"label": label, "page": None, "bbox": ev_bbox,
+                 "context": line[:60], "count": 1}
+            )
     return hints
+
+
+def _ev_attr(ev: Any, attr: str) -> Any:
+    """Safely extract an attribute from a FieldEvidence (dataclass or dict)."""
+    if ev is None:
+        return None
+    if isinstance(ev, dict):
+        return ev.get(attr)
+    return getattr(ev, attr, None)
+
+
+def _find_hint_in_segments(
+    segments: list[Any],
+    field_name: str,
+    value: str,
+    *,
+    evidence_page: int | None = None,
+    evidence_bbox: tuple[float, ...] | None = None,
+) -> dict[str, Any] | None:
+    """Search segments for *value*, return a hint dict with page info.
+
+    When *evidence_page* / *evidence_bbox* are provided (from the user's
+    confirmed field evidence), prefer the match on that page/position.
+    This is the key fix: instead of always returning the first text match,
+    we return the match closest to where the user actually pointed.
+    """
+    markers = _value_markers(field_name, value)
+    # Collect ALL matches, then pick the best one.
+    candidates: list[dict[str, Any]] = []
+    for segment in segments:
+        seg_text: str = getattr(segment, "text", "") or ""
+        seg_page: int | None = getattr(segment, "page", None)
+        seg_bbox: tuple | None = getattr(segment, "bbox", None)
+        seg_lines = _candidate_lines(seg_text)
+        for line in seg_lines[:120]:
+            line_norm = line.lower()
+            for marker in markers:
+                if marker and marker.lower() in line_norm:
+                    label = _extract_label_from_line(line, marker)
+                    if label:
+                        candidates.append({
+                            "label": label,
+                            "page": seg_page,
+                            "bbox": _coerce_bbox(seg_bbox),
+                            "context": line[:60],
+                            "count": 1,
+                        })
+    if not candidates:
+        return None
+
+    # If user confirmed a specific page+bbox, pick the closest candidate.
+    if evidence_page is not None:
+        best = _pick_best_candidate(candidates, evidence_page, evidence_bbox)
+        if best is not None:
+            # Override bbox with the user's precise coordinates.
+            best["bbox"] = _coerce_bbox(evidence_bbox)
+            return best
+
+    # Fallback: first candidate (legacy behaviour).
+    return candidates[0]
+
+
+def _coerce_bbox(bbox: Any) -> tuple[float, ...] | None:
+    """Ensure bbox is a tuple of floats or None."""
+    if bbox is None:
+        return None
+    try:
+        return tuple(float(v) for v in bbox)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pick_best_candidate(
+    candidates: list[dict[str, Any]],
+    target_page: int,
+    target_bbox: tuple[float, ...] | None,
+) -> dict[str, Any] | None:
+    """Pick the candidate closest to the user's confirmed position."""
+    # First: filter to same page
+    same_page = [c for c in candidates if c.get("page") == target_page]
+    if not same_page:
+        return None
+    if len(same_page) == 1 or target_bbox is None:
+        return same_page[0]
+
+    # Multiple matches on same page — pick closest by bbox distance.
+    def bbox_distance(c: dict) -> float:
+        c_bbox = c.get("bbox")
+        if c_bbox is None or target_bbox is None:
+            return float("inf")
+        try:
+            # Manhattan distance of top-left corners
+            return abs(c_bbox[0] - target_bbox[0]) + abs(c_bbox[1] - target_bbox[1])
+        except (IndexError, TypeError):
+            return float("inf")
+
+    return min(same_page, key=bbox_distance)
 
 
 def normalize_hint_label(value: str) -> str:
@@ -279,14 +418,21 @@ def _value_markers(field_name: str, value: str) -> list[str]:
 
 
 def _merge_hint_entries(existing: list[dict[str, Any]], new_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
+    # Key = (label, page) so the same label on different pages is kept separate.
+    merged: dict[tuple[str, Any], dict[str, Any]] = {}
     for entry in existing + new_entries:
         label = normalize_hint_label(str(entry.get("label", "")))
         if not label:
             continue
-        if label not in merged:
-            merged[label] = {"label": label, "count": 0}
-        merged[label]["count"] += int(entry.get("count", 1) or 1)
+        page = entry.get("page")  # None or int
+        key = (label, page)
+        if key not in merged:
+            merged[key] = {"label": label, "page": page, "bbox": None, "count": 0}
+        merged[key]["count"] += int(entry.get("count", 1) or 1)
+        # Keep the most recent bbox (overwrites older ones on merge).
+        new_bbox = entry.get("bbox")
+        if new_bbox is not None:
+            merged[key]["bbox"] = _coerce_bbox(new_bbox)
     return sorted(merged.values(), key=lambda item: (-int(item.get("count", 0)), item["label"]))
 
 

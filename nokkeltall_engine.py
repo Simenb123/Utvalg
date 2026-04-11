@@ -51,6 +51,8 @@ class NokkeltallResult:
     kpi_cards: list[dict] = field(default_factory=list)
     pl_summary: list[dict] = field(default_factory=list)
     bs_summary: list[dict] = field(default_factory=list)
+    bs_eiendeler: list[dict] = field(default_factory=list)
+    bs_ek_gjeld: list[dict] = field(default_factory=list)
     cost_breakdown: list[dict] = field(default_factory=list)
     bs_breakdown: list[dict] = field(default_factory=list)
     top_activity: list[dict] = field(default_factory=list)
@@ -72,12 +74,9 @@ def _format_value(value: float | None, fmt: str) -> str:
         return f"{value:.2f}"
     if fmt == "days":
         return f"{value:.0f}"
-    # amount
-    if abs(value) >= 1e6:
-        return f"{value / 1e6:,.1f} M".replace(",", " ")
-    if abs(value) >= 1e3:
-        return f"{value / 1e3:,.0f} k".replace(",", " ")
-    return f"{value:,.0f}".replace(",", " ")
+    # amount — alltid i hele tusen
+    v = round(value / 1000)
+    return f"{v:,}".replace(",", " ")
 
 
 def _safe_div(a: float | None, b: float | None) -> float | None:
@@ -376,55 +375,80 @@ def _build_kpi_cards(ub: dict[int, float], ub_prev: dict[int, float] | None) -> 
 # P&L og Balanse oppsummering
 # ---------------------------------------------------------------------------
 
-_PL_LINES = [
-    (10, "Salgsinntekt"),
-    (19, "Sum driftsinntekter"),
-    (20, "Varekostnad"),
-    (40, "Lønnskostnad"),
-    (50, "Avskrivning"),
-    (70, "Annen driftskostnad"),
-    (79, "Sum driftskostnader"),
-    (80, "Driftsresultat"),
-    (135, "Sum finansinntekter"),
-    (145, "Sum finanskostnader"),
-    (160, "Resultat før skattekostnad"),
-    (280, "Årsresultat"),
-]
+@dataclass
+class RLMeta:
+    """Metadata for regnskapslinjer fra config — single source of truth."""
+    type_map: dict[int, str] = field(default_factory=dict)      # regnr → "PL" | "BS"
+    sumpost_set: set[int] = field(default_factory=set)           # regnr som er sumposter
+    order: list[int] = field(default_factory=list)               # regnr i config-rekkefølge
+    names: dict[int, str] = field(default_factory=dict)          # regnr → navn fra config
 
-_BS_LINES = [
-    (555, "Sum varige driftsmidler"),
-    (580, "Sum finansielle anleggsmidler"),
-    (590, "Sum anleggsmidler"),
-    (605, "Varelager"),
-    (610, "Kundefordringer"),
-    (655, "Bankinnskudd"),
-    (660, "Sum omløpsmidler"),
-    (665, "Sum eiendeler"),
-    (715, "Sum egenkapital"),
-    (780, "Leverandørgjeld"),
-    (810, "Sum kortsiktig gjeld"),
-    (820, "Sum gjeld"),
-    (830, "Sum egenkapital og gjeld"),
-]
 
-_SUM_REGNR = {19, 79, 80, 160, 280, 590, 660, 665, 715, 810, 820, 830}
+def _load_rl_meta() -> RLMeta:
+    """Last regnskapslinje-metadata fra config.
+
+    Bruker regnskap_config (regnskapslinjer.xlsx) som eneste kilde for:
+      - Resultat/Balanse-type
+      - Sumpost-flagg
+      - Rekkefølge (bevarer config-sortering)
+      - Offisielle navn
+    """
+    meta = RLMeta()
+    try:
+        from regnskap_config import load_regnskapslinjer
+        from regnskap_mapping import normalize_regnskapslinjer
+
+        rl_cfg = load_regnskapslinjer()
+
+        # Type (PL/BS) fra rå config
+        for _, row in rl_cfg.iterrows():
+            try:
+                nr = int(float(row.get("nr", 0)))
+            except (ValueError, TypeError):
+                continue
+            rb = str(row.get("resultat/balanse", "")).strip().lower()
+            if "resultat" in rb:
+                meta.type_map[nr] = "PL"
+            elif "balanse" in rb:
+                meta.type_map[nr] = "BS"
+
+        # Sumpost + rekkefølge + navn fra normalisert config
+        regn = normalize_regnskapslinjer(rl_cfg)
+        for _, row in regn.iterrows():
+            regnr = int(row["regnr"])
+            meta.order.append(regnr)
+            meta.names[regnr] = str(row.get("regnskapslinje", ""))
+            if bool(row.get("sumpost", False)):
+                meta.sumpost_set.add(regnr)
+    except Exception:
+        pass
+    return meta
 
 
 def _build_summary_lines(
-    line_defs: list[tuple[int, str]],
     ub: dict[int, float],
     ub_prev: dict[int, float] | None,
     rl_names: dict[int, str],
+    meta: RLMeta,
+    *,
+    line_type: str,
 ) -> list[dict]:
-    """Bygg oppsummeringslinjer for resultat eller balanse."""
+    """Bygg oppsummeringslinjer fra data, sortert etter config-rekkefølge.
+
+    Bruker meta.type_map for å filtrere PL/BS — aldri hardkodet regnr-grense.
+    Bevarer config-rekkefølgen via meta.order.
+    """
+    # Sorter etter config-rekkefølge; ukjente regnr plasseres til slutt
+    order_idx = {regnr: i for i, regnr in enumerate(meta.order)}
+    eligible = [r for r in ub if meta.type_map.get(r) == line_type]
+    eligible.sort(key=lambda r: order_idx.get(r, 99999))
+
     lines: list[dict] = []
-    for regnr, fallback_name in line_defs:
-        val = _rl_value(ub, regnr)
-        if val is None:
-            continue
+    for regnr in eligible:
+        val = ub[regnr]
         prev = _rl_value(ub_prev, regnr) if ub_prev else None
-        name = rl_names.get(regnr, fallback_name)
-        is_sum = regnr in _SUM_REGNR
+        name = rl_names.get(regnr) or meta.names.get(regnr, f"RL {regnr}")
+        is_sum = regnr in meta.sumpost_set
         change_pct = None
         change_amount = None
         if prev is not None:
@@ -506,6 +530,7 @@ def _build_top_activity(
     rl_df: pd.DataFrame,
     transactions_df: pd.DataFrame | None = None,
     n: int = 3,
+    sumpost_set: set[int] | None = None,
 ) -> list[dict]:
     """Finn top-N regnskapslinjer etter transaksjonsmengde."""
     if rl_df is None or rl_df.empty:
@@ -516,12 +541,12 @@ def _build_top_activity(
     if "Antall" not in df.columns:
         return []
 
-    # Filtrer ut sumposter (de med regnr i _SUM_REGNR)
     try:
         df["_regnr"] = df["regnr"].astype(float).astype(int)
     except (ValueError, TypeError):
         return []
-    df = df[~df["_regnr"].isin(_SUM_REGNR)]
+    if sumpost_set:
+        df = df[~df["_regnr"].isin(sumpost_set)]
     df = df[df["Antall"] > 0]
 
     if df.empty:
@@ -588,7 +613,10 @@ def compute_nokkeltall(
     has_prev = "UB_fjor" in rl_df.columns
     ub_prev = _build_lookup(rl_df, "UB_fjor", normalize_sign=True) if has_prev else None
 
-    # Regnskapslinje-navn fra data
+    # Regnskapslinje-metadata fra config (type, sumpost, rekkefølge, navn)
+    meta = _load_rl_meta()
+
+    # Navn fra data (overstyrer config-navn hvis dataen har egne)
     rl_names: dict[int, str] = {}
     for _, row in rl_df.iterrows():
         try:
@@ -596,14 +624,33 @@ def compute_nokkeltall(
         except (ValueError, TypeError):
             pass
 
+    bs_all = _build_summary_lines(ub, ub_prev, rl_names, meta, line_type="BS")
+
+    # Splitt balanse i Eiendeler vs EK+Gjeld ved "Sum eiendeler"-linjen
+    bs_eiendeler: list[dict] = []
+    bs_ek_gjeld: list[dict] = []
+    split_found = False
+    for line in bs_all:
+        bs_eiendeler.append(line) if not split_found else bs_ek_gjeld.append(line)
+        # Splitten er etter den overordnede "Sum eiendeler"-linjen,
+        # IKKE sub-summer som "Sum immaterielle eiendeler".
+        if line.get("is_sum") and not split_found:
+            name_lc = line.get("name", "").lower().strip()
+            if name_lc == "sum eiendeler":
+                split_found = True
+
     return NokkeltallResult(
         metrics=_compute_metrics(ub, ub_prev),
         kpi_cards=_build_kpi_cards(ub, ub_prev),
-        pl_summary=_build_summary_lines(_PL_LINES, ub, ub_prev, rl_names),
-        bs_summary=_build_summary_lines(_BS_LINES, ub, ub_prev, rl_names),
+        pl_summary=_build_summary_lines(ub, ub_prev, rl_names, meta,
+                                        line_type="PL"),
+        bs_summary=bs_all,
+        bs_eiendeler=bs_eiendeler,
+        bs_ek_gjeld=bs_ek_gjeld,
         cost_breakdown=_build_cost_breakdown(ub),
         bs_breakdown=_build_bs_breakdown(ub),
-        top_activity=_build_top_activity(rl_df, transactions_df),
+        top_activity=_build_top_activity(rl_df, transactions_df,
+                                         sumpost_set=meta.sumpost_set),
         has_prev_year=has_prev,
         client=str(client),
         year=str(year or ""),

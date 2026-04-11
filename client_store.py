@@ -3,10 +3,15 @@
 
 Rot: ``app_paths.data_dir()/clients``. Hver klient får egen mappe, videre
 inndelt i år og dtype (hb, mapping, osv.). Audit logges i jsonl.
+
+Versjonshåndtering (VersionModel, create_version, list_versions, …) er
+splittet ut til ``client_store_versions.py``.  Alt re-eksporteres herfra
+for bakoverkompatibilitet.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +25,8 @@ import shutil
 import time
 
 import app_paths
+
+log = logging.getLogger(__name__)
 
 CLIENTS_SUBDIR = "clients"
 META_FILE = "meta.json"
@@ -377,6 +384,10 @@ def _cache_remove_client(display_name: str) -> None:
 def _now() -> float:
     return float(time.time())
 
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
 def _user() -> str:
     try:
         return getpass.getuser()
@@ -573,7 +584,7 @@ def _find_client_dir(display_name: str) -> Optional[Path]:
     # kall refresh_client_cache() og forsøk igjen.
     return None
 
-def ensure_client(display_name: str, *, persist_index: bool = True) -> Path:
+def ensure_client(display_name: str, *, persist_index: bool = True, create: bool = True) -> Path:
     dn = (display_name or "").strip()
     if not dn:
         raise ValueError("Tomt klientnavn")
@@ -581,6 +592,8 @@ def ensure_client(display_name: str, *, persist_index: bool = True) -> Path:
     existing = _find_client_dir(dn)
     if existing is not None:
         return existing
+    if not create:
+        raise FileNotFoundError(f"Fant ikke klientmappen for {dn!r}")
 
     root = _root()
     slug = _safe_slug(dn)
@@ -602,34 +615,6 @@ def ensure_client(display_name: str, *, persist_index: bool = True) -> Path:
             log.debug("Could not persist clients index after ensure_client: %s", e)
 
     return d
-
-@dataclass
-class VersionModel:
-    id: str
-    client_display: str
-    year: str
-    dtype: str
-    filename: str
-    path: str
-    created_at: float
-    meta: Dict[str, Any] | None = None
-
-class DuplicateContentError(Exception):
-    def __init__(self, existing_id: str, existing_filename: str) -> None:
-        super().__init__(f"Duplicate content (id={existing_id}, file={existing_filename})")
-        self.existing_id = existing_id
-        self.existing_filename = existing_filename
-
-def _vdir(display_name: str, *, year: str, dtype: str) -> Path:
-    c = ensure_client(display_name)
-    y = normalize_year(year)
-    p = c / "years" / y / "versions" / dtype.lower()
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-def versions_dir(display_name: str, *, year: str, dtype: str) -> Path:
-    return _vdir(display_name, year=year, dtype=dtype)
-
 
 
 def update_client_display_name(old_display_name: str, new_display_name: str) -> bool:
@@ -675,6 +660,51 @@ def update_client_display_name(old_display_name: str, new_display_name: str) -> 
     # Oppdater hurtigindeks (ytelse; best effort)
     try:
         persist_clients_index()
+    except Exception:
+        pass
+
+    return True
+
+
+def read_client_meta(display_name: str) -> dict:
+    """Les meta.json for en klient. Returnerer tom dict hvis ikke funnet."""
+    d = _find_client_dir((display_name or "").strip())
+    if d is None:
+        return {}
+    meta_p = d / META_FILE
+    try:
+        if meta_p.exists():
+            return _read_json(meta_p)
+    except Exception:
+        pass
+    return {}
+
+
+def update_client_meta(display_name: str, updates: dict) -> bool:
+    """Merger nye felt inn i meta.json uten å fjerne eksisterende.
+
+    Returnerer True hvis oppdatering ble utført.
+    """
+    dn = (display_name or "").strip()
+    if not dn or not updates:
+        return False
+
+    d = _find_client_dir(dn)
+    if d is None:
+        return False
+
+    meta_p = d / META_FILE
+    try:
+        meta = _read_json(meta_p) if meta_p.exists() else {}
+    except Exception:
+        meta = {}
+
+    meta.update(updates)
+    meta["updated_at"] = _now_iso()
+    _write_json_atomic(meta_p, meta)
+
+    try:
+        _append_audit(d, {"event": "update_client_meta", "fields": list(updates.keys())})
     except Exception:
         pass
 
@@ -756,335 +786,38 @@ def years_dir(display_name: str, *, year: str) -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
-def _index_path(display_name: str, *, year: str, dtype: str) -> Path:
-    return _vdir(display_name, year=year, dtype=dtype) / INDEX_FILE
+def exports_dir(display_name: str, *, year: str) -> Path:
+    """Mappe for eksporterte dokumenter (years/<YYYY>/exports/).
 
-def _load_index(display_name: str, *, year: str, dtype: str) -> Dict[str, Any]:
-    p = _index_path(display_name, year=year, dtype=dtype)
-    if not p.exists():
-        return {"versions": [], "active_id": None}
-    obj = _read_json(p)
-    if not isinstance(obj, dict):
-        return {"versions": [], "active_id": None}
-    obj.setdefault("versions", [])
-    obj.setdefault("active_id", None)
-    return obj
-
-def _save_index(display_name: str, *, year: str, dtype: str, idx: Dict[str, Any]) -> None:
-    _write_json_atomic(_index_path(display_name, year=year, dtype=dtype), idx)
-
-def list_versions(display_name: str, *, year: str, dtype: str) -> List[VersionModel]:
-    idx = _load_index(display_name, year=year, dtype=dtype)
-    out: List[VersionModel] = []
-    for v in idx.get("versions", []) or []:
-        try:
-            out.append(VersionModel(**v))
-        except Exception:
-            continue
-    out.sort(key=lambda x: x.created_at or 0.0)
-    return out
-
-def get_active_version(display_name: str, *, year: str, dtype: str) -> Optional[VersionModel]:
-    idx = _load_index(display_name, year=year, dtype=dtype)
-    aid = idx.get("active_id")
-    if not aid:
-        return None
-    for v in idx.get("versions", []) or []:
-        if (v or {}).get("id") == aid:
-            try:
-                return VersionModel(**v)
-            except Exception:
-                return None
-    return None
-
-
-def get_active_version_id(display_name: str, *, year: str, dtype: str) -> Optional[str]:
-    """Return the active version id (or None).
-
-    Backwards-compat helper used by some UI code.
-    The canonical API is `get_active_version()`.
+    Opprettes automatisk ved første kall.
     """
-
-    v = get_active_version(display_name, year=year, dtype=dtype)
-    return v.id if v else None
-
-
-def get_version(display_name: str, *, year: str, dtype: str, version_id: str) -> Optional[VersionModel]:
-    """Hent en spesifikk versjon ved id."""
-
-    if not version_id:
-        return None
-    idx = _load_index(display_name, year=year, dtype=dtype)
-    for v in idx.get("versions", []) or []:
-        if (v or {}).get("id") == version_id:
-            try:
-                return VersionModel(**v)
-            except Exception:
-                return None
-    return None
+    p = years_dir(display_name, year=year) / "exports"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 
-def datasets_dir(display_name: str, *, year: str, dtype: str) -> Path:
-    """Mappe for ferdigbygde datasett (sqlite-cache) per klient/år/type."""
+# ---------------------------------------------------------------------------
+# Re-eksport fra client_store_versions (bakoverkompatibilitet)
+#
+# Bruker __getattr__ (PEP 562) for å unngå sirkulær import.
+# «from client_store import VersionModel» fungerer som før.
+# ---------------------------------------------------------------------------
 
-    y = normalize_year(year)
-    return years_dir(display_name, year=y) / "datasets" / dtype
-
-
-def get_dataset_cache_meta(
-    display_name: str,
-    *,
-    year: str,
-    dtype: str,
-    version_id: str,
-) -> Optional[Dict[str, Any]]:
-    """Henter dataset-cache-meta fra versjons-meta (hvis den finnes)."""
-
-    v = get_version(display_name, year=year, dtype=dtype, version_id=version_id)
-    if v is None:
-        return None
-    dc = (v.meta or {}).get("dataset_cache")
-    if isinstance(dc, dict):
-        return dc
-    return None
+_VERSIONS_NAMES = frozenset({
+    "DuplicateContentError", "VersionModel", "create_version",
+    "datasets_dir", "delete_version", "get_active_version",
+    "get_active_version_id", "get_dataset_cache_meta",
+    "get_version", "list_versions", "set_active_version",
+    "set_dataset_cache_meta", "versions_dir",
+})
 
 
-def set_dataset_cache_meta(
-    display_name: str,
-    *,
-    year: str,
-    dtype: str,
-    version_id: str,
-    dataset_cache: Dict[str, Any],
-) -> None:
-    """Oppdaterer versjons-meta med peker til ferdigbygd datasett-cache."""
-
-    y = normalize_year(year)
-    idx = _load_index(display_name, year=y, dtype=dtype)
-    versions = idx.get("versions", []) or []
-
-    updated = False
-    for rec in versions:
-        if (rec or {}).get("id") != version_id:
-            continue
-        meta = rec.get("meta")
-        if not isinstance(meta, dict):
-            meta = {}
-        meta["dataset_cache"] = dict(dataset_cache)
-        rec["meta"] = meta
-        updated = True
-        break
-
-    if not updated:
-        raise KeyError(f"Version not found: {display_name=} {y=} {dtype=} {version_id=}")
-
-    idx["versions"] = versions
-    _save_index(display_name, year=y, dtype=dtype, idx=idx)
-    _append_audit(
-        ensure_client(display_name),
-        {
-            "action": "dataset_cache_set",
-            "year": y,
-            "dtype": dtype,
-            "version_id": version_id,
-            "dataset_cache": {
-                k: dataset_cache.get(k)
-                for k in ("signature", "file", "built_at", "rows", "cols", "schema_version")
-                if k in dataset_cache
-            },
-        },
-    )
-
-def create_version(
-    display_name: str,
-    *,
-    year: str,
-    dtype: str,
-    src_path: Path,
-    make_active: bool = True,
-    period_from: Optional[int] = None,
-    period_to: Optional[int] = None,
-    period_label: Optional[str] = None,
-    meta: Optional[Dict[str, Any]] = None,
-) -> VersionModel:
-    """Importer en fil til klientlageret som en ny versjon (kopierer filen)."""
-
-    src_path = Path(src_path)
-    if not src_path.exists() or not src_path.is_file():
-        raise FileNotFoundError(str(src_path))
-
-    cdir = ensure_client(display_name)
-    y = normalize_year(year)
-    idx = _load_index(display_name, year=y, dtype=dtype)
-
-    # Ytelse: beregn SHA256 samtidig som vi kopierer filen (1 pass over filen).
-    # Vi kopierer først til dst (atomisk), og sjekker duplikat etterpå.
-
-    ts = _now()
-    dt_s = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
-    base_id = f"{src_path.name} | {dt_s}"
-    vid = base_id
-    existing_ids = {v.get("id") for v in idx.get("versions", []) or []}
-    if vid in existing_ids:
-        n = 2
-        while True:
-            cand = f"{base_id} | #{n}"
-            if cand not in existing_ids:
-                vid = cand
-                break
-            n += 1
-
-    dst_dir = _vdir(display_name, year=y, dtype=dtype)
-    dst = dst_dir / src_path.name
-    i = 1
-    while dst.exists():
-        dst = dst_dir / f"{src_path.stem}_{i}{src_path.suffix}"
-        i += 1
-
-    # Kopier + hash i én pass
-    sha = _copy_and_sha256_atomic(src_path, dst)
-
-    # Duplikatsjekk etter at sha er kjent.
-    for v in idx.get("versions", []) or []:
-        if ((v or {}).get("meta") or {}).get("sha256") == sha:
-            ex_id = str((v or {}).get("id") or "")
-            ex_fn = str((v or {}).get("filename") or "")
-            # Rydd opp kopien vi nettopp skrev
-            try:
-                if dst.exists():
-                    dst.unlink()
-            except Exception:
-                pass
-            _append_audit(
-                cdir,
-                {
-                    "action": "version_duplicate_rejected",
-                    "client_display": (display_name or "").strip(),
-                    "client_id": cdir.name,
-                    "year": y,
-                    "dtype": dtype,
-                    "sha256": sha,
-                    "source_path": str(src_path),
-                    "existing_id": ex_id,
-                    "existing_filename": ex_fn,
-                },
-            )
-            raise DuplicateContentError(ex_id, ex_fn)
-
-    rec_meta = dict(meta or {})
-    rec_meta.update({"sha256": sha, "source_path": str(src_path)})
-    # Periodisering (valgfritt) – beholdes i meta for sporbarhet
-    if period_from is not None:
-        try:
-            rec_meta["period_from"] = int(period_from)
-        except Exception:
-            rec_meta["period_from"] = period_from
-    if period_to is not None:
-        try:
-            rec_meta["period_to"] = int(period_to)
-        except Exception:
-            rec_meta["period_to"] = period_to
-    if period_label is not None and str(period_label).strip():
-        rec_meta["period_label"] = str(period_label).strip()
-
-    rec = VersionModel(
-        id=vid,
-        client_display=(display_name or "").strip(),
-        year=y,
-        dtype=dtype,
-        filename=dst.name,
-        path=str(dst),
-        created_at=ts,
-        meta=rec_meta,
-    )
-
-    idx.setdefault("versions", []).append(asdict(rec))
-    if make_active:
-        idx["active_id"] = vid
-    _save_index(display_name, year=y, dtype=dtype, idx=idx)
-    _append_audit(
-        cdir,
-        {
-            "action": "version_created",
-            "client_display": rec.client_display,
-            "client_id": cdir.name,
-            "year": rec.year,
-            "dtype": rec.dtype,
-            "version_id": rec.id,
-            "filename": rec.filename,
-            "path": rec.path,
-            "active": bool(make_active),
-            "meta": rec.meta or {},
-        },
-    )
-    return rec
-
-def set_active_version(display_name: str, *, year: str, dtype: str, version_id: str) -> bool:
-    idx = _load_index(display_name, year=year, dtype=dtype)
-    if not any((v or {}).get("id") == version_id for v in idx.get("versions", []) or []):
-        return False
-    prev = idx.get("active_id")
-    idx["active_id"] = version_id
-    _save_index(display_name, year=normalize_year(year), dtype=dtype, idx=idx)
-    cdir = ensure_client(display_name)
-    _append_audit(
-        cdir,
-        {
-            "action": "version_set_active",
-            "client_display": (display_name or "").strip(),
-            "client_id": cdir.name,
-            "year": normalize_year(year),
-            "dtype": dtype,
-            "previous_active_id": prev,
-            "active_id": version_id,
-        },
-    )
-    return True
-
-def delete_version(display_name: str, *, year: str, dtype: str, version_id: str) -> bool:
-    idx = _load_index(display_name, year=year, dtype=dtype)
-    versions = idx.get("versions", []) or []
-    victim = next((v for v in versions if (v or {}).get("id") == version_id), None)
-    keep = [v for v in versions if (v or {}).get("id") != version_id]
-    if len(keep) == len(versions):
-        return False
-
-    file_deleted = False
-    victim_path = ""
-    if victim and victim.get("path"):
-        try:
-            p = Path(str(victim.get("path") or ""))
-            victim_path = str(p)
-            if p.exists():
-                p.unlink()
-                file_deleted = True
-        except Exception:
-            file_deleted = False
-
-    prev_active = idx.get("active_id")
-    idx["versions"] = keep
-    if prev_active == version_id:
-        idx["active_id"] = None
-        if keep:
-            keep_sorted = sorted(keep, key=lambda x: float((x or {}).get("created_at") or 0.0))
-            idx["active_id"] = (keep_sorted[-1] or {}).get("id")
-
-    _save_index(display_name, year=normalize_year(year), dtype=dtype, idx=idx)
-    cdir = ensure_client(display_name)
-    _append_audit(
-        cdir,
-        {
-            "action": "version_deleted",
-            "client_display": (display_name or "").strip(),
-            "client_id": cdir.name,
-            "year": normalize_year(year),
-            "dtype": dtype,
-            "version_id": version_id,
-            "previous_active_id": prev_active,
-            "active_id": idx.get("active_id"),
-            "file_deleted": file_deleted,
-            "path": victim_path,
-        },
-    )
-    return True
+def __getattr__(name: str):  # noqa: E302
+    if name in _VERSIONS_NAMES:
+        import client_store_versions as _csv
+        val = getattr(_csv, name)
+        # Cache i modulens namespace slik at neste oppslag er direkte.
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
