@@ -1212,25 +1212,27 @@ def _apply_supplier_profile_learning(
         facts = DocumentFacts.from_mapping(facts_map)
 
     # ── Apply static profile values (supplier_name, orgnr, currency) ─────
-    learned_values = apply_supplier_profile(profile, raw_text)
+    # Skip for global fallback (low match score) — no supplier identity to apply.
     applied_fields: list[str] = list(hint_fields)
     facts_map = facts.as_dict()
 
-    for field_name, raw_value in learned_values.items():
-        normalized = _normalize_field_value(field_name, raw_value)
-        if not normalized or facts_map.get(field_name):
-            continue
-        facts_map[field_name] = normalized
-        field_evidence[field_name] = FieldEvidence(
-            field_name=field_name,
-            normalized_value=normalized,
-            raw_value=raw_value,
-            source="profile",
-            confidence=0.9 if field_name in {"supplier_name", "supplier_orgnr", "currency"} else 0.74,
-            inferred_from_profile=True,
-            metadata={"profile_key": profile.profile_key},
-        )
-        applied_fields.append(field_name)
+    if match_score >= 20:
+        learned_values = apply_supplier_profile(profile, raw_text)
+        for field_name, raw_value in learned_values.items():
+            normalized = _normalize_field_value(field_name, raw_value)
+            if not normalized or facts_map.get(field_name):
+                continue
+            facts_map[field_name] = normalized
+            field_evidence[field_name] = FieldEvidence(
+                field_name=field_name,
+                normalized_value=normalized,
+                raw_value=raw_value,
+                source="profile",
+                confidence=0.9 if field_name in {"supplier_name", "supplier_orgnr", "currency"} else 0.74,
+                inferred_from_profile=True,
+                metadata={"profile_key": profile.profile_key},
+            )
+            applied_fields.append(field_name)
 
     updated_facts = DocumentFacts.from_mapping(facts_map)
     profile_status = "applied" if applied_fields else "matched"

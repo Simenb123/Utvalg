@@ -9,6 +9,8 @@ import app_paths
 from document_engine.models import PROFILE_SCHEMA_VERSION, SupplierProfile
 from document_engine.ports import ProfileRepository
 from document_engine.profiles import (
+    GLOBAL_PROFILE_KEY,
+    build_global_profile,
     build_supplier_profile,
     export_profiles_payload,
     import_profiles_payload,
@@ -52,6 +54,13 @@ class LocalJsonProfileRepository(ProfileRepository):
         if not payload.get("source_app"):
             payload["source_app"] = self._source_app
         profiles[profile.profile_key] = payload
+
+        # Regenerate global profile from all supplier profiles
+        if profile.profile_key != GLOBAL_PROFILE_KEY:
+            global_profile = build_global_profile(profiles)
+            if global_profile is not None:
+                profiles[GLOBAL_PROFILE_KEY] = global_profile.to_dict()
+
         _write_store(store, path_provider=self._path_provider)
         return SupplierProfile.from_dict(profiles[profile.profile_key]) or profile
 

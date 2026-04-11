@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
 from .models import PROFILE_SCHEMA_VERSION, SupplierProfile
 
+
+GLOBAL_PROFILE_KEY = "__global__"
 
 LEARNABLE_FIELDS = (
     "invoice_number",
@@ -129,6 +132,12 @@ def match_supplier_profile(
 
     if best_score >= 60.0:
         return best_profile, best_score
+
+    # --- Global fallback: use aggregated hints with low score ---
+    global_profile = normalized_profiles.get(GLOBAL_PROFILE_KEY)
+    if global_profile is not None:
+        return global_profile, 10.0
+
     return None, 0.0
 
 
@@ -510,3 +519,100 @@ def _coerce_profile(profile: SupplierProfile | dict[str, Any] | None) -> Supplie
     if isinstance(profile, dict):
         return SupplierProfile.from_dict(profile)
     return None
+
+
+# ---------------------------------------------------------------------------
+# Global profile — aggregated hints across all suppliers
+# ---------------------------------------------------------------------------
+
+_MIN_PROFILES_FOR_LABEL = 3     # label must appear in ≥3 distinct profiles
+_MIN_PAGE_CONSENSUS = 0.60      # page must have ≥60% share to be included
+_GLOBAL_HINT_COUNT_CAP = 3      # cap count to keep boost weight moderate
+
+
+def build_global_profile(
+    profiles: dict[str, SupplierProfile | dict[str, Any]],
+) -> SupplierProfile | None:
+    """Build a synthetic global profile from the most common patterns.
+
+    Only includes hints where:
+    - The label appears in ≥ ``_MIN_PROFILES_FOR_LABEL`` distinct profiles
+    - The dominant page has ≥ ``_MIN_PAGE_CONSENSUS`` consensus
+    - Bbox is always ``None`` (too supplier-specific)
+    """
+    # Collect per-field: label → set of profile keys that have it
+    #                    page  → weighted vote per profile
+    label_profiles: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
+    page_votes: dict[str, Counter[int | None]] = defaultdict(Counter)
+
+    for key, raw_profile in profiles.items():
+        if key == GLOBAL_PROFILE_KEY:
+            continue
+        profile = _coerce_profile(raw_profile)
+        if profile is None or not profile.field_hints:
+            continue
+        for field_name, hint_list in profile.field_hints.items():
+            for h in (hint_list if isinstance(hint_list, list) else []):
+                label = (h.get("label") or "").strip().lower()
+                page = h.get("page")
+                count = h.get("count", 1)
+                if label:
+                    label_profiles[field_name][label].add(key)
+                if page is not None:
+                    page_votes[field_name][page] += count
+
+    if not label_profiles:
+        return None
+
+    global_hints: dict[str, list[dict[str, Any]]] = {}
+
+    for field_name in LEARNABLE_FIELDS:
+        labels_by_profile = label_profiles.get(field_name, {})
+        votes = page_votes.get(field_name, Counter())
+
+        # Find dominant page (≥60% consensus)
+        total_votes = sum(votes.values())
+        dominant_page = None
+        if total_votes > 0:
+            top_page, top_count = votes.most_common(1)[0]
+            if top_count / total_votes >= _MIN_PAGE_CONSENSUS:
+                dominant_page = top_page
+
+        # Collect labels shared by ≥3 profiles
+        field_hints = []
+        for label, pkeys in labels_by_profile.items():
+            if len(pkeys) < _MIN_PROFILES_FOR_LABEL:
+                continue
+            field_hints.append({
+                "label": label,
+                "page": dominant_page,
+                "bbox": None,
+                "count": min(len(pkeys), _GLOBAL_HINT_COUNT_CAP),
+            })
+
+        # If no universal label but we have a dominant page, still add page-only hint
+        if not field_hints and dominant_page is not None:
+            field_hints.append({
+                "label": "",
+                "page": dominant_page,
+                "bbox": None,
+                "count": 1,
+            })
+
+        if field_hints:
+            global_hints[field_name] = field_hints
+
+    if not global_hints:
+        return None
+
+    return SupplierProfile(
+        profile_key=GLOBAL_PROFILE_KEY,
+        supplier_name="",
+        supplier_orgnr="",
+        aliases=[],
+        sample_count=0,
+        field_hints=global_hints,
+        static_fields={},
+        schema_version=PROFILE_SCHEMA_VERSION,
+        source_app="Utvalg-1",
+    )
