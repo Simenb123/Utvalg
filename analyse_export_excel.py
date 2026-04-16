@@ -145,29 +145,75 @@ def export_trees_to_excel(
     log.info("Excel eksportert: %s", filepath)
 
 
+def _resolve_visible_columns(tree: Any) -> tuple[list[str], list[int]]:
+    """Returner (synlige kolonne-ID-er, deres posisjoner i tree["columns"]).
+
+    Respekterer `displaycolumns`. Når `displaycolumns` er `"#all"` eller
+    ikke satt, brukes alle kolonner i original rekkefølge.
+    """
+    all_columns = list(tree["columns"])
+
+    try:
+        display = tree["displaycolumns"]
+    except Exception:
+        display = "#all"
+
+    if isinstance(display, str):
+        display_list: list[str] = [display]
+    else:
+        try:
+            display_list = [str(x) for x in display]
+        except Exception:
+            display_list = ["#all"]
+
+    use_all = (
+        not display_list
+        or display_list == ["#all"]
+        or "#all" in display_list
+    )
+
+    if use_all:
+        visible = list(all_columns)
+    else:
+        known = set(all_columns)
+        visible = [c for c in display_list if c in known]
+        if not visible:
+            visible = list(all_columns)
+
+    positions = [all_columns.index(c) for c in visible]
+    return visible, positions
+
+
 def treeview_to_sheet(
     tree: Any,
     *,
     title: str,
-    heading: str,
-    bold_tags: tuple[str, ...] = ("header", "sum"),
+    heading: str | None = None,
+    bold_tags: tuple[str, ...] = ("header", "sum", "sumline", "sumline_major"),
     bg_tags: dict[str, str] | None = None,
 ) -> dict:
     """Konverter en ttk.Treeview til et sheet-dict for export_trees_to_excel.
 
+    Respekterer `displaycolumns`: bare kolonner som faktisk er synlige i
+    Treeview-en havner i Excel-eksporten, i samme rekkefølge som i GUI-en.
+    Overskriftstekst hentes fra `tree.heading(col)["text"]`.
+
     Args:
         tree: ttk.Treeview-widget.
         title: Arknavn.
-        heading: Overskrift i arket.
+        heading: Overskrift i arket (default: samme som title).
         bold_tags: Tags som skal gi fet tekst.
         bg_tags: {tag: hex_color} for bakgrunnsfarge.
     """
     if bg_tags is None:
         bg_tags = {}
 
+    if heading is None:
+        heading = title
+
     try:
-        columns = list(tree["columns"])
-        col_headers = [tree.heading(c)["text"] for c in columns]
+        visible_cols, positions = _resolve_visible_columns(tree)
+        col_headers = [tree.heading(c)["text"] for c in visible_cols]
     except Exception:
         return {"title": title, "heading": heading, "columns": [], "rows": []}
 
@@ -187,10 +233,8 @@ def treeview_to_sheet(
         bold = any(t in bold_tags for t in tags)
         bg = next((bg_tags[t] for t in tags if t in bg_tags), None)
 
-        # Prøv å parse tall (fjern tusenskiller og komma-desimal)
-        parsed: list[Any] = []
-        for v in vals:
-            parsed.append(_try_parse_number(str(v)))
+        filtered = [vals[i] if i < len(vals) else "" for i in positions]
+        parsed: list[Any] = [_try_parse_number(str(v)) for v in filtered]
 
         rows.append({"values": parsed, "bold": bold, "bg": bg})
 
@@ -200,6 +244,10 @@ def treeview_to_sheet(
         "columns": col_headers,
         "rows":    rows,
     }
+
+
+# Alias beholdes for Analyse-eksport som bruker ...dict-navnet.
+treeview_to_sheet_dict = treeview_to_sheet
 
 
 def _try_parse_number(s: str) -> Any:
