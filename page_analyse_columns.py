@@ -23,9 +23,156 @@ import preferences
 
 # Kolonner som alltid skal strekke seg for å fylle ledig plass
 PIVOT_STRETCH_COLS = ("Kontonavn",)
-PIVOT_FILL_PRIORITY = ("Kontonavn", "Konto", "Sum")
-PIVOT_FILL_WEIGHTS = {"Kontonavn": 7, "Konto": 2, "Sum": 1}
+PIVOT_FILL_PRIORITY = ("Kontonavn", "Konto")
+PIVOT_FILL_WEIGHTS = {"Kontonavn": 9, "Konto": 1}
 TX_HEADER_DRAG_THRESHOLD_PX = 10
+
+
+def normalize_aggregation_mode(value: object) -> str:
+    """Map user-facing og legacy mode-verdier til kanonisk intern verdi.
+
+    GUI viser nå bare "Saldobalanse" og "Regnskapslinje". Legacy/interne
+    moduser ("Konto", "SB-konto", "HB-konto", "MVA-kode") kollapses til
+    kanonisk "SB-konto" slik at eldre prefs/kode fortsatt fungerer.
+    """
+    v = str(value or "").strip()
+    if v == "Regnskapslinje":
+        return "Regnskapslinje"
+    return "SB-konto"
+
+
+def normalize_view_mode(value: object) -> str:
+    """Map høyre-side view-modus til kanonisk intern verdi.
+
+    GUI viser nå bare "Saldobalanse" og "Hovedbok". Gamle moduser
+    ("Saldobalansekontoer", "Transaksjoner", "Nøkkeltall", "Motposter",
+    "Motposter (kontonivå)") normaliseres slik at eldre prefs/kode
+    fortsatt fungerer. Ukjente/fjernede verdier → "Saldobalansekontoer".
+    """
+    v = str(value or "").strip()
+    if v in ("Hovedbok", "Transaksjoner"):
+        return "Transaksjoner"
+    return "Saldobalansekontoer"
+
+
+def _read_agg_mode(page: Any) -> str:
+    """Les aggregeringsmodus fra page med legacy-migrering."""
+    try:
+        raw = page._var_aggregering.get() if page._var_aggregering is not None else ""
+    except Exception:
+        raw = ""
+    return normalize_aggregation_mode(raw)
+
+
+def _read_view_mode(page: Any) -> str:
+    """Les høyre-panel view-modus fra page med legacy-migrering."""
+    try:
+        raw = page._var_tx_view_mode.get() if page._var_tx_view_mode is not None else ""
+    except Exception:
+        raw = ""
+    return normalize_view_mode(raw)
+
+
+# =====================================================================
+# Felles brukerrettet label-mapper for Analyse-kolonner
+# =====================================================================
+
+# Kanoniske labels for kolonne-ID-er som brukes både i venstre pivot og
+# høyre SB-tree. UB / UB_fjor får årstall injisert via analysis_heading.
+_ANALYSIS_HEADINGS_STATIC = {
+    "Konto": "Konto",
+    "Kontonavn": "Kontonavn",
+    "OK": "OK",
+    "Vedlegg": "Vedlegg",
+    "Gruppe": "Gruppe",
+    "IB": "IB",
+    "Endring": "Bevegelse i år",       # periode-bevegelse (UB-IB)
+    "Endring_fjor": "Endring",          # år-over-år (UB - UB_fjor)
+    "Endring_pct": "Endring %",
+    "Antall": "Antall",
+    "AO_belop": "Tilleggspostering",
+    "UB_for_ao": "UB før ÅO",
+    "UB_etter_ao": "UB etter ÅO",
+    "BRREG": "BRREG",
+    "Avvik_brreg": "Avvik mot BRREG",
+    "Avvik_brreg_pct": "Avvik % mot BRREG",
+}
+
+
+def analysis_heading(col_id: str, *, year: Optional[int] = None) -> str:
+    """Returner kanonisk brukerrettet overskrift for en Analyse-kolonne-ID.
+
+    Brukes av både venstre pivot og høyre SB-tree slik at samme kolonne
+    ID vises med samme label overalt.
+
+    - ``Sum`` / ``UB``   → ``UB <år>`` når år er kjent, ellers ``UB``.
+    - ``UB_fjor``        → ``UB <år-1>`` når år er kjent, ellers ``UB i fjor``.
+    - Øvrige kolonner    → fra ``_ANALYSIS_HEADINGS_STATIC``, fallback til ID.
+    """
+    if col_id in ("Sum", "UB"):
+        return f"UB {year}" if year is not None else "UB"
+    if col_id == "UB_fjor":
+        return f"UB {year - 1}" if year is not None else "UB i fjor"
+    return _ANALYSIS_HEADINGS_STATIC.get(col_id, col_id)
+
+
+def _active_year() -> Optional[int]:
+    """Les aktivt regnskapsår fra session som int når mulig."""
+    try:
+        import session as _session
+        raw = getattr(_session, "year", None)
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+_LEGACY_RL_VISIBLE_DEFAULTS = {
+    (
+        "Konto",
+        "Kontonavn",
+        "IB",
+        "Endring",
+        "Sum",
+        "AO_belop",
+        "UB_for_ao",
+        "UB_etter_ao",
+        "Antall",
+    ),
+    (
+        "Konto",
+        "Kontonavn",
+        "Endring",
+        "Sum",
+        "UB_fjor",
+        "AO_belop",
+        "UB_for_ao",
+        "UB_etter_ao",
+        "Antall",
+        "Endring_pct",
+    ),
+    # Tidligere PIVOT_COLS_DEFAULT_RL (uten fjor\u00e5rsdata)
+    ("Konto", "Kontonavn", "IB", "Endring", "Sum", "Antall"),
+    # Tidligere default med fjor\u00e5rsdata (avledet av gammel pivot_default_for_mode)
+    ("Konto", "Kontonavn", "Endring", "Sum", "UB_fjor", "Antall", "Endring_pct"),
+    # Forrige PIVOT_COLS_DEFAULT_RL (med intern Endring = Bevegelse i \u00e5r)
+    (
+        "Konto",
+        "Kontonavn",
+        "Sum",
+        "UB_fjor",
+        "Endring",
+        "Endring_fjor",
+        "Endring_pct",
+        "Antall",
+    ),
+    # Tidligere slank fallback uten fj\u00e5rsdata med intern Endring innskutt etter Sum
+    ("Konto", "Kontonavn", "Sum", "Endring", "Antall"),
+}
 
 
 def _has_prev_year(page: Any) -> bool:
@@ -40,36 +187,55 @@ def _has_prev_year(page: Any) -> bool:
     return False
 
 
+def _rl_like_default(*, page: Any, base: tuple[str, ...]) -> tuple[str, ...]:
+    """Samme komparative kolonne-default som RL, med slank fallback uten fjorårsdata.
+
+    Brukes av både Regnskapslinje- og SB-konto-modus: begge viser
+    ``UB <år>``, ``UB <år-1>``, ``Endring`` og ``Endring %`` når
+    fjorårsdata er tilgjengelig. Uten fjorårsdata droppes de
+    fjorårsavhengige kolonnene uten å sette inn intern ``Endring``
+    (Bevegelse i år) som fallback — den forblir tilgjengelig via
+    kolonne-menyen, men er ikke standard synlig.
+    """
+    if _has_prev_year(page):
+        return tuple(base)
+    prev_dependent = {"UB_fjor", "Endring_fjor", "Endring_pct"}
+    result: list[str] = []
+    seen: set[str] = set()
+    for col in base:
+        if col in prev_dependent:
+            continue
+        if col in seen:
+            continue
+        result.append(col)
+        seen.add(col)
+    return tuple(result)
+
+
 def pivot_default_for_mode(*, page: Any) -> tuple[str, ...]:
     """Returner standard synlige pivot-kolonner for gjeldende aggregeringsmodus.
 
-    Når fjorårsdata er tilgjengelig i RL-modus:
-    - IB erstattes av UB_fjor (fjorårets saldo er mer relevant som sammenligningspunkt)
-    - Endring_pct legges til
+    RL / SB-konto standardrekkefølge (med fjorårsdata):
+        Nr / Konto | Regnskapslinje / Kontonavn | UB <aktivt år> |
+        UB <aktivt år-1> | Endring | Endring % | Antall
+        (kolonne-IDer: Konto | Kontonavn | Sum | UB_fjor | Endring_fjor |
+         Endring_pct | Antall)
+
+    Uten fjorårsdata:
+        UB <aktivt år> | Bevegelse i år | Antall
+        (kolonne-IDer: Konto | Kontonavn | Sum | Endring | Antall)
+
+    HB-konto: Konto | Kontonavn | HB-bevegelse | Antall (ingen komparativ).
     """
-    agg = ""
-    try:
-        agg = str(page._var_aggregering.get())
-    except Exception:
-        pass
-    if agg == "Konto":
-        return getattr(page, "PIVOT_COLS_DEFAULT_KONTO", page.PIVOT_COLS_DEFAULT_VISIBLE)
+    agg = _read_agg_mode(page)
+    if agg == "HB-konto":
+        return getattr(page, "PIVOT_COLS_DEFAULT_HB_KONTO", page.PIVOT_COLS_DEFAULT_VISIBLE)
+    if agg == "SB-konto":
+        base = getattr(page, "PIVOT_COLS_DEFAULT_SB_KONTO", page.PIVOT_COLS_DEFAULT_VISIBLE)
+        return _rl_like_default(page=page, base=tuple(base))
     if agg == "Regnskapslinje":
         base = getattr(page, "PIVOT_COLS_DEFAULT_RL", page.PIVOT_COLS_DEFAULT_VISIBLE)
-        if _has_prev_year(page):
-            # Bytt IB med UB_fjor, legg til Endring_pct
-            base_list = [c for c in base if c != "IB"]
-            if "UB_fjor" not in base_list:
-                # Sett UB_fjor etter Sum
-                try:
-                    idx = base_list.index("Sum")
-                    base_list.insert(idx + 1, "UB_fjor")
-                except ValueError:
-                    base_list.append("UB_fjor")
-            if "Endring_pct" not in base_list:
-                base_list.append("Endring_pct")
-            return tuple(base_list)
-        return base
+        return _rl_like_default(page=page, base=tuple(base))
     return page.PIVOT_COLS_DEFAULT_VISIBLE
 
 
@@ -163,12 +329,8 @@ def show_pivot_column_menu(*, page: Any, event: Any) -> None:
     menu.add_separator()
     menu.add_command(label="Standard", command=lambda: reset_pivot_columns(page=page))
 
-    # Kommentar-alternativ for RL- og Konto-modus
-    agg_mode = ""
-    try:
-        agg_mode = str(page._var_aggregering.get()) if page._var_aggregering else ""
-    except Exception:
-        pass
+    # Kommentar-alternativ for RL- og konto-moduser
+    agg_mode = _read_agg_mode(page)
 
     if tree is not None:
         try:
@@ -182,10 +344,14 @@ def show_pivot_column_menu(*, page: Any, event: Any) -> None:
                         menu.add_separator()
                         if agg_mode == "Regnskapslinje":
                             menu.add_command(
+                                label=f"Vis statistikk for {first_col} {second_col}",
+                                command=lambda r=first_col: _open_statistikk(page=page, regnr=r),
+                            )
+                            menu.add_command(
                                 label=f"Kommentar for {first_col} {second_col}\u2026",
                                 command=lambda: _open_rl_comment(page=page, regnr=first_col, rl_name=second_col),
                             )
-                        elif agg_mode in ("Konto", ""):
+                        elif agg_mode in ("SB-konto", "HB-konto", ""):
                             menu.add_command(
                                 label=f"Kommentar for {first_col} {second_col}\u2026",
                                 command=lambda: _open_account_comment(page=page, konto=first_col, kontonavn=second_col),
@@ -221,6 +387,24 @@ def _open_account_comment(*, page: Any, konto: str, kontonavn: str) -> None:
         pass
 
 
+def _open_statistikk(*, page: Any, regnr: str) -> None:
+    """Bytt til Statistikk-fanen og vis valgt regnskapslinje."""
+    try:
+        import session as _session
+        app = getattr(_session, "APP", None)
+        if app is None:
+            return
+        stat_page = getattr(app, "page_statistikk", None)
+        if stat_page is None:
+            return
+        nb = getattr(app, "nb", None)
+        if nb is not None:
+            nb.select(stat_page)
+        stat_page.show_regnr(int(regnr))
+    except Exception:
+        pass
+
+
 def reset_pivot_columns(*, page: Any) -> None:
     page._pivot_visible_cols = list(pivot_default_for_mode(page=page))
     apply_pivot_visible_columns(page=page)
@@ -230,6 +414,11 @@ def reset_pivot_columns(*, page: Any) -> None:
 def adapt_pivot_columns_for_mode(*, page: Any) -> None:
     """Tilpass synlige kolonner når aggregeringsmodus endres."""
     defaults = pivot_default_for_mode(page=page)
+    agg = _read_agg_mode(page)
+    if agg in ("Regnskapslinje", "SB-konto"):
+        current = tuple(getattr(page, "_pivot_visible_cols", []) or [])
+        if current in _LEGACY_RL_VISIBLE_DEFAULTS:
+            page._pivot_visible_cols = list(defaults)
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
         return
@@ -256,9 +445,9 @@ def adapt_pivot_columns_for_mode(*, page: Any) -> None:
 def update_pivot_columns_for_prev_year(*, page: Any) -> None:
     """Kall etter at fjorårsdata er lastet.
 
-    Legger automatisk til UB_fjor og Endring_pct (fjerner IB) i RL-modus
-    dersom brukeren ikke allerede har tilpasset kolonnevalget bort fra default.
-    Gjør ingenting i Konto-modus.
+    Legger automatisk til UB_fjor, Endring_fjor og Endring_pct (fjerner IB)
+    i RL-modus så brukeren får ny komparativ standard. Gjør ingenting i
+    Konto-modus. Rekkefølge: Sum → UB_fjor → Endring_fjor → Endring_pct.
     """
     agg = ""
     try:
@@ -274,27 +463,78 @@ def update_pivot_columns_for_prev_year(*, page: Any) -> None:
     visible = list(getattr(page, "_pivot_visible_cols", []))
 
     changed = False
-    # Fjern IB hvis det er der
+    # Fjern IB hvis det er der (ikke del av ny komparativ default)
     if "IB" in visible:
         visible.remove("IB")
         changed = True
-    # Legg til UB_fjor etter Sum om ikke allerede synlig
-    if "UB_fjor" not in visible:
+
+    # Sørg for rekkefølge Sum → UB_fjor → Endring_fjor → Endring_pct ved å
+    # sette inn manglende kolonner rett etter "Sum" (eller hver etter den
+    # forrige hvis Sum mangler).
+    def _insert_after(anchor: str, col: str) -> bool:
+        if col in visible:
+            return False
         try:
-            idx = visible.index("Sum")
-            visible.insert(idx + 1, "UB_fjor")
+            idx = visible.index(anchor)
+            visible.insert(idx + 1, col)
         except ValueError:
-            visible.append("UB_fjor")
-        changed = True
-    # Legg til Endring_pct på slutten om ikke allerede synlig
-    if "Endring_pct" not in visible:
-        visible.append("Endring_pct")
-        changed = True
+            visible.append(col)
+        return True
+
+    changed |= _insert_after("Sum", "UB_fjor")
+    changed |= _insert_after("UB_fjor", "Endring_fjor")
+    changed |= _insert_after("Endring_fjor", "Endring_pct")
 
     if changed:
         page._pivot_visible_cols = visible
         apply_pivot_visible_columns(page=page)
         persist_pivot_visible_columns(page=page)
+
+
+def update_pivot_columns_for_brreg(*, page: Any) -> None:
+    """Kall etter at BRREG-data er hentet.
+
+    Viser BRREG, Avvik_brreg og Avvik_brreg_pct i RL-modus når tilgjengelig.
+    """
+    agg = ""
+    try:
+        agg = str(page._var_aggregering.get())
+    except Exception:
+        pass
+    if agg != "Regnskapslinje":
+        return
+
+    if not getattr(page, "_nk_brreg_data", None):
+        return
+
+    visible = list(getattr(page, "_pivot_visible_cols", []))
+    changed = False
+    for col in ("BRREG", "Avvik_brreg", "Avvik_brreg_pct"):
+        if col not in visible:
+            visible.append(col)
+            changed = True
+
+    if changed:
+        page._pivot_visible_cols = visible
+        apply_pivot_visible_columns(page=page)
+        persist_pivot_visible_columns(page=page)
+
+
+def clear_pivot_columns_for_brreg(*, page: Any) -> None:
+    """Skjul BRREG-kolonner i RL-modus (kalles når BRREG-data tømmes)."""
+    visible = list(getattr(page, "_pivot_visible_cols", []))
+    changed = False
+    for col in ("BRREG", "Avvik_brreg", "Avvik_brreg_pct"):
+        if col in visible:
+            visible.remove(col)
+            changed = True
+    if changed:
+        page._pivot_visible_cols = visible
+        try:
+            apply_pivot_visible_columns(page=page)
+            persist_pivot_visible_columns(page=page)
+        except Exception:
+            pass
 
 
 # =====================================================================
@@ -416,6 +656,187 @@ def reset_tx_columns_to_default(*, page: Any) -> None:
 
 
 # =====================================================================
+# SB-kolonnepreferanser (Saldobalansekontoer-visning)
+# =====================================================================
+
+# SB-pinned kolonner (kan ikke skjules eller flyttes fra starten)
+SB_PINNED_COLS = ("Konto", "Kontonavn")
+
+# Dynamiske kolonner som skjules midlertidig når fjorårsdata mangler,
+# men der brukerens preferanse ikke slettes.
+SB_DYNAMIC_COLS = ("UB_fjor", "Endring_fjor", "Endring_pct")
+
+
+def _sb_defaults(page: Any) -> tuple[list[str], list[str]]:
+    """Returner (alle SB-kolonner, kanonisk standard synlig-sett)."""
+    try:
+        import page_analyse_sb as _sb
+        all_cols = list(_sb.SB_COLS)
+        default_visible = list(getattr(_sb, "SB_DEFAULT_VISIBLE", _sb.SB_COLS))
+    except Exception:
+        all_cols = list(SB_PINNED_COLS)
+        default_visible = list(SB_PINNED_COLS)
+    # Sørg for at pinned alltid ligger først i default_visible
+    for p in reversed(SB_PINNED_COLS):
+        if p not in default_visible:
+            default_visible.insert(0, p)
+    return all_cols, default_visible
+
+
+def _sb_ub_fjor_available(page: Any) -> bool:
+    """Har SB-visningen fjorårsdata tilgjengelig for UB_fjor-kolonnen?"""
+    import pandas as pd
+    sb_prev = getattr(page, "_rl_sb_prev_df", None)
+    if isinstance(sb_prev, pd.DataFrame) and not sb_prev.empty:
+        return True
+    return False
+
+
+def load_sb_columns_from_preferences(*, page: Any) -> None:
+    """Last inn SB-kolonneoppsett fra preferences og normaliser."""
+    try:
+        stored_order = preferences.get("analyse.sb_cols.order", None)
+        stored_visible = preferences.get("analyse.sb_cols.visible", None)
+    except Exception:
+        stored_order = None
+        stored_visible = None
+
+    default_order, default_visible = _sb_defaults(page)
+
+    order = stored_order if isinstance(stored_order, list) else list(default_order)
+    visible = stored_visible if isinstance(stored_visible, list) else list(default_visible)
+
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=order,
+        visible=visible,
+        all_cols=default_order,
+        pinned=SB_PINNED_COLS,
+        required=SB_PINNED_COLS,
+    )
+
+    page._sb_cols_order = list(order_clean)
+    page._sb_cols_visible = list(visible_order)
+
+
+def persist_sb_columns_to_preferences(*, page: Any) -> None:
+    try:
+        preferences.set("analyse.sb_cols.order", list(getattr(page, "_sb_cols_order", [])))
+        preferences.set("analyse.sb_cols.visible", list(getattr(page, "_sb_cols_visible", [])))
+    except Exception:
+        pass
+
+
+def apply_sb_column_config(*, page: Any, order: List[str], visible: List[str]) -> None:
+    default_order, _ = _sb_defaults(page)
+
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=order,
+        visible=visible,
+        all_cols=default_order,
+        pinned=SB_PINNED_COLS,
+        required=SB_PINNED_COLS,
+    )
+
+    page._sb_cols_order = list(order_clean)
+    page._sb_cols_visible = list(visible_order)
+
+    persist_sb_columns_to_preferences(page=page)
+    configure_sb_tree_columns(page=page)
+
+
+def open_sb_column_chooser(*, page: Any) -> None:
+    if not getattr(page, "_tk_ok", False):
+        return
+    try:
+        from views_column_chooser import open_column_chooser
+    except Exception:
+        return
+
+    default_order, default_visible = _sb_defaults(page)
+    current_visible = list(getattr(page, "_sb_cols_visible", default_visible))
+    initial_order = list(getattr(page, "_sb_cols_order", default_order))
+
+    res = open_column_chooser(
+        page,
+        all_cols=list(default_order),
+        visible_cols=current_visible,
+        initial_order=initial_order,
+        default_visible_cols=list(default_visible),
+        default_order=list(default_order),
+    )
+    if not res:
+        return
+    order, visible = res
+    if not isinstance(order, list) or not isinstance(visible, list):
+        return
+    apply_sb_column_config(page=page, order=order, visible=visible)
+
+
+def reset_sb_columns_to_default(*, page: Any) -> None:
+    default_order, default_visible = _sb_defaults(page)
+    apply_sb_column_config(page=page, order=default_order, visible=default_visible)
+
+
+def configure_sb_tree_columns(*, page: Any) -> None:
+    """Sett displaycolumns + bredder på SB-treet basert på preferanser.
+
+    UB_fjor skjules dynamisk når fjorårsdata mangler, men brukerens
+    preferanse beholdes.
+    """
+    if not getattr(page, "_tk_ok", False):
+        return
+    tree = getattr(page, "_sb_tree", None)
+    if tree is None:
+        return
+
+    try:
+        import page_analyse_sb as _sb
+    except Exception:
+        return
+
+    default_order, _ = _sb_defaults(page)
+    order = list(getattr(page, "_sb_cols_order", default_order))
+    visible_pref = list(getattr(page, "_sb_cols_visible", default_order))
+
+    has_prev = _sb_ub_fjor_available(page)
+    effective_visible = [
+        c for c in visible_pref
+        if not (c in SB_DYNAMIC_COLS and not has_prev)
+    ]
+
+    try:
+        tree.configure(columns=tuple(default_order))
+        tree["displaycolumns"] = tuple(effective_visible)
+    except Exception:
+        return
+
+    widths_pref = getattr(page, "_sb_col_widths", None) or {}
+    year = _active_year()
+
+    for c in default_order:
+        heading = analysis_heading(c, year=year)
+        try:
+            tree.heading(c, text=heading)
+        except Exception:
+            pass
+
+        if c in _sb._SB_NUMERIC_COLS:
+            anchor = "e"
+        elif c in _sb._SB_CENTER_COLS:
+            anchor = "center"
+        else:
+            anchor = "w"
+        stretch = (c == "Kontonavn")
+
+        default_width = _sb._SB_COL_WIDTHS.get(c, 100)
+        width = int(widths_pref.get(c, default_width))
+        try:
+            tree.column(c, width=width, minwidth=40, anchor=anchor, stretch=stretch)
+        except Exception:
+            pass
+
+
+# =====================================================================
 # Bredde-persistens & auto-fit
 # =====================================================================
 
@@ -498,13 +919,27 @@ def snapshot_tree_widths(tree: Any, columns: List[str]) -> dict[str, int]:
     return widths
 
 
-def tree_rows_for_width_estimate(tree: Any, columns: List[str], *, limit: int = 200) -> List[List[Any]]:
+def tree_rows_for_width_estimate(tree: Any, columns: List[str], *, limit: int = 200) -> List[dict]:
+    """Hent radverdier for breddeestimering, korrekt indeksert per kolonnenavn.
+
+    tree.item(item).get("values") returnerer verdier for ALLE kolonner i tree["columns"]
+    rekkefølge, uavhengig av hvilke kolonner som er synlige (displaycolumns). Vi mapper
+    derfor eksplisitt kolonnenavn → verdi fremfor å bruke posisjonell indeks, slik at
+    skjulte kolonner ikke forskyver indeksene for synlige kolonner.
+    """
+    try:
+        all_cols = list(tree["columns"])
+    except Exception:
+        all_cols = list(columns)
+
+    col_index = {col: i for i, col in enumerate(all_cols)}
+
     try:
         children = list(tree.get_children(""))[:limit]
     except Exception:
         return []
 
-    rows: List[List[Any]] = []
+    rows: List[dict] = []
     for item in children:
         try:
             values = list(tree.item(item).get("values") or [])
@@ -512,9 +947,11 @@ def tree_rows_for_width_estimate(tree: Any, columns: List[str], *, limit: int = 
             continue
         if not values:
             continue
-        if len(values) < len(columns):
-            values = values + [""] * (len(columns) - len(values))
-        rows.append(values[: len(columns)])
+        row: dict = {}
+        for col in columns:
+            idx = col_index.get(col)
+            row[col] = values[idx] if idx is not None and idx < len(values) else ""
+        rows.append(row)
     return rows
 
 
@@ -559,19 +996,19 @@ def auto_fit_tree_columns(
     updated = dict(stored_widths)
     stretch_cols = stretch_cols or set()
 
-    for idx, col in enumerate(columns):
+    for col in columns:
         if target_col and col != target_col:
             continue
         if only_missing and col in stored_widths:
             continue
 
-        values = [row[idx] for row in rows if idx < len(row)]
+        values = [row.get(col, "") for row in rows]
         width = analyse_treewidths.suggest_column_width(col, values)
         try:
             tree.column(
                 col,
                 width=width,
-                minwidth=max(40, min(width, 80)),
+                minwidth=analyse_treewidths.column_minwidth(col),
                 anchor=analyse_treewidths.column_anchor(col),
                 stretch=col in stretch_cols,
             )
@@ -685,6 +1122,19 @@ def remember_pivot_column_widths(*, page: Any) -> None:
         return
     page._pivot_col_widths.update(widths)
     persist_saved_column_widths("analyse.pivot.widths", page._pivot_col_widths)
+
+
+def remember_sb_column_widths(*, page: Any) -> None:
+    tree = getattr(page, "_sb_tree", None)
+    if tree is None:
+        return
+    widths = snapshot_tree_widths(tree, tree_display_columns(tree))
+    if not widths:
+        return
+    if not hasattr(page, "_sb_col_widths") or page._sb_col_widths is None:
+        page._sb_col_widths = {}
+    page._sb_col_widths.update(widths)
+    persist_saved_column_widths("analyse.sb_cols.widths", page._sb_col_widths)
 
 
 def maybe_auto_fit_tx_tree(*, page: Any) -> None:
@@ -1079,21 +1529,18 @@ def _finish_pivot_header_drag(*, page: Any, event: Any) -> bool:
 def refresh_pivot_sorting(*, page: Any, enable_fn: Any) -> None:
     """Slå sortering av/på i pivot-treet basert på aggregeringsmodus.
 
-    Konto-modus   → sortering aktivert (radene er uavhengige kontoer).
-    RL-modus      → sortering deaktivert (rekkefølge er semantisk, med summer).
+    Konto-moduser (SB-konto, HB-konto) → sortering aktivert
+        (radene er uavhengige kontoer).
+    RL-modus → sortering deaktivert (rekkefølge er semantisk, med summer).
     """
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
         return
 
     cols = tuple(getattr(page, "PIVOT_COLS", ()))
-    agg  = ""
-    try:
-        agg = str(page._var_aggregering.get())
-    except Exception:
-        pass
+    agg = _read_agg_mode(page)
 
-    if agg == "Konto" and enable_fn is not None:
+    if agg in ("SB-konto", "HB-konto") and enable_fn is not None:
         try:
             enable_fn(tree, columns=cols)
         except Exception:
@@ -1121,13 +1568,10 @@ def reset_pivot_column_widths(*, page: Any) -> None:
     if hasattr(page, "_pivot_col_widths"):
         page._pivot_col_widths = {}
     # Kjør heading-oppdatering for å trigge default-bredder
-    try:
-        agg = str(page._var_aggregering.get())
-    except Exception:
-        agg = "Regnskapslinje"
+    agg = _read_agg_mode(page) or "Regnskapslinje"
     try:
         import page_analyse_rl as _rl
-        _rl.update_pivot_headings(page=page, mode=agg if agg else "Regnskapslinje")
+        _rl.update_pivot_headings(page=page, mode=agg)
     except Exception:
         pass
 
@@ -1182,7 +1626,7 @@ def configure_tx_tree_columns(*, page: Any) -> None:
             tree.column(
                 c,
                 width=width,
-                minwidth=max(40, min(width, 80)),
+                minwidth=analyse_treewidths.column_minwidth(c),
                 anchor=anchor,
                 stretch=False,
             )
