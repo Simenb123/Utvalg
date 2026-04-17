@@ -21,8 +21,8 @@ Merk:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Sequence
 
 try:  # pragma: no cover
     import tkinter as tk
@@ -30,6 +30,9 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
+
+
+_REGISTRATION_ATTR = "_ui_selection_summary_config"
 
 
 # --------------------------------------------------------------------------------------
@@ -113,7 +116,7 @@ def _format_amount_no(value: float, decimals: int = 2) -> str:
 def _score_column_for_sum(col_name: str) -> int:
     name = str(col_name).strip().lower()
 
-    if "%" in name or "andel" in name:
+    if "%" in name or "pct" in name or "andel" in name:
         return 0
     if "antall" in name or "linjer" in name:
         return 10
@@ -122,6 +125,14 @@ def _score_column_for_sum(col_name: str) -> int:
         return 100
     if "sum" in name:
         return 80
+    if "bevegelse" in name:
+        return 90
+    if name == "endring" or name.startswith("endring_") or name.endswith("_endring"):
+        return 85
+    if name == "ib" or name.startswith("ib_") or name.endswith("_ib"):
+        return 75
+    if name == "ub" or name.startswith("ub_") or name.endswith("_ub"):
+        return 75
     if "netto" in name:
         return 70
     if "diff" in name:
@@ -163,8 +174,176 @@ def _tree_get_heading_text(tree: Any, col_id: str) -> str:
         return str(col_id)
 
 
+def _tree_get_displaycolumns(tree: Any) -> Optional[set[str]]:
+    """Returner sett av aktive displaycolumns, eller None om alle vises."""
+    try:
+        dc = tree["displaycolumns"]  # type: ignore[index]
+    except Exception:
+        return None
+    if dc is None:
+        return None
+    try:
+        items = list(dc)
+    except Exception:
+        return None
+    if not items:
+        return None
+    if len(items) == 1 and str(items[0]) == "#all":
+        return None
+    return {str(c) for c in items}
+
+
+def _tree_column_is_visible(tree: Any, col_id: str) -> bool:
+    """Sjekk om en kolonne er faktisk synlig for brukeren.
+
+    Skjulte kolonner identifiseres via:
+      - `displaycolumns` ekskluderer den
+      - bredde er `0`
+      - headingtekst er tom
+    """
+    display = _tree_get_displaycolumns(tree)
+    if display is not None and str(col_id) not in display:
+        return False
+    try:
+        width = int(tree.column(col_id, option="width"))
+    except Exception:
+        width = -1
+    if width == 0:
+        return False
+    try:
+        heading_text = tree.heading(col_id, option="text")
+    except Exception:
+        heading_text = ""
+    if not str(heading_text or "").strip():
+        return False
+    return True
+
+
+PriorityColumnsT = Any  # tuple[str, ...] | Callable[[Any], Sequence[str]] | None
+
+
+@dataclass
+class _SelectionSummaryConfig:
+    columns: Optional[tuple[str, ...]] = None
+    enabled: bool = True
+    row_noun: str = "rader"
+    max_items: int = 3
+    hide_zero: bool = True
+    priority_columns: PriorityColumnsT = None
+
+
+_PLURAL_TO_SINGULAR: dict[str, str] = {
+    "rader": "rad",
+    "kontoer": "konto",
+    "transaksjoner": "transaksjon",
+    "bilag": "bilag",
+    "poster": "post",
+    "linjer": "linje",
+}
+
+
+def _row_noun_singular(plural: str) -> str:
+    """Avled entallsform fra en flertallsform (beste innsats for norsk)."""
+    p = str(plural or "rader").strip().lower()
+    if p in _PLURAL_TO_SINGULAR:
+        return _PLURAL_TO_SINGULAR[p]
+    if p.endswith("er"):
+        return p[:-2]
+    return p
+
+
+def _get_registration(tree: Any) -> Optional[_SelectionSummaryConfig]:
+    cfg = getattr(tree, _REGISTRATION_ATTR, None)
+    if isinstance(cfg, _SelectionSummaryConfig):
+        return cfg
+    return None
+
+
+def register_treeview_selection_summary(
+    tree: Any,
+    *,
+    columns: Optional[Sequence[str]] = None,
+    enabled: bool = True,
+    row_noun: str = "rader",
+    max_items: int = 3,
+    hide_zero: bool = True,
+    priority_columns: PriorityColumnsT = None,
+) -> None:
+    """Registrer eksplisitt oppsett for selection-summary på en Treeview.
+
+    - `columns`: kolonne-id-er som *kan* summeres (fallback når ingen priority).
+    - `priority_columns`: eksplisitt rekkefølge for hvilke summer som vises,
+      enten som en sekvens av kolonne-id-er eller som en callable
+      `(tree) -> Sequence[str]` som beregnes på hvert selection-event (nyttig
+      når en kontekst — f.eks. aktiv aggregeringsmodus — styrer hva som vises).
+    - `row_noun`: flertallsform for radbetegnelsen i footer-teksten (f.eks.
+      "rader", "transaksjoner", "kontoer"). Entallsform avledes automatisk.
+    - `max_items`: maks antall summer som vises.
+    - `hide_zero`: skjul summer som runder til `0,00`.
+    - `enabled=False` gjør at treet ignoreres i opt-in-modus.
+    """
+    if tree is None:
+        return
+    cfg = _SelectionSummaryConfig(
+        columns=tuple(str(c) for c in columns) if columns is not None else None,
+        enabled=bool(enabled),
+        row_noun=str(row_noun),
+        max_items=int(max_items),
+        hide_zero=bool(hide_zero),
+        priority_columns=priority_columns,
+    )
+    try:
+        setattr(tree, _REGISTRATION_ATTR, cfg)
+    except Exception:
+        return
+
+
+def _resolve_priority_columns(
+    cfg: Optional[_SelectionSummaryConfig], tree: Any
+) -> Optional[tuple[str, ...]]:
+    """Hent priority-kolonner; kaller resolver hvis registrert som callable."""
+    if cfg is None or cfg.priority_columns is None:
+        return None
+    pc = cfg.priority_columns
+    if callable(pc):
+        try:
+            resolved = pc(tree)
+        except Exception:
+            return None
+        if not resolved:
+            return None
+        return tuple(str(c) for c in resolved)
+    try:
+        return tuple(str(c) for c in pc)
+    except Exception:
+        return None
+
+
+def _resolve_sum_columns(tree: Any, cols: list[str]) -> list[str]:
+    """Finn kolonner å summere.
+
+    Prioritet:
+      1. Dynamisk/eksplisitt `priority_columns` fra registrering
+      2. Eksplisitt `columns` fra registrering
+      3. Heuristikk
+    """
+    cfg = _get_registration(tree)
+    priority = _resolve_priority_columns(cfg, tree)
+    if priority is not None:
+        cols_set = set(cols)
+        return [c for c in priority if c in cols_set]
+    if cfg is not None and cfg.columns is not None:
+        cols_set = set(cols)
+        return [c for c in cfg.columns if c in cols_set]
+    return guess_sum_columns(cols)
+
+
 def treeview_selection_sums(tree: Any) -> tuple[int, dict[str, float]]:
-    """Returnerer (antall markerte, {kolonne: sum})."""
+    """Returnerer (antall markerte, {kolonne-id: sum}).
+
+    Summerer på interne kolonne-id-er. Usynlige kolonner ignoreres selv om
+    de er eksplisitt registrert, slik at teksten speiler det brukeren ser.
+    """
     if not _tree_is_treeview(tree):
         return 0, {}
 
@@ -177,7 +356,8 @@ def treeview_selection_sums(tree: Any) -> tuple[int, dict[str, float]]:
         return 0, {}
 
     cols = _tree_get_columns(tree)
-    sum_cols = guess_sum_columns(cols)
+    sum_cols = _resolve_sum_columns(tree, cols)
+    sum_cols = [c for c in sum_cols if _tree_column_is_visible(tree, c)]
     if not sum_cols:
         return len(selected), {}
 
@@ -200,14 +380,50 @@ def treeview_selection_sums(tree: Any) -> tuple[int, dict[str, float]]:
     return len(selected), sums
 
 
-def build_selection_summary_text(count: int, sums: dict[str, float]) -> str:
-    rows_txt = "rad" if count == 1 else "rader"
-    parts = [f"Markert: {count} {rows_txt}"]
+_ZERO_EPSILON = 0.005  # under denne rundes verdien til 0,00 ved to desimaler
+
+
+def build_selection_summary_text(
+    count: int,
+    sums: dict[str, float],
+    *,
+    row_noun: str = "rader",
+    priority: Optional[Sequence[str]] = None,
+    max_items: int = 3,
+    hide_zero: bool = True,
+) -> str:
+    """Bygg footer-tekst på formatet "{N} {rownoun} valgt | Label: verdi | ...".
+
+    `sums` er en ordnet dict der nøkkelen kan være intern kolonne-id eller
+    synlig headingtekst — denne funksjonen bryr seg ikke om hvilken, men
+    forventer at kaller har gjort mapping i riktig retning.
+
+    `priority` gir eksplisitt rekkefølge blant nøklene i `sums`. Uten
+    priority sorteres summene heuristisk slik som før.
+    """
+    noun_singular = _row_noun_singular(row_noun)
+    noun = noun_singular if count == 1 else row_noun
+    parts = [f"{count} {noun} valgt"]
 
     if sums:
-        cols = list(sums.keys())
-        cols.sort(key=lambda c: (-_score_column_for_sum(c), str(c).lower()))
-        for c in cols:
+        if priority:
+            priority_list = [p for p in priority if p in sums]
+            rest = [c for c in sums.keys() if c not in priority_list]
+            ordered = priority_list + sorted(
+                rest, key=lambda c: (-_score_column_for_sum(c), str(c).lower())
+            )
+        else:
+            ordered = sorted(
+                sums.keys(), key=lambda c: (-_score_column_for_sum(c), str(c).lower())
+            )
+
+        if hide_zero:
+            ordered = [c for c in ordered if abs(float(sums[c])) >= _ZERO_EPSILON]
+
+        if max_items and max_items > 0:
+            ordered = ordered[:max_items]
+
+        for c in ordered:
             parts.append(f"{c}: {_format_amount_no(sums[c])}")
 
     return " | ".join(parts)
@@ -355,8 +571,14 @@ def install_global_selection_summary(
     root: Any,
     *,
     status_setter: Optional[Callable[[str], None]] = None,
+    require_opt_in: bool = False,
 ) -> None:
-    """Installer global selection-summary (idempotent)."""
+    """Installer global selection-summary (idempotent).
+
+    I opt-in-modus vises summary bare for Treeviews som er registrert via
+    `register_treeview_selection_summary(..., enabled=True)`. Uregistrerte
+    trees og registrerte med `enabled=False` ignoreres uten å røre footeren.
+    """
     if not callable(getattr(root, "bind_all", None)):
         return
 
@@ -364,23 +586,52 @@ def install_global_selection_summary(
     if st.installed:
         return
 
+    def _emit(widget: Any, txt: str) -> None:
+        if status_setter is not None:
+            _safe_call(status_setter, txt)
+            return
+        win = _get_toplevel(widget)
+        setter = _default_status_setter_for_window(win)
+        _safe_call(setter, txt)
+
     def on_tree_select(event: Any) -> None:
         tree = getattr(event, "widget", None)
         if tree is None or not _tree_is_treeview(tree):
             return
 
-        n, sums = treeview_selection_sums(tree)
-        # Vis heading-tekst i stedet for internal col-id
-        pretty = {_tree_get_heading_text(tree, c): v for c, v in sums.items()}
-        txt = build_selection_summary_text(n, pretty)
-
-        if status_setter is not None:
-            _safe_call(status_setter, txt)
+        cfg = _get_registration(tree)
+        if require_opt_in:
+            if cfg is None or not cfg.enabled:
+                return
+        elif cfg is not None and not cfg.enabled:
             return
 
-        win = _get_toplevel(tree)
-        setter = _default_status_setter_for_window(win)
-        _safe_call(setter, txt)
+        n, sums = treeview_selection_sums(tree)
+        row_noun = cfg.row_noun if cfg is not None else "rader"
+        max_items = cfg.max_items if cfg is not None else 3
+        hide_zero = cfg.hide_zero if cfg is not None else True
+
+        if n == 0:
+            _emit(tree, "")
+            return
+
+        # Map id -> synlig heading; behold rekkefølgen fra treeview_selection_sums
+        # (som allerede følger registrert priority).
+        heading_for: dict[str, str] = {
+            c: _tree_get_heading_text(tree, c) for c in sums.keys()
+        }
+        pretty = {heading_for[c]: v for c, v in sums.items()}
+        priority_headings = [heading_for[c] for c in sums.keys()]
+
+        txt = build_selection_summary_text(
+            n,
+            pretty,
+            row_noun=row_noun,
+            priority=priority_headings,
+            max_items=max_items,
+            hide_zero=hide_zero,
+        )
+        _emit(tree, txt)
 
     def on_listbox_select(event: Any) -> None:
         lb = getattr(event, "widget", None)
@@ -389,19 +640,20 @@ def install_global_selection_summary(
         # Duck typing listbox
         if not all(hasattr(lb, a) for a in ("curselection", "size")):
             return
+        cfg = _get_registration(lb)
+        if require_opt_in:
+            if cfg is None or not cfg.enabled:
+                return
         try:
             n = len(list(lb.curselection()))
         except Exception:
             n = 0
-        txt = build_selection_summary_text(n, {})
-
-        if status_setter is not None:
-            _safe_call(status_setter, txt)
+        row_noun = cfg.row_noun if cfg is not None else "rader"
+        if n == 0:
+            _emit(lb, "")
             return
-
-        win = _get_toplevel(lb)
-        setter = _default_status_setter_for_window(win)
-        _safe_call(setter, txt)
+        txt = build_selection_summary_text(n, {}, row_noun=row_noun)
+        _emit(lb, txt)
 
     try:
         root.bind_all("<<TreeviewSelect>>", on_tree_select, add="+")
@@ -414,6 +666,7 @@ def install_global_selection_summary(
 
 __all__ = [
     "install_global_selection_summary",
+    "register_treeview_selection_summary",
     "guess_sum_columns",
     "treeview_selection_sums",
     "build_selection_summary_text",

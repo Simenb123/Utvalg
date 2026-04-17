@@ -245,3 +245,75 @@ def test_mva_code_mapping_cleans_input(tmp_path, monkeypatch) -> None:
     loaded = regnskap_client_overrides.load_mva_code_mapping("Testklient")
 
     assert loaded == {"1": "1"}
+
+
+def test_save_and_load_skatteetaten_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides as rco
+
+    payload = {
+        "org_nr": "123456789",
+        "company": "Test AS",
+        "year": 2025,
+        "mva_per_termin": {"1": 10000.0, "2": 20000.0},
+    }
+    rco.save_skatteetaten_data("Testklient", 2025, payload)
+
+    loaded = rco.load_skatteetaten_data("Testklient", 2025)
+    assert loaded is not None
+    assert loaded["org_nr"] == "123456789"
+    assert loaded["mva_per_termin"] == {"1": 10000.0, "2": 20000.0}
+
+    assert rco.load_skatteetaten_data("Testklient", 2024) is None
+    assert rco.load_skatteetaten_data(None, 2025) is None
+
+
+def test_skatteetaten_data_per_year_isolation(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides as rco
+
+    rco.save_skatteetaten_data("K", 2024, {"mva_per_termin": {"1": 1.0}})
+    rco.save_skatteetaten_data("K", 2025, {"mva_per_termin": {"1": 2.0}})
+
+    assert rco.load_skatteetaten_data("K", 2024)["mva_per_termin"] == {"1": 1.0}
+    assert rco.load_skatteetaten_data("K", 2025)["mva_per_termin"] == {"1": 2.0}
+
+
+def test_save_and_load_mva_melding(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides as rco
+
+    rco.save_mva_melding("K", 2025, 1, {"post1_avgift_25": 250000.0})
+    rco.save_mva_melding("K", 2025, 2, {"post1_avgift_25": 125000.0})
+
+    t1 = rco.load_mva_melding("K", 2025, termin=1)
+    t2 = rco.load_mva_melding("K", 2025, termin=2)
+    assert t1 == {"post1_avgift_25": 250000.0}
+    assert t2 == {"post1_avgift_25": 125000.0}
+
+    # Uten termin → hele årsbucket
+    year_bucket = rco.load_mva_melding("K", 2025)
+    assert set(year_bucket.keys()) == {"1", "2"}
+
+    # Ukjent termin / år → None
+    assert rco.load_mva_melding("K", 2025, termin=6) is None
+    assert rco.load_mva_melding("K", 2024) is None
+    assert rco.load_mva_melding(None, 2025) is None
+
+
+def test_mva_persistence_preserves_other_data(tmp_path, monkeypatch) -> None:
+    """Skatteetaten/MVA-melding skal ikke overskrive andre klient-overrides."""
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides as rco
+
+    rco.save_mva_code_mapping("K", {"1": "1", "3": "3"})
+    rco.save_skatteetaten_data("K", 2025, {"mva_per_termin": {"1": 10.0}})
+    rco.save_mva_melding("K", 2025, 1, {"post1_avgift_25": 1.0})
+
+    assert rco.load_mva_code_mapping("K") == {"1": "1", "3": "3"}
+    assert rco.load_skatteetaten_data("K", 2025) is not None
+    assert rco.load_mva_melding("K", 2025, termin=1) is not None

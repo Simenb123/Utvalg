@@ -12,6 +12,13 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from materiality_store import (
+    DEFAULT_SELECTION_THRESHOLD_KEY,
+    SELECTION_THRESHOLD_LABELS,
+    get_selection_threshold_label,
+    normalize_selection_threshold_key,
+    resolve_selection_threshold,
+)
 from .helpers import (
     build_population_summary_text,
     build_sample_summary_text,
@@ -20,7 +27,12 @@ from .helpers import (
     fmt_amount_no,
     fmt_int_no,
 )
-from .ui_logic import no_break_spaces_in_numbers, split_specific_selection_by_tolerable_error, compute_net_basis_recommendation
+from .ui_logic import (
+    compute_net_basis_recommendation,
+    format_amount_input_no,
+    no_break_spaces_in_numbers,
+    split_specific_selection_by_tolerable_error,
+)
 from .ui_widget_models import Recommendation
 from .ui_widget_filters import get_tolerable_error_value, parse_confidence_percent
 
@@ -49,6 +61,85 @@ def schedule_refresh(studio: Any, *, immediate: bool = False) -> None:
         refresh_all(studio)
 
 
+def set_materiality_context(studio: Any, active_materiality: object, threshold_key: str | None) -> None:
+    studio._materiality_payload = active_materiality if isinstance(active_materiality, dict) else None
+    requested_key = normalize_selection_threshold_key(threshold_key or DEFAULT_SELECTION_THRESHOLD_KEY)
+    _apply_materiality_choice(studio, requested_key=requested_key, persist=False)
+
+
+def _apply_materiality_choice(studio: Any, *, requested_key: str, persist: bool) -> None:
+    requested_key = normalize_selection_threshold_key(requested_key)
+    resolved_key, resolved_amount = resolve_selection_threshold(
+        getattr(studio, "_materiality_payload", None),
+        requested_key,
+    )
+
+    display_key = requested_key
+    if requested_key != "manual" and resolved_amount is not None:
+        display_key = resolved_key
+        studio.var_tolerable_error.set(format_amount_input_no(resolved_amount))
+
+    studio._materiality_threshold_key = display_key
+    studio.var_materiality_choice.set(get_selection_threshold_label(display_key))
+    _update_materiality_info(studio, resolved_key=resolved_key, resolved_amount=resolved_amount)
+
+    if not persist:
+        return
+
+    callback = getattr(studio, "_on_materiality_choice_change", None)
+    if callable(callback):
+        callback(getattr(studio, "_materiality_threshold_key", display_key))
+
+
+def on_materiality_choice_selected(studio: Any, *, persist: bool = True) -> None:
+    label = str(studio.var_materiality_choice.get() or "").strip()
+    choice_key = next(
+        (key for key, value in SELECTION_THRESHOLD_LABELS.items() if value == label),
+        DEFAULT_SELECTION_THRESHOLD_KEY,
+    )
+    _apply_materiality_choice(studio, requested_key=choice_key, persist=persist)
+
+
+def _update_materiality_info(studio: Any, *, resolved_key: str, resolved_amount: float | None) -> None:
+    payload = getattr(studio, "_materiality_payload", None)
+    if not isinstance(payload, dict):
+        studio.var_materiality_info.set("Ingen aktiv vesentlighet valgt i Vesentlighet-fanen.")
+        return
+
+    source_raw = str(payload.get("source") or "").strip().lower()
+    if source_raw == "crmsystem":
+        source_text = "CRMSystem"
+    elif source_raw == "local_calculation":
+        source_text = "Lokal beregning"
+    else:
+        source_text = "Aktiv verdi"
+
+    details: list[str] = []
+    if choice := get_selection_threshold_label(resolved_key):
+        if resolved_amount is not None:
+            details.append(f"{choice}: {fmt_amount_no(resolved_amount, decimals=0)}")
+        elif resolved_key == "manual":
+            details.append("Manuell verdi i feltet")
+
+    for key, short_label in (
+        ("performance_materiality", "PM"),
+        ("overall_materiality", "OM"),
+        ("clearly_trivial", "Ubet"),
+    ):
+        try:
+            amount = float(payload.get(key))
+        except Exception:
+            amount = 0.0
+        if amount > 0.0:
+            details.append(f"{short_label} {fmt_amount_no(amount, decimals=0)}")
+
+    if not details:
+        studio.var_materiality_info.set(f"{source_text}: ingen aktiv verdi")
+        return
+
+    studio.var_materiality_info.set(no_break_spaces_in_numbers(f"{source_text}: " + " | ".join(details)))
+
+
 def refresh_all(studio: Any) -> None:
     """Refresh both calculation state and visible UI text/tables."""
 
@@ -68,21 +159,21 @@ def refresh_all(studio: Any) -> None:
     min_raw = (studio.var_min_amount.get() or "").strip()
     max_raw = (studio.var_max_amount.get() or "").strip()
     if min_raw or max_raw:
-        removed_rows = max(0, calc_metrics.n_rows - draw_metrics.n_rows)
-        removed_bilag = max(0, calc_metrics.n_bilag - draw_metrics.n_bilag)
-        removed_konto = max(0, calc_metrics.n_konto - draw_metrics.n_konto)
+        removed_rows = max(0, calc_metrics.rows - draw_metrics.rows)
+        removed_bilag = max(0, calc_metrics.bilag - draw_metrics.bilag)
+        removed_konto = max(0, calc_metrics.konto - draw_metrics.konto)
 
         parts = [
-            f"Trekkgrunnlag (etter beløpsfilter): {fmt_int_no(draw_metrics.n_rows)} rader",
-            f"{fmt_int_no(draw_metrics.n_bilag)} bilag",
-            f"{fmt_int_no(draw_metrics.n_konto)} kontorer",
+            f"Trekkgrunnlag (etter beløpsfilter): {fmt_int_no(draw_metrics.rows)} rader",
+            f"{fmt_int_no(draw_metrics.bilag)} bilag",
+            f"{fmt_int_no(draw_metrics.konto)} kontoer",
         ]
         extra = ""
         if removed_rows or removed_bilag or removed_konto:
             extra = (
                 f" (fjernet {fmt_int_no(removed_rows)} rader | "
                 f"{fmt_int_no(removed_bilag)} bilag | "
-                f"{fmt_int_no(removed_konto)} kontorer)"
+                f"{fmt_int_no(removed_konto)} kontoer)"
             )
         summary_text = summary_text + "\n" + " | ".join(parts) + extra
 
@@ -105,22 +196,20 @@ def refresh_all(studio: Any) -> None:
 
     update_recommendation_text(studio, rec)
 
-    # Split text is based on the calculation population (not the amount-filtered drawing frame)
-    split_text = build_bilag_split_text(
-        studio._bilag_df_calc,
-        tolerable_error=get_tolerable_error_value(studio),
-    )
+    # Population split vars (based on calculation population, not amount-filtered)
+    _update_population_split_vars(studio, studio._bilag_df_calc, tol=get_tolerable_error_value(studio))
 
-    # Add a note if amount filter reduces the available bilag for drawing
+    # Drawing frame info (only shown when amount filter is active)
     if min_raw or max_raw:
         available = 0 if studio._bilag_df is None else int(len(studio._bilag_df))
-        split_text += f"\n\nTrekkgrunnlag (bilag) etter beløpsfilter: {fmt_int_no(available)}"
+        draw_info = f"Trekkgrunnlag: {fmt_int_no(available)} bilag"
         if rec:
             wanted = int(rec.n_total_recommended or 0)
             if available and available < wanted:
-                split_text += f" (OBS: færre enn foreslått utvalg {fmt_int_no(wanted)})"
-
-    studio.var_recommendation.set(studio.var_recommendation.get() + "\n\n" + split_text)
+                draw_info += f" (OBS: færre enn foreslått {fmt_int_no(wanted)})"
+        studio.var_drawing_frame_info.set(no_break_spaces_in_numbers(draw_info))
+    else:
+        studio.var_drawing_frame_info.set("")
 
     refresh_groups_table(studio)
 
@@ -217,29 +306,57 @@ def compute_recommendation(studio: Any) -> Recommendation | None:
     )
 
 
-def update_recommendation_text(studio: Any, rec: Optional[Recommendation]) -> None:
-    """Update the top recommendation label text."""
+def _update_population_split_vars(studio: Any, bilag_df_calc: pd.DataFrame, *, tol: float) -> None:
+    """Set the structured population/specific/rest StringVars."""
 
-    tol = get_tolerable_error_value(studio)
-
-    parts: list[str] = []
-
-    if tol > 0:
-        parts.append(f"Tolererbar feil: {fmt_amount_no(tol, decimals=0)}")
-
-    if rec is None:
-        studio.var_recommendation.set(no_break_spaces_in_numbers("\n".join(parts)))
+    if bilag_df_calc is None or bilag_df_calc.empty or "SumBeløp" not in bilag_df_calc.columns:
+        studio.var_pop_line.set("")
+        studio.var_spec_line.set("")
+        studio.var_rest_line.set("")
         return
 
-    if rec.conf_factor:
-        parts.append(f"Konfidensfaktor: {str(rec.conf_factor).replace('.', ',')}")
+    amounts = pd.to_numeric(bilag_df_calc["SumBeløp"], errors="coerce").fillna(0.0)
+    n_total = int(len(bilag_df_calc))
+    net_total = float(amounts.sum())
 
-    parts.append(
-        f"Forslag utvalg: {fmt_int_no(rec.n_total_recommended)} bilag"
-        + (f" (inkl. {fmt_int_no(rec.n_specific)} spesifikk)" if rec.n_specific else "")
-    )
+    if tol > 0.0:
+        mask_spec = amounts.abs() >= tol
+    else:
+        mask_spec = pd.Series([False] * n_total, index=bilag_df_calc.index)
 
-    studio.var_recommendation.set(no_break_spaces_in_numbers("\n".join(parts)))
+    n_spec = int(mask_spec.sum())
+    n_rem = n_total - n_spec
+    net_spec = float(amounts.loc[mask_spec].sum()) if n_spec else 0.0
+    net_rem = float(amounts.loc[~mask_spec].sum()) if n_rem else 0.0
+
+    studio.var_pop_line.set(no_break_spaces_in_numbers(
+        f"{fmt_int_no(n_total)} bilag | Netto: {fmt_amount_no(net_total, decimals=0)}"
+    ))
+    studio.var_spec_line.set(no_break_spaces_in_numbers(
+        f"{fmt_int_no(n_spec)} bilag | Netto: {fmt_amount_no(net_spec, decimals=0)}"
+    ))
+    studio.var_rest_line.set(no_break_spaces_in_numbers(
+        f"{fmt_int_no(n_rem)} bilag | Netto: {fmt_amount_no(net_rem, decimals=0)}"
+    ))
+
+
+def update_recommendation_text(studio: Any, rec: Optional[Recommendation]) -> None:
+    """Update the structured calculation summary labels."""
+
+    tol = get_tolerable_error_value(studio)
+    studio.var_calc_tolerable.set(fmt_amount_no(tol, decimals=0) if tol > 0 else "0")
+
+    if rec is None:
+        studio.var_calc_confidence.set("")
+        studio.var_calc_suggestion.set("")
+        return
+
+    studio.var_calc_confidence.set(str(rec.conf_factor).replace('.', ','))
+
+    suggestion = f"{fmt_int_no(rec.n_total_recommended)} bilag"
+    if rec.n_specific:
+        suggestion += f" (inkl. {fmt_int_no(rec.n_specific)} spesifikk)"
+    studio.var_calc_suggestion.set(no_break_spaces_in_numbers(suggestion))
 
 
 def refresh_groups_table(studio: Any) -> None:
@@ -289,7 +406,7 @@ def refresh_groups_table(studio: Any) -> None:
             "",
             "end",
             values=(
-                str(grp),
+                f"Gruppe {grp}" if str(grp).isdigit() else str(grp),
                 interval,
                 int(row.get("Antall", 0)),
                 fmt_amount_no(float(row.get("Sum", 0.0))),

@@ -37,6 +37,7 @@ from typing import Optional
 
 APP_NAME = "Utvalg"
 DATA_DIR_HINT_FILENAME = "utvalg_data_dir.txt"
+SOURCES_DIR_HINT_FILENAME = "utvalg_sources_dir.txt"
 
 
 def is_frozen() -> bool:
@@ -146,6 +147,34 @@ def data_dir(app_name: str = APP_NAME) -> Path:
 
     # Dev/ikke-frozen: bruk prosjektmappen
     return executable_dir()
+
+
+def sources_dir() -> Optional[Path]:
+    """Returner mappe for kildefiler (fagdatabase, openai-repo, bilder).
+
+    Konfigureres via ``utvalg_sources_dir.txt`` ved siden av prosjektet/.exe,
+    eller miljøvariabel ``UTVALG_SOURCES_DIR``.
+    Returnerer None hvis ikke konfigurert.
+    """
+    override = os.getenv("UTVALG_SOURCES_DIR")
+    if override and override.strip():
+        p = Path(override).expanduser().resolve()
+        if p.is_dir():
+            return p
+
+    try:
+        hint_path = executable_dir() / SOURCES_DIR_HINT_FILENAME
+        if hint_path.exists() and hint_path.is_file():
+            raw = hint_path.read_text(encoding="utf-8", errors="ignore").strip()
+            raw = raw.strip('"').strip("'").strip()
+            if raw:
+                p = Path(raw).expanduser().resolve()
+                if p.is_dir():
+                    return p
+    except Exception:
+        pass
+
+    return None
 
 
 def ensure_dir(path: Path) -> None:

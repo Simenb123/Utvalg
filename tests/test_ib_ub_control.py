@@ -62,8 +62,8 @@ class TestBuildAccountReconciliation:
         sb = pd.DataFrame({
             "konto": ["1920", "9999"],
             "kontonavn": ["Bank", "Ukjent"],
-            "ib": [0.0, 100.0],
-            "ub": [0.0, 100.0],
+            "ib": [50.0, 100.0],
+            "ub": [50.0, 100.0],
         })
         hb = pd.DataFrame({"Konto": ["1920"], "Beløp": [0.0]})
         result = ib_ub_control.build_account_reconciliation(sb, hb)
@@ -72,7 +72,7 @@ class TestBuildAccountReconciliation:
         assert ukjent["hb_sum"] == 0.0
 
     def test_account_only_in_hb(self) -> None:
-        sb = pd.DataFrame({"konto": ["1920"], "kontonavn": ["Bank"], "ib": [0.0], "ub": [0.0]})
+        sb = pd.DataFrame({"konto": ["1920"], "kontonavn": ["Bank"], "ib": [10.0], "ub": [10.0]})
         hb = pd.DataFrame({"Konto": ["1920", "8888"], "Beløp": [0.0, 500.0]})
         result = ib_ub_control.build_account_reconciliation(sb, hb)
         assert len(result) == 2

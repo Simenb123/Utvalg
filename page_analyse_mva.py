@@ -25,6 +25,47 @@ import mva_codes
 
 log = logging.getLogger("app")
 
+
+def _resolve_code_mapping(client: str | None) -> dict[str, str]:
+    """Hent klient-spesifikk MVA-kode-mapping {klient_kode: saft_kode}.
+
+    Faller tilbake på standard-mapping for klientens regnskapssystem
+    hvis ingen eksplisitt mapping er lagret. Returnerer tom dict hvis
+    klient ikke er satt eller intet kan bestemmes.
+    """
+    if not client:
+        return {}
+    try:
+        import regnskap_client_overrides as rco
+        mapping = rco.load_mva_code_mapping(client)
+        if mapping:
+            return dict(mapping)
+        system = rco.load_accounting_system(client)
+        if system:
+            import mva_system_defaults
+            return mva_system_defaults.get_default_mapping(system)
+    except Exception:
+        log.debug("Kunne ikke laste MVA-kode-mapping for klient %s", client, exc_info=True)
+    return {}
+
+
+def _normalize_code(raw: str, mapping: dict[str, str]) -> str:
+    """Slå opp rå-kode i klient-mapping; fall tilbake på rå-koden."""
+    raw_s = str(raw or "").strip()
+    if not raw_s:
+        return raw_s
+    if raw_s in mapping:
+        return mapping[raw_s]
+    return raw_s
+
+
+def _current_client() -> str:
+    try:
+        import session
+        return str(getattr(session, "client", None) or "").strip()
+    except Exception:
+        return ""
+
 # Headings for MVA-modus (mapper til de 9 interne kolonne-IDene i pivot_tree)
 MVA_PIVOT_HEADINGS = (
     "MVA-kode", "Beskrivelse", "T1", "T2", "T3", "T4", "T5", "T6", "Sum",
@@ -64,7 +105,7 @@ def _compute_tax(code: str, grunnlag: float) -> float:
 # Pivot-bygging
 # ---------------------------------------------------------------------------
 
-def build_mva_pivot(df: pd.DataFrame) -> pd.DataFrame:
+def build_mva_pivot(df: pd.DataFrame, *, client: str | None = None) -> pd.DataFrame:
     """Bygg MVA-pivot fra filtrert DataFrame.
 
     Grupperer transaksjoner etter MVA-kode og termin.
@@ -73,11 +114,17 @@ def build_mva_pivot(df: pd.DataFrame) -> pd.DataFrame:
     Hvis MVA-beløp finnes i dataene brukes det direkte.
     Hvis MVA-beløp er 0/mangler, beregnes avgift fra grunnlag (Beløp) × sats.
 
+    Hvis ``client`` er satt, normaliseres klient-spesifikke MVA-koder til
+    SAF-T standardkoder via ``regnskap_client_overrides.load_mva_code_mapping``
+    (med fallback til ``mva_system_defaults``). Ukjente koder beholdes som-er.
+
     Returnerer DataFrame med kolonnene:
         MVA-kode, Beskrivelse, T1, T2, T3, T4, T5, T6, Sum
     """
     if df is None or df.empty:
         return _empty_pivot()
+
+    code_mapping = _resolve_code_mapping(client)
 
     # Finn MVA-relevante kolonner
     mva_code_col = _find_col(df, ["MVA-kode", "mva-kode", "Mva-kode"])
@@ -111,6 +158,11 @@ def build_mva_pivot(df: pd.DataFrame) -> pd.DataFrame:
     work = work[work["_code"].ne("") & work["_code"].ne("nan") & work["_code"].ne("None")]
     if work.empty:
         return _empty_pivot()
+
+    # Normaliser klient-spesifikke koder til SAF-T standardkoder
+    if code_mapping:
+        work["_code_raw"] = work["_code"]
+        work["_code"] = work["_code"].map(lambda c: _normalize_code(c, code_mapping))
 
     # Parse numeriske kolonner
     work["_mva_amt"] = pd.to_numeric(work["_mva_amt"], errors="coerce").fillna(0.0)
@@ -323,7 +375,8 @@ def refresh_mva_pivot(*, page: Any) -> None:
     if df_filtered is None or not isinstance(df_filtered, pd.DataFrame) or df_filtered.empty:
         return
 
-    pivot_df = build_mva_pivot(df_filtered)
+    client = _current_client()
+    pivot_df = build_mva_pivot(df_filtered, client=client or None)
 
     # Cache for eksport
     try:
@@ -335,6 +388,14 @@ def refresh_mva_pivot(*, page: Any) -> None:
         _show_mva_not_available(tree)
         return
 
+    _dec = 2
+    try:
+        _var_dec = getattr(page, "_var_decimals", None)
+        if _var_dec is not None and not bool(_var_dec.get()):
+            _dec = 0
+    except Exception:
+        pass
+
     for _, row in pivot_df.iterrows():
         code = str(row.get("MVA-kode", ""))
         desc = str(row.get("Beskrivelse", ""))
@@ -344,8 +405,8 @@ def refresh_mva_pivot(*, page: Any) -> None:
         t_vals = []
         for t in range(1, 7):
             val = row.get(f"T{t}", 0.0)
-            t_vals.append(formatting.fmt_amount(val) if val else "")
-        sum_val = formatting.fmt_amount(row.get("Sum", 0.0))
+            t_vals.append(formatting.fmt_amount(val, decimals=_dec) if val else "")
+        sum_val = formatting.fmt_amount(row.get("Sum", 0.0), decimals=_dec)
 
         # Bestem tag
         tags: tuple = ()

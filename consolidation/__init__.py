@@ -5,6 +5,8 @@ eliminering, konsolideringsmotor og Excel-eksport.
 """
 
 from consolidation.models import (  # noqa: F401
+    AssociateAdjustmentRow,
+    AssociateCase,
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -19,14 +21,24 @@ from consolidation.models import (  # noqa: F401
 )
 
 from consolidation.storage import (  # noqa: F401
+    delete_company_line_basis,
     delete_company_tb,
     delete_project,
     export_path,
+    load_company_line_basis,
     load_company_tb,
     load_project,
     project_dir,
+    save_company_line_basis,
     save_company_tb,
     save_project,
+)
+
+from consolidation.line_basis_import import (  # noqa: F401
+    export_line_basis_template,
+    import_company_line_basis,
+    normalize_company_line_basis,
+    validate_company_line_basis,
 )
 
 from consolidation.tb_import import (  # noqa: F401
@@ -59,4 +71,20 @@ from consolidation.suggestions import (  # noqa: F401
     generate_suggestions,
     ignore_suggestion,
     unignore_suggestion,
+)
+
+from consolidation.pdf_line_suggestions import (  # noqa: F401
+    suggest_line_basis_from_pdf,
+)
+
+from consolidation.associate_equity_method import (  # noqa: F401
+    AssociateFieldSuggestion,
+    build_associate_case_calculation,
+    build_associate_journal,
+    compute_associate_case_generation_hash,
+    delete_associate_case,
+    mark_associate_case_stale,
+    suggest_associate_fields_from_line_basis,
+    sync_associate_case_journal,
+    validate_associate_case,
 )

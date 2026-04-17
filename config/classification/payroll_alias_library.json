@@ -1,0 +1,330 @@
+{
+  "concepts": {
+    "fastloenn": {
+      "aliases": [
+        "lonn",
+        "loenn",
+        "fastlonn",
+        "fastloenn",
+        "timelonn",
+        "timeloenn",
+        "overtid",
+        "bonus",
+        "etterlønn",
+        "Etterlønn /uferiepenger"
+      ],
+      "exclude_aliases": [
+        "feriepenger",
+        "feriepengegjeld",
+        "otp",
+        "pensjon",
+        "aga",
+        "forskuddstrekk",
+        "arbeidsgiveravgift"
+      ],
+      "account_ranges": [
+        "5000-5091"
+      ],
+      "boost_accounts": [
+        5000
+      ]
+    },
+    "feriepenger": {
+      "aliases": [
+        "feriepenger",
+        "Feriepenger",
+        "skyldig feriepenger",
+        "skyldige feriepenger",
+        "feriepengegjeld",
+        "påløpte feriepenger",
+        "palopte feriepenger",
+        "påløpt feriepenger",
+        "avsatt feriepenger",
+        "Periodisering av feriepenger",
+        "Feriepenger over 60 år"
+      ],
+      "exclude_aliases": [
+        "fri bil",
+        "firmabil",
+        "otp",
+        "pensjon",
+        "revisjon",
+        "revisjonshonorar",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk",
+        "uferiepenger",
+        "uten feriepenger"
+      ],
+      "account_ranges": [
+        "5002",
+        "5020",
+        "5092",
+        "5096",
+        "2940"
+      ],
+      "boost_accounts": [
+        5002,
+        5020,
+        5092,
+        5096,
+        2940
+      ]
+    },
+    "tilskuddOgPremieTilPensjon": {
+      "aliases": [
+        "pensjon",
+        "otp",
+        "obligatorisk tjenestepensjon",
+        "innberetning otp",
+        "premie pensjon"
+      ],
+      "exclude_aliases": [
+        "refusjon",
+        "feriepenger",
+        "fri bil",
+        "telefon",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "account_ranges": [
+        "5420-5429",
+        "5952-5953"
+      ],
+      "boost_accounts": [
+        5420,
+        5952,
+        5953
+      ]
+    },
+    "sumAvgiftsgrunnlagRefusjon": {
+      "aliases": [
+        "refusjon",
+        "sykepenger",
+        "sykepengerefusjon",
+        "foreldrepenger",
+        "foreldrepengerefusjon",
+        "nav refusjon",
+        "Refusjon av sykepenger"
+      ],
+      "exclude_aliases": [
+        "pensjon",
+        "bil",
+        "telefon",
+        "forsikring",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "account_ranges": [
+        "5800-5899"
+      ],
+      "boost_accounts": [
+        5800
+      ]
+    },
+    "elektroniskKommunikasjon": {
+      "aliases": [
+        "telefon",
+        "mobil",
+        "ekom",
+        "elektronisk kommunikasjon",
+        "fri telefon"
+      ],
+      "exclude_aliases": [
+        "bil",
+        "firmabil",
+        "yrkebil",
+        "pensjon",
+        "revisjon",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "account_ranges": [
+        "5210-5219"
+      ],
+      "boost_accounts": [
+        5210
+      ]
+    },
+    "skattepliktigDelForsikringer": {
+      "aliases": [
+        "forsikring",
+        "helseforsikring",
+        "behandlingsforsikring",
+        "personalforsikring"
+      ],
+      "exclude_aliases": [
+        "revisjon",
+        "advokat",
+        "pensjon",
+        "telefon",
+        "bil",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk",
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "arb avg",
+        "arb.giv.avg",
+        "OTP",
+        "Obligatorisk Tjeneste Pensjon",
+        "Obligatorisk Tjenestepensjon"
+      ],
+      "account_ranges": [
+        "5250-5259",
+        "5280-5289",
+        "5320-5329"
+      ],
+      "boost_accounts": [
+        5250,
+        5280,
+        5320
+      ]
+    },
+    "styrehonorarOgGodtgjoerelseVerv": {
+      "aliases": [
+        "styre",
+        "styrehonorar",
+        "påløpt styrehonorar",
+        "skyldig styrehonorar",
+        "avsatt styrehonorar",
+        "verv",
+        "godtgjorelse verv"
+      ],
+      "exclude_aliases": [
+        "revisjon",
+        "revisjonshonorar",
+        "revisor",
+        "advokat",
+        "konsulent",
+        "firmabil",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "account_ranges": [
+        "5330-5339",
+        "5390-5399"
+      ],
+      "boost_accounts": [
+        5330,
+        5390
+      ]
+    },
+    "bil": {
+      "aliases": [
+        "fri bil",
+        "firmabil",
+        "bilfordel",
+        "fordel fri fimabil",
+        "fri firmabil"
+      ],
+      "exclude_aliases": [
+        "yrkebil",
+        "listepris",
+        "drivstoff",
+        "bom",
+        "parkering",
+        "leasing",
+        "verksted",
+        "revisjon",
+        "revisjonshonorar",
+        "advokat",
+        "forsikring",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "account_ranges": [
+        "5200-5209"
+      ],
+      "boost_accounts": [
+        5200
+      ]
+    },
+    "yrkebilTjenstligbehovListepris": {
+      "aliases": [
+        "yrkebil",
+        "listepris",
+        "yrkebil listepris",
+        "yrkebil tjenstlig behov"
+      ],
+      "exclude_aliases": [
+        "revisjon",
+        "revisjonshonorar",
+        "advokat",
+        "drivstoff",
+        "bom",
+        "parkering",
+        "leasing",
+        "verksted",
+        "telefon",
+        "forsikring",
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "account_ranges": [
+        "5200-5209"
+      ],
+      "boost_accounts": [
+        5200
+      ]
+    },
+    "forskuddstrekk": {
+      "aliases": [
+        "trekk",
+        "forskuddstrekk",
+        "skyldig forskuddstrekk",
+        "skattetrekk",
+        "påløpt forskuddstrekk"
+      ],
+      "exclude_aliases": [
+        "aga",
+        "pensjon",
+        "feriepenger",
+        "arbeidsgiveravgift",
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "arb avg",
+        "arb.giv.avg"
+      ],
+      "account_ranges": [
+        "2600-2699"
+      ],
+      "boost_accounts": [
+        2600
+      ]
+    },
+    "aga": {
+      "aliases": [
+        "arbeidsgiveravgift",
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "aga",
+        "arb avg",
+        "arb.giv.avg"
+      ],
+      "exclude_aliases": [
+        "trekk",
+        "pensjon",
+        "feriepenger",
+        "forskuddstrekk",
+        "forskudd",
+        "lønnsforskudd",
+        "skyldig lønn",
+        "påløpt lønn"
+      ],
+      "account_ranges": [
+        "2770-2799"
+      ],
+      "boost_accounts": [
+        2770,
+        2785
+      ]
+    }
+  }
+}

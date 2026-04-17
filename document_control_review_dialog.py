@@ -39,7 +39,7 @@ from document_control_app_service import (
     load_saved_review,
     save_document_review,
 )
-from document_control_viewer import DocumentPreviewFrame, preview_target_from_evidence
+from document_control_viewer import DocumentPreviewFrame, PreviewTarget, preview_target_from_evidence
 from document_engine.engine import (
     build_validation_messages,
     normalize_bilag_key,
@@ -107,6 +107,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._year           = year
         self._current_index  = 0
         self._last_segments: list[Any] | None = None   # segments from most recent analysis
+        self._bilagsprint_pages: set[int] = set()       # 1-based page numbers that are bilagsprint
 
         # Per-result mutable state
         self._pdf_state:    list[dict[str, str]] = [_init_pdf_state(r) for r in self._results]
@@ -114,6 +115,8 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._avvik_state:  list[list[str]]      = [list(r.validation_messages) for r in self._results]
         self._notes_state:  list[str]            = [""] * len(self._results)
         self._hit_idx_state: list[dict[str, int]] = [{} for _ in self._results]
+        self._saved_fields: list[dict[str, str] | None] = [None] * len(self._results)  # disk snapshot per bilag
+        self._saved_evidence: list[dict[str, Any] | None] = [None] * len(self._results)  # saved page+bbox per bilag
         self._load_persisted_state()
 
         # StringVars
@@ -125,6 +128,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._var_file_path  = tk.StringVar()
         self._match_labels:  dict[str, tk.Label] = {}
         self._page_labels:   dict[str, tk.Label] = {}
+        self._saved_labels:  dict[str, tk.Label] = {}  # disk-saved indicator per field
         self._field_evidence: dict[str, Any]     = {}  # populated after re-analysis
         # All PDF search hits per field: list of (page, bbox)
         self._field_hits:      dict[str, list[tuple[int, tuple]]] = {}
@@ -171,6 +175,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
             # Restore field values (overwrite batch-analysis defaults)
             saved_fields = saved.get("fields")
             if saved_fields and isinstance(saved_fields, dict):
+                self._saved_fields[i] = dict(saved_fields)
                 for field_key in saved_fields:
                     if field_key in self._pdf_state[i]:
                         self._pdf_state[i][field_key] = str(saved_fields[field_key] or "")
@@ -184,6 +189,10 @@ class DocumentControlReviewDialog(tk.Toplevel):
                     k: int(v) for k, v in saved["field_hit_indices"].items()
                     if isinstance(v, (int, float))
                 }
+            # Restore saved evidence (page+bbox per field)
+            saved_ev = saved.get("field_evidence")
+            if saved_ev and isinstance(saved_ev, dict):
+                self._saved_evidence[i] = dict(saved_ev)
 
     # ------------------------------------------------------------------
     # UI building
@@ -294,15 +303,21 @@ class DocumentControlReviewDialog(tk.Toplevel):
         _canvas.bind("<MouseWheel>", _on_wheel)
         inner.bind("<MouseWheel>", _on_wheel)
 
-        # ── File bar (outside scroll area, always visible at bottom) ─────
+        # ── File bar (collapsed by default — click ► to expand) ──────────
         file_bar = ttk.Frame(outer)
-        file_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        file_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         file_bar.columnconfigure(1, weight=1)
-        ttk.Label(file_bar, text="Dok.").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        ttk.Entry(file_bar, textvariable=self._var_file_path,
-                  state="readonly").grid(row=0, column=1, sticky="ew")
-        ttk.Button(file_bar, text="Velg...",   command=self._choose_file,  width=7).grid(row=0, column=2, padx=(4, 0))
-        ttk.Button(file_bar, text="Les oppl.", command=self._reanalyse,    width=9).grid(row=0, column=3, padx=(4, 0))
+
+        self._file_detail = ttk.Frame(file_bar)
+        self._file_detail.columnconfigure(0, weight=1)
+        ttk.Entry(self._file_detail, textvariable=self._var_file_path,
+                  state="readonly").grid(row=0, column=0, sticky="ew")
+        ttk.Button(self._file_detail, text="Velg...",   command=self._choose_file,  width=7).grid(row=0, column=1, padx=(4, 0))
+        ttk.Button(self._file_detail, text="Les oppl.", command=self._reanalyse,    width=9).grid(row=0, column=2, padx=(4, 0))
+
+        self._file_bar_expanded = False
+        self._file_toggle_btn = ttk.Button(file_bar, text="Dok ►", width=6, command=self._toggle_file_bar)
+        self._file_toggle_btn.grid(row=0, column=0, sticky="w")
 
         # ── Build field rows inside the scrollable inner frame ───────────
         # col 0=label, 1=HB entry, 2=icon, 3=PDF entry, 4=copy btn, 5=page badge
@@ -375,9 +390,16 @@ class DocumentControlReviewDialog(tk.Toplevel):
             # Click cycles through hits; the chosen position is pinned.
             page_lbl = tk.Label(inner, text="", fg="#999", font=("Segoe UI", 8),
                                 width=8, anchor="w", cursor="hand2")
-            page_lbl.grid(row=r, column=5, sticky="w", padx=(0, 4))
+            page_lbl.grid(row=r, column=5, sticky="w", padx=(0, 2))
             page_lbl.bind("<Button-1>", lambda _e, k=key: self._focus_pdf_field(k))
             self._page_labels[key] = page_lbl
+
+            # Saved indicator — shows disk-saved value, click to navigate to saved PDF position
+            saved_lbl = tk.Label(inner, text="", fg="#999", font=("Segoe UI", 7),
+                                  anchor="w", cursor="hand2")
+            saved_lbl.grid(row=r, column=6, sticky="w", padx=(0, 4))
+            saved_lbl.bind("<Button-1>", lambda _e, k=key: self._goto_saved_position(k))
+            self._saved_labels[key] = saved_lbl
 
             # Bind mousewheel on each entry too
             hb_ent.bind("<MouseWheel>", _on_wheel)
@@ -408,7 +430,12 @@ class DocumentControlReviewDialog(tk.Toplevel):
                              sticky="ew", pady=(0, 3))
         self._txt_notes.bind("<MouseWheel>", _on_wheel)
 
-        # Save buttons removed — use header buttons (Lagre og neste / Ctrl+S)
+        # ── Save buttons (below fields, easy to reach) ──────────────────
+        save_r = notes_r + 1
+        save_bar = ttk.Frame(inner)
+        save_bar.grid(row=save_r, column=1, columnspan=4, sticky="ew", pady=(6, 2))
+        ttk.Button(save_bar, text="Lagre",            command=self._save_current).pack(side="left", padx=(0, 6))
+        ttk.Button(save_bar, text="Lagre og neste ►", command=self._save_and_next).pack(side="left")
 
     def _build_pdf_pane(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(0, weight=1)
@@ -430,14 +457,17 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._list.delete(item)
         for idx, r in enumerate(self._results):
             dot, tag = _status_dot(self._status_state[idx])
+            display_name = self._pdf_state[idx].get("supplier_name", "").strip() or r.supplier_name
             self._list.insert("", tk.END, iid=str(idx),
-                              values=(dot, r.bilag_nr, r.supplier_name), tags=(tag,))
+                              values=(dot, r.bilag_nr, display_name), tags=(tag,))
         self._refresh_summary()
 
     def _update_list_row(self, idx: int) -> None:
         dot, tag = _status_dot(self._status_state[idx])
         r = self._results[idx]
-        self._list.item(str(idx), values=(dot, r.bilag_nr, r.supplier_name), tags=(tag,))
+        # Use edited supplier name from PDF state if available
+        display_name = self._pdf_state[idx].get("supplier_name", "").strip() or r.supplier_name
+        self._list.item(str(idx), values=(dot, r.bilag_nr, display_name), tags=(tag,))
         self._refresh_summary()
 
     def _refresh_summary(self) -> None:
@@ -502,11 +532,14 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._txt_notes.insert("1.0", self._notes_state[idx])
 
         # Clear previous field evidence, hits, page badges, and pins
-        self._field_evidence = {}
+        # Restore saved evidence from disk so _auto_analyse preserves it
+        saved_ev = self._saved_evidence[idx] if 0 <= idx < len(self._saved_evidence) else None
+        self._field_evidence = dict(saved_ev) if saved_ev else {}
         self._field_hits = {}
         self._field_hit_index = {}
         self._pinned_fields.clear()
         self._update_page_labels()
+        self._update_saved_indicators()
         self._preview.set_highlight(None)
 
         # Load PDF (prefer extracted sub-PDF)
@@ -532,18 +565,29 @@ class DocumentControlReviewDialog(tk.Toplevel):
                 self._last_segments = (_etf(Path(file_path)).segments or None)
             except Exception:
                 pass
+        # Detect bilagsprint pages FIRST (synchronously) — must happen before
+        # any search or restore so that bilagsprint filtering is available.
+        if file_path and Path(file_path).exists():
+            self._detect_bilagsprint_pages(file_path)
+
         # Immediately restore hit indices from saved state (fast — just PDF text search)
         # This gives instant visual feedback; _auto_analyse later refines with full analysis.
         if file_path and Path(file_path).exists():
             self._restore_hit_indices_sync(idx)
 
-        # Jump past the bilagsprint cover page to the actual invoice
-        if file_path and Path(file_path).exists():
-            self.after(80, lambda p=file_path: self._skip_bilagsprint_page(p))
-
         # Auto-analyse to populate page badges and field evidence
         if file_path and Path(file_path).exists():
             self.after(200, lambda fp=file_path, i=idx: self._auto_analyse(fp, i))
+
+    def _sort_hits(self, raw_hits: list[tuple]) -> list[tuple]:
+        """Sort a hit list so bilagsprint (Tripletex cover) pages come last.
+
+        Every call that builds a hit list MUST route through this helper so
+        that every code path (restore, auto-analyse, reanalyse, live search)
+        treats bilagsprint pages as the least preferred match.
+        """
+        bp = self._bilagsprint_pages
+        return sorted(raw_hits, key=lambda h: (h[0] in bp, h[0]))
 
     def _restore_hit_indices_sync(self, idx: int) -> None:
         """Synchronously restore hit indices so page badges appear immediately."""
@@ -554,9 +598,10 @@ class DocumentControlReviewDialog(tk.Toplevel):
             val = self.pdf_vars[key].get().strip()
             if not val or len(val) < 2:
                 continue
-            hits = self._preview.search_all_pages(val)
-            if not hits:
+            raw_hits = self._preview.search_all_pages(val)
+            if not raw_hits:
                 continue
+            hits = self._sort_hits(raw_hits)
             self._field_hits[key] = hits
             target_idx = saved.get(key, 0)
             target_idx = min(target_idx, len(hits) - 1)
@@ -565,16 +610,24 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._update_evidence_location(key, page, bbox)
         self._update_page_labels()
 
-    def _skip_bilagsprint_page(self, file_path: str) -> None:
-        """If the first PDF page is a Tripletex bilagsprint, navigate to page 2."""
+    def _detect_bilagsprint_pages(self, file_path: str) -> None:
+        """Detect bilagsprint pages and skip past the first one.
+
+        Runs synchronously so that bilagsprint filtering is available for
+        all subsequent operations (_restore_hit_indices_sync, _auto_analyse,
+        _search_pdf_for_field).
+        """
+        self._bilagsprint_pages = set()
         try:
             import fitz
             doc = fitz.open(file_path)
-            if len(doc) < 2:
-                return
-            text = doc[0].get_text()
+            page_count = len(doc)
+            for page_idx in range(page_count):
+                text = doc[page_idx].get_text()
+                if _is_bilagsprint_text(text):
+                    self._bilagsprint_pages.add(page_idx + 1)  # 1-based
             doc.close()
-            if _is_bilagsprint_text(text):
+            if 1 in self._bilagsprint_pages and page_count >= 2:
                 self._preview.show_page(2)
         except Exception:
             pass
@@ -653,19 +706,23 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._update_page_label_for(key)
             return
 
-        hits = self._preview.search_all_pages(val)
+        raw_hits = self._preview.search_all_pages(val)
+        hits = self._sort_hits(raw_hits)
         old_hits = self._field_hits.get(key, [])
         self._field_hits[key] = hits
 
-        # If the user pinned this field AND the hit list didn't change
-        # (i.e. the value is the same), keep the pinned index.
+        # Index policy:
+        #  - Pinned field + hit list unchanged → keep the user's chosen idx.
+        #  - Otherwise (new value, unpinned, or hit list shape changed) →
+        #    start from 0 so the user sees the best (non-bilagsprint) hit.
+        #
+        # Previously this code also preserved prev_idx when the field was
+        # simply unpinned, which caused the search to land back on a
+        # bilagsprint page (page 1) after the user typed a new value.
         prev_idx = self._field_hit_index.get(key, 0)
         if key in self._pinned_fields and len(hits) == len(old_hits) and 0 <= prev_idx < len(hits):
             idx = prev_idx
-        elif 0 <= prev_idx < len(hits):
-            idx = prev_idx
         else:
-            # New value or invalid index — reset to 0 and unpin
             idx = 0
             self._pinned_fields.discard(key)
         self._field_hit_index[key] = idx
@@ -761,6 +818,63 @@ class DocumentControlReviewDialog(tk.Toplevel):
         for key, _ in FIELD_DEFS:
             self._update_page_label_for(key)
 
+    def _update_saved_indicators(self) -> None:
+        """Show disk-saved value next to each field for comparison."""
+        idx = self._current_index
+        saved = self._saved_fields[idx] if 0 <= idx < len(self._saved_fields) else None
+        saved_ev = self._saved_evidence[idx] if 0 <= idx < len(self._saved_evidence) else None
+        for key, _ in FIELD_DEFS:
+            lbl = self._saved_labels.get(key)
+            if lbl is None:
+                continue
+            if saved is None:
+                lbl.configure(text="", fg="#b0b0b0", font=("Segoe UI", 7))
+                continue
+            disk_val = str(saved.get(key, "") or "").strip()
+            gui_val = self.pdf_vars[key].get().strip()
+            has_pos = saved_ev and key in saved_ev and saved_ev[key].get("page") is not None
+            page_str = f" s.{saved_ev[key]['page']}" if has_pos else ""
+            if not disk_val:
+                lbl.configure(text="", fg="#b0b0b0", font=("Segoe UI", 7))
+            elif disk_val == gui_val:
+                lbl.configure(
+                    text=f"Lagret{page_str}: {disk_val[:20]}",
+                    fg="#1a7a1a",
+                    font=("Segoe UI", 7, "underline") if has_pos else ("Segoe UI", 7),
+                )
+            else:
+                lbl.configure(
+                    text=f"Lagret{page_str}: {disk_val[:20]}",
+                    fg="#cc6600",
+                    font=("Segoe UI", 7, "underline") if has_pos else ("Segoe UI", 7),
+                )
+
+    def _goto_saved_position(self, key: str) -> None:
+        """Navigate PDF viewer to the saved position for this field."""
+        idx = self._current_index
+        saved_ev = self._saved_evidence[idx] if 0 <= idx < len(self._saved_evidence) else None
+        if not saved_ev:
+            return
+        ev = saved_ev.get(key)
+        if not ev or not isinstance(ev, dict):
+            return
+        page = ev.get("page")
+        if page is None:
+            return
+        bbox = ev.get("bbox")
+        bbox_t = tuple(bbox) if bbox and isinstance(bbox, (list, tuple)) and len(bbox) >= 4 else None
+        label = next((lbl for k, lbl in FIELD_DEFS if k == key), key)
+        target = PreviewTarget(
+            field_name=key,
+            page=page,
+            bbox=bbox_t,
+            label=label,
+            source="saved",
+            raw_value=ev.get("raw_value", ""),
+            normalized_value=ev.get("normalized_value", ""),
+        )
+        self._preview.set_highlight(target)
+
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
@@ -837,6 +951,9 @@ class DocumentControlReviewDialog(tk.Toplevel):
             new_status = "ikke_funnet"
         self._status_state[idx] = new_status
         self._update_list_row(idx)
+        # Update header with (possibly edited) supplier name
+        display_name = fields.get("supplier_name", "").strip() or r.supplier_name or "(leverandør ukjent)"
+        self._var_header.set(f"Bilag {r.bilag_nr}  —  {display_name}")
         if not silent:
             self._var_progress.set(
                 f"{idx + 1} / {len(self._results)}  ({'OK' if new_status == 'ok' else 'Avvik'})"
@@ -858,10 +975,21 @@ class DocumentControlReviewDialog(tk.Toplevel):
                 field_hit_indices=dict(self._field_hit_index),
                 field_evidence=dict(self._field_evidence),
             )
+            # Update saved snapshots so indicators reflect disk state
+            self._saved_fields[idx] = dict(fields)
+            # Snapshot evidence (page+bbox) for "show saved location"
+            ev_snapshot: dict[str, Any] = {}
+            for k, v in self._field_evidence.items():
+                if hasattr(v, "to_dict"):
+                    ev_snapshot[k] = v.to_dict()
+                elif isinstance(v, dict):
+                    ev_snapshot[k] = dict(v)
+            self._saved_evidence[idx] = ev_snapshot if ev_snapshot else None
             if not silent:
                 self._var_status_bar.set(
                     f"Lagret bilag {r.bilag_nr} ({new_status.upper()})  —  klient={self._client or '?'}, år={self._year or '?'}"
                 )
+                self._update_saved_indicators()
         except Exception as exc:
             if not silent:
                 messagebox.showerror("Lagringsfeil", str(exc), parent=self)
@@ -871,18 +999,113 @@ class DocumentControlReviewDialog(tk.Toplevel):
             if idx < len(self._results) - 1:
                 self._load_index(idx + 1)
             else:
-                messagebox.showinfo(
-                    "Ferdig",
-                    f"Alle {len(self._results)} bilag er gjennomgått.",
-                    parent=self,
-                )
+                self._show_finish_dialog()
 
     def _save_and_next(self) -> None:
         self._save_current(advance=True)
 
     # ------------------------------------------------------------------
+    # Finish / export
+    # ------------------------------------------------------------------
+
+    def _collect_bilag_data(self) -> list[dict[str, Any]]:
+        """Build a list of bilag dicts for export from dialog state."""
+        bilag_data: list[dict[str, Any]] = []
+        for i, r in enumerate(self._results):
+            df_bilag = _bilag_rows(self._df_all, r.bilag_nr)
+            hb = _extract_hb_values(df_bilag, r.accounting_ref, bilag_nr=r.bilag_nr)
+            pdf = dict(self._pdf_state[i])
+            status = self._status_state[i]
+            avvik = list(self._avvik_state[i])
+            notes = self._notes_state[i]
+            bilag_data.append({
+                "bilag_nr": r.bilag_nr,
+                "status": status,
+                "hb_fields": hb,
+                "pdf_fields": pdf,
+                "avvik": avvik,
+                "notes": notes,
+            })
+        return bilag_data
+
+    def _show_finish_dialog(self) -> None:
+        """Show completion dialog with export options."""
+        n = len(self._results)
+        n_ok = sum(1 for s in self._status_state if s == "ok")
+        n_avvik = sum(1 for s in self._status_state if s == "avvik")
+        n_ikke = sum(1 for s in self._status_state if s == "ikke_funnet")
+
+        win = tk.Toplevel(self)
+        win.title("Bilagskontroll ferdig")
+        win.geometry("420x260")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+
+        frm = ttk.Frame(win, padding=16)
+        frm.pack(fill="both", expand=True)
+
+        ttk.Label(frm, text=f"Alle {n} bilag er gjennomgått.",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(frm, text=f"OK: {n_ok}   Avvik: {n_avvik}   Ikke funnet: {n_ikke}",
+                  foreground="#555").pack(anchor="w", pady=(4, 12))
+
+        ttk.Label(frm, text="Eksporter rapport:").pack(anchor="w", pady=(0, 4))
+
+        btn_frm = ttk.Frame(frm)
+        btn_frm.pack(fill="x", pady=(0, 8))
+
+        def _do_export_excel() -> None:
+            try:
+                from document_control_export import export_to_excel, open_file
+                data = self._collect_bilag_data()
+                path = export_to_excel(
+                    client=self._client or "ukjent",
+                    year=self._year or "ukjent",
+                    bilag_data=data,
+                )
+                open_file(path)
+                self._var_status_bar.set(f"Excel-rapport eksportert: {path}")
+            except Exception as exc:
+                messagebox.showerror("Eksportfeil", str(exc), parent=win)
+
+        def _do_export_html() -> None:
+            try:
+                from document_control_export import export_to_html, open_file
+                data = self._collect_bilag_data()
+                path = export_to_html(
+                    client=self._client or "ukjent",
+                    year=self._year or "ukjent",
+                    bilag_data=data,
+                )
+                open_file(path)
+                self._var_status_bar.set(f"HTML-rapport eksportert: {path}")
+            except Exception as exc:
+                messagebox.showerror("Eksportfeil", str(exc), parent=win)
+
+        def _do_export_both() -> None:
+            _do_export_excel()
+            _do_export_html()
+
+        ttk.Button(btn_frm, text="Excel (.xlsx)", command=_do_export_excel).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_frm, text="HTML (utskrift)", command=_do_export_html).pack(side="left", padx=(0, 6))
+        ttk.Button(btn_frm, text="Begge", command=_do_export_both).pack(side="left")
+
+        ttk.Separator(frm).pack(fill="x", pady=8)
+        ttk.Button(frm, text="Lukk", command=win.destroy).pack(anchor="e")
+
+    # ------------------------------------------------------------------
     # File / re-analysis
     # ------------------------------------------------------------------
+
+    def _toggle_file_bar(self) -> None:
+        if self._file_bar_expanded:
+            self._file_detail.grid_forget()
+            self._file_toggle_btn.configure(text="Dok ►")
+        else:
+            self._file_detail.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+            self._file_toggle_btn.configure(text="Dok ▼")
+        self._file_bar_expanded = not self._file_bar_expanded
 
     def _choose_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -918,7 +1141,14 @@ class DocumentControlReviewDialog(tk.Toplevel):
         # Guard: user may have navigated away during analysis
         if self._current_index != expected_idx:
             return
-        self._field_evidence = dict(analysis.field_evidence or {})
+        # Merge analysis evidence but preserve existing entries that have bbox
+        # (e.g. restored from disk or user-confirmed positions)
+        new_evidence = dict(analysis.field_evidence or {})
+        for key, ev in self._field_evidence.items():
+            ev_bbox = getattr(ev, "bbox", None) if not isinstance(ev, dict) else ev.get("bbox")
+            if ev_bbox is not None:
+                new_evidence[key] = ev
+        self._field_evidence = new_evidence
 
         # Fill empty PDF fields from analysis — but only for bilag that have
         # never been saved (otherwise the user's choices take precedence).
@@ -944,13 +1174,13 @@ class DocumentControlReviewDialog(tk.Toplevel):
             val = self.pdf_vars[key].get().strip()
             hits: list[tuple[int, tuple]] = []
             if val and len(val) >= 2:
-                hits = self._preview.search_all_pages(val)
+                hits = self._sort_hits(self._preview.search_all_pages(val))
             # Fallback: search for raw_value from evidence (e.g. text-month date)
             if not hits:
                 ev = self._field_evidence.get(key)
                 raw = getattr(ev, "raw_value", "") if ev and not isinstance(ev, dict) else ""
                 if raw and raw != val and len(raw) >= 2:
-                    hits = self._preview.search_all_pages(raw)
+                    hits = self._sort_hits(self._preview.search_all_pages(raw))
             self._field_hits[key] = hits
             # Restore persisted hit index if available, else default to 0
             saved_idx = self._hit_idx_state[expected_idx].get(key, 0)
@@ -1013,13 +1243,13 @@ class DocumentControlReviewDialog(tk.Toplevel):
             val = new_state.get(key, "").strip()
             hits_r: list[tuple[int, tuple]] = []
             if val and len(val) >= 2:
-                hits_r = self._preview.search_all_pages(val)
+                hits_r = self._sort_hits(self._preview.search_all_pages(val))
             # Fallback: search for raw_value from evidence (e.g. text-month date)
             if not hits_r:
                 ev = self._field_evidence.get(key)
                 raw = getattr(ev, "raw_value", "") if ev and not isinstance(ev, dict) else ""
                 if raw and raw != val and len(raw) >= 2:
-                    hits_r = self._preview.search_all_pages(raw)
+                    hits_r = self._sort_hits(self._preview.search_all_pages(raw))
             self._field_hits[key] = hits_r
             self._field_hit_index[key] = 0
         self._update_page_labels()

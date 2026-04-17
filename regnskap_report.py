@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import html as _html_escape
 import json
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +16,18 @@ import pandas as pd
 from regnskap_data import (
     RS_STRUCTURE,
     BS_STRUCTURE,
+    BS_EIENDELER,
+    BS_EK_GJELD,
     NOTE_SPECS,
     NOTE_REFS,
     PRINSIPP_DEFAULT,
+    PRINSIPP_DEFAULTS,
     ub_lookup,
     fmt_amount,
     eval_auto_row,
     build_cf_rows,
+    get_notes_for_framework,
+    build_note_numbers,
 )
 
 
@@ -33,37 +37,33 @@ from regnskap_data import (
 
 _CSS = """\
 * { margin:0; padding:0; box-sizing:border-box; }
-@page { size: A4 portrait; margin: 18mm 20mm 18mm 22mm; }
+@page { size: A4 portrait; margin: 20mm 20mm 18mm 24mm; }
 body {
     font-family: "Segoe UI", "Calibri", system-ui, sans-serif;
-    font-size: 10pt;
+    font-size: 11pt;
     color: #1a1a2e;
     background: #f4f6f9;
-    line-height: 1.45;
+    line-height: 1.5;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
 }
-@media print {
-    body { background: white; }
-    .page { box-shadow: none; margin: 0; padding: 0; max-width: none; border-radius: 0; }
-    .no-print { display: none !important; }
-    .page-break { page-break-before: always; }
-}
 .page {
     background: white;
-    max-width: 760px;
+    max-width: 700px;
     margin: 24px auto;
-    padding: 40px 48px;
+    padding: 36px 40px;
     border-radius: 6px;
     box-shadow: 0 1px 6px rgba(0,0,0,0.10);
 }
 /* Cover */
-.cover { display:flex; flex-direction:column; justify-content:center; min-height:70vh; }
-.cover-company { font-size: 26pt; font-weight: 700; color: #1a2e5a; margin-bottom: 10px; }
-.cover-title   { font-size: 18pt; font-weight: 300; color: #4472C4; margin-bottom: 36px; }
-.cover-year    { font-size: 13pt; font-weight: 600; color: #555; margin-bottom: 6px; }
-.cover-date    { font-size: 9pt; color: #888; }
-.cover-line    { border-top: 3px solid #4472C4; margin: 32px 0 32px 0; }
+.cover {
+    display: flex; flex-direction: column; justify-content: center;
+    min-height: 70vh;
+}
+.cover-company { font-size: 28pt; font-weight: 700; color: #1a2e5a; margin-bottom: 12px; }
+.cover-title   { font-size: 20pt; font-weight: 300; color: #4472C4; margin-bottom: 40px; }
+.cover-year    { font-size: 14pt; font-weight: 600; color: #555; margin-bottom: 8px; }
+.cover-line    { border-top: 3px solid #4472C4; margin: 36px 0 36px 0; }
 /* Page header */
 .page-header {
     display: flex;
@@ -71,34 +71,35 @@ body {
     align-items: baseline;
     border-bottom: 2px solid #4472C4;
     padding-bottom: 8px;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
 }
-.page-header-company { font-size: 9pt; color: #888; }
-.page-title { font-size: 14pt; font-weight: 700; color: #1a2e5a; }
+.page-header-company { font-size: 10pt; color: #888; }
+.page-title { font-size: 15pt; font-weight: 700; color: #1a2e5a; }
 /* Statement table */
 .stmt-table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
 }
 .stmt-table th {
-    font-size: 9pt;
+    font-size: 10pt;
     font-weight: 600;
     text-align: right;
-    padding: 5px 8px 5px 4px;
+    padding: 6px 10px 6px 6px;
     color: #4472C4;
     border-bottom: 1.5px solid #4472C4;
 }
 .stmt-table th.lbl { text-align: left; }
+.stmt-table th.note-ref { text-align: center; }
 .stmt-table td {
-    padding: 3px 8px 3px 0;
-    font-size: 10pt;
+    padding: 4px 10px 4px 0;
+    font-size: 11pt;
 }
 .stmt-table td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.stmt-table td.lbl { width: 62%; }
+.stmt-table td.lbl { width: 50%; }
 .stmt-table tr.section-hdr td {
-    font-size: 8.5pt; font-weight: 600; color: #4472C4;
-    padding-top: 10px; padding-bottom: 2px;
+    font-size: 9.5pt; font-weight: 600; color: #4472C4;
+    padding-top: 14px; padding-bottom: 4px;
     border-bottom: none;
     text-transform: uppercase; letter-spacing: 0.4px;
 }
@@ -110,7 +111,7 @@ body {
 }
 .stmt-table tr.major-sum td {
     font-weight: 700;
-    font-size: 10.5pt;
+    font-size: 11.5pt;
     border-top: 1.5px solid #1a2e5a;
     border-bottom: 3px double #1a2e5a;
     background: #e8eef7;
@@ -118,49 +119,108 @@ body {
 .stmt-table tr.normal-row td { border-bottom: 1px solid #eff1f5; }
 .stmt-table tr.normal-row:hover td { background: #fafbfc; }
 /* Note reference column */
-.stmt-table td.note-ref { text-align: center; width: 52px; white-space: nowrap; }
+.stmt-table td.note-ref { text-align: center; width: 56px; white-space: nowrap; }
 .stmt-table td.note-ref a {
-    color: #4472C4; font-weight: 600; font-size: 9pt;
+    color: #4472C4; font-weight: 600; font-size: 9.5pt;
     text-decoration: none; border-bottom: 1px dotted #4472C4;
 }
 .stmt-table td.note-ref a:hover { color: #1a2e5a; }
 /* Column header year badge */
-.col-year { color: #1a2e5a; font-size: 10pt; font-weight: 700; }
+.col-year { color: #1a2e5a; font-size: 11pt; font-weight: 700; }
 /* Note section */
+.note-block { margin-bottom: 10px; }
 .note-title {
-    font-size: 11pt; font-weight: 700; color: #1a2e5a;
-    margin: 24px 0 10px 0;
+    font-size: 12pt; font-weight: 700; color: #1a2e5a;
+    margin: 28px 0 12px 0;
     padding-bottom: 4px;
     border-bottom: 1.5px solid #4472C4;
 }
+.note-title:first-child { margin-top: 0; }
 .note-section-hdr {
-    font-size: 9pt; font-weight: 600; color: #4472C4;
+    font-size: 9.5pt; font-weight: 600; color: #4472C4;
     text-transform: uppercase; letter-spacing: 0.3px;
-    margin: 14px 0 4px 0;
+    margin: 16px 0 6px 0;
 }
 .note-table {
     width: 100%;
     border-collapse: collapse;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 .note-table td {
-    padding: 3px 8px 3px 0;
-    font-size: 10pt;
+    padding: 4px 10px 4px 0;
+    font-size: 11pt;
     border-bottom: 1px solid #f0f2f5;
 }
-.note-table td.lbl { width: 62%; color: #2c3e50; }
+.note-table td.lbl { width: 55%; color: #2c3e50; }
 .note-table td.val { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .note-table td.auto-val { color: #1a56a0; font-weight: 600; text-align: right; }
-.note-text { font-size: 10pt; line-height: 1.6; white-space: pre-wrap; color: #2c3e50; }
-.sep-line { border-top: 1px solid #dde2ea; margin: 10px 0; }
-/* Footer */
+.note-text { font-size: 11pt; line-height: 1.65; white-space: pre-wrap; color: #2c3e50; }
+.sep-line { border-top: 1px solid #dde2ea; margin: 12px 0; }
+/* Signature section — Maestro-inspired compact 3-col layout */
+.sig-section {
+    margin-top: 28px;
+}
+.sig-place-date {
+    font-size: 10.5pt; color: #333;
+    text-align: center;
+    margin-bottom: 4px;
+}
+.sig-board-label {
+    font-size: 10.5pt; color: #333;
+    text-align: center;
+    margin-bottom: 20px;
+}
+.sig-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 24px 32px;
+}
+.sig-item {
+    flex: 0 0 calc(33.333% - 22px);
+    min-width: 140px;
+    text-align: center;
+}
+.sig-line {
+    border-top: 1px solid #1a2e5a;
+    margin-top: 28px;
+    padding-top: 4px;
+}
+.sig-name {
+    font-size: 10.5pt; font-weight: 600; color: #1a2e5a;
+}
+.sig-role {
+    font-size: 9.5pt; color: #666; margin-top: 1px;
+}
+/* Footer — pushed to bottom of page in print */
 .page-footer {
-    margin-top: 32px;
+    margin-top: 36px;
     padding-top: 8px;
     border-top: 1px solid #dde2ea;
-    font-size: 8pt;
+    font-size: 8.5pt;
     color: #aaa;
     text-align: right;
+}
+/* ---- Print overrides (MUST be last to win cascade) ---- */
+@media print {
+    body { background: white; }
+    .page {
+        box-shadow: none; margin: 0; padding: 0;
+        max-width: none; border-radius: 0;
+        display: flex; flex-direction: column;
+        min-height: 100vh;
+    }
+    .page-footer { margin-top: auto; }
+    .cover { min-height: 0; padding-top: 200px; }
+    .no-print { display: none !important; }
+    .page-break { page-break-before: always; }
+    .stmt-table, .note-table { page-break-inside: auto; }
+    .stmt-table tr, .note-table tr { page-break-inside: avoid; }
+    .stmt-table thead { display: table-header-group; }
+    .note-block { page-break-inside: avoid; }
+    .sig-item { page-break-inside: avoid; }
+    .page-header { page-break-after: avoid; }
+    .note-title { page-break-after: avoid; }
 }
 """
 
@@ -180,16 +240,19 @@ def _stmt_table_html(
     year: str,
     year_prev: str,
     has_prev: bool,
+    note_refs: dict[int, tuple[int, str]] | None = None,
 ) -> str:
     prev_th = f'<th class="amt">{_e(year_prev or "Fjorår")}</th>' if has_prev else ""
     total_cols = (3 if has_prev else 2) + 1  # +1 for note column
     html = f'<table class="stmt-table"><thead><tr>'
     html += (f'<th class="lbl"></th>'
+             f'<th class="note-ref" style="font-size:10pt;color:#4472C4">Note</th>'
              f'<th class="amt col-year">{_e(year or "I år")}</th>'
              f'{prev_th}'
-             f'<th style="width:52px;text-align:center;font-size:9pt;color:#4472C4">Note</th>'
              f'</tr></thead><tbody>')
 
+    if note_refs is None:
+        note_refs = NOTE_REFS
     for entry in structure:
         regnr, label, level, is_sum, is_header = entry
         indent = "\u00a0" * (level * 4)
@@ -207,7 +270,7 @@ def _stmt_table_html(
         val_str = fmt_amount(val) if val is not None else "–"
         prev_td = f'<td class="amt">{fmt_amount(val_prev) if val_prev is not None else "–"}</td>' if has_prev else ""
 
-        note_ref = NOTE_REFS.get(regnr)
+        note_ref = note_refs.get(regnr)
         if note_ref:
             note_num, note_id = note_ref
             note_td = (f'<td class="note-ref">'
@@ -219,8 +282,9 @@ def _stmt_table_html(
         html += (
             f'<tr class="{row_class}">'
             f'<td class="lbl">{_e(indent + label)}</td>'
+            f'{note_td}'
             f'<td class="amt">{_e(val_str)}</td>'
-            f'{prev_td}{note_td}</tr>'
+            f'{prev_td}</tr>'
         )
 
     html += "</tbody></table>"
@@ -259,12 +323,14 @@ def _note_html(
     ub: dict[int, float],
     ub_prev: dict[int, float] | None,
 ) -> str:
-    html = f'<h3 class="note-title" id="note_{note_id}">{_e(note_label)}</h3>'
+    html = f'<div class="note-block"><h3 class="note-title" id="note_{note_id}">{_e(note_label)}</h3>'
 
     if spec is None:
-        # Free text (regnskapsprinsipper)
-        tekst = note_data.get("tekst") or PRINSIPP_DEFAULT
-        html += f'<p class="note-text">{_e(tekst)}</p>'
+        # Free text (regnskapsprinsipper or custom)
+        tekst = note_data.get("tekst") or (PRINSIPP_DEFAULT if note_id == "regnskapsprinsipper" else "")
+        if tekst:
+            html += f'<p class="note-text">{_e(tekst)}</p>'
+        html += '</div>'
         return html
 
     html += '<table class="note-table"><tbody>'
@@ -288,7 +354,7 @@ def _note_html(
                 f'<tr><td class="lbl">{_e(row["label"])}</td>'
                 f'<td class="val">{_e(val) if val else "&nbsp;"}</td></tr>'
             )
-    html += "</tbody></table>"
+    html += "</tbody></table></div>"
     return html
 
 
@@ -311,6 +377,10 @@ def build_report_html(
     notes_data: dict[str, dict[str, str]] | None = None,
     client: str = "",
     year: str = "",
+    framework: str = "",
+    custom_notes: list[tuple[str, str]] | None = None,
+    include_cf: bool = True,
+    signatories: list[dict[str, str]] | None = None,
 ) -> str:
     """Bygg komplett HTML-rapport (årsregnskap)."""
     if notes_data is None:
@@ -321,7 +391,12 @@ def build_report_html(
     ub_prev = ub_lookup(rl_df, "UB_fjor") if has_prev else None
     year_prev = str(int(year) - 1) if year and year.isdigit() else ("Fjorår" if has_prev else "")
 
-    today = date.today().strftime("%d.%m.%Y")
+    # Build note list and refs based on framework
+    fw_notes = get_notes_for_framework(framework) if framework else NOTE_SPECS
+    custom = [(nid, lbl, None) for nid, lbl in (custom_notes or [])]
+    all_notes = fw_notes + custom
+    _, note_refs = build_note_numbers(all_notes)
+
     company_e = _e(client or "")
 
     # Cover
@@ -331,7 +406,6 @@ def build_report_html(
         f'<div class="cover-title">Årsregnskap</div>'
         f'<div class="cover-line"></div>'
         f'<div class="cover-year">{_e(year)}</div>'
-        f'<div class="cover-date">Utskriftsdato: {today}</div>'
         f'</div>'
     )
 
@@ -339,22 +413,57 @@ def build_report_html(
     rs_html = (
         f'<div class="page page-break">'
         + _page_header_html(client, "Resultatregnskap")
-        + _stmt_table_html(RS_STRUCTURE, ub, ub_prev, year, year_prev, has_prev)
+        + _stmt_table_html(RS_STRUCTURE, ub, ub_prev, year, year_prev, has_prev,
+                           note_refs=note_refs)
         + f'<div class="page-footer">Alle beløp i NOK</div>'
         f'</div>'
     )
 
-    # Balanse
-    bs_html = (
+    # Balanse + signatur (signatur plasseres rett under balansen)
+    sig_inline = ""
+    if signatories:
+        sig_items = ""
+        for s in signatories:
+            sig_items += (
+                f'<div class="sig-item">'
+                f'<div class="sig-line"></div>'
+                f'<div class="sig-name">{_e(s.get("navn", ""))}</div>'
+                f'<div class="sig-role">{_e(s.get("rolle", ""))}</div>'
+                f'</div>'
+            )
+        place_date = f"__________________, den ____.____.{_e(year)}"
+        board_label = f"Styret i {_e(client)}" if client else ""
+        sig_inline = (
+            f'<div class="sig-section">'
+            f'<p class="sig-place-date">{place_date}</p>'
+            + (f'<p class="sig-board-label">{board_label}</p>' if board_label else "")
+            + f'<div class="sig-grid">{sig_items}</div>'
+            f'</div>'
+        )
+
+    # Balanse side 1: Eiendeler
+    bs_eiendeler_html = (
         f'<div class="page page-break">'
         + _page_header_html(client, "Balanse")
-        + _stmt_table_html(BS_STRUCTURE, ub, ub_prev, year, year_prev, has_prev)
+        + _stmt_table_html(BS_EIENDELER, ub, ub_prev, year, year_prev, has_prev,
+                           note_refs=note_refs)
         + f'<div class="page-footer">Alle beløp i NOK</div>'
         f'</div>'
     )
+    # Balanse side 2: EK + Gjeld + signatur
+    bs_ek_gjeld_html = (
+        f'<div class="page page-break">'
+        + _page_header_html(client, "Balanse")
+        + _stmt_table_html(BS_EK_GJELD, ub, ub_prev, year, year_prev, has_prev,
+                           note_refs=note_refs)
+        + sig_inline
+        + f'<div class="page-footer">Alle beløp i NOK</div>'
+        f'</div>'
+    )
+    bs_html = bs_eiendeler_html + "\n" + bs_ek_gjeld_html
 
     # Kontantstrøm
-    if has_prev:
+    if has_prev and include_cf:
         cf_html = (
             f'<div class="page page-break">'
             + _page_header_html(client, "Kontantstrøm (indirekte metode)")
@@ -365,9 +474,9 @@ def build_report_html(
     else:
         cf_html = ""
 
-    # Noter
+    # Noter — each note wrapped in note-block for page-break-inside:avoid
     notes_html_parts = []
-    for note_id, note_label, spec in NOTE_SPECS:
+    for note_id, note_label, spec in all_notes:
         nd = notes_data.get(note_id) or {}
         notes_html_parts.append(
             _note_html(note_id, note_label, spec, nd, ub, ub_prev)
@@ -406,9 +515,15 @@ def save_report_html(
     notes_data: dict | None = None,
     client: str = "",
     year: str = "",
+    framework: str = "",
+    custom_notes: list[tuple[str, str]] | None = None,
+    include_cf: bool = True,
+    signatories: list[dict[str, str]] | None = None,
 ) -> str:
     """Lagre HTML-rapport til fil og returner filstien."""
-    html = build_report_html(rl_df, notes_data=notes_data, client=client, year=year)
+    html = build_report_html(rl_df, notes_data=notes_data, client=client, year=year,
+                             framework=framework, custom_notes=custom_notes,
+                             include_cf=include_cf, signatories=signatories)
     out = Path(path)
     out.write_text(html, encoding="utf-8")
     return str(out)
@@ -421,10 +536,16 @@ def save_report_pdf(
     notes_data: dict | None = None,
     client: str = "",
     year: str = "",
+    framework: str = "",
+    custom_notes: list[tuple[str, str]] | None = None,
+    include_cf: bool = True,
+    signatories: list[dict[str, str]] | None = None,
 ) -> str:
     """Lagre PDF-rapport via playwright og returner filstien."""
     import tempfile
-    html = build_report_html(rl_df, notes_data=notes_data, client=client, year=year)
+    html = build_report_html(rl_df, notes_data=notes_data, client=client, year=year,
+                             framework=framework, custom_notes=custom_notes,
+                             include_cf=include_cf, signatories=signatories)
 
     with tempfile.NamedTemporaryFile(suffix=".html", mode="w", encoding="utf-8",
                                      delete=False) as tmp:
@@ -442,7 +563,7 @@ def save_report_pdf(
             page.pdf(
                 path=str(out),
                 format="A4",
-                margin={"top": "18mm", "bottom": "18mm", "left": "22mm", "right": "20mm"},
+                margin={"top": "15mm", "bottom": "15mm", "left": "18mm", "right": "15mm"},
                 print_background=True,
             )
             browser.close()
@@ -463,6 +584,10 @@ def save_report_excel(
     notes_data: dict | None = None,
     client: str = "",
     year: str = "",
+    framework: str = "",
+    custom_notes: list[tuple[str, str]] | None = None,
+    include_cf: bool = True,
+    signatories: list[dict[str, str]] | None = None,
 ) -> str:
     """Lagre profesjonelt Excel-årsregnskap og returner filstien."""
     from openpyxl import Workbook
@@ -478,6 +603,12 @@ def save_report_excel(
     has_prev = "UB_fjor" in rl_df.columns
     ub_prev = ub_lookup(rl_df, "UB_fjor") if has_prev else None
     year_prev = str(int(year) - 1) if year and year.isdigit() else ("Fjorår" if has_prev else "")
+
+    # Resolve notes for framework
+    fw_notes = get_notes_for_framework(framework) if framework else NOTE_SPECS
+    custom = [(nid, lbl, None) for nid, lbl in (custom_notes or [])]
+    all_notes = fw_notes + custom
+    _, xl_note_refs = build_note_numbers(all_notes)
 
     # --- Style helpers ---
     DARK_BLUE  = "1A2E5A"
@@ -605,7 +736,7 @@ def save_report_excel(
                 prev_cell.alignment = Alignment(horizontal="right")
 
             # Note reference column (D)
-            note_ref = NOTE_REFS.get(regnr)
+            note_ref = xl_note_refs.get(regnr)
             note_cell = ws.cell(row=row, column=4,
                                 value=f"Note {note_ref[0]}" if note_ref else "")
             note_cell.font = _font(bold=False, size=9,
@@ -707,8 +838,8 @@ def save_report_excel(
     r = _write_stmt_header(ws_bs, "Balanse", 1)
     _write_stmt_rows(ws_bs, BS_STRUCTURE, r)
 
-    # CF sheet (only if prev year data)
-    if has_prev and ub_prev:
+    # CF sheet (only if prev year data and enabled)
+    if has_prev and ub_prev and include_cf:
         ws_cf = wb.create_sheet("Kontantstrøm")
         ws_cf.sheet_view.showGridLines = False
         ws_cf.column_dimensions["A"].width = 46
@@ -747,7 +878,7 @@ def save_report_excel(
                 row += 1
 
     # Note sheets
-    for note_id, note_label, spec in NOTE_SPECS:
+    for note_id, note_label, spec in all_notes:
         ws_note = wb.create_sheet()
         _write_note_sheet(ws_note, note_id, note_label, spec)
 

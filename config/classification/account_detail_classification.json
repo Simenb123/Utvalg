@@ -1,0 +1,157 @@
+{
+  "classes": [
+    {
+      "id": "skyldig_mva",
+      "navn": "Skyldig MVA",
+      "kategori": "forpliktelse",
+      "kontointervall": [
+        "2700-2770"
+      ],
+      "aliaser": [
+        "skyldig mva",
+        "utgående merverdiavgift",
+        "mva oppgjør",
+        "mva",
+        "oppgjørskonto merverdiavgift",
+        "merverdiavift",
+        "skyldig merverdiavgift",
+        "Utgående merverdiavgift, høy sats",
+        "Utgående merverdiavgift kjøp av tjenester fra utlandet",
+        "Utgående merverdiavgift innførsel, høy sats",
+        "Inngående merverdiavgift, høy sats",
+        "Inngående merverdiavgift, lav sats"
+      ],
+      "ekskluder_aliaser": [
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "påløpt aga",
+        "påløpt arbeidsgiveravgift",
+        "arbeidsgiveravgift",
+        "aga"
+      ],
+      "aktiv": true,
+      "sortering": 10
+    },
+    {
+      "id": "skyldig_forskuddstrekk",
+      "navn": "Skyldig forskuddstrekk",
+      "kategori": "forpliktelse",
+      "kontointervall": [
+        "2600-2619"
+      ],
+      "aliaser": [
+        "forskuddstrekk",
+        "skyldig skattetrekk",
+        "skyldig forskuddstrekk"
+      ],
+      "ekskluder_aliaser": [
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "påløpt aga",
+        "påløpt arbeidsgiveravgift",
+        "arbeidsgiveravgift",
+        "aga",
+        "feriepenger",
+        "skyldig feriepenger"
+      ],
+      "aktiv": true,
+      "sortering": 20
+    },
+    {
+      "id": "kostnadsfoert_arbeidsgiveravgift",
+      "navn": "Kostnadsført arbeidsgiveravgift",
+      "kategori": "kostnad",
+      "kontointervall": [
+        "5400-5499"
+      ],
+      "aliaser": [
+        "Kostnadsført arbeidsgiveravgift",
+        "kostnadsført aga",
+        "aga",
+        "påløpt aga"
+      ],
+      "ekskluder_aliaser": [
+        "skyldig aga",
+        "lønnn",
+        "naturalytelser",
+        "annet",
+        "feriepenger"
+      ],
+      "aktiv": true,
+      "sortering": 25
+    },
+    {
+      "id": "skyldig_arbeidsgiveravgift",
+      "navn": "Skyldig arbeidsgiveravgift",
+      "kategori": "forpliktelse",
+      "kontointervall": [
+        "2770-2779"
+      ],
+      "aliaser": [
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "påløpt aga",
+        "påløpt arbeidsgiveravgift",
+        "arbeidsgiveravgift",
+        "aga"
+      ],
+      "ekskluder_aliaser": [
+        "feriepenger",
+        "skyldig feriepenger",
+        "mva",
+        "oppgjørskonto merverdiavgift",
+        "merverdiavift",
+        "skyldig merverdiavgift"
+      ],
+      "aktiv": true,
+      "sortering": 30
+    },
+    {
+      "id": "skyldig_feriepenger",
+      "navn": "Skyldig feriepenger",
+      "kategori": "forpliktelse",
+      "kontointervall": [
+        "2940-2949"
+      ],
+      "aliaser": [
+        "skyldig feriepenger",
+        "avsatte feriepenger",
+        "avsatt feriepenger"
+      ],
+      "ekskluder_aliaser": [
+        "mva",
+        "oppgjørskonto merverdiavgift",
+        "merverdiavift",
+        "skyldig merverdiavgift"
+      ],
+      "aktiv": true,
+      "sortering": 40
+    },
+    {
+      "id": "skyldig_arbeidsgiveravgift_feriepenger",
+      "navn": "Skyldig arbeidsgiveravgift av feriepenger",
+      "kategori": "forpliktelse",
+      "kontointervall": [
+        "2780-2789"
+      ],
+      "aliaser": [
+        "arbeidsgiveravgift av feriepenger",
+        "arbeidsgiveravgift av påløpte feriepenger",
+        "aga feriepenger",
+        "Påløpt arbeidsgiveravgift på ferielønn",
+        "skyldig arbeidsgiveravgift på ferielønn",
+        "skyldig arbeidsgiveravgift på feriepenger",
+        "Påløpt arbeidsgiveravgift på feriepenger"
+      ],
+      "ekskluder_aliaser": [
+        "mva",
+        "oppgjørskonto merverdiavgift",
+        "merverdiavift",
+        "skyldig merverdiavgift",
+        "forskuddstrekk"
+      ],
+      "aktiv": true,
+      "sortering": 50
+    }
+  ]
+}

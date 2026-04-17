@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from consolidation.models import (
+    AssociateCase,
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -41,6 +42,14 @@ class TestProjectSaveLoad:
                 CompanyTB(company_id="c1", name="Mor AS", source_file="mor.xlsx",
                           source_type="excel", row_count=42, has_ib=True),
             ],
+            associate_cases=[
+                AssociateCase(
+                    case_id="assoc1",
+                    name="Tilknyttet AS",
+                    investor_company_id="c1",
+                    ownership_pct=35.0,
+                )
+            ],
             mapping_config=MappingConfig(company_overrides={"c1": {"1920": 1900}}),
             eliminations=[
                 EliminationJournal(
@@ -63,6 +72,7 @@ class TestProjectSaveLoad:
         assert loaded.client == "TestKlient"
         assert len(loaded.companies) == 1
         assert loaded.companies[0].name == "Mor AS"
+        assert loaded.associate_cases[0].name == "Tilknyttet AS"
         assert loaded.mapping_config.company_overrides == {"c1": {"1920": 1900}}
         assert len(loaded.eliminations) == 1
         assert loaded.eliminations[0].is_balanced
@@ -75,7 +85,7 @@ class TestProjectSaveLoad:
         proj = ConsolidationProject(client="JsonTest", year="2025")
         path = storage.save_project(proj)
         raw = json.loads(path.read_text(encoding="utf-8"))
-        assert raw["schema_version"] == 2
+        assert raw["schema_version"] == 4
         assert raw["client"] == "JsonTest"
 
     def test_delete_project(self, _mock_years_dir):
@@ -146,6 +156,35 @@ class TestCompanyTBParquet:
         assert storage.delete_company_tb("Del", "2025", "c1") is True
         assert storage.load_company_tb("Del", "2025", "c1") is None
         assert storage.delete_company_tb("Del", "2025", "c1") is False
+
+    def test_save_and_load_line_basis(self, _mock_years_dir):
+        df = pd.DataFrame({
+            "regnr": [10, 11],
+            "regnskapslinje": ["Eiendeler", "Inntekter"],
+            "ub": [150.0, -200.0],
+            "source_regnskapslinje": ["Bank", "Salg"],
+            "review_status": ["approved", "approved"],
+        })
+        path = storage.save_company_line_basis("TestKlient", "2025", "c1", df)
+        assert path.exists()
+        assert path.name.endswith(".regnskapslinjer.csv")
+
+        loaded = storage.load_company_line_basis("TestKlient", "2025", "c1")
+        assert loaded is not None
+        assert list(loaded.columns)[:3] == ["regnr", "regnskapslinje", "ub"]
+        assert int(loaded.iloc[0]["regnr"]) == 10
+        assert loaded.iloc[1]["review_status"] == "approved"
+
+    def test_delete_company_line_basis(self, _mock_years_dir):
+        df = pd.DataFrame({
+            "regnr": [10],
+            "regnskapslinje": ["Eiendeler"],
+            "ub": [100.0],
+        })
+        storage.save_company_line_basis("Del", "2025", "c1", df)
+        assert storage.delete_company_line_basis("Del", "2025", "c1") is True
+        assert storage.load_company_line_basis("Del", "2025", "c1") is None
+        assert storage.delete_company_line_basis("Del", "2025", "c1") is False
 
 
 class TestProjectDir:

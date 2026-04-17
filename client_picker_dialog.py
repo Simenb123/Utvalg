@@ -15,107 +15,171 @@ class _PickerState:
 def open_client_picker(
     parent: tk.Misc,
     clients: list[str],
+    *,
+    client_meta: dict[str, dict] | None = None,
     initial_query: str = "",
     initial_selection: str | None = None,
     title: str = "Velg klient",
+    show_mine_filter: bool = True,
 ) -> Optional[str]:
-    """Åpne en liten dialog for å søke/velge klient.
+    """Åpne en søkbar dialog for å velge klient.
 
-    - Dialogen starter alltid med tomt søkefelt (for å unngå "låst" søk på valgt klient).
-    - Hvis initial_selection er satt, forhåndsmarkeres den i lista.
+    Viser multi-kolonne Treeview med Klient, Org.nr, Knr, Ansvarlig, Manager.
+    Søk matcher på tvers av navn, orgnr og Knr.
 
     Returnerer valgt klient (display-navn) eller None ved avbryt.
     """
 
-    # Bakoverkompatibilitet: hvis noen fortsatt sender initial_query med forventning om
-    # "start på denne klienten", bruk den som initial_selection.
     if initial_selection is None:
         sel = str(initial_query or "").strip()
         initial_selection = sel or None
 
-    # Kopi + sortér én gang (case-insensitivt)
+    meta = client_meta or {}
+
+    # Sortér case-insensitivt
     all_clients = sorted([c for c in clients if c], key=lambda s: s.lower())
+
+    # Bygg søkbar strengliste for rask filtrering
+    search_index: dict[str, str] = {}
+    for c in all_clients:
+        m = meta.get(c, {})
+        search_index[c] = " ".join([
+            c.lower(),
+            (m.get("org_number") or "").lower(),
+            (m.get("client_number") or "").lower(),
+        ])
+
+    # "Mine klienter"-filter
+    my_clients_set: set[str] | None = None
+    if show_mine_filter:
+        try:
+            import team_config
+            from client_store_enrich import is_my_client
+            user = team_config.current_user()
+            if user:
+                my_clients_set = set()
+                for c in all_clients:
+                    m = meta.get(c, {})
+                    if is_my_client(m, user.visena_initials, user.full_name):
+                        my_clients_set.add(c)
+        except Exception:
+            my_clients_set = None
 
     win = tk.Toplevel(parent)
     win.title(title)
     win.transient(parent)
     win.grab_set()
     win.resizable(True, True)
-    win.geometry("720x480")
+    win.geometry("860x520")
 
     st = _PickerState(result=None)
 
     frm = ttk.Frame(win, padding=10)
     frm.pack(fill="both", expand=True)
 
-    ttk.Label(frm, text="Søk (klientnr / navn):").pack(anchor="w")
+    # --- Søkerad ---
+    search_row = ttk.Frame(frm)
+    search_row.pack(fill="x")
 
-    # Viktig: Start alltid blankt søkefelt.
+    ttk.Label(search_row, text="Søk (navn / orgnr / Knr):").pack(side="left")
+
     query_var = tk.StringVar(value="")
-    ent = ttk.Entry(frm, textvariable=query_var)
-    ent.pack(fill="x", pady=(0, 8))
+    ent = ttk.Entry(search_row, textvariable=query_var)
+    ent.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
-    # Liste + scrollbar
-    list_frame = ttk.Frame(frm)
-    list_frame.pack(fill="both", expand=True)
+    mine_var = tk.BooleanVar(value=False)
+    if show_mine_filter and my_clients_set is not None:
+        ttk.Checkbutton(search_row, text="Mine klienter", variable=mine_var).pack(
+            side="right", padx=(8, 0))
 
-    yscroll = ttk.Scrollbar(list_frame, orient="vertical")
+    # --- Treeview ---
+    tree_frame = ttk.Frame(frm)
+    tree_frame.pack(fill="both", expand=True, pady=(8, 0))
+
+    cols = ("klient", "orgnr", "knr", "ansvarlig", "manager")
+    tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse")
+
+    tree.heading("klient", text="Klient")
+    tree.heading("orgnr", text="Org.nr")
+    tree.heading("knr", text="Knr")
+    tree.heading("ansvarlig", text="Ansvarlig")
+    tree.heading("manager", text="Manager")
+
+    tree.column("klient", width=300, stretch=True)
+    tree.column("orgnr", width=100, stretch=False)
+    tree.column("knr", width=70, stretch=False)
+    tree.column("ansvarlig", width=80, stretch=False)
+    tree.column("manager", width=160, stretch=True)
+
+    yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=yscroll.set)
+
+    tree.pack(side="left", fill="both", expand=True)
     yscroll.pack(side="right", fill="y")
 
-    listbox = tk.Listbox(
-        list_frame,
-        activestyle="dotbox",
-        selectmode="browse",
-        yscrollcommand=yscroll.set,
-    )
-    listbox.pack(side="left", fill="both", expand=True)
-    yscroll.config(command=listbox.yview)
+    # Sortering
+    try:
+        from ui_treeview_sort import enable_treeview_sorting
+        enable_treeview_sorting(tree)
+    except Exception:
+        pass
 
+    # --- Statuslinje ---
     lbl_count = ttk.Label(frm, text="")
     lbl_count.pack(anchor="w", pady=(6, 0))
 
+    # --- Hjelpefunksjoner ---
+
     def get_selected() -> str:
-        try:
-            idx = int(listbox.curselection()[0])
-        except Exception:
+        sel = tree.selection()
+        if not sel:
             return ""
         try:
-            return str(listbox.get(idx))
+            return str(tree.item(sel[0], "values")[0])
         except Exception:
             return ""
 
-    def fill_list(items: list[str], select_value: str | None = None) -> None:
-        listbox.delete(0, tk.END)
+    def fill_tree(items: list[str], select_value: str | None = None) -> None:
+        tree.delete(*tree.get_children())
+
         for c in items:
-            listbox.insert(tk.END, c)
+            m = meta.get(c, {})
+            tree.insert("", "end", iid=c, values=(
+                c,
+                m.get("org_number", ""),
+                m.get("client_number", ""),
+                m.get("responsible", ""),
+                m.get("manager", ""),
+            ))
 
         lbl_count.configure(text=f"Viser {len(items)} av {len(all_clients)} klienter")
 
         if not items:
             return
 
-        # Finn index for ønsket forhåndsvalg (hvis det finnes i filtrert liste)
-        idx = 0
-        if select_value:
-            try:
-                idx = items.index(select_value)
-            except ValueError:
-                idx = 0
-
-        listbox.selection_clear(0, tk.END)
-        listbox.selection_set(idx)
-        listbox.activate(idx)
-        listbox.see(idx)
+        # Forhåndsvelg
+        target = select_value or (items[0] if items else None)
+        if target and tree.exists(target):
+            tree.selection_set(target)
+            tree.focus(target)
+            tree.see(target)
 
     def apply_filter() -> None:
         q = str(query_var.get() or "").strip().lower()
-        if not q:
-            filtered = all_clients
-        else:
-            filtered = [c for c in all_clients if q in c.lower()]
-        # Ved filtering: behold valgt klient hvis den fortsatt er synlig
+        only_mine = mine_var.get()
+
+        filtered = []
+        for c in all_clients:
+            if only_mine and my_clients_set is not None and c not in my_clients_set:
+                continue
+            if q and q not in search_index.get(c, c.lower()):
+                continue
+            filtered.append(c)
+
         cur = get_selected() or initial_selection
-        fill_list(filtered, select_value=cur)
+        fill_tree(filtered, select_value=cur)
+
+    # --- Callbacks ---
 
     def on_ok() -> None:
         sel = get_selected()
@@ -127,7 +191,7 @@ def open_client_picker(
         st.result = None
         win.destroy()
 
-    def on_double_click(event: tk.Event) -> None:  # noqa: ARG001
+    def on_double_click(event: tk.Event) -> None:
         on_ok()
 
     def on_delete_client() -> None:
@@ -135,7 +199,6 @@ def open_client_picker(
         if not sel:
             return
 
-        # Sikker "soft delete": arkiver til _deleted_clients
         msg = (
             f"Vil du slette klienten '{sel}'?\n\n"
             "Dette vil *arkivere* klientmappen (inkl. versjoner) ved å flytte den til\n"
@@ -146,63 +209,59 @@ def open_client_picker(
 
         try:
             import client_store
-
             deleted_to = client_store.delete_client(sel)
         except Exception as e:
-            messagebox.showerror(
-                "Slett klient",
-                f"Kunne ikke slette klienten '{sel}'.\n\n{e}",
-                parent=win,
-            )
+            messagebox.showerror("Slett klient", f"Kunne ikke slette '{sel}'.\n\n{e}", parent=win)
             return
 
-        # Oppdater intern liste og UI
         try:
             all_clients.remove(sel)
         except ValueError:
             pass
 
-        # Etter sletting: blankt søk og oppdatert liste
         query_var.set("")
-        fill_list(all_clients)
+        fill_tree(all_clients)
 
-        messagebox.showinfo(
-            "Slett klient",
-            f"Klienten '{sel}' ble arkivert til:\n{deleted_to}",
-            parent=win,
-        )
+        messagebox.showinfo("Slett klient", f"'{sel}' ble arkivert til:\n{deleted_to}", parent=win)
 
-    def on_search_down(event: tk.Event) -> str:  # noqa: ARG001
-        """↓ i søkefeltet → flytt fokus til listbox."""
-        if listbox.size() > 0:
-            cur = listbox.curselection()
-            idx = (cur[0] + 1) if cur and cur[0] + 1 < listbox.size() else (cur[0] if cur else 0)
-            listbox.selection_clear(0, tk.END)
-            listbox.selection_set(idx)
-            listbox.activate(idx)
-            listbox.see(idx)
-            listbox.focus_set()
+    def on_search_down(event: tk.Event) -> str:
+        """↓ i søkefeltet → flytt fokus til Treeview."""
+        children = tree.get_children()
+        if children:
+            cur = tree.selection()
+            if cur:
+                idx = list(children).index(cur[0])
+                next_idx = min(idx + 1, len(children) - 1)
+            else:
+                next_idx = 0
+            target = children[next_idx]
+            tree.selection_set(target)
+            tree.focus(target)
+            tree.see(target)
+            tree.focus_set()
         return "break"
 
-    def on_listbox_up(event: tk.Event) -> str | None:  # noqa: ARG001
-        """↑ øverst i listbox → flytt fokus tilbake til søkefeltet."""
-        cur = listbox.curselection()
-        if not cur or cur[0] == 0:
+    def on_tree_up(event: tk.Event) -> str | None:
+        """↑ øverst i Treeview → flytt fokus til søkefeltet."""
+        children = tree.get_children()
+        cur = tree.selection()
+        if not cur or (children and cur[0] == children[0]):
             ent.focus_set()
             ent.icursor(tk.END)
             return "break"
         return None
 
-    # Bindinger
+    # --- Bindings ---
     query_var.trace_add("write", lambda *_: apply_filter())
+    mine_var.trace_add("write", lambda *_: apply_filter())
     ent.bind("<Down>", on_search_down)
-    listbox.bind("<Up>", on_listbox_up)
-    listbox.bind("<Double-Button-1>", on_double_click)
+    tree.bind("<Up>", on_tree_up)
+    tree.bind("<Double-Button-1>", on_double_click)
     win.bind("<Return>", lambda *_: on_ok())
     win.bind("<Escape>", lambda *_: on_cancel())
     win.bind("<Delete>", lambda *_: on_delete_client())
 
-    # Knapper
+    # --- Knapper ---
     bottom = ttk.Frame(frm)
     bottom.pack(fill="x", pady=(10, 0))
 
@@ -215,11 +274,9 @@ def open_client_picker(
     btn_cancel = ttk.Button(bottom, text="Avbryt", command=on_cancel)
     btn_cancel.pack(side="right")
 
-    # Initial fyll + initial selection
-    fill_list(all_clients, select_value=initial_selection)
+    # --- Initial fyll ---
+    fill_tree(all_clients, select_value=initial_selection)
 
     ent.focus_set()
-
-    # Vent til lukket
     win.wait_window()
     return st.result

@@ -62,12 +62,25 @@ BS_STRUCTURE: list[tuple] = [
     (770,   "Sum langsiktig gjeld",                      2, True,  False),
     (None,  "Kortsiktig gjeld",                         1, False, True),
     (780,   "Leverandørgjeld",                           2, False, False),
+    (785,   "Betalbar skatt",                             2, False, False),
     (800,   "Skattetrekk og offentlige avgifter",        2, False, False),
+    (803,   "Annen kortsiktig gjeld",                     2, False, False),
     (805,   "Utbytte",                                   2, False, False),
     (810,   "Sum kortsiktig gjeld",                      2, True,  False),
     (820,   "Sum gjeld",                                 1, True,  False),
     (830,   "SUM EGENKAPITAL OG GJELD",                  0, True,  False),
 ]
+
+# Balanse splittet i to sider for PDF-eksport
+BS_EIENDELER: list[tuple] = [row for row in BS_STRUCTURE
+                              if row[0] != 830 or row[1] != "SUM EGENKAPITAL OG GJELD"]
+BS_EIENDELER = BS_STRUCTURE[:BS_STRUCTURE.index(
+    (665, "SUM EIENDELER", 0, True, False)
+) + 1]
+
+BS_EK_GJELD: list[tuple] = BS_STRUCTURE[BS_STRUCTURE.index(
+    (None, "EGENKAPITAL OG GJELD", 0, False, True)
+):]
 
 # ---------------------------------------------------------------------------
 # Note-spec format
@@ -154,46 +167,225 @@ SKATT_SPEC: list[dict] = [
     {"type": "field",  "label": "Utsatt skattefordel (22 %)",         "key": "utsatt_fordel",        "default": ""},
 ]
 
-PRINSIPP_DEFAULT = (
-    "Årsregnskapet er satt opp i samsvar med regnskapslovens bestemmelser "
-    "og god regnskapsskikk for små foretak.\n\n"
-    "Inntektsføring\n"
-    "Inntekter resultatføres etter opptjeningsprinsippet.\n\n"
-    "Klassifisering og vurdering av balanseposter\n"
-    "Omløpsmidler og kortsiktig gjeld omfatter poster som forfaller til "
-    "betaling innen ett år etter balansedagen, samt poster som knytter seg "
-    "til varekretsløpet.\n\n"
-    "Fordringer\n"
-    "Kundefordringer og andre fordringer er oppført til pålydende etter "
-    "fradrag for avsetning til forventet tap.\n\n"
-    "Varige driftsmidler\n"
-    "Varige driftsmidler balanseføres og avskrives lineært over driftsmidlets "
-    "forventede levetid. Direkte vedlikehold av driftsmidler kostnadsføres "
-    "løpende.\n\n"
-    "Skatter\n"
-    "Skattekostnaden i resultatregnskapet omfatter periodens betalbare skatt "
-    "og endring i utsatt skatt. Utsatt skatt er beregnet med 22 % på grunnlag "
-    "av de midlertidige forskjeller som eksisterer mellom regnskapsmessige og "
-    "skattemessige verdier."
-)
+# ---------------------------------------------------------------------------
+# Finansielt rammeverk
+# ---------------------------------------------------------------------------
 
-# Ordered note registry: (note_id, display_label, spec | None)
-# spec=None → renders as free-text (regnskapsprinsipper)
-NOTE_SPECS: list[tuple[str, str, list | None]] = [
+FRAMEWORK_CHOICES: list[str] = [
+    "NGAAP — små foretak",
+    "NGAAP — mellomstore foretak",
+    "NGAAP — store foretak",
+]
+
+PRINSIPP_DEFAULTS: dict[str, str] = {
+    "NGAAP — små foretak": (
+        "Årsregnskapet er satt opp i samsvar med regnskapslovens bestemmelser "
+        "og god regnskapsskikk for små foretak.\n\n"
+        "Inntektsføring\n"
+        "Inntekter resultatføres etter opptjeningsprinsippet.\n\n"
+        "Klassifisering og vurdering av balanseposter\n"
+        "Omløpsmidler og kortsiktig gjeld omfatter poster som forfaller til "
+        "betaling innen ett år etter balansedagen, samt poster som knytter seg "
+        "til varekretsløpet.\n\n"
+        "Fordringer\n"
+        "Kundefordringer og andre fordringer er oppført til pålydende etter "
+        "fradrag for avsetning til forventet tap.\n\n"
+        "Varige driftsmidler\n"
+        "Varige driftsmidler balanseføres og avskrives lineært over driftsmidlets "
+        "forventede levetid. Direkte vedlikehold av driftsmidler kostnadsføres "
+        "løpende.\n\n"
+        "Skatter\n"
+        "Skattekostnaden i resultatregnskapet omfatter periodens betalbare skatt "
+        "og endring i utsatt skatt. Utsatt skatt er beregnet med 22 % på grunnlag "
+        "av de midlertidige forskjeller som eksisterer mellom regnskapsmessige og "
+        "skattemessige verdier."
+    ),
+    "NGAAP — mellomstore foretak": (
+        "Årsregnskapet er avlagt i samsvar med regnskapsloven og god "
+        "regnskapsskikk for mellomstore foretak i Norge.\n\n"
+        "Inntektsføring\n"
+        "Inntekter resultatføres etter opptjeningsprinsippet. Tjenestesalg "
+        "inntektsføres i takt med utførelsen.\n\n"
+        "Klassifisering og vurdering av balanseposter\n"
+        "Omløpsmidler og kortsiktig gjeld omfatter poster som forfaller til "
+        "betaling innen ett år etter balansedagen, samt poster som knytter seg "
+        "til varekretsløpet. Øvrige poster er klassifisert som anleggsmiddel/"
+        "langsiktig gjeld.\n\n"
+        "Omløpsmidler vurderes til laveste av anskaffelseskost og virkelig verdi. "
+        "Anleggsmidler vurderes til anskaffelseskost med fradrag for planmessige "
+        "avskrivninger og nedskrivninger.\n\n"
+        "Fordringer\n"
+        "Kundefordringer og andre fordringer er oppført til pålydende etter "
+        "fradrag for avsetning til forventet tap. Avsetning vurderes individuelt.\n\n"
+        "Varige driftsmidler\n"
+        "Varige driftsmidler balanseføres og avskrives lineært over driftsmidlets "
+        "forventede levetid. Direkte vedlikehold kostnadsføres løpende, "
+        "mens påkostninger aktiveres.\n\n"
+        "Skatter\n"
+        "Skattekostnaden i resultatregnskapet omfatter periodens betalbare skatt "
+        "og endring i utsatt skatt. Utsatt skatt er beregnet med 22 % på grunnlag "
+        "av de midlertidige forskjeller som eksisterer mellom regnskapsmessige og "
+        "skattemessige verdier. Utsatt skattefordel balanseføres når det er "
+        "sannsynlig at den kan utnyttes.\n\n"
+        "Kontantstrøm\n"
+        "Kontantstrømoppstillingen er utarbeidet etter den indirekte metoden."
+    ),
+    "NGAAP — store foretak": (
+        "Årsregnskapet er avlagt i samsvar med regnskapsloven og god "
+        "regnskapsskikk for store foretak i Norge.\n\n"
+        "Inntektsføring\n"
+        "Inntekter resultatføres etter opptjeningsprinsippet. Tjenestesalg "
+        "inntektsføres i takt med utførelsen.\n\n"
+        "Klassifisering og vurdering av balanseposter\n"
+        "Omløpsmidler og kortsiktig gjeld omfatter poster som forfaller til "
+        "betaling innen ett år etter balansedagen, samt poster som knytter seg "
+        "til varekretsløpet. Øvrige poster er klassifisert som anleggsmiddel/"
+        "langsiktig gjeld.\n\n"
+        "Omløpsmidler vurderes til laveste av anskaffelseskost og virkelig verdi. "
+        "Anleggsmidler vurderes til anskaffelseskost med fradrag for planmessige "
+        "avskrivninger og nedskrivninger.\n\n"
+        "Fordringer\n"
+        "Kundefordringer og andre fordringer er oppført til pålydende etter "
+        "fradrag for avsetning til forventet tap. Avsetning vurderes individuelt.\n\n"
+        "Varige driftsmidler\n"
+        "Varige driftsmidler balanseføres og avskrives lineært over driftsmidlets "
+        "forventede levetid. Direkte vedlikehold kostnadsføres løpende, "
+        "mens påkostninger aktiveres.\n\n"
+        "Immaterielle eiendeler\n"
+        "Utgifter til forskning kostnadsføres løpende. Utgifter til utvikling "
+        "balanseføres i den grad det kan identifiseres en fremtidig økonomisk "
+        "fordel knyttet til utviklingen av en identifiserbar immateriell "
+        "eiendel, og utgiftene kan måles pålitelig.\n\n"
+        "Pensjoner\n"
+        "Selskapet har pensjonsordning som behandles som en innskuddsordning. "
+        "Pensjonskostnaden innregnes i resultatregnskapet i den perioden den "
+        "påløper.\n\n"
+        "Skatter\n"
+        "Skattekostnaden i resultatregnskapet omfatter periodens betalbare skatt "
+        "og endring i utsatt skatt. Utsatt skatt er beregnet med 22 % på grunnlag "
+        "av de midlertidige forskjeller som eksisterer mellom regnskapsmessige og "
+        "skattemessige verdier. Utsatt skattefordel balanseføres når det er "
+        "sannsynlig at den kan utnyttes.\n\n"
+        "Kontantstrøm\n"
+        "Kontantstrømoppstillingen er utarbeidet etter den indirekte metoden."
+    ),
+}
+
+# Backwards compat alias
+PRINSIPP_DEFAULT = PRINSIPP_DEFAULTS["NGAAP — små foretak"]
+
+# ---------------------------------------------------------------------------
+# Tilleggsnote-specs for mellomstore/store foretak
+# ---------------------------------------------------------------------------
+
+PENSJON_SPEC: list[dict] = [
+    {"type": "header", "label": "Pensjonsforpliktelser"},
+    {"type": "field",  "label": "Innskuddsbasert pensjonskostnad",    "key": "pensjon_innskudd",  "default": ""},
+    {"type": "field",  "label": "Ytelsesbasert pensjonskostnad",      "key": "pensjon_ytelse",    "default": ""},
+    {"type": "field",  "label": "Netto pensjonsforpliktelse",         "key": "pensjon_netto",     "default": ""},
+    {"type": "field",  "label": "Antall personer i ordningen",        "key": "pensjon_antall",    "default": ""},
+]
+
+DRIFTSMIDLER_SPEC: list[dict] = [
+    {"type": "header", "label": "Varige driftsmidler"},
+    {"type": "field",  "label": "Anskaffelseskost 01.01",             "key": "dm_akk_01",     "default": ""},
+    {"type": "field",  "label": "+ Tilgang i år",                     "key": "dm_tilgang",    "default": ""},
+    {"type": "field",  "label": "- Avgang i år",                      "key": "dm_avgang",     "default": ""},
+    {"type": "field",  "label": "Anskaffelseskost 31.12",             "key": "dm_akk_31",     "default": ""},
+    {"type": "sep"},
+    {"type": "field",  "label": "Akkumulerte avskrivninger 01.01",    "key": "dm_avskr_01",   "default": ""},
+    {"type": "field",  "label": "Årets avskrivninger",                "key": "dm_avskr_aar",  "default": ""},
+    {"type": "field",  "label": "Akkumulerte avskrivninger 31.12",    "key": "dm_avskr_31",   "default": ""},
+    {"type": "sep"},
+    {"type": "auto",   "label": "Bokført verdi 31.12",               "regnr": 555, "period": "current"},
+    {"type": "field",  "label": "Avskrivningsplan",                   "key": "dm_plan",       "default": "Lineær"},
+    {"type": "field",  "label": "Økonomisk levetid (år)",             "key": "dm_levetid",    "default": ""},
+]
+
+BUNDNE_MIDLER_SPEC: list[dict] = [
+    {"type": "header", "label": "Bundne midler"},
+    {"type": "field",  "label": "Skattetrekksmidler",                 "key": "bundne_skatt",   "default": ""},
+    {"type": "field",  "label": "Andre bundne midler",                "key": "bundne_andre",   "default": ""},
+]
+
+GJELD_SPEC: list[dict] = [
+    {"type": "header", "label": "Langsiktig gjeld"},
+    {"type": "field",  "label": "Pantelån",                           "key": "gjeld_pant",      "default": ""},
+    {"type": "field",  "label": "Kassakreditt (trekk/limit)",         "key": "gjeld_kasse",     "default": ""},
+    {"type": "field",  "label": "Annen langsiktig gjeld",             "key": "gjeld_annen",     "default": ""},
+    {"type": "auto",   "label": "Sum langsiktig gjeld",               "regnr": 770, "period": "current"},
+    {"type": "sep"},
+    {"type": "header", "label": "Pantstillelser og garantier"},
+    {"type": "field",  "label": "Bokført verdi pantsatte eiendeler",  "key": "pant_verdi",      "default": ""},
+    {"type": "field",  "label": "Garantiforpliktelser",               "key": "pant_garanti",    "default": ""},
+]
+
+# Hvilke noter som kreves per rammeverk (note_id → (label, spec | None))
+_BASE_NOTES: list[tuple[str, str, list | None]] = [
     ("regnskapsprinsipper", "Regnskapsprinsipper", None),
     ("lonnsnote",           "Lønnskostnader",      LONNS_SPEC),
     ("egenkapitalnote",     "Egenkapital",          EK_SPEC),
     ("aksjonaernote",       "Aksjonærer",           AKS_SPEC),
     ("skattenote",          "Skatter",              SKATT_SPEC),
+    ("driftsmidlernote",    "Varige driftsmidler",  DRIFTSMIDLER_SPEC),
 ]
 
-# Note numbers (1-based, matching NOTE_SPECS order)
+_MELLOMSTORE_EXTRA: list[tuple[str, str, list | None]] = [
+    ("bundnemidlernote",    "Bundne midler",        BUNDNE_MIDLER_SPEC),
+    ("gjeldnote",           "Gjeld og pant",        GJELD_SPEC),
+]
+
+_STORE_EXTRA: list[tuple[str, str, list | None]] = [
+    ("pensjonsnote",        "Pensjoner",            PENSJON_SPEC),
+    ("bundnemidlernote",    "Bundne midler",        BUNDNE_MIDLER_SPEC),
+    ("gjeldnote",           "Gjeld og pant",        GJELD_SPEC),
+]
+
+FRAMEWORK_NOTES: dict[str, list[tuple[str, str, list | None]]] = {
+    "NGAAP — små foretak":         _BASE_NOTES,
+    "NGAAP — mellomstore foretak": _BASE_NOTES + _MELLOMSTORE_EXTRA,
+    "NGAAP — store foretak":       _BASE_NOTES + _STORE_EXTRA,
+}
+
+# Default NOTE_SPECS for backward compat (små foretak)
+NOTE_SPECS: list[tuple[str, str, list | None]] = _BASE_NOTES
+
+
+def get_notes_for_framework(framework: str) -> list[tuple[str, str, list | None]]:
+    """Returner liste med (note_id, label, spec) for gitt rammeverk."""
+    return FRAMEWORK_NOTES.get(framework, _BASE_NOTES)
+
+
+def build_note_numbers(
+    notes: list[tuple[str, str, list | None]],
+) -> tuple[dict[str, int], dict[int, tuple[int, str]]]:
+    """Bygg note-nummerering og note-refs for et gitt sett med noter."""
+    numbers: dict[str, int] = {}
+    for idx, (note_id, _, _) in enumerate(notes):
+        numbers[note_id] = idx + 1
+
+    # regnr → (note_number, note_id)
+    _REF_MAP: dict[int, str] = {
+        40: "lonnsnote",
+        260: "skattenote",
+        715: "egenkapitalnote",
+        555: "driftsmidlernote",
+        770: "gjeldnote",
+    }
+    refs: dict[int, tuple[int, str]] = {}
+    for regnr, nid in _REF_MAP.items():
+        if nid in numbers:
+            refs[regnr] = (numbers[nid], nid)
+
+    return numbers, refs
+
+
+# Static defaults for backward compat
 NOTE_NUMBERS: dict[str, int] = {
     note_id: idx + 1
     for idx, (note_id, _, _) in enumerate(NOTE_SPECS)
 }
 
-# regnr → (note_number, note_id) — hvilke regnskapslinjer har notehenvisning
 NOTE_REFS: dict[int, tuple[int, str]] = {
     40:  (NOTE_NUMBERS["lonnsnote"],       "lonnsnote"),
     260: (NOTE_NUMBERS["skattenote"],      "skattenote"),
@@ -216,6 +408,30 @@ def _is_credit(regnr: int) -> bool:
     return False
 
 
+# Computed sum rows for balance sheet.
+# Order matters: leaf sums first, then higher-level sums.
+_BS_SUM_FORMULAS: list[tuple[int, list[int]]] = [
+    (590, [555, 580]),                # Sum anleggsmidler
+    (660, [605, 610, 630, 655]),      # Sum omløpsmidler
+    (665, [590, 660]),                # SUM EIENDELER
+    (770, [735, 760]),                # Sum langsiktig gjeld
+    (810, [780, 785, 800, 803, 805]), # Sum kortsiktig gjeld
+    (820, [770, 810]),                # Sum gjeld
+    (830, [715, 820]),                # SUM EGENKAPITAL OG GJELD
+]
+
+
+def _fill_computed_sums(ub: dict[int, float]) -> None:
+    """Fill in missing balance sheet sum rows from their components."""
+    for sum_regnr, components in _BS_SUM_FORMULAS:
+        if sum_regnr in ub:
+            continue  # already has a value from the data
+        parts = [ub.get(c, 0) for c in components]
+        total = sum(parts)
+        if any(c in ub for c in components):
+            ub[sum_regnr] = total
+
+
 def ub_lookup(rl_df: pd.DataFrame, col: str = "UB") -> dict[int, float]:
     """Bygg regnr → visningsverdi fra rl_df. Inverterer fortegn for kredittlinjer."""
     out: dict[int, float] = {}
@@ -233,25 +449,21 @@ def ub_lookup(rl_df: pd.DataFrame, col: str = "UB") -> dict[int, float]:
         if _is_credit(regnr):
             val = -val
         out[regnr] = val
+    _fill_computed_sums(out)
     return out
 
 
 def fmt_amount(val: float | None, blank_zero: bool = True) -> str:
-    """Formater beløp med norsk tusenskille og 2 desimaler. Returnerer '–' for None."""
+    """Formater beløp med norsk tusenskille, uten desimaler. Returnerer '–' for None."""
     if val is None:
         return "–"
-    if blank_zero and abs(val) < 0.005:
+    if blank_zero and abs(val) < 0.5:
         return "–"
-    # Norsk format: mellomrom som tusenskille, komma som desimalskille
-    abs_val = abs(val)
-    int_part = int(abs_val)
-    dec_part = round((abs_val - int_part) * 100)
-    if dec_part == 100:
-        int_part += 1
-        dec_part = 0
-    int_str = f"{int_part:,}".replace(",", "\u202f")  # narrow no-break space
-    sign = "-" if val < 0 else ""
-    return f"{sign}{int_str},{dec_part:02d}"
+    rounded = round(val)
+    abs_val = abs(rounded)
+    int_str = f"{abs_val:,}".replace(",", "\u202f")  # narrow no-break space
+    sign = "-" if rounded < 0 else ""
+    return f"{sign}{int_str}"
 
 
 def eval_auto_row(
@@ -333,3 +545,76 @@ def build_cf_rows(
     row("  Kontanter ved årets slutt", bank_this, is_sum=True)
 
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Note-malbibliotek (lagres som JSON i config/regnskap/)
+# ---------------------------------------------------------------------------
+
+import json
+from pathlib import Path
+
+_TEMPLATE_DIR = Path(__file__).parent / "config" / "regnskap" / "note_templates"
+
+
+def _ensure_template_dir() -> Path:
+    _TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
+    return _TEMPLATE_DIR
+
+
+def save_note_template(name: str, note_data: dict[str, dict[str, str]]) -> Path:
+    """Lagre en notemal til biblioteket. Returnerer filstien."""
+    d = _ensure_template_dir()
+    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in name)
+    path = d / f"{safe}.json"
+    path.write_text(json.dumps({
+        "name": name,
+        "notes": note_data,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def list_note_templates() -> list[str]:
+    """Returner navnene på alle lagrede notemaler."""
+    d = _ensure_template_dir()
+    names: list[str] = []
+    for p in sorted(d.glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            names.append(data.get("name", p.stem))
+        except Exception:
+            names.append(p.stem)
+    return names
+
+
+def load_note_template(name: str) -> dict[str, dict[str, str]] | None:
+    """Last inn notemal fra biblioteket. Returnerer notes-dict eller None."""
+    d = _ensure_template_dir()
+    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in name)
+    path = d / f"{safe}.json"
+    if not path.exists():
+        # Try fuzzy match on stem
+        for p in d.glob("*.json"):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if data.get("name") == name:
+                    return data.get("notes", {})
+            except Exception:
+                continue
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("notes", {})
+    except Exception:
+        return None
+
+
+def delete_note_template(name: str) -> bool:
+    """Slett en notemal. Returnerer True hvis slettet."""
+    d = _ensure_template_dir()
+    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in name)
+    path = d / f"{safe}.json"
+    if path.exists():
+        path.unlink()
+        return True
+    return False

@@ -13,6 +13,9 @@ from typing import Any
 import pandas as pd
 
 import preferences
+import regnskap_export
+import regnskap_klient
+import regnskap_noter
 
 from regnskap_data import (
     RS_STRUCTURE,
@@ -20,10 +23,18 @@ from regnskap_data import (
     NOTE_SPECS,
     NOTE_REFS,
     PRINSIPP_DEFAULT,
+    PRINSIPP_DEFAULTS,
+    FRAMEWORK_CHOICES,
     ub_lookup,
     fmt_amount,
     eval_auto_row,
     build_cf_rows,
+    get_notes_for_framework,
+    build_note_numbers,
+    save_note_template,
+    list_note_templates,
+    load_note_template,
+    delete_note_template,
 )
 
 log = logging.getLogger(__name__)
@@ -51,7 +62,10 @@ def _populate_stmt_tree(
     ub_prev: dict[int, float] | None,
     *,
     has_prev: bool = False,
+    note_refs: dict[int, tuple[int, str]] | None = None,
 ) -> None:
+    if note_refs is None:
+        note_refs = NOTE_REFS
     try:
         tree.delete(*tree.get_children())
     except Exception:
@@ -76,7 +90,7 @@ def _populate_stmt_tree(
         val_str = fmt_amount(val) if val is not None else "–"
         prev_str = fmt_amount(val_prev) if (has_prev and val_prev is not None) else ("–" if has_prev else "")
 
-        note_ref = NOTE_REFS.get(regnr)
+        note_ref = note_refs.get(regnr)
         note_str = f"Note {note_ref[0]}" if note_ref else ""
 
         tag = ("major_sum" if (is_sum and level == 0) else
@@ -95,127 +109,8 @@ def _populate_stmt_tree(
 # Scrollable note form helpers
 # ---------------------------------------------------------------------------
 
-def _make_scrollable(parent: Any) -> tuple[Any, Any]:
-    """Returns (canvas, inner_frame) for a scrollable note form."""
-    if tk is None:
-        return None, None
-
-    canvas = tk.Canvas(parent, bg="#FAFAFA", highlightthickness=0)
-    vsb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=vsb.set)
-
-    inner = ttk.Frame(canvas, padding=(12, 8, 12, 12))
-    win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
-
-    def _on_inner_configure(_e: Any) -> None:
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    def _on_canvas_configure(e: Any) -> None:
-        canvas.itemconfig(win_id, width=e.width)
-
-    inner.bind("<Configure>", _on_inner_configure)
-    canvas.bind("<Configure>", _on_canvas_configure)
-
-    def _scroll(event: Any) -> None:
-        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", _scroll))
-    canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
-
-    vsb.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-    return canvas, inner
-
-
-def _build_note_form(
-    parent: Any,
-    spec: list[dict],
-) -> tuple[Any, dict[str, Any]]:
-    """
-    Build a structured note form in parent.
-    Returns (canvas, entry_widgets_by_key).
-
-    Auto-rows: read-only Entry with light blue background.
-    Field-rows: editable Entry, normal background.
-    """
-    if tk is None:
-        return None, {}
-
-    canvas, inner = _make_scrollable(parent)
-    if inner is None:
-        return None, {}
-
-    inner.columnconfigure(0, weight=1, minsize=260)
-    inner.columnconfigure(1, weight=0, minsize=160)
-
-    entry_widgets: dict[str, tk.StringVar] = {}
-
-    # Styles
-    HDR_BG    = "#E3EAF4"
-    AUTO_FG   = "#1A56A0"
-    FIELD_BG  = "#FFFFFF"
-
-    row_idx = 0
-
-    for spec_row in spec:
-        rtype = spec_row["type"]
-
-        if rtype == "header":
-            lbl = ttk.Label(
-                inner,
-                text=spec_row["label"],
-                font=("TkDefaultFont", 9, "bold"),
-                foreground="#1A2E5A",
-                background=HDR_BG,
-                anchor="w",
-                padding=(6, 4),
-            )
-            lbl.grid(row=row_idx, column=0, columnspan=2, sticky="ew",
-                     pady=(10, 2))
-            row_idx += 1
-
-        elif rtype == "sep":
-            sep = ttk.Separator(inner, orient="horizontal")
-            sep.grid(row=row_idx, column=0, columnspan=2, sticky="ew",
-                     pady=6)
-            row_idx += 1
-
-        elif rtype == "auto":
-            lbl = ttk.Label(inner, text="  " + spec_row["label"],
-                             anchor="w", font=("TkDefaultFont", 10))
-            lbl.grid(row=row_idx, column=0, sticky="ew", pady=1)
-
-            svar = tk.StringVar(value="–")
-            entry = ttk.Entry(inner, textvariable=svar, width=22,
-                               state="readonly", justify="right",
-                               font=("TkDefaultFont", 10))
-            # Give auto-entries a distinct look
-            try:
-                style_name = f"Auto.TEntry"
-                entry.configure(style=style_name)
-            except Exception:
-                pass
-            entry.grid(row=row_idx, column=1, sticky="ew", padx=(6, 0), pady=1)
-
-            key = f"__auto__{spec_row.get('regnr', '')}_{spec_row.get('period', 'current')}"
-            entry_widgets[key] = svar
-            row_idx += 1
-
-        elif rtype == "field":
-            lbl = ttk.Label(inner, text="  " + spec_row["label"],
-                             anchor="w", font=("TkDefaultFont", 10))
-            lbl.grid(row=row_idx, column=0, sticky="ew", pady=1)
-
-            key = spec_row.get("key", f"_field_{row_idx}")
-            svar = tk.StringVar(value=spec_row.get("default", ""))
-            entry = ttk.Entry(inner, textvariable=svar, width=22,
-                               justify="right", font=("TkDefaultFont", 10))
-            entry.grid(row=row_idx, column=1, sticky="ew", padx=(6, 0), pady=1)
-
-            entry_widgets[key] = svar
-            row_idx += 1
-
-    return canvas, entry_widgets
+_make_scrollable = regnskap_noter.make_scrollable
+_build_note_form = regnskap_noter.build_note_form
 
 
 # ---------------------------------------------------------------------------
@@ -233,16 +128,24 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
         self.columnconfigure(0, weight=1)
 
         self._analyse_page: Any = None
+        self._driftsmidler_page: Any = None
         self._ub: dict[int, float] = {}
         self._ub_prev: dict[int, float] | None = None
         self._has_prev: bool = False
         self._client: str = ""
         self._year: str = ""
+        self._framework: str = FRAMEWORK_CHOICES[0]
 
         # note entry widgets: note_id → {key → StringVar}
         self._note_vars: dict[str, dict[str, tk.StringVar]] = {}
         # free-text notes: note_id → tk.Text widget
         self._note_text_widgets: dict[str, Any] = {}
+        # custom (user-created) notes: list of (note_id, label)
+        self._custom_notes: list[tuple[str, str]] = []
+        # active note specs (changes with framework)
+        self._active_notes: list[tuple[str, str, list | None]] = []
+        self._active_note_numbers: dict[str, int] = {}
+        self._active_note_refs: dict[int, tuple[int, str]] = {}
 
         self._build_ui()
 
@@ -251,7 +154,7 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        # Toolbar
+        # Toolbar row 1: client + buttons
         toolbar = ttk.Frame(self)
         toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=4)
 
@@ -272,6 +175,18 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
         ttk.Button(toolbar, text="Eksporter PDF", command=self._on_export_pdf,
                    width=13).pack(side="left", padx=2)
 
+        ttk.Separator(toolbar, orient="vertical").pack(
+            side="left", fill="y", padx=6, pady=2)
+
+        ttk.Label(toolbar, text="Rammeverk:").pack(side="left", padx=(0, 2))
+        self._framework_var = tk.StringVar(value=self._framework)
+        fw_cb = ttk.Combobox(
+            toolbar, textvariable=self._framework_var,
+            values=FRAMEWORK_CHOICES, state="readonly", width=28,
+        )
+        fw_cb.pack(side="left", padx=(0, 6))
+        self._framework_var.trace_add("write", self._on_framework_change)
+
         self._lbl_status = ttk.Label(toolbar, text="Ingen data",
                                       foreground="#888888")
         self._lbl_status.pack(side="left", padx=10)
@@ -285,18 +200,21 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
         self._bs_frame   = ttk.Frame(self._nb)
         self._cf_frame   = ttk.Frame(self._nb)
         self._noter_frame = ttk.Frame(self._nb)
+        self._klient_frame = ttk.Frame(self._nb)
 
         self._nb.add(self._oversikt_frame, text="Oversikt")
         self._nb.add(self._rs_frame,    text="Resultatregnskap")
         self._nb.add(self._bs_frame,    text="Balanse")
         self._nb.add(self._cf_frame,    text="Kontantstrøm")
         self._nb.add(self._noter_frame, text="Noter")
+        self._nb.add(self._klient_frame, text="Klientoversikt")
 
         self._build_oversikt_tab(self._oversikt_frame)
         self._build_rs_tab(self._rs_frame)
         self._build_bs_tab(self._bs_frame)
         self._build_cf_tab(self._cf_frame)
         self._build_noter_tab(self._noter_frame)
+        self._build_klient_tab(self._klient_frame)
 
     # ------------------------------------------------------------------
     # Statement trees
@@ -421,10 +339,12 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
         choice = val.get()
         if choice == "Resultatregnskap":
             _populate_stmt_tree(tree, RS_STRUCTURE,
-                                self._ub, self._ub_prev, has_prev=self._has_prev)
+                                self._ub, self._ub_prev, has_prev=self._has_prev,
+                                note_refs=self._active_note_refs)
         elif choice == "Balanse":
             _populate_stmt_tree(tree, BS_STRUCTURE,
-                                self._ub, self._ub_prev, has_prev=self._has_prev)
+                                self._ub, self._ub_prev, has_prev=self._has_prev,
+                                note_refs=self._active_note_refs)
         elif choice == "Kontantstrøm":
             self._populate_cf_into(tree)
 
@@ -623,7 +543,7 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             pass
 
         # Check for note reference — jump hint
-        note_ref = NOTE_REFS.get(regnr)
+        note_ref = self._active_note_refs.get(regnr)
         if note_ref:
             try:
                 self._drill_lbl.configure(
@@ -656,8 +576,7 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             self._nb.select(self._noter_frame)
         except Exception:
             return
-        # Find the sub-tab index in _noter_nb
-        for idx, (nid, _, _) in enumerate(NOTE_SPECS):
+        for idx, (nid, _, _) in enumerate(self._active_notes):
             if nid == note_id:
                 try:
                     self._noter_nb.select(idx)
@@ -722,29 +641,40 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             pass
 
     def _get_konto_breakdown(self, regnr: int) -> list[dict]:
-        """Hent konto-nivå data for en gitt regnskapslinje."""
+        """Hent konto-nivå data for en gitt regnskapslinje.
+
+        Bruker den kanoniske RL-servicen for konto -> regnr-oppslag slik
+        at samme klassifisering brukes i Analyse, Saldobalanse og Admin.
+        """
         if self._analyse_page is None:
             return []
         try:
-            from regnskap_mapping import apply_interval_mapping
+            import regnskapslinje_mapping_service as _rl_svc
 
-            intervals = getattr(self._analyse_page, "_rl_intervals", None)
-            if intervals is None:
-                return []
-
-            # Bygg en konto-liste fra SB-data
             sb_df = getattr(self._analyse_page, "_rl_sb_df", None)
             sb_prev_df = getattr(self._analyse_page, "_rl_sb_prev_df", None)
 
             if not isinstance(sb_df, pd.DataFrame) or sb_df.empty:
                 return []
 
-            # Map konto → regnr
+            context = _rl_svc.context_from_page(self._analyse_page)
+            if context.is_empty:
+                return []
+
             work = sb_df[["konto", "ib", "ub"]].copy()
+            work["konto"] = work["konto"].astype(str).str.strip()
             work["ib"] = pd.to_numeric(work["ib"], errors="coerce").fillna(0.0)
             work["ub"] = pd.to_numeric(work["ub"], errors="coerce").fillna(0.0)
-            mapped = apply_interval_mapping(work, intervals, konto_col="konto").mapped
-            filtered = mapped[mapped["regnr"] == regnr].copy()
+
+            resolved = _rl_svc.resolve_accounts_to_rl(work["konto"].tolist(), context=context)
+            if resolved.empty:
+                return []
+            target_kontoer = set(
+                resolved.loc[resolved["regnr"] == regnr, "konto"].astype(str).tolist()
+            )
+            if not target_kontoer:
+                return []
+            filtered = work[work["konto"].isin(target_kontoer)].copy()
             if filtered.empty:
                 return []
 
@@ -763,15 +693,24 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             except Exception:
                 pass
 
-            # Merge prev year UB if available
+            # Merge prev year UB if available — bruker samme service-resolusjon
             prev_map: dict[str, float] = {}
             if isinstance(sb_prev_df, pd.DataFrame) and not sb_prev_df.empty:
                 try:
                     wp = sb_prev_df[["konto", "ub"]].copy()
+                    wp["konto"] = wp["konto"].astype(str).str.strip()
                     wp["ub"] = pd.to_numeric(wp["ub"], errors="coerce").fillna(0.0)
-                    mp = apply_interval_mapping(wp, intervals, konto_col="konto").mapped
-                    mp_f = mp[mp["regnr"] == regnr]
-                    prev_map = mp_f.set_index("konto")["ub"].to_dict()
+                    resolved_prev = _rl_svc.resolve_accounts_to_rl(
+                        wp["konto"].tolist(), context=context
+                    )
+                    prev_kontoer = set(
+                        resolved_prev.loc[resolved_prev["regnr"] == regnr, "konto"].astype(str).tolist()
+                    )
+                    prev_map = (
+                        wp[wp["konto"].isin(prev_kontoer)]
+                        .set_index("konto")["ub"]
+                        .to_dict()
+                    )
                 except Exception:
                     pass
 
@@ -799,61 +738,73 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             return []
 
     # ------------------------------------------------------------------
+    # Klientoversikt-fane
+    # ------------------------------------------------------------------
+
+    def _build_klient_tab(self, parent: Any) -> None:
+        regnskap_klient.build_klient_tab(page=self, parent=parent)
+
+    def _fetch_brreg_roles(self) -> None:
+        regnskap_klient.fetch_brreg_roles(page=self)
+
+    def _toggle_role_signerer(self, event: Any = None) -> None:
+        regnskap_klient.toggle_role_signerer(page=self, event=event)
+
+    def _add_role_manual(self) -> None:
+        regnskap_klient.add_role_manual(page=self)
+
+    def _remove_selected_role(self) -> None:
+        regnskap_klient.remove_selected_role(page=self)
+
+    def _start_enrichment(self) -> None:
+        regnskap_klient.start_enrichment(page=self)
+
+    def _save_klient_data(self) -> None:
+        regnskap_klient.save_klient_data(page=self)
+
+    def _load_klient_data(self) -> None:
+        regnskap_klient.load_klient_data(page=self)
+
+    def _get_signatories(self) -> list[dict[str, str]]:
+        return regnskap_klient.get_signatories(page=self)
+
+    # ------------------------------------------------------------------
     # Note forms
     # ------------------------------------------------------------------
 
     def _build_noter_tab(self, parent: Any) -> None:
-        parent.rowconfigure(0, weight=1)
-        parent.columnconfigure(0, weight=1)
+        regnskap_noter.build_noter_tab(page=self, parent=parent)
 
-        noter_nb = ttk.Notebook(parent)
-        noter_nb.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-        self._noter_nb = noter_nb
+    def _rebuild_noter_tabs(self) -> None:
+        regnskap_noter.rebuild_noter_tabs(page=self)
 
-        for note_id, note_label, spec in NOTE_SPECS:
-            tab = ttk.Frame(noter_nb)
-            noter_nb.add(tab, text=note_label)
-            tab.rowconfigure(1, weight=1)
-            tab.columnconfigure(0, weight=1)
+    def _build_single_note_tab(self, nb: Any, note_id: str, note_label: str,
+                               spec: list | None, is_custom: bool = False) -> None:
+        regnskap_noter.build_single_note_tab(self, nb, note_id, note_label, spec, is_custom)
 
-            # Button bar
-            btn_bar = ttk.Frame(tab)
-            btn_bar.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 0))
-            ttk.Button(btn_bar, text="Lagre note",
-                       command=lambda nid=note_id: self._save_note(nid),
-                       width=12).pack(side="left")
-            ttk.Label(btn_bar,
-                      text="  Lagres per klient. Auto-verdier hentes fra regnskapet.",
-                      foreground="#888888").pack(side="left")
+    def _on_framework_change(self, *_args: Any) -> None:
+        regnskap_noter.on_framework_change(page=self)
 
-            # Build content frame
-            content_frame = ttk.Frame(tab)
-            content_frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-            content_frame.rowconfigure(0, weight=1)
-            content_frame.columnconfigure(0, weight=1)
+    def _add_custom_note(self) -> None:
+        regnskap_noter.add_custom_note(page=self)
 
-            if spec is None:
-                # Free text (regnskapsprinsipper)
-                txt = tk.Text(content_frame, wrap="word",
-                              font=("TkDefaultFont", 10),
-                              relief="flat", bg="#FAFAFA", padx=10, pady=8,
-                              undo=True)
-                vsb = ttk.Scrollbar(content_frame, orient="vertical",
-                                    command=txt.yview)
-                vsb.grid(row=0, column=1, sticky="ns")
-                txt.configure(yscrollcommand=vsb.set)
-                txt.grid(row=0, column=0, sticky="nsew")
-                txt.insert("1.0", PRINSIPP_DEFAULT)
-                txt.bind("<Control-s>",
-                         lambda _e, nid=note_id: self._save_note(nid) or "break")
-                self._note_text_widgets[note_id] = txt
-                content_frame.columnconfigure(0, weight=1)
+    def _remove_custom_note(self, note_id: str) -> None:
+        regnskap_noter.remove_custom_note(page=self, note_id=note_id)
 
-            else:
-                # Structured form
-                canvas, entry_vars = _build_note_form(content_frame, spec)
-                self._note_vars[note_id] = entry_vars
-                entry_vars.get  # ensure dict accessible
+    def _save_custom_notes_list(self) -> None:
+        regnskap_noter.save_custom_notes_list(page=self)
+
+    def _load_custom_notes_list(self) -> None:
+        regnskap_noter.load_custom_notes_list(page=self)
+
+    def _save_as_template(self) -> None:
+        regnskap_noter.save_as_template(page=self)
+
+    def _load_from_template(self) -> None:
+        regnskap_noter.load_from_template(page=self)
+
+    def _apply_notes_data(self, data: dict[str, dict[str, str]]) -> None:
+        regnskap_noter.apply_notes_data(page=self, data=data)
 
     # ------------------------------------------------------------------
     # Data-kobling
@@ -861,6 +812,9 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
 
     def set_analyse_page(self, page: Any) -> None:
         self._analyse_page = page
+
+    def set_driftsmidler_page(self, page: Any) -> None:
+        self._driftsmidler_page = page
 
     def refresh_from_session(self, session_obj: Any) -> None:
         try:
@@ -882,6 +836,18 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             self._lbl_client.configure(text="")
             self._clear_all_trees()
             return
+
+        # Load saved framework preference for this client
+        saved_fw = preferences.get(self._pref_key("__meta__", "framework"))
+        if saved_fw and saved_fw in FRAMEWORK_CHOICES and saved_fw != self._framework:
+            self._framework = saved_fw
+            try:
+                self._framework_var.set(saved_fw)
+            except Exception:
+                pass
+
+        # Load custom notes list
+        self._load_custom_notes_list()
 
         # Merge UB_fjor from Analyse pivot if available
         pivot_df = getattr(self._analyse_page, "_pivot_df_last", None)
@@ -918,8 +884,10 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
         self._populate_bs()
         self._populate_cf()
         self._populate_oversikt()
-        self._update_note_auto_values()
+        self._rebuild_noter_tabs()
         self._load_all_notes()
+        self._autofill_dm_note()
+        self._load_klient_data()
 
         prev_label = f"  (med fjorår {year_prev})" if has_prev else ""
         self._set_status(f"Oppdatert{prev_label}")
@@ -947,11 +915,13 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
 
     def _populate_rs(self) -> None:
         _populate_stmt_tree(self._rs_tree, RS_STRUCTURE,
-                            self._ub, self._ub_prev, has_prev=self._has_prev)
+                            self._ub, self._ub_prev, has_prev=self._has_prev,
+                            note_refs=self._active_note_refs)
 
     def _populate_bs(self) -> None:
         _populate_stmt_tree(self._bs_tree, BS_STRUCTURE,
-                            self._ub, self._ub_prev, has_prev=self._has_prev)
+                            self._ub, self._ub_prev, has_prev=self._has_prev,
+                            note_refs=self._active_note_refs)
 
     def _populate_cf(self) -> None:
         try:
@@ -997,247 +967,40 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
             except Exception:
                 pass
 
-    # ------------------------------------------------------------------
-    # Note auto-values
-    # ------------------------------------------------------------------
-
     def _update_note_auto_values(self) -> None:
-        """Fill in all __auto__ StringVars from ub/ub_prev."""
-        for note_id, vars_dict in self._note_vars.items():
-            for key, svar in vars_dict.items():
-                if not key.startswith("__auto__"):
-                    continue
-                # key format: __auto__{regnr}_{period}
-                parts = key.split("__auto__", 1)[-1].split("_", 1)
-                if len(parts) != 2:
-                    continue
-                try:
-                    regnr  = int(parts[0])
-                    period = parts[1]
-                except ValueError:
-                    continue
-                lookup = self._ub_prev if (period == "prev" and self._ub_prev) else self._ub
-                val = lookup.get(regnr)
-                try:
-                    svar.set(fmt_amount(val) if val is not None else "–")
-                except Exception:
-                    pass
-
-    # ------------------------------------------------------------------
-    # Note persistence
-    # ------------------------------------------------------------------
+        regnskap_noter.update_note_auto_values(page=self)
 
     def _pref_key(self, note_id: str, field_key: str) -> str:
         safe = "".join(c if c.isalnum() else "_" for c in (self._client or "default"))
         return f"regnskap.noter.{safe}.{note_id}.{field_key}"
 
     def _load_all_notes(self) -> None:
-        for note_id, vars_dict in self._note_vars.items():
-            for key, svar in vars_dict.items():
-                if key.startswith("__auto__"):
-                    continue
-                saved = preferences.get(self._pref_key(note_id, key))
-                if saved is not None:
-                    try:
-                        svar.set(str(saved))
-                    except Exception:
-                        pass
-        # Free text notes
-        for note_id, txt in self._note_text_widgets.items():
-            saved = preferences.get(self._pref_key(note_id, "tekst"))
-            if saved and isinstance(saved, str):
-                try:
-                    txt.delete("1.0", "end")
-                    txt.insert("1.0", saved)
-                except Exception:
-                    pass
+        regnskap_noter.load_all_notes(page=self)
+
+    def _autofill_dm_note(self) -> None:
+        regnskap_noter.autofill_dm_note(page=self)
 
     def _save_note(self, note_id: str) -> None:
-        # Structured form fields
-        vars_dict = self._note_vars.get(note_id) or {}
-        for key, svar in vars_dict.items():
-            if key.startswith("__auto__"):
-                continue
-            try:
-                preferences.set(self._pref_key(note_id, key), svar.get())
-            except Exception:
-                pass
-        # Free text
-        txt = self._note_text_widgets.get(note_id)
-        if txt is not None:
-            try:
-                content = txt.get("1.0", "end-1c")
-                preferences.set(self._pref_key(note_id, "tekst"), content)
-            except Exception:
-                pass
+        regnskap_noter.save_note(page=self, note_id=note_id)
 
     def _collect_notes_data(self) -> dict[str, dict[str, str]]:
-        """Gather all note field values for export."""
-        out: dict[str, dict[str, str]] = {}
-        for note_id, vars_dict in self._note_vars.items():
-            nd: dict[str, str] = {}
-            for key, svar in vars_dict.items():
-                if key.startswith("__auto__"):
-                    continue
-                try:
-                    nd[key] = svar.get()
-                except Exception:
-                    nd[key] = ""
-            out[note_id] = nd
-        for note_id, txt in self._note_text_widgets.items():
-            try:
-                out.setdefault(note_id, {})["tekst"] = txt.get("1.0", "end-1c")
-            except Exception:
-                pass
-        return out
+        return regnskap_noter.collect_notes_data(page=self)
 
     # ------------------------------------------------------------------
     # Export handlers
     # ------------------------------------------------------------------
 
     def _get_export_rl_df(self) -> pd.DataFrame | None:
-        rl_df, _, _ = self._fetch_rl_df()
-        if rl_df is None or rl_df.empty:
-            return None
-        # Merge UB_fjor
-        pivot_df = getattr(self._analyse_page, "_pivot_df_last", None)
-        if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
-            rl_df = rl_df.copy()
-            if "UB_fjor" not in rl_df.columns:
-                m = pivot_df[["regnr", "UB_fjor"]].drop_duplicates(subset=["regnr"])
-                rl_df = rl_df.merge(m, on="regnr", how="left")
-        return rl_df
+        return regnskap_export.get_export_rl_df(page=self)
 
     def _on_export_excel(self) -> None:
-        if filedialog is None:
-            return
-        rl_df = self._get_export_rl_df()
-        if rl_df is None:
-            self._msg_no_data()
-            return
-
-        base = f"Årsregnskap {self._client} {self._year}".strip()
-        safe_base = "".join(c if c.isalnum() or c in " _-" else "_" for c in base)
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="Lagre Excel-årsregnskap",
-            defaultextension=".xlsx",
-            filetypes=[("Excel workbook", "*.xlsx"), ("Alle filer", "*.*")],
-            initialfile=safe_base + ".xlsx",
-        )
-        if not path:
-            return
-
-        try:
-            import regnskap_report
-            regnskap_report.save_report_excel(
-                path, rl_df,
-                notes_data=self._collect_notes_data(),
-                client=self._client,
-                year=self._year,
-            )
-        except Exception as exc:
-            if messagebox:
-                messagebox.showerror("Eksport", f"Kunne ikke lage Excel-rapport:\n{exc}")
-            log.exception("Excel export failed")
-            return
-
-        self._set_status(f"Excel lagret: {path}")
-        try:
-            import os
-            os.startfile(path)
-        except Exception:
-            pass
+        regnskap_export.on_export_excel(page=self)
 
     def _on_export_html(self) -> None:
-        if filedialog is None:
-            return
-        rl_df = self._get_export_rl_df()
-        if rl_df is None:
-            self._msg_no_data()
-            return
-
-        base = f"Årsregnskap {self._client} {self._year}".strip()
-        safe_base = "".join(c if c.isalnum() or c in " _-" else "_" for c in base)
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="Lagre HTML-årsregnskap",
-            defaultextension=".html",
-            filetypes=[("HTML-rapport", "*.html"), ("Alle filer", "*.*")],
-            initialfile=safe_base + ".html",
-        )
-        if not path:
-            return
-
-        try:
-            import regnskap_report
-            regnskap_report.save_report_html(
-                path, rl_df,
-                notes_data=self._collect_notes_data(),
-                client=self._client,
-                year=self._year,
-            )
-        except Exception as exc:
-            if messagebox:
-                messagebox.showerror("Eksport", f"Kunne ikke lage HTML-rapport:\n{exc}")
-            log.exception("HTML export failed")
-            return
-
-        self._set_status(f"HTML lagret: {path}")
-        try:
-            import webbrowser
-            from pathlib import Path
-            webbrowser.open(Path(path).as_uri())
-        except Exception:
-            pass
+        regnskap_export.on_export_html(page=self)
 
     def _on_export_pdf(self) -> None:
-        if filedialog is None:
-            return
-        rl_df = self._get_export_rl_df()
-        if rl_df is None:
-            self._msg_no_data()
-            return
-
-        base = f"Årsregnskap {self._client} {self._year}".strip()
-        safe_base = "".join(c if c.isalnum() or c in " _-" else "_" for c in base)
-        path = filedialog.asksaveasfilename(
-            parent=self,
-            title="Lagre PDF-årsregnskap",
-            defaultextension=".pdf",
-            filetypes=[("PDF", "*.pdf"), ("Alle filer", "*.*")],
-            initialfile=safe_base + ".pdf",
-        )
-        if not path:
-            return
-
-        self._set_status("Genererer PDF…")
-        try:
-            self.update_idletasks()
-        except Exception:
-            pass
-
-        try:
-            import regnskap_report
-            regnskap_report.save_report_pdf(
-                path, rl_df,
-                notes_data=self._collect_notes_data(),
-                client=self._client,
-                year=self._year,
-            )
-        except Exception as exc:
-            if messagebox:
-                messagebox.showerror("Eksport", f"Kunne ikke lage PDF:\n{exc}")
-            log.exception("PDF export failed")
-            self._set_status("PDF-eksport feilet")
-            return
-
-        self._set_status(f"PDF lagret: {path}")
-        try:
-            import os
-            os.startfile(path)
-        except Exception:
-            pass
+        regnskap_export.on_export_pdf(page=self)
 
     # ------------------------------------------------------------------
     # Utilities

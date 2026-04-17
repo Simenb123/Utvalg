@@ -270,14 +270,134 @@ def open_document_control(studio: Any) -> None:
         messagebox.showinfo("Dokumentkontroll", "Fant ingen regnskapslinjer for valgt bilag.")
         return
 
+    client = getattr(session, "client", None)
+    year = getattr(session, "year", None)
+
     dialog = DocumentControlDialog(
         studio,
         bilag=bilag,
         df_bilag=df_bilag,
-        client=getattr(session, "client", None),
-        year=getattr(session, "year", None),
+        client=client,
+        year=year,
     )
     dialog.wait_window()
+
+    # Refresh the status cell for this bilag in the tree after the dialog closes.
+    _refresh_tree_dok_status(studio, bilag, client=client, year=year)
+
+
+_DOK_TAG_MAP = {
+    "OK": "dok_ok",
+    "Avvik": "dok_avvik",
+    "Koblet": "dok_koblet",
+}
+
+
+def _refresh_tree_dok_status(
+    studio: Any,
+    bilag: str,
+    *,
+    client: str | None,
+    year: str | None,
+) -> None:
+    """Update the Dok. column and colour tag for a single bilag row in the tree.
+
+    Called after the DocumentControlDialog closes so the status is immediately
+    visible without re-running the full selection.
+    """
+    try:
+        from document_control_app_service import load_document_statuses
+
+        statuses = load_document_statuses(client, year, [bilag])
+        new_status = statuses.get(bilag, "")
+    except Exception:
+        return
+
+    tree = getattr(studio, "tree", None)
+    if tree is None:
+        return
+
+    columns: tuple[str, ...] = tree.cget("columns")  # type: ignore[assignment]
+    if "Dok." not in columns:
+        return
+    dok_col_index = list(columns).index("Dok.")
+
+    for item in tree.get_children():
+        values = list(tree.item(item, "values"))
+        if not values:
+            continue
+        row_bilag = normalize_bilag_key(str(values[0]))
+        if row_bilag != bilag:
+            continue
+
+        # Update the Dok. column value
+        if len(values) > dok_col_index:
+            values[dok_col_index] = new_status
+        else:
+            values.extend([""] * (dok_col_index - len(values) + 1))
+            values[dok_col_index] = new_status
+
+        # Rebuild tags: keep non-dok tags, add new dok tag
+        existing_tags = list(tree.item(item, "tags") or ())
+        tags = [tag for tag in existing_tags if not tag.startswith("dok_")]
+        new_dok_tag = _DOK_TAG_MAP.get(new_status, "")
+        if new_dok_tag:
+            tags.append(new_dok_tag)
+
+        tree.item(item, values=values, tags=tuple(tags))
+        break
+
+
+def open_batch_document_control(studio: Any) -> None:
+    """Open the batch document control dialog for all bilag in the current sample."""
+    from document_control_batch_dialog import BatchDocumentControlDialog
+    from document_control_service import normalize_bilag_key
+
+    df_sample = getattr(studio, "_df_sample", None)
+    if df_sample is None or getattr(df_sample, "empty", True):
+        messagebox.showinfo(
+            "Massekjøring",
+            "Kjør utvalg først — ingen bilag er trukket ut ennå.",
+        )
+        return
+
+    if "Bilag" not in df_sample.columns:
+        messagebox.showinfo("Massekjøring", "Fant ikke Bilag-kolonne i utvalget.")
+        return
+
+    # Unique normalised bilag keys, in selection order
+    seen: set[str] = set()
+    bilag_keys: list[str] = []
+    for raw in df_sample["Bilag"].tolist():
+        key = normalize_bilag_key(str(raw or "").strip())
+        if key and key not in seen:
+            seen.add(key)
+            bilag_keys.append(key)
+
+    if not bilag_keys:
+        messagebox.showinfo("Massekjøring", "Fant ingen bilagsnumre i utvalget.")
+        return
+
+    df_all = getattr(studio, "_df_all", None)
+    client = getattr(session, "client", None)
+    year = getattr(session, "year", None)
+
+    BatchDocumentControlDialog(
+        studio,
+        bilag_keys=bilag_keys,
+        df_all=df_all,
+        client=client,
+        year=year,
+    )
+
+
+def open_voucher_setup(studio: Any) -> None:
+    """Open the voucher PDF setup dialog for the current client/year."""
+    from document_control_voucher_dialog import VoucherSetupDialog
+
+    client = getattr(session, "client", None)
+    year = getattr(session, "year", None)
+    VoucherSetupDialog(studio, client=client, year=year)
 
 
 def sample_size_touched(studio: Any) -> None:

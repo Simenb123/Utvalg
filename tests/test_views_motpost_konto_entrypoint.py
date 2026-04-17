@@ -388,28 +388,20 @@ def test_show_combinations_reuses_cached_popup_builds(monkeypatch) -> None:
     assert calls["popup"] == 2
 
 
-def test_restore_expected_regnskapslinjer_for_view_uses_client_preset(monkeypatch) -> None:
-    monkeypatch.setattr(
-        views_motpost_konto.regnskap_client_overrides,
-        "load_expected_regnskapslinjer",
-        lambda client, *, scope_regnr, selected_direction=None: [610, 790],
+def test_single_source_regnr_returns_regnr_for_single_scope() -> None:
+    assert (
+        views_motpost_konto._single_source_regnr(
+            "regnskapslinje", ("10 Salgsinntekt",)
+        )
+        == 10
     )
-
-    restored = views_motpost_konto._restore_expected_regnskapslinjer_for_view(
-        client="Nbs Regnskap AS",
-        scope_mode="regnskapslinje",
-        scope_items=("10 Salgsinntekt",),
-        konto_regnskapslinje_map={
-            "1500": "610 Kundefordringer",
-            "2700": "790 Skyldig offentlige avgifter",
-        },
-        selected_direction="Kredit",
+    assert (
+        views_motpost_konto._single_source_regnr(
+            "regnskapslinje", ("10 Salgsinntekt", "20 Annen driftsinntekt")
+        )
+        is None
     )
-
-    assert restored == (
-        "610 Kundefordringer",
-        "790 Skyldig offentlige avgifter",
-    )
+    assert views_motpost_konto._single_source_regnr("konto", ("10",)) is None
 
 
 def test_render_summary_marks_expected_motkonto_rows() -> None:
@@ -436,11 +428,7 @@ def test_render_summary_marks_expected_motkonto_rows() -> None:
         )
     )
     v._outliers = set()
-    v._expected_regnskapslinjer = ("610 Kundefordringer",)
-    v._konto_regnskapslinje_map = {
-        "1500": "610 Kundefordringer",
-        "2700": "790 Skyldig offentlige avgifter",
-    }
+    v._expected_motkontoer = {"1500"}
 
     views_motpost_konto.render_summary(v)
 

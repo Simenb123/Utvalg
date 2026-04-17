@@ -26,10 +26,19 @@ def test_no_duplicate_codes():
 
 
 def test_get_code_info_known():
+    # Kode 1 i offisiell SAF-T StandardTaxCode = "Fradrag inngående avgift, høy sats"
     info = mva_codes.get_code_info("1")
     assert info is not None
     assert info["rate"] == 25.0
-    assert "utgående" in info["direction"].lower()
+    assert "inngående" in info["direction"].lower()
+
+
+def test_utgaaende_high_rate_is_code_3():
+    # Utgående 25% (innenlands omsetning, høy sats) = SAF-T StandardTaxCode 3
+    info = mva_codes.get_code_info("3")
+    assert info is not None
+    assert info["rate"] == 25.0
+    assert info["direction"] == "utgående"
 
 
 def test_get_code_info_unknown():
@@ -54,7 +63,10 @@ def test_accounting_systems_not_empty():
 def test_key_codes_present():
     """Sjekk at de viktigste kodene er definert."""
     codes = {c["code"] for c in mva_codes.get_standard_codes()}
-    expected = {"0", "1", "3", "5", "6", "7", "8", "11", "13", "14", "15"}
+    # Offisielle SAF-T StandardTaxCode (kode "0" og "8" finnes ikke i
+    # Skatteetatens liste; ingen avgiftsbehandling er dekket av kode 7).
+    expected = {"1", "3", "5", "6", "7", "11", "12", "13", "14", "15",
+                "20", "31", "32", "33", "51", "52", "81", "85", "86", "91"}
     missing = expected - codes
     assert not missing, f"Manglende nøkkelkoder: {missing}"
 

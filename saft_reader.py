@@ -17,6 +17,7 @@ Denne modulen har ingen GUI-avhengigheter og kan testes isolert.
 from __future__ import annotations
 
 import logging
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,6 +110,20 @@ def _txt(elem: Optional[ET.Element]) -> str:
     if elem.text is None:
         return ""
     return elem.text.strip()
+
+
+_ACCOUNT_ID_RE = re.compile(r"^(\d+)")
+
+
+def _normalize_account_id(raw: str) -> str:
+    """Normaliser en SAF-T AccountID til et rent kontonummer.
+
+    Noen systemer (f.eks. Way) bruker sammensatte IDer som '1941PKEY18820865'
+    der de første sifrene er kontonummeret og suffiksen er en intern nøkkel.
+    Vi bruker kun det ledende tallprefiks.
+    """
+    m = _ACCOUNT_ID_RE.match(raw)
+    return m.group(1) if m else raw
 
 
 def _safe_float(text: str) -> Optional[float]:
@@ -322,7 +337,7 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
         tag = _local_name(elem.tag)
 
         if tag == "Account":
-            acc_id = _txt(elem.find(".//{*}AccountID"))
+            acc_id = _normalize_account_id(_txt(elem.find(".//{*}AccountID")))
             if acc_id:
                 acc_name = _txt(elem.find(".//{*}AccountDescription")) or _txt(elem.find(".//{*}Description"))
                 look.accounts.setdefault(acc_id, acc_name)
@@ -345,7 +360,7 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
                 ba = elem.find(".//{*}BalanceAccount")
                 if ba is not None:
                     look.customer_balance_acct.setdefault(
-                        cid, _txt(ba.find(".//{*}AccountID")))
+                        cid, _normalize_account_id(_txt(ba.find(".//{*}AccountID"))))
                     od = _safe_float(_txt(ba.find(".//{*}OpeningDebitBalance")))  or 0.0
                     oc = _safe_float(_txt(ba.find(".//{*}OpeningCreditBalance"))) or 0.0
                     cd = _safe_float(_txt(ba.find(".//{*}ClosingDebitBalance")))  or 0.0
@@ -375,7 +390,7 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
                 ba = elem.find(".//{*}BalanceAccount")
                 if ba is not None:
                     look.supplier_balance_acct.setdefault(
-                        sid, _txt(ba.find(".//{*}AccountID")))
+                        sid, _normalize_account_id(_txt(ba.find(".//{*}AccountID"))))
                     od = _safe_float(_txt(ba.find(".//{*}OpeningDebitBalance")))  or 0.0
                     oc = _safe_float(_txt(ba.find(".//{*}OpeningCreditBalance"))) or 0.0
                     cd = _safe_float(_txt(ba.find(".//{*}ClosingDebitBalance")))  or 0.0
@@ -494,7 +509,7 @@ def _parse_line(
     tdesc: str,
     look: _Lookup,
 ) -> Optional[dict[str, Any]]:
-    acc = _txt(line.find(".//{*}AccountID"))
+    acc = _normalize_account_id(_txt(line.find(".//{*}AccountID")))
     if not acc:
         return None
 

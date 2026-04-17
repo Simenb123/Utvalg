@@ -8,7 +8,7 @@ def run() -> None:
       - Klasse: _App / App / MainApp / Application
       - Fabrikk-funksjon: create_app() / build_app() / make_app()
 
-    I tillegg installeres globale hotkeys (Ctrl+A/Ctrl+C) for Treeview/Listbox
+    I tillegg installeres globale hotkeys (Cdrl+A/Ctrl+C) for Treeview/Listbox
     slik at "copy to clipboard" fungerer på tvers av alle visningsbilder.
     """
     import importlib
@@ -42,11 +42,19 @@ def run() -> None:
             "og ingen create_app()/build_app()/make_app() som returnerer en Tk-app."
         )
 
-    # Installer globale hotkeys (best-effort)
+    # Installer felles runtime-oppførsel (hotkeys, autofit, selection-summary
+    # i opt-in-modus koblet til app-footeren). Identisk oppsett uansett
+    # entrypoint — holdes samlet i ui_main.install_runtime_ui_behaviors.
     try:
-        import ui_hotkeys
+        install = getattr(ui, "install_runtime_ui_behaviors", None)
+        if callable(install):
+            install(inst)
+        else:
+            # Bakoverkompatibel fallback for eldre ui_main.py
+            import ui_hotkeys
 
-        ui_hotkeys.install_global_hotkeys(inst)
+            ui_hotkeys.install_global_hotkeys(inst)
+            ui_hotkeys.install_autofit_all(inst)
     except Exception:
         # Skal aldri stoppe app-start om hotkeys feiler
         pass

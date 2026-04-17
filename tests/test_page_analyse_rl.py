@@ -74,6 +74,18 @@ def _make_sb() -> pd.DataFrame:
     )
 
 
+def _make_sb_prev() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "konto": ["1000", "1500", "3000"],
+            "kontonavn": ["Bank", "Kunder", "Salg"],
+            "ib": [400.0, 250.0, 0.0],
+            "ub": [500.0, 200.0, -900.0],
+            "netto": [100.0, -50.0, -900.0],
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # build_rl_pivot – uten SB (fallback)
 # ---------------------------------------------------------------------------
@@ -101,7 +113,7 @@ def test_build_rl_pivot_no_sb_basic() -> None:
     from page_analyse_rl import build_rl_pivot
 
     pivot = build_rl_pivot(_make_hb(), _make_intervals(), _make_regnskapslinjer(), sb_df=None)
-    assert set(pivot.columns) == {"regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall"}
+    assert set(pivot.columns) == {"regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall", "Antall_bilag"}
     assert set(pivot["regnr"].tolist()) == {10, 20}
 
     ub_10 = float(pivot.loc[pivot["regnr"] == 10, "UB"].iloc[0])
@@ -186,6 +198,67 @@ def test_build_rl_pivot_with_sb_antall_from_hb() -> None:
     # regnr 10: 3 tx i HB (1000+1000+1500)
     ant_10 = int(pivot.loc[pivot["regnr"] == 10, "Antall"].iloc[0])
     assert ant_10 == 3
+
+
+def test_build_rl_pivot_with_previous_year_columns() -> None:
+    from page_analyse_rl import build_rl_pivot
+
+    pivot = build_rl_pivot(
+        _make_hb(),
+        _make_intervals(),
+        _make_regnskapslinjer(),
+        sb_df=_make_sb(),
+        sb_prev_df=_make_sb_prev(),
+    )
+
+    assert {"UB_fjor", "Endring_fjor", "Endring_pct"} <= set(pivot.columns)
+    row_10 = pivot.loc[pivot["regnr"] == 10].iloc[0]
+    assert float(row_10["UB_fjor"]) == pytest.approx(700.0)
+    assert float(row_10["Endring_fjor"]) == pytest.approx(80.0)
+    assert float(row_10["Endring_pct"]) == pytest.approx(11.4, abs=0.1)
+
+
+def test_add_adjustment_columns_shows_before_after_and_delta() -> None:
+    from page_analyse_rl import _add_adjustment_columns
+
+    current = pd.DataFrame(
+        {
+            "regnr": [10, 20],
+            "regnskapslinje": ["Eiendeler", "Inntekter"],
+            "IB": [700.0, 0.0],
+            "Endring": [80.0, -900.0],
+            "UB": [780.0, -900.0],
+            "Antall": [3, 2],
+        }
+    )
+    before = pd.DataFrame(
+        {
+            "regnr": [10, 20],
+            "UB": [700.0, -1000.0],
+        }
+    )
+    after = pd.DataFrame(
+        {
+            "regnr": [10, 20, 30],
+            "UB": [780.0, -900.0, 50.0],
+        }
+    )
+
+    out = _add_adjustment_columns(
+        current,
+        base_pivot_df=before,
+        adjusted_pivot_df=after,
+    )
+
+    row_10 = out.loc[out["regnr"] == 10].iloc[0]
+    row_20 = out.loc[out["regnr"] == 20].iloc[0]
+
+    assert float(row_10["UB_for_ao"]) == pytest.approx(700.0)
+    assert float(row_10["UB_etter_ao"]) == pytest.approx(780.0)
+    assert float(row_10["AO_belop"]) == pytest.approx(80.0)
+    assert float(row_20["UB_for_ao"]) == pytest.approx(-1000.0)
+    assert float(row_20["UB_etter_ao"]) == pytest.approx(-900.0)
+    assert float(row_20["AO_belop"]) == pytest.approx(100.0)
 
 
 def test_build_rl_pivot_with_sb_shows_zero_ub_with_transactions() -> None:

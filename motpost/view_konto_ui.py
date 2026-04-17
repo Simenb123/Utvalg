@@ -20,6 +20,7 @@ from tkinter import ttk
 
 from formatting import fmt_amount
 from motpost_konto_core import MotpostData
+from .expected_rules_dialog import format_rule_summary
 
 
 def build_motpost_header_metrics_text(data: MotpostData) -> str:
@@ -58,13 +59,28 @@ def build_motpost_scope_value(scope_items: list[str] | tuple[str, ...] | None) -
     return ", ".join([str(x).strip() for x in (scope_items or ()) if str(x).strip()])
 
 
-def build_motpost_expected_label(expected_items: list[str] | tuple[str, ...] | None) -> str:
-    items = [str(x).strip() for x in (expected_items or ()) if str(x).strip()]
-    return f"Forventede regnskapslinjer ({len(items)}):"
+def build_motpost_rule_set_summary_text(
+    rule_set: Any,
+    *,
+    konto_regnskapslinje_map: dict[str, str] | None = None,
+) -> str:
+    """Kort oppsummering av forventningsregler til visning over pivot-grid."""
+    if rule_set is None:
+        return "Forventningsregler: ingen kilde-RL valgt"
+    rules = tuple(getattr(rule_set, "rules", ()) or ())
+    if not rules:
+        return "Forventningsregler: ingen regler definert"
 
+    regnr_to_label: dict[int, str] = {}
+    for label in (konto_regnskapslinje_map or {}).values():
+        head = str(label or "").strip().split(" ", 1)[0]
+        try:
+            regnr_to_label.setdefault(int(head), str(label).strip())
+        except Exception:
+            continue
 
-def build_motpost_expected_value(expected_items: list[str] | tuple[str, ...] | None) -> str:
-    return ", ".join([str(x).strip() for x in (expected_items or ()) if str(x).strip()])
+    parts = [format_rule_summary(rule, regnr_to_label=regnr_to_label) for rule in rules]
+    return f"Forventningsregler ({len(rules)}): " + "  •  ".join(parts)
 
 
 def bind_entry_select_all(entry: Any) -> None:
@@ -116,6 +132,15 @@ def build_ui(
     btn_frame = ttk.Frame(top)
     btn_frame.grid(row=0, column=1, sticky="e")
 
+    rules_btn = ttk.Button(
+        btn_frame, text="Forventningsregler...", command=view._open_rules_dialog
+    )
+    rules_btn.pack(side=tk.LEFT, padx=(0, 12))
+    if getattr(view, "_source_regnr", None) is None:
+        try:
+            rules_btn.state(("disabled",))
+        except Exception:
+            pass
     ttk.Button(btn_frame, text="Kombinasjoner", command=view._show_combinations).pack(side=tk.LEFT, padx=(0, 12))
     ttk.Button(btn_frame, text="Merk outlier", command=view._mark_outlier).pack(side=tk.LEFT, padx=(0, 6))
     ttk.Button(btn_frame, text="Nullstill outliers", command=view._clear_outliers).pack(side=tk.LEFT, padx=(0, 6))
@@ -138,25 +163,21 @@ def build_ui(
         bind_entry_select_all(view._scope_entry)
         current_row += 1
 
-    if getattr(view, "_expected_regnskapslinjer", ()):
-        expected_row = ttk.Frame(top)
-        expected_row.grid(row=current_row, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        expected_row.columnconfigure(1, weight=1)
+    if getattr(view, "_source_regnr", None) is not None:
+        rule_row = ttk.Frame(top)
+        rule_row.grid(row=current_row, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        rule_row.columnconfigure(0, weight=1)
 
-        ttk.Label(
-            expected_row,
-            text=build_motpost_expected_label(getattr(view, "_expected_regnskapslinjer", ())),
-        ).grid(row=0, column=0, sticky="w")
-        view._expected_regnskapslinjer_var = tk.StringVar(
-            value=build_motpost_expected_value(getattr(view, "_expected_regnskapslinjer", ()))
+        view._rule_set_label = ttk.Label(
+            rule_row,
+            text=build_motpost_rule_set_summary_text(
+                getattr(view, "_rule_set", None),
+                konto_regnskapslinje_map=getattr(view, "_konto_regnskapslinje_map", {}),
+            ),
+            anchor="w",
+            foreground="#333333",
         )
-        view._expected_regnskapslinjer_entry = ttk.Entry(
-            expected_row,
-            textvariable=view._expected_regnskapslinjer_var,
-            state="readonly",
-        )
-        view._expected_regnskapslinjer_entry.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        bind_entry_select_all(view._expected_regnskapslinjer_entry)
+        view._rule_set_label.grid(row=0, column=0, sticky="ew")
         current_row += 1
 
     # Neste rad: konto-liste i readonly entry (hindrer at vinduet blir altfor bredt)

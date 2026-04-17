@@ -1,0 +1,476 @@
+"""page_oversikt.py -- CRM-lignende oversiktsside (v1).
+
+Viser:
+- Hilsen med brukerens navn
+- Aktiv klient (fra session)
+- Sist brukte klienter som horisontale kort
+- Klienttabell med mine/alle toggle og sok
+- Frister-stub (v2)
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import tkinter as tk
+from tkinter import ttk
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+
+def _safe_import(module_name: str):
+    try:
+        import importlib
+        return importlib.import_module(module_name)
+    except Exception:
+        return None
+
+
+class OversiktPage(ttk.Frame):
+    """Oversikt-fane: landing page for appen."""
+
+    def __init__(self, parent: tk.Widget, *, nb: ttk.Notebook, dataset_page):
+        super().__init__(parent)
+        self._nb = nb
+        self._dataset_page = dataset_page
+
+        # Lazy imports
+        self._team_config = _safe_import("team_config")
+        self._client_meta_index = _safe_import("client_meta_index")
+        self._client_store_enrich = _safe_import("client_store_enrich")
+        self._preferences = _safe_import("preferences")
+
+        # Brukerinfo
+        self._user = None
+        if self._team_config:
+            try:
+                self._user = self._team_config.current_user()
+            except Exception:
+                pass
+
+        # State
+        self._mine_only_var = tk.BooleanVar(value=False)
+        self._search_var = tk.StringVar(value="")
+        self._all_client_rows: list[tuple] = []  # (name, org, knr, ansvarlig, manager)
+
+        # Build UI
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(3, weight=1)  # klienttabell tar resten av plassen
+
+        self._build_header()
+        self._build_recent_cards()
+        self._build_client_table()
+        self._build_deadlines_stub()
+
+    def _build_header(self) -> None:
+        hdr = ttk.Frame(self)
+        hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 4))
+        hdr.columnconfigure(1, weight=1)
+
+        # Hilsen
+        name = ""
+        if self._user:
+            name = self._user.full_name or self._user.windows_user or ""
+        greeting = f"Hei, {name}" if name else "Oversikt"
+        self._lbl_greeting = ttk.Label(hdr, text=greeting, font=("Segoe UI", 16, "bold"))
+        self._lbl_greeting.grid(row=0, column=0, sticky="w")
+
+        # Aktiv klient
+        self._lbl_active = ttk.Label(hdr, text="", style="Muted.TLabel")
+        self._lbl_active.grid(row=0, column=1, sticky="e", padx=(12, 0))
+
+        # Ga til aktiv klient-knapp
+        self._btn_goto_active = ttk.Button(
+            hdr, text="Vis", width=6, style="Secondary.TButton",
+            command=self._goto_active_client,
+        )
+        self._btn_goto_active.grid(row=0, column=2, sticky="e", padx=(6, 0))
+        self._btn_goto_active.grid_remove()  # skjult til vi har aktiv klient
+
+        # Sokefelt
+        search_frame = ttk.Frame(self)
+        search_frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(8, 4))
+        search_frame.columnconfigure(0, weight=1)
+
+        self._entry_search = ttk.Entry(search_frame, textvariable=self._search_var)
+        self._entry_search.grid(row=0, column=0, sticky="ew")
+        self._entry_search.insert(0, "")
+        self._search_var.trace_add("write", lambda *_: self._on_search())
+
+        # Placeholder
+        self._entry_search.insert(0, "")
+        self._entry_search.bind("<FocusIn>", self._on_search_focus_in)
+        self._entry_search.bind("<FocusOut>", self._on_search_focus_out)
+        self._search_placeholder = True
+        self._show_search_placeholder()
+
+    def _show_search_placeholder(self) -> None:
+        if not self._search_var.get():
+            self._entry_search.insert(0, "Sok klient...")
+            self._entry_search.config(foreground="gray")
+            self._search_placeholder = True
+
+    def _on_search_focus_in(self, _event=None) -> None:
+        if self._search_placeholder:
+            self._entry_search.delete(0, tk.END)
+            self._entry_search.config(foreground="")
+            self._search_placeholder = False
+
+    def _on_search_focus_out(self, _event=None) -> None:
+        if not self._search_var.get().strip():
+            self._show_search_placeholder()
+
+    def _build_recent_cards(self) -> None:
+        self._recent_frame = ttk.LabelFrame(self, text="Sist brukte klienter", padding=8)
+        self._recent_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(4, 8))
+        self._recent_cards_inner = ttk.Frame(self._recent_frame)
+        self._recent_cards_inner.pack(fill="x")
+        self._populate_recent_cards()
+
+    def _populate_recent_cards(self) -> None:
+        # Rydd opp
+        for w in self._recent_cards_inner.winfo_children():
+            w.destroy()
+
+        recent = []
+        if self._preferences:
+            try:
+                recent = self._preferences.get_recent_clients(max_count=8)
+            except Exception:
+                pass
+
+        if not recent:
+            ttk.Label(self._recent_cards_inner, text="Ingen nylige klienter.",
+                      style="Muted.TLabel").pack(padx=8, pady=8)
+            return
+
+        # Hent metadata-indeks for org/knr/ansvarlig
+        meta_index = {}
+        if self._client_meta_index:
+            try:
+                meta_index = self._client_meta_index.get_index()
+            except Exception:
+                pass
+
+        for i, entry in enumerate(recent):
+            name = entry.get("name", "")
+            ts = entry.get("timestamp", 0)
+            if not name:
+                continue
+
+            meta = meta_index.get(name, {})
+            org = meta.get("org_number", "")
+            ansvarlig = meta.get("responsible", "")
+
+            # Relativ tid
+            elapsed = _relative_time(ts)
+
+            card = ttk.Frame(self._recent_cards_inner, relief="solid", borderwidth=1, padding=8)
+            card.pack(side="left", padx=(0 if i == 0 else 6, 0), pady=2)
+
+            # Kort navn (maks 20 tegn)
+            short_name = name if len(name) <= 22 else name[:20] + "..."
+            ttk.Label(card, text=short_name, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+            if org:
+                ttk.Label(card, text=org, style="Muted.TLabel", font=("Segoe UI", 8)).pack(anchor="w")
+            if ansvarlig:
+                ttk.Label(card, text=ansvarlig, style="Muted.TLabel", font=("Segoe UI", 8)).pack(anchor="w")
+            ttk.Label(card, text=elapsed, style="Muted.TLabel", font=("Segoe UI", 8)).pack(anchor="w")
+
+            # Klikk -> navigasjon
+            card.bind("<Button-1>", lambda _e, n=name: self._navigate_to_client(n))
+            for child in card.winfo_children():
+                child.bind("<Button-1>", lambda _e, n=name: self._navigate_to_client(n))
+
+            # Hover-effekt
+            card.bind("<Enter>", lambda _e, c=card: c.configure(relief="raised"))
+            card.bind("<Leave>", lambda _e, c=card: c.configure(relief="solid"))
+
+    def _build_client_table(self) -> None:
+        table_frame = ttk.Frame(self)
+        table_frame.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 8))
+        table_frame.columnconfigure(0, weight=1)
+        table_frame.rowconfigure(1, weight=1)
+
+        # Toolbar: mine klienter toggle
+        toolbar = ttk.Frame(table_frame)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+
+        cb_mine = ttk.Checkbutton(
+            toolbar, text="Mine klienter", variable=self._mine_only_var,
+            command=self._on_filter_changed,
+        )
+        cb_mine.pack(side="left")
+
+        self._lbl_count = ttk.Label(toolbar, text="", style="Muted.TLabel")
+        self._lbl_count.pack(side="right")
+
+        # Treeview
+        cols = ("Klient", "Org.nr", "Knr", "Ansvarlig", "Manager", "Team")
+        self._tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="browse")
+
+        # Kolonnebredder
+        try:
+            import analyse_treewidths as tw
+            widths = {c: tw.default_column_width(c) for c in cols}
+        except Exception:
+            widths = {"Klient": 260, "Org.nr": 90, "Knr": 80, "Ansvarlig": 70, "Manager": 70, "Team": 180}
+
+        for col in cols:
+            w = widths.get(col, 120)
+            anchor = "w"
+            self._tree.heading(col, text=col, command=lambda c=col: self._sort_by_column(c))
+            self._tree.column(col, width=w, minwidth=40, anchor=anchor)
+
+        # Klient-kolonnen far mer plass
+        self._tree.column("Klient", width=280, minwidth=120)
+
+        self._tree.grid(row=1, column=0, sticky="nsew")
+
+        # Scrollbar
+        sb = ttk.Scrollbar(table_frame, orient="vertical", command=self._tree.yview)
+        sb.grid(row=1, column=1, sticky="ns")
+        self._tree.configure(yscrollcommand=sb.set)
+
+        # Dobbeltklikk -> navigasjon
+        self._tree.bind("<Double-1>", self._on_tree_double_click)
+
+        # Sort state
+        self._sort_col: Optional[str] = None
+        self._sort_reverse = False
+
+        # Fyll tabell
+        self._load_client_data()
+        self._populate_client_table()
+
+    def _build_deadlines_stub(self) -> None:
+        stub = ttk.LabelFrame(self, text="Frister (kommer)", padding=8)
+        stub.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 16))
+        ttk.Label(stub, text="Ingen frister registrert.", style="Muted.TLabel").pack(padx=8, pady=8)
+
+    # ------------------------------------------------------------------
+    # Data loading
+    # ------------------------------------------------------------------
+
+    def _load_client_data(self) -> None:
+        """Les metadata-indeks og bygg _all_client_rows."""
+        meta_index = {}
+        if self._client_meta_index:
+            try:
+                meta_index = self._client_meta_index.get_index()
+            except Exception:
+                pass
+
+        rows = []
+        for name, meta in sorted(meta_index.items()):
+            org = meta.get("org_number", "")
+            knr = meta.get("client_number", "")
+            ansvarlig = meta.get("responsible", "")
+            manager = meta.get("manager", "")
+            team_raw = str(meta.get("team_members", "") or "")
+            # Visena gir ofte fler navn separert med newline — vis kompakt.
+            team = ", ".join(
+                part.strip() for part in team_raw.replace("\r", "\n").split("\n") if part.strip()
+            )
+            rows.append((name, org, knr, ansvarlig, manager, team))
+
+        self._all_client_rows = rows
+
+    def _populate_client_table(self) -> None:
+        """Fyll Treeview basert pa filter."""
+        self._tree.delete(*self._tree.get_children())
+
+        mine_only = self._mine_only_var.get()
+        search_text = self._search_var.get().strip().lower()
+        if self._search_placeholder:
+            search_text = ""
+
+        # Mine klienter-filtrering
+        my_initials = ""
+        my_name = ""
+        if mine_only and self._user:
+            my_initials = self._user.visena_initials or ""
+            my_name = self._user.full_name or ""
+
+        count = 0
+        for name, org, knr, ansvarlig, manager, team in self._all_client_rows:
+            # Mine-filter
+            if mine_only:
+                if not self._client_store_enrich:
+                    continue
+                meta = {
+                    "visena_responsible": ansvarlig,
+                    "visena_manager": manager,
+                    "visena_team_members": team,
+                }
+                if not self._client_store_enrich.is_my_client(meta, my_initials, my_name):
+                    continue
+
+            # Sok-filter
+            if search_text:
+                haystack = f"{name} {org} {knr} {ansvarlig} {manager} {team}".lower()
+                if search_text not in haystack:
+                    continue
+
+            self._tree.insert("", "end", values=(name, org, knr, ansvarlig, manager, team))
+            count += 1
+
+        self._lbl_count.configure(text=f"{count} klienter")
+
+    # ------------------------------------------------------------------
+    # Sorting
+    # ------------------------------------------------------------------
+
+    def _sort_by_column(self, col: str) -> None:
+        if self._sort_col == col:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_col = col
+            self._sort_reverse = False
+
+        cols = ("Klient", "Org.nr", "Knr", "Ansvarlig", "Manager", "Team")
+        col_idx = cols.index(col) if col in cols else 0
+
+        self._all_client_rows.sort(key=lambda r: (r[col_idx] or "").lower(), reverse=self._sort_reverse)
+        self._populate_client_table()
+
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
+
+    def _on_filter_changed(self) -> None:
+        self._populate_client_table()
+
+    def _on_search(self) -> None:
+        if self._search_placeholder:
+            return
+        self._populate_client_table()
+
+    def _on_tree_double_click(self, event) -> None:
+        sel = self._tree.selection()
+        if not sel:
+            return
+        values = self._tree.item(sel[0], "values")
+        if values:
+            self._navigate_to_client(values[0])
+
+    def _goto_active_client(self) -> None:
+        """Naviger til aktiv klient (vist i headeren)."""
+        try:
+            dp = getattr(self._dataset_page, "dp", None)
+            sec = getattr(dp, "_store_section", None) if dp else None
+            if sec:
+                name = (getattr(sec, "client_var", None) and sec.client_var.get() or "").strip()
+                if name:
+                    self._navigate_to_client(name)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Navigation
+    # ------------------------------------------------------------------
+
+    def _navigate_to_client(self, name: str) -> None:
+        """Sett klient i Dataset og bytt tab."""
+        if not name:
+            return
+
+        # Oppdater recent
+        if self._preferences:
+            try:
+                self._preferences.add_recent_client(name)
+            except Exception:
+                pass
+
+        # Sett klient i Dataset-fanen
+        try:
+            dp = getattr(self._dataset_page, "dp", None)
+            sec = getattr(dp, "_store_section", None) if dp else None
+            if sec is not None:
+                sec.client_var.set(name)
+                if hasattr(sec, "_debounced_refresh"):
+                    sec._debounced_refresh()
+        except Exception:
+            log.debug("Kunne ikke navigere til klient %s", name, exc_info=True)
+
+        # Bytt til Dataset-fanen
+        try:
+            self._nb.select(self._dataset_page)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Refresh (kalles fra ui_main nar session oppdateres)
+    # ------------------------------------------------------------------
+
+    def refresh_from_session(self, session=None, **kw) -> None:
+        """Oppdater oversikt etter at dataset er lastet."""
+        # Oppdater aktiv klient i header
+        try:
+            client_name = getattr(session, "client", None) if session else None
+            year = getattr(session, "year", None) if session else None
+            if client_name:
+                text = f"Aktiv: {client_name}"
+                if year:
+                    text += f" ({year})"
+                self._lbl_active.configure(text=text)
+                self._btn_goto_active.grid()
+            else:
+                self._lbl_active.configure(text="")
+                self._btn_goto_active.grid_remove()
+        except Exception:
+            pass
+
+        # Oppdater recent cards
+        try:
+            self._populate_recent_cards()
+        except Exception:
+            pass
+
+        # Oppdater klienttabell (metadata kan ha endret seg)
+        try:
+            self._load_client_data()
+            self._populate_client_table()
+        except Exception:
+            pass
+
+
+# ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+
+def _relative_time(timestamp: float) -> str:
+    """Konverter timestamp til lesbar relativ tid."""
+    if not timestamp:
+        return ""
+    try:
+        diff = time.time() - timestamp
+        if diff < 60:
+            return "Akkurat na"
+        if diff < 3600:
+            m = int(diff // 60)
+            return f"{m} min siden"
+        if diff < 86400:
+            h = int(diff // 3600)
+            return f"{h} {'time' if h == 1 else 'timer'} siden"
+        days = int(diff // 86400)
+        if days == 1:
+            return "I gar"
+        if days < 7:
+            return f"{days} dager siden"
+        weeks = days // 7
+        if weeks == 1:
+            return "1 uke siden"
+        if weeks < 5:
+            return f"{weeks} uker siden"
+        return f"{days} dager siden"
+    except Exception:
+        return ""

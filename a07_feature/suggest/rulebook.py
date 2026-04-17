@@ -6,6 +6,9 @@ from pathlib import Path
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import classification_config
+from .alias_library import build_alias_expansions, load_alias_library, normalize_alias_term, rule_defaults_for_terms
+
 
 @dataclass(frozen=True)
 class RulebookSpecialAdd:
@@ -20,6 +23,7 @@ class RulebookRule:
     category: Optional[str] = None
     allowed_ranges: Tuple[Tuple[int, int], ...] = ()
     keywords: Tuple[str, ...] = ()
+    exclude_keywords: Tuple[str, ...] = ()
     boost_accounts: Tuple[int, ...] = ()
     special_add: Tuple[RulebookSpecialAdd, ...] = ()
     basis: Optional[str] = None
@@ -52,9 +56,7 @@ def _parse_ranges(ranges: Sequence[str]) -> Tuple[Tuple[int, int], ...]:
 
 
 def _normalize_alias_key(value: object) -> str:
-    text = str(value or "").strip().lower()
-    text = text.replace("ø", "oe").replace("æ", "ae").replace("å", "aa")
-    return text
+    return normalize_alias_term(value)
 
 
 def _parse_aliases(data: object) -> Dict[str, Tuple[str, ...]]:
@@ -74,6 +76,22 @@ def _parse_aliases(data: object) -> Dict[str, Tuple[str, ...]]:
                     values.append(value)
         out[key] = tuple(values)
     return out
+
+
+def _merge_alias_maps(*maps: Dict[str, Tuple[str, ...]]) -> Dict[str, Tuple[str, ...]]:
+    merged: Dict[str, Tuple[str, ...]] = {}
+    for data in maps:
+        for key, values in data.items():
+            existing = list(merged.get(key, ()))
+            seen = {_normalize_alias_key(item) for item in existing}
+            for value in values:
+                normalized = _normalize_alias_key(value)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                existing.append(str(value))
+            merged[key] = tuple(existing)
+    return merged
 
 
 def _expand_keywords(
@@ -139,8 +157,11 @@ def _find_rulebook_path(explicit: Optional[str] = None) -> Optional[str]:
     candidates: list[Path] = []
     if explicit:
         candidates.append(Path(explicit))
+    else:
+        candidates.append(classification_config.resolve_rulebook_path())
 
     filenames = (
+        "config/classification/global_full_a07_rulebook.json",
         "global_full_a07_rulebook.json",
         "a07_rulebook.json",
         "rulebook.json",
@@ -185,7 +206,11 @@ def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
     if not isinstance(data, dict):
         return {}
 
-    aliases = _parse_aliases(data.get("aliases", {}))
+    shared_library = load_alias_library()
+    aliases = _merge_alias_maps(
+        _parse_aliases(data.get("aliases", {})),
+        build_alias_expansions(shared_library),
+    )
     rules_raw = data.get("rules", {})
     if not isinstance(rules_raw, dict):
         return {}
@@ -197,16 +222,36 @@ def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
 
         label = str(rule.get("label") or "").strip() or None
         category = str(rule.get("category") or "").strip() or None
+        raw_keywords = tuple(rule.get("keywords", []) or [])
+        concept_ranges, concept_boost_accounts, concept_excludes = rule_defaults_for_terms(
+            rule.get("code") or code,
+            label,
+            library=shared_library,
+        )
+
         allowed = _parse_ranges(rule.get("allowed_ranges", []) or [])
+        if concept_ranges:
+            merged_allowed = list(allowed)
+            for item in concept_ranges:
+                if item not in merged_allowed:
+                    merged_allowed.append(item)
+            allowed = tuple(merged_allowed)
+
         keywords = _expand_keywords(
             code=rule.get("code") or code,
             label=label,
-            raw_keywords=rule.get("keywords", []) or [],
+            raw_keywords=raw_keywords,
+            aliases=aliases,
+        )
+        exclude_keywords = _expand_keywords(
+            code="",
+            label="",
+            raw_keywords=[*(rule.get("exclude_keywords", []) or []), *concept_excludes],
             aliases=aliases,
         )
         boost_accounts = tuple(
             int(x)
-            for x in (rule.get("boost_accounts", []) or [])
+            for x in [*(rule.get("boost_accounts", []) or []), *concept_boost_accounts]
             if str(x).strip().isdigit()
         )
         special_add = _parse_special_add(rule.get("special_add", []) or [])
@@ -223,6 +268,7 @@ def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
             category=category,
             allowed_ranges=allowed,
             keywords=keywords,
+            exclude_keywords=exclude_keywords,
             boost_accounts=boost_accounts,
             special_add=special_add,
             basis=str(basis) if basis else None,

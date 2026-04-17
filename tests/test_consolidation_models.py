@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from consolidation.models import (
+    AssociateAdjustmentRow,
+    AssociateCase,
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -47,6 +49,25 @@ def _sample_project() -> ConsolidationProject:
         client="Test AS",
         year="2025",
         companies=[c1, c2],
+        associate_cases=[
+            AssociateCase(
+                case_id="assoc1",
+                name="Tilknyttet AS",
+                investor_company_id="c1",
+                ownership_pct=40.0,
+                journal_id="ek1",
+                line_mapping={"investment_regnr": 575, "result_regnr": 100, "other_equity_regnr": 695, "retained_earnings_regnr": 705},
+                manual_adjustment_rows=[
+                    AssociateAdjustmentRow(
+                        row_id="adj1",
+                        label="Emisjon",
+                        amount=25000.0,
+                        offset_regnr=695,
+                        description="Kapitalendring",
+                    )
+                ],
+            )
+        ],
         mapping_config=MappingConfig(company_overrides={"c1": {"1920": 1900}}),
         eliminations=[elim],
         runs=[],
@@ -57,7 +78,8 @@ class TestProjectRoundTrip:
     def test_serialize_deserialize(self):
         proj = _sample_project()
         d = project_to_dict(proj)
-        assert d["schema_version"] == 2
+        assert d["schema_version"] == 4
+        assert len(d["associate_cases"]) == 1
         assert d["client"] == "Test AS"
         assert len(d["companies"]) == 2
         assert len(d["eliminations"]) == 1
@@ -68,8 +90,10 @@ class TestProjectRoundTrip:
         assert proj2.client == "Test AS"
         assert proj2.year == "2025"
         assert len(proj2.companies) == 2
+        assert len(proj2.associate_cases) == 1
         assert proj2.companies[0].name == "Morselskap AS"
         assert proj2.companies[1].source_type == "saft"
+        assert proj2.associate_cases[0].manual_adjustment_rows[0].label == "Emisjon"
         assert len(proj2.eliminations) == 1
         assert proj2.eliminations[0].name == "Internhandel"
         assert len(proj2.eliminations[0].lines) == 2
@@ -143,6 +167,12 @@ class TestProjectHelpers:
         assert proj.find_journal("e1").name == "Internhandel"
         assert proj.find_journal("nonexistent") is None
 
+    def test_find_associate_case(self):
+        proj = _sample_project()
+        assert proj.find_associate_case("assoc1") is not None
+        assert proj.find_associate_case("assoc1").name == "Tilknyttet AS"
+        assert proj.find_associate_case("missing") is None
+
     def test_touch_updates_timestamp(self):
         proj = _sample_project()
         old_ts = proj.updated_at
@@ -168,3 +198,97 @@ class TestProjectHelpers:
         proj.ensure_elimination_voucher_numbers()
 
         assert proj.next_elimination_voucher_no() == 2
+
+
+class TestNewFieldsRoundTrip:
+    """Verify serialization of fields added in Fase 2-4."""
+
+    def test_goodwill_fields_roundtrip(self):
+        proj = ConsolidationProject(
+            client="T", year="2025",
+            associate_cases=[
+                AssociateCase(
+                    name="GW AS",
+                    acquisition_cost=500_000.0,
+                    share_of_net_assets_at_acquisition=350_000.0,
+                    goodwill_useful_life_years=10,
+                    goodwill_method="linear",
+                )
+            ],
+        )
+        d = project_to_dict(proj)
+        restored = project_from_dict(d)
+        c = restored.associate_cases[0]
+        assert c.acquisition_cost == 500_000.0
+        assert c.share_of_net_assets_at_acquisition == 350_000.0
+        assert c.goodwill_useful_life_years == 10
+        assert c.goodwill_method == "linear"
+
+    def test_konto_field_roundtrip(self):
+        proj = ConsolidationProject(
+            client="T", year="2025",
+            eliminations=[
+                EliminationJournal(
+                    lines=[
+                        EliminationLine(regnr=10, amount=100.0, konto="1500"),
+                        EliminationLine(regnr=20, amount=-100.0),
+                    ]
+                )
+            ],
+        )
+        d = project_to_dict(proj)
+        restored = project_from_dict(d)
+        lines = restored.eliminations[0].lines
+        assert lines[0].konto == "1500"
+        assert lines[1].konto == ""
+
+    def test_default_associate_line_mapping_roundtrip(self):
+        proj = ConsolidationProject(
+            client="T", year="2025",
+            default_associate_line_mapping={
+                "investment_regnr": 999,
+                "result_regnr": 888,
+            },
+        )
+        d = project_to_dict(proj)
+        restored = project_from_dict(d)
+        assert restored.default_associate_line_mapping == {
+            "investment_regnr": 999,
+            "result_regnr": 888,
+        }
+
+    def test_old_project_without_new_fields_loads_with_defaults(self):
+        """Simulates loading a project saved before new fields existed."""
+        d = {
+            "schema_version": 4,
+            "project_id": "old",
+            "client": "Old AS",
+            "year": "2024",
+            "companies": [],
+            "associate_cases": [
+                {
+                    "case_id": "a1",
+                    "name": "Old Case",
+                    "investor_company_id": "",
+                    "ownership_pct": 30.0,
+                    "status": "draft",
+                    # No goodwill fields, no konto
+                }
+            ],
+            "eliminations": [
+                {
+                    "journal_id": "j1",
+                    "lines": [
+                        {"regnr": 10, "amount": 50.0}
+                        # No konto field
+                    ],
+                }
+            ],
+        }
+        proj = project_from_dict(d)
+        case = proj.associate_cases[0]
+        assert case.acquisition_cost == 0.0
+        assert case.goodwill_useful_life_years == 5
+        line = proj.eliminations[0].lines[0]
+        assert line.konto == ""
+        assert proj.default_associate_line_mapping == {}

@@ -26,6 +26,15 @@ class ReconciliationResult:
     discrepancies: pd.DataFrame
 
 
+@dataclass
+class ContinuityResult:
+    """Resultat fra IB/UB-kontinuitetskontroll (IB i år == UB fjor)."""
+
+    account_level: pd.DataFrame
+    summary: Dict[str, object]
+    discrepancies: pd.DataFrame
+
+
 def build_account_reconciliation(
     sb_df: pd.DataFrame,
     hb_df: pd.DataFrame,
@@ -33,6 +42,7 @@ def build_account_reconciliation(
     konto_col: str = "Konto",
     belop_col: str = "Beløp",
     tolerance: float = 0.01,
+    skip_zero: bool = True,
 ) -> pd.DataFrame:
     """Bygg avstemming per konto mellom SB og HB.
 
@@ -63,6 +73,16 @@ def build_account_reconciliation(
     merged["hb_sum"] = merged["hb_sum"].fillna(0.0)
     merged["differanse"] = merged["sb_netto"] - merged["hb_sum"]
     merged["har_avvik"] = merged["differanse"].abs() > tolerance
+
+    # Filtrer vekk kontoer der alt er null (ingen bevegelse verken i SB eller HB)
+    if skip_zero:
+        has_data = (
+            (merged["sb_ib"].abs() > tolerance)
+            | (merged["sb_ub"].abs() > tolerance)
+            | (merged["sb_netto"].abs() > tolerance)
+            | (merged["hb_sum"].abs() > tolerance)
+        )
+        merged = merged.loc[has_data].copy()
 
     # Sorter etter konto (numerisk der mulig)
     merged["_sort"] = pd.to_numeric(merged["konto"], errors="coerce").fillna(999999)
@@ -173,6 +193,80 @@ def reconcile(
     return ReconciliationResult(
         account_level=account_level,
         rl_level=rl_level,
+        summary=summary,
+        discrepancies=discrepancies,
+    )
+
+
+# ---------------------------------------------------------------------------
+# IB/UB-kontinuitetskontroll:  IB(i år) == UB(fjor)
+# ---------------------------------------------------------------------------
+
+def build_continuity_check(
+    sb_current: pd.DataFrame,
+    sb_previous: pd.DataFrame,
+    *,
+    tolerance: float = 0.01,
+) -> pd.DataFrame:
+    """Sjekk at IB i inneværende år stemmer med UB fra forrige år, per konto.
+
+    Begge DataFrames forventes med kolonner: konto, kontonavn, ib, ub.
+
+    Returnerer DataFrame med kolonner:
+        konto, kontonavn, ib_current, ub_previous, differanse, har_avvik
+    """
+    cur = sb_current[["konto", "kontonavn", "ib"]].copy()
+    cur["konto"] = cur["konto"].astype(str).str.strip()
+    cur["ib"] = pd.to_numeric(cur["ib"], errors="coerce").fillna(0.0)
+    cur = cur.rename(columns={"ib": "ib_current"})
+
+    prev = sb_previous[["konto", "ub"]].copy()
+    prev["konto"] = prev["konto"].astype(str).str.strip()
+    prev["ub"] = pd.to_numeric(prev["ub"], errors="coerce").fillna(0.0)
+    prev = prev.rename(columns={"ub": "ub_previous"})
+
+    merged = cur.merge(prev, on="konto", how="outer")
+    merged["kontonavn"] = merged["kontonavn"].fillna("")
+    merged["ib_current"] = merged["ib_current"].fillna(0.0)
+    merged["ub_previous"] = merged["ub_previous"].fillna(0.0)
+    merged["differanse"] = merged["ib_current"] - merged["ub_previous"]
+    merged["har_avvik"] = merged["differanse"].abs() > tolerance
+
+    # Filtrer vekk kontoer der begge er null
+    has_data = (merged["ib_current"].abs() > tolerance) | (merged["ub_previous"].abs() > tolerance)
+    merged = merged.loc[has_data].copy()
+
+    merged["_sort"] = pd.to_numeric(merged["konto"], errors="coerce").fillna(999999)
+    merged = merged.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
+
+    return merged[["konto", "kontonavn", "ib_current", "ub_previous", "differanse", "har_avvik"]]
+
+
+def build_continuity_summary(df: pd.DataFrame) -> Dict[str, object]:
+    """Oppsummering av IB/UB-kontinuitetskontroll."""
+    return {
+        "total_ib_current": float(df["ib_current"].sum()),
+        "total_ub_previous": float(df["ub_previous"].sum()),
+        "total_differanse": float(df["differanse"].sum()),
+        "antall_kontoer": len(df),
+        "antall_avvik": int(df["har_avvik"].sum()),
+        "kun_i_current": int(((df["ub_previous"].abs() < 0.01) & (df["ib_current"].abs() > 0.01)).sum()),
+        "kun_i_previous": int(((df["ib_current"].abs() < 0.01) & (df["ub_previous"].abs() > 0.01)).sum()),
+    }
+
+
+def check_continuity(
+    sb_current: pd.DataFrame,
+    sb_previous: pd.DataFrame,
+    *,
+    tolerance: float = 0.01,
+) -> ContinuityResult:
+    """Komplett IB/UB-kontinuitetskontroll."""
+    account_level = build_continuity_check(sb_current, sb_previous, tolerance=tolerance)
+    summary = build_continuity_summary(account_level)
+    discrepancies = account_level.loc[account_level["har_avvik"]].reset_index(drop=True)
+    return ContinuityResult(
+        account_level=account_level,
         summary=summary,
         discrepancies=discrepancies,
     )

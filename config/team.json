@@ -1,0 +1,11 @@
+{
+  "_comment": "Mapper Windows-brukernavn til Visena-initialer og teaminfo. Legg til nye brukere her.",
+  "users": {
+    "ib91": {
+      "visena_initials": "sb",
+      "full_name": "Simen Bjørndalen",
+      "email": "sb@bhl.no",
+      "role": "manager"
+    }
+  }
+}

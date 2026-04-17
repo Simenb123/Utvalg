@@ -23,10 +23,11 @@ from typing import Any, Callable
 log = logging.getLogger(__name__)
 
 _ENHET_URL    = "https://data.brreg.no/enhetsregisteret/api/enheter/{orgnr}"
+_ROLLER_URL   = "https://data.brreg.no/enhetsregisteret/api/enheter/{orgnr}/roller"
 _REGNSKAP_URL = "https://data.brreg.no/regnskapsregisteret/regnskap/{orgnr}"
 _CACHE_TTL    = 86_400   # 24 timer
 _TIMEOUT      = 10       # sekunder per request
-_REGNSKAP_SCHEMA_VERSION = "2"   # bump når felt-mappingen endres
+_REGNSKAP_SCHEMA_VERSION = "3"   # bump når felt-mappingen endres
 
 # NACE-toppkoder som typisk er unntatt eller utenfor MVA-loven.
 # Kilde: mval. §§ 3-2 til 3-20 og Merverdiavgiftshåndboken.
@@ -189,6 +190,103 @@ def fetch_enhet(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
+# Roller (fra Enhetsregisteret)
+# ---------------------------------------------------------------------------
+
+# Rolletype-koder vi ønsker å hente ut
+_ROLLE_MAP: dict[str, str] = {
+    "DAGL": "Daglig leder",
+    "LEDE": "Styreleder",
+    "NEST": "Nestleder",
+    "MEDL": "Styremedlem",
+    "VARA": "Varamedlem",
+    "REVI": "Revisor",
+    "REGN": "Regnskapsfører",
+    "KONT": "Kontaktperson",
+    "KOMP": "Komplementar",
+    "DTPR": "Deltaker med pro-rata ansvar",
+    "DTSO": "Deltaker med solidarisk ansvar",
+    "EIKM": "Eier/innehaver (enkeltpersonforetak)",
+}
+
+
+def fetch_roller(orgnr: str, *, use_cache: bool = True) -> list[dict[str, str]] | None:
+    """Hent rolleinnehavere fra Enhetsregisteret.
+
+    Returnerer liste av dicts med nøklene:
+        rolle, rolle_kode, navn, fodselsdato (kan være tom)
+    Sortert: Daglig leder → Styreleder → Nestleder → Styremedlem → Varamedlem → Revisor → andre.
+    Returnerer None ved feil / ugyldig orgnr.
+    """
+    orgnr = orgnr.strip().replace(" ", "")
+    if not _valid_orgnr(orgnr):
+        return None
+
+    cache = _load_cache() if use_cache else {}
+    cache_key = f"roller:{orgnr}"
+    entry = cache.get(cache_key)
+    if entry and time.time() - entry.get("_ts", 0) < _CACHE_TTL:
+        return entry.get("data")
+
+    data = _get_json(_ROLLER_URL.format(orgnr=orgnr))
+    if data is None:
+        cache[cache_key] = {"_ts": time.time(), "data": None}
+        _save_cache(cache)
+        return None
+
+    # Parse rollegrupper → flat liste
+    result: list[dict[str, str]] = []
+    for gruppe in data.get("rollegrupper", []):
+        for rolle in gruppe.get("roller", []):
+            if rolle.get("fratraadt"):
+                continue
+            rtype = rolle.get("type", {})
+            kode = rtype.get("kode", "")
+            beskrivelse = rtype.get("beskrivelse", _ROLLE_MAP.get(kode, kode))
+
+            person = rolle.get("person")
+            enhet = rolle.get("enhet")
+            if person:
+                # API returnerer navn som nestet objekt: person.navn.fornavn
+                navn_obj = person.get("navn") or {}
+                if isinstance(navn_obj, dict):
+                    fornavn = navn_obj.get("fornavn", "")
+                    mellomnavn = navn_obj.get("mellomnavn", "")
+                    etternavn = navn_obj.get("etternavn", "")
+                else:
+                    # Fallback for evt. streng-format
+                    fornavn, mellomnavn, etternavn = str(navn_obj), "", ""
+                parts = [p for p in (fornavn, mellomnavn, etternavn) if p]
+                navn = " ".join(parts)
+                fdato = person.get("fodselsdato", "")
+            elif enhet:
+                raw_navn = enhet.get("navn", "")
+                # API kan returnere navn som liste
+                if isinstance(raw_navn, list):
+                    navn = raw_navn[0] if raw_navn else ""
+                else:
+                    navn = str(raw_navn)
+                fdato = ""
+            else:
+                continue
+
+            result.append({
+                "rolle": beskrivelse,
+                "rolle_kode": kode,
+                "navn": navn,
+                "fodselsdato": fdato or "",
+            })
+
+    # Sortér etter prioritet
+    _PRIO = {"DAGL": 0, "LEDE": 1, "NEST": 2, "MEDL": 3, "VARA": 4, "REVI": 5, "REGN": 6}
+    result.sort(key=lambda r: (_PRIO.get(r["rolle_kode"], 99), r["navn"]))
+
+    cache[cache_key] = {"_ts": time.time(), "data": result}
+    _save_cache(cache)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Regnskapsregisteret
 # ---------------------------------------------------------------------------
 
@@ -239,6 +337,18 @@ def fetch_regnskap(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | No
         else:
             rev_txt = "Revidert"
 
+        ek = ek_gjeld.get("egenkapital") or {}
+        innskutt = ek.get("innskuttEgenkapital") or {}
+        opptjent = ek.get("opptjentEgenkapital") or {}
+
+        # BRREG har inkonsistent stavemåte for "innskutt" — sumInnskuttEgenkaptial
+        # observert i live data. Fall tilbake til korrekt staving hvis endret.
+        _sum_innskutt = (
+            innskutt.get("sumInnskuttEgenkaptial")
+            or innskutt.get("sumInnskuttEgenkapital")
+        )
+        _sum_opptjent = opptjent.get("sumOpptjentEgenkapital")
+
         result = {
             "fra_dato":           rs.get("fraDato", ""),
             "til_dato":           rs.get("tilDato", ""),
@@ -256,16 +366,37 @@ def fetch_regnskap(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | No
             "sum_anleggsmidler":  _num((eiend.get("anleggsmidler") or {}).get("sumAnleggsmidler")),
             "sum_omloepsmidler":  _num((eiend.get("omloepsmidler") or {}).get("sumOmloepsmidler")),
             "sum_eiendeler":      _num(eiend.get("sumEiendeler")),
-            "sum_egenkapital":    _num((ek_gjeld.get("egenkapital") or {}).get("sumEgenkapital")),
+            "sum_egenkapital":    _num(ek.get("sumEgenkapital")),
+            "sum_innskutt_egenkapital": _num(_sum_innskutt),
+            "sum_opptjent_egenkapital": _num(_sum_opptjent),
             "langsiktig_gjeld":   _num((gjeld_ov.get("langsiktigGjeld") or {}).get("sumLangsiktigGjeld")),
             "kortsiktig_gjeld":   _num((gjeld_ov.get("kortsiktigGjeld") or {}).get("sumKortsiktigGjeld")),
             "sum_gjeld":          _num(gjeld_ov.get("sumGjeld")),
+            "sum_egenkapital_og_gjeld": _num(ek_gjeld.get("sumEgenkapitalGjeld")),
             # Meta
             "valuta":             rec.get("valuta", "NOK"),
             "regnskapstype":      rec.get("regnskapstype", ""),
             "ikke_revidert":      ikke_rev,
             "fravalg_revisjon":   fravalg,
             "revisorberetning":   rev_txt,
+        }
+        # Kanonisk linjesett (summary view). Bakoverkompatibelt: eksisterende
+        # toppnøkler er uendret — `linjer` er et tillegg for RL-mapping.
+        result["linjer"] = {
+            k: v
+            for k, v in result.items()
+            if k
+            in {
+                "driftsinntekter", "driftskostnader", "driftsresultat",
+                "finansinntekter", "finanskostnader", "netto_finans",
+                "resultat_for_skatt", "aarsresultat",
+                "sum_anleggsmidler", "sum_omloepsmidler", "sum_eiendeler",
+                "sum_egenkapital", "sum_innskutt_egenkapital",
+                "sum_opptjent_egenkapital",
+                "langsiktig_gjeld", "kortsiktig_gjeld", "sum_gjeld",
+                "sum_egenkapital_og_gjeld",
+            }
+            and v is not None
         }
 
     cache[cache_key] = {"_ts": time.time(), "data": result}

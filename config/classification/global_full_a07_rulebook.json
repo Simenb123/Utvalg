@@ -1,0 +1,307 @@
+{
+  "aliases": {
+    "feriepenger": [
+      "skyldig feriepenger",
+      "påløpte feriepenger",
+      "pålopte feriepenger",
+      "feriepengegjeld"
+    ],
+    "tilskuddogpremietilpensjon": [
+      "pensjon",
+      "otp"
+    ],
+    "sumavgiftsgrunnlagrefusjon": [
+      "refusjon",
+      "sykepengerefusjon",
+      "foreldrepengerefusjon"
+    ],
+    "elektroniskkommunikasjon": [
+      "telefon",
+      "mobil",
+      "ekom"
+    ],
+    "skattepliktigdelforsikringer": [
+      "forsikring",
+      "helseforsikring"
+    ],
+    "styrehonoraroggodtgjoerelseverv": [
+      "styrehonorar",
+      "styre",
+      "verv"
+    ],
+    "bil": [
+      "fri bil",
+      "firmabil"
+    ],
+    "yrkebiltjenstligbehovlistepris": [
+      "yrkebil",
+      "listepris",
+      "fri bil",
+      "firmabil"
+    ],
+    "fastloenn": [
+      "lønn",
+      "lonn",
+      "fastlønn",
+      "fastlonn"
+    ],
+    "forskuddstrekk": [
+      "trekk",
+      "forskuddstrekk"
+    ],
+    "aga": [
+      "arbeidsgiveravgift",
+      "aga"
+    ]
+  },
+  "rules": {
+    "fastloenn": {
+      "label": "Fastlønn",
+      "keywords": [
+        "lønn",
+        "lonn",
+        "lønn til ansatte",
+        "fastlønn til ansatte",
+        "fastlønn",
+        "fastlonn",
+        "etterlønn",
+        "Etterlønn /uferiepenger"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5000-5091"
+      ],
+      "boost_accounts": [
+        5000
+      ],
+      "basis": "Endring"
+    },
+    "feriepenger": {
+      "label": "Feriepenger",
+      "keywords": [
+        "feriepenger",
+        "Feriepenger",
+        "skyldig feriepenger",
+        "Periodisering av feriepenger",
+        "kostnadsførte feriepenger"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5002",
+        "5020",
+        "5092",
+        "5096",
+        "2940"
+      ],
+      "boost_accounts": [
+        5002,
+        5020,
+        5092,
+        5096,
+        2940
+      ],
+      "basis": "UB",
+      "special_add": [
+        {
+          "account": "2940",
+          "basis": "Endring",
+          "weight": 1.0
+        }
+      ]
+    },
+    "tilskuddOgPremieTilPensjon": {
+      "label": "Pensjon",
+      "keywords": [
+        "pensjon",
+        "otp"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5420-5429",
+        "5952-5953"
+      ],
+      "boost_accounts": [
+        5420,
+        5952,
+        5953
+      ],
+      "basis": "Endring"
+    },
+    "sumAvgiftsgrunnlagRefusjon": {
+      "label": "Refusjon",
+      "keywords": [
+        "refusjon",
+        "sykepenger",
+        "foreldrepenger"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5800-5899"
+      ],
+      "boost_accounts": [
+        5800
+      ],
+      "basis": "Endring"
+    },
+    "elektroniskKommunikasjon": {
+      "label": "Elektronisk kommunikasjon",
+      "keywords": [
+        "telefon",
+        "mobil",
+        "ekom",
+        "fri telefon"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5210-5219"
+      ],
+      "boost_accounts": [
+        5210
+      ],
+      "basis": "Endring"
+    },
+    "skattepliktigDelForsikringer": {
+      "label": "Skattepliktig del forsikringer",
+      "keywords": [
+        "forsikring",
+        "helseforsikring"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5250-5259",
+        "5280-5289",
+        "5320-5329"
+      ],
+      "boost_accounts": [
+        5250,
+        5280,
+        5320
+      ],
+      "basis": "Endring"
+    },
+    "styrehonorarOgGodtgjoerelseVerv": {
+      "label": "Styrehonorar og godtgjørelse verv",
+      "keywords": [
+        "styre",
+        "styrehonorar",
+        "honorar",
+        "verv"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5330-5339",
+        "5390-5399"
+      ],
+      "boost_accounts": [
+        5330,
+        5390
+      ],
+      "basis": "Endring"
+    },
+    "bil": {
+      "label": "Bil",
+      "keywords": [
+        "bil",
+        "fri bil",
+        "firmabil"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5200-5209"
+      ],
+      "boost_accounts": [
+        5200
+      ],
+      "basis": "Endring"
+    },
+    "yrkebilTjenstligbehovListepris": {
+      "label": "Yrkebil tjenstlig behov listepris",
+      "keywords": [
+        "yrkebil",
+        "listepris",
+        "fri bil",
+        "firmabil"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "5200-5209"
+      ],
+      "boost_accounts": [
+        5200
+      ],
+      "basis": "Endring"
+    },
+    "forskuddstrekk": {
+      "label": "Forskuddstrekk",
+      "keywords": [
+        "trekk",
+        "forskuddstrekk"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk"
+      ],
+      "allowed_ranges": [
+        "2600-2699"
+      ],
+      "boost_accounts": [
+        2600
+      ],
+      "basis": "UB",
+      "expected_sign": -1
+    },
+    "aga": {
+      "label": "Arbeidsgiveravgift",
+      "keywords": [
+        "arbeidsgiveravgift",
+        "aga"
+      ],
+      "allowed_ranges": [
+        "2770-2799"
+      ],
+      "boost_accounts": [
+        2770,
+        2785
+      ],
+      "basis": "UB",
+      "expected_sign": -1
+    }
+  }
+}

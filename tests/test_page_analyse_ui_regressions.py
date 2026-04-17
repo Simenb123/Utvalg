@@ -125,6 +125,12 @@ class DummyWidget:
         self._grid_calls.append(kwargs)
         return self
 
+    def grid_remove(self, **_k):
+        return None
+
+    def grid_configure(self, **_k):
+        return None
+
     def rowconfigure(self, *_a, **_k):
         return None
 
@@ -154,7 +160,25 @@ class DummyWidget:
         self._config[key] = value
 
     def __getitem__(self, key: str):
-        return self._config[key]
+        return self._config.get(key, "")
+
+    def insert(self, *_a, **_k):
+        return None
+
+    def delete(self, *_a, **_k):
+        return None
+
+    def cget(self, key: str):
+        return self._config.get(key, "")
+
+    def winfo_children(self):
+        return []
+
+    def forget(self, *_a, **_k):
+        return None
+
+    def add(self, *_a, **_k):
+        return None
 
 
 class DummyEntry(DummyWidget):
@@ -371,6 +395,18 @@ class DummyPage:
 
     def _bind_shortcuts(self, **_kwargs):
         self._inc("bind_shortcuts")
+
+    def _show_only_unmapped_accounts(self):
+        self._inc("show_unmapped")
+
+    def _map_selected_problem_account(self):
+        self._inc("map_problem")
+
+    def _bulk_map_selected_problem_accounts(self):
+        self._inc("bulk_map")
+
+    def _on_tx_view_mode_changed(self):
+        self._inc("tx_view_mode_changed")
 
 
 def test_build_ui_restores_missing_analyse_features() -> None:

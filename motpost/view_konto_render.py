@@ -28,15 +28,10 @@ def render_summary(view: Any) -> None:
         return
 
     outliers = getattr(view, "_outliers", set()) or set()
-    expected_regnskapslinjer = {
-        str(v).strip()
-        for v in (getattr(view, "_expected_regnskapslinjer", ()) or ())
-        if str(v).strip()
-    }
-    konto_regnskapslinje_map = {
-        _konto_str(k): str(v).strip()
-        for k, v in (getattr(view, "_konto_regnskapslinje_map", {}) or {}).items()
-        if _konto_str(k) and str(v).strip()
+    expected_motkontoer = {
+        _konto_str(k)
+        for k in (getattr(view, "_expected_motkontoer", set()) or set())
+        if _konto_str(k)
     }
 
     for _, row in df.iterrows():
@@ -46,12 +41,9 @@ def render_summary(view: Any) -> None:
         share = float(row.get("% andel", 0.0))
         cnt = int(row.get("Antall bilag", 0))
         out = "Ja" if motkonto in outliers else ""
-        regnskapslinje = str(konto_regnskapslinje_map.get(motkonto, "") or "").strip()
         is_expected = bool(
             motkonto not in outliers
-            and regnskapslinje
-            and expected_regnskapslinjer
-            and regnskapslinje in expected_regnskapslinjer
+            and motkonto in expected_motkontoer
         )
 
         tags: list[str] = []

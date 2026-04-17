@@ -21,6 +21,7 @@ Teknisk:
 
 from __future__ import annotations
 
+import logging
 import tkinter as tk
 from tkinter import ttk
 from typing import Any, Callable, List, Optional
@@ -28,7 +29,11 @@ from typing import Any, Callable, List, Optional
 import pandas as pd
 
 import session
+from materiality_store import load_state
 from views_selection_studio_ui import SelectionStudio
+
+
+log = logging.getLogger(__name__)
 
 
 def _normalize_account_values(accounts: List[Any]) -> List[str]:
@@ -218,6 +223,30 @@ class UtvalgStrataPage(ttk.Frame):
         df_all = base_df
 
         self.studio.load_data(df_all, df_base)
+        self._apply_materiality_to_studio()
+
+    def refresh_materiality(self) -> None:
+        self._apply_materiality_to_studio()
+
+    def _apply_materiality_to_studio(self) -> None:
+        if not hasattr(self.studio, "set_materiality_context"):
+            return
+
+        client = str(getattr(self.session, "client", "") or "").strip()
+        year = str(getattr(self.session, "year", "") or "").strip()
+        if not client or not year:
+            self.studio.set_materiality_context(None, None)
+            return
+
+        try:
+            state = load_state(client, year)
+        except Exception:
+            log.exception("Kunne ikke lese materialitetsstatus for %s/%s", client, year)
+            state = {}
+        self.studio.set_materiality_context(
+            state.get("active_materiality"),
+            state.get("selection_threshold_key"),
+        )
 
     # ------------------------------------------------------------
     # Callback fra SelectionStudio når brukeren "committer" et sample

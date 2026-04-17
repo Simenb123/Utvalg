@@ -21,7 +21,7 @@ import formatting
 # opprinnelige "Endring"-kolonnen er fortsatt periode-bevegelsen (UB - IB)
 # og vises som "Bevegelse i år" via den felles label-mapperen.
 SB_COLS = (
-    "Konto", "Kontonavn", "OK", "Vedlegg", "Gruppe",
+    "Konto", "Kontonavn", "OK", "OK_av", "OK_dato", "Vedlegg", "Gruppe",
     "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
 )
 
@@ -39,6 +39,8 @@ _SB_COL_WIDTHS = {
     "Konto":        70,
     "Kontonavn":    220,
     "OK":           40,
+    "OK_av":        70,
+    "OK_dato":      90,
     "Vedlegg":      60,
     "Gruppe":       150,
     "IB":           110,
@@ -53,7 +55,7 @@ _SB_COL_WIDTHS = {
 _SB_NUMERIC_COLS = (
     "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
 )
-_SB_CENTER_COLS = ("OK", "Vedlegg")
+_SB_CENTER_COLS = ("OK", "OK_av", "OK_dato", "Vedlegg")
 
 
 # =====================================================================
@@ -102,6 +104,12 @@ def create_sb_tree(parent_frame: Any) -> Any:
 
     try:
         tree.tag_configure("neg", foreground="red")
+    except Exception:
+        pass
+
+    # Lys grønn bakgrunn for konti markert som OK (ferdigrevidert)
+    try:
+        tree.tag_configure("ok_row", background="#E3F5E1")
     except Exception:
         pass
 
@@ -436,8 +444,13 @@ def refresh_sb_view(*, page: Any) -> None:
     except Exception:
         pass
 
-    # Bygg UB-i-fjor-map per konto fra _rl_sb_prev_df
+    # Bygg UB-i-fjor-map per konto fra _rl_sb_prev_df (lastet idempotent)
     prev_map: dict[str, float] = {}
+    try:
+        import page_analyse_rl as _rl_mod
+        _rl_mod.ensure_sb_prev_loaded(page=page)
+    except Exception:
+        pass
     try:
         sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
         if isinstance(sb_prev_df, pd.DataFrame) and not sb_prev_df.empty:
@@ -572,15 +585,15 @@ def refresh_sb_view(*, page: Any) -> None:
 
             comment = account_comments.get(konto, "")
             gruppe = gruppe_mapping.get(konto, "")
-            tags: tuple
-            if comment and gruppe:
-                tags = ("commented", "gruppe")
-            elif comment:
-                tags = ("commented",)
-            elif gruppe:
-                tags = ("gruppe",)
-            else:
-                tags = ()
+            is_ok = bool(account_review.get(konto, {}).get("ok"))
+            _tag_list: list[str] = []
+            if comment:
+                _tag_list.append("commented")
+            if gruppe:
+                _tag_list.append("gruppe")
+            if is_ok:
+                _tag_list.append("ok_row")
+            tags = tuple(_tag_list)
             # Kommentar signaliseres via 'commented'-tag (farge), ikke via
             # \u00e5 lime inn tekst i Kontonavn.
             display_name = navn
@@ -608,7 +621,15 @@ def refresh_sb_view(*, page: Any) -> None:
                 endring_pct_cell = ""
 
             review_entry = account_review.get(konto, {})
-            ok_cell = "OK" if review_entry.get("ok") else ""
+            is_review_ok = bool(review_entry.get("ok"))
+            ok_cell = "OK" if is_review_ok else ""
+            if is_review_ok:
+                ok_av_cell = str(review_entry.get("ok_by", "") or "")
+                ok_at_raw = str(review_entry.get("ok_at", "") or "")
+                ok_dato_cell = ok_at_raw.split("T", 1)[0] if ok_at_raw else ""
+            else:
+                ok_av_cell = ""
+                ok_dato_cell = ""
             n_atts = len(review_entry.get("attachments") or [])
             vedlegg_cell = str(n_atts) if n_atts > 0 else ""
 
@@ -616,6 +637,8 @@ def refresh_sb_view(*, page: Any) -> None:
                 konto,
                 display_name,
                 ok_cell,
+                ok_av_cell,
+                ok_dato_cell,
                 vedlegg_cell,
                 gruppe,
                 _fmt(ib_val),
@@ -828,6 +851,17 @@ def _bind_sb_rightclick(*, page: Any, tree: Any) -> None:
                 command=lambda: _show_attachments_dialog(page=page, konto=konto, kontonavn=kontonavn),
             )
             menu.add_separator()
+            link_label = _action_link_menu_label(
+                kind="account", entity_key=konto, base="Koble til handling"
+            )
+            menu.add_command(
+                label=f"{link_label}\u2026",
+                command=lambda: _open_action_link_dialog(
+                    page=page, kind="account",
+                    entity_key=konto, entity_label=f"{konto} {kontonavn}",
+                ),
+            )
+            menu.add_separator()
             menu.add_command(
                 label=f"Endre regnskapslinje for {konto}\u2026",
                 command=lambda: remap_sb_account(page=page, konto=konto, kontonavn=kontonavn),
@@ -1000,7 +1034,8 @@ def _remap_multiple_sb_accounts(*, page: Any,
     dlg.title(f"Flytt {len(kontoer)} kontoer til regnskapslinje")
     dlg.transient(page)
     dlg.grab_set()
-    dlg.resizable(False, False)
+    dlg.resizable(True, True)
+    dlg.minsize(520, 520)
 
     # Kontoer-info
     konto_text = ", ".join(k for k, _n in kontoer[:5])
@@ -1014,7 +1049,7 @@ def _remap_multiple_sb_accounts(*, page: Any,
     lb_frame = ttk.Frame(dlg)
     lb_frame.pack(padx=12, pady=2, fill="both", expand=True)
 
-    lb = tk.Listbox(lb_frame, width=50, height=15, exportselection=False)
+    lb = tk.Listbox(lb_frame, width=60, height=28, exportselection=False)
     lb_scroll = ttk.Scrollbar(lb_frame, orient="vertical", command=lb.yview)
     lb.configure(yscrollcommand=lb_scroll.set)
     lb.pack(side="left", fill="both", expand=True)
@@ -1085,6 +1120,49 @@ def _set_accounts_ok(*, page: Any, kontoer: list[str], ok: bool) -> None:
     except Exception:
         return
     _refresh_sb_after_review_change(page)
+
+
+def _action_link_menu_label(*, kind: str, entity_key: str, base: str) -> str:
+    """Returner menu-label med antall eksisterende koblinger, hvis noen."""
+    client, year = _session_client_year()
+    if not client or not year or not entity_key:
+        return base
+    try:
+        import regnskap_client_overrides as _rco
+        if kind == "account":
+            links_map = _rco.load_account_action_links(client, year)
+        else:
+            links_map = _rco.load_rl_action_links(client, year)
+        n = len(links_map.get(str(entity_key), []))
+    except Exception:
+        return base
+    if n <= 0:
+        return base
+    if n == 1:
+        return f"{base} (1 koblet)"
+    return f"{base} ({n} koblet)"
+
+
+def _open_action_link_dialog(
+    *, page: Any, kind: str, entity_key: str, entity_label: str
+) -> None:
+    """Åpne handlingskobling-dialog og oppfrisk visning etter lagring."""
+    client, year = _session_client_year()
+    if not client or not year or not entity_key:
+        return
+    try:
+        from action_link_dialog import open_action_link_dialog as _open
+    except Exception:
+        return
+    _open(
+        parent=page,
+        client=client,
+        year=year,
+        kind=kind,
+        entity_key=str(entity_key),
+        entity_label=entity_label,
+        on_saved=lambda: _refresh_sb_after_review_change(page),
+    )
 
 
 def _resolve_regnr_by_konto(*, page: Any, kontoer: list[str]) -> dict[str, tuple[int, str]]:
@@ -1619,8 +1697,23 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
 
     def _refresh_ok_label() -> None:
         review = _rco.load_account_review(client, year)
-        is_ok = bool(review.get(konto, {}).get("ok"))
-        ok_var.set("OK ✓" if is_ok else "Ikke markert OK")
+        entry = review.get(konto, {}) or {}
+        is_ok = bool(entry.get("ok"))
+        if is_ok:
+            by = str(entry.get("ok_by", "") or "").strip()
+            at = str(entry.get("ok_at", "") or "").strip()
+            # Kort dato (YYYY-MM-DD) fra ISO-tidsstempel
+            at_short = at.split("T")[0] if at else ""
+            parts = ["OK ✓"]
+            if by and at_short:
+                parts.append(f"— {by}, {at_short}")
+            elif by:
+                parts.append(f"— {by}")
+            elif at_short:
+                parts.append(f"— {at_short}")
+            ok_var.set(" ".join(parts))
+        else:
+            ok_var.set("Ikke markert OK")
         ok_btn.configure(text=("Fjern OK" if is_ok else "Merk som OK"))
 
     ttk.Label(ok_frame, text="Status:", foreground="#666").pack(side="left", padx=(8, 4))
@@ -2110,11 +2203,6 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
     def _focus_ub_evidence() -> None:
         ev = _load_evidence()
         if not ev or preview is None:
-            messagebox.showinfo(
-                "UB-bevis",
-                "Ingen lagret UB-bevis for denne kontoen enda.",
-                parent=dlg,
-            )
             return
         path = str(ev.get("attachment_path") or "")
         try:

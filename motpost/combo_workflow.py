@@ -385,6 +385,183 @@ def find_expected_combos_by_netting_regnskapslinjer(
     return matched
 
 
+def _label_has_regnr(label: str, regnr: int) -> bool:
+    text = str(label or "").strip()
+    if not text:
+        return False
+    head = text.split(" ", 1)[0].strip()
+    try:
+        return int(head) == int(regnr)
+    except Exception:
+        return False
+
+
+def _rule_allowed_kontos(
+    rule: Any,
+    konto_regnskapslinje_map: Mapping[str, str],
+) -> tuple[set[str], str]:
+    """Kontoer én enkelt regel aksepterer, samt RL-label for mapping."""
+    try:
+        regnr = int(getattr(rule, "target_regnr"))
+    except Exception:
+        return set(), ""
+    kontos_in_rl: list[str] = []
+    label_for_rule = ""
+    for konto, label in konto_regnskapslinje_map.items():
+        if _label_has_regnr(label, regnr):
+            k = _konto_str(konto)
+            if k and k not in kontos_in_rl:
+                kontos_in_rl.append(k)
+            if not label_for_rule:
+                label_for_rule = str(label).strip()
+    if not kontos_in_rl:
+        return set(), label_for_rule
+    mode = str(getattr(rule, "account_mode", "all") or "all").strip().lower()
+    if mode == "selected":
+        whitelist = {
+            _konto_str(k)
+            for k in getattr(rule, "allowed_accounts", ()) or ()
+            if _konto_str(k)
+        }
+        if not whitelist:
+            return set(), label_for_rule
+        return {k for k in kontos_in_rl if k in whitelist}, label_for_rule
+    excluded = {
+        _konto_str(k)
+        for k in getattr(rule, "excluded_accounts", ()) or ()
+        if _konto_str(k)
+    }
+    return {k for k in kontos_in_rl if k not in excluded}, label_for_rule
+
+
+def _build_rule_set_allowed(
+    rule_set: Any,
+    konto_regnskapslinje_map: Mapping[str, str],
+) -> tuple[set[str], str, list[tuple[Any, set[str], str]]]:
+    """Bygg (allowed_kontos, source_label, rule_entries) fra regelsettet.
+
+    ``rule_entries`` gir (rule, allowed_kontos_for_rule, target_label) slik at
+    netting kan avgjøres per regel.
+    """
+    allowed_kontos: set[str] = set()
+    rule_entries: list[tuple[Any, set[str], str]] = []
+    label_map = konto_regnskapslinje_map or {}
+
+    source_label = ""
+    for konto, label in label_map.items():
+        if _label_has_regnr(label, int(rule_set.source_regnr)):
+            source_label = str(label).strip()
+            break
+
+    for rule in getattr(rule_set, "rules", ()) or ():
+        kontos, label = _rule_allowed_kontos(rule, label_map)
+        if not kontos:
+            continue
+        rule_entries.append((rule, kontos, label))
+        allowed_kontos.update(kontos)
+    return allowed_kontos, source_label, rule_entries
+
+
+def find_expected_combos_by_rule_set(
+    combos: Sequence[str],
+    *,
+    rule_set: Any,
+    df_scope: pd.DataFrame,
+    selected_accounts: Sequence[str],
+    konto_regnskapslinje_map: Mapping[str, str] | None = None,
+    selected_direction: str | None = None,
+    empty_label: str = "(ingen motkonto)",
+) -> list[str]:
+    """Evaluer strukturerte forventningsregler per kombinasjon.
+
+    Semantikk:
+      1. En kombinasjon er kandidat-forventet når alle observerte motpost-
+         kontoer ligger i et regelsett-allowed-sett og alle motpost-kontoer
+         har RL-mapping.
+      2. For hver regel som treffer kombinasjonen og har
+         ``requires_netting=True``, kjøres eksisterende netting-matematikk
+         mot det aktuelle kontosettet. Kombinasjonen beholdes bare hvis
+         alle slike per-regel-sjekker godkjenner.
+    """
+    if rule_set is None or not getattr(rule_set, "rules", ()):
+        return []
+    if not konto_regnskapslinje_map:
+        return []
+
+    label_map = konto_regnskapslinje_map or {}
+    allowed_kontos, source_label, rule_entries = _build_rule_set_allowed(
+        rule_set, label_map
+    )
+    if not allowed_kontos:
+        return []
+
+    sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
+
+    approved: list[tuple[str, list[str]]] = []
+    for combo in combos:
+        combo_key = str(combo or "").strip()
+        if not combo_key:
+            continue
+        non_selected: list[str] = []
+        any_unmapped = False
+        for raw in combo_key.split(","):
+            k = _konto_str(raw)
+            if not k:
+                continue
+            if k in sel_set:
+                continue
+            label = str(label_map.get(k, "") or "").strip()
+            if not label:
+                any_unmapped = True
+                break
+            non_selected.append(k)
+        if any_unmapped or not non_selected:
+            continue
+        if all(k in allowed_kontos for k in non_selected):
+            approved.append((combo_key, non_selected))
+
+    if not approved:
+        return []
+
+    netting_rules = [
+        (rule, rule_kontos, rule_label)
+        for rule, rule_kontos, rule_label in rule_entries
+        if bool(getattr(rule, "requires_netting", False)) and rule_label
+    ]
+    if not netting_rules:
+        return [combo for combo, _ in approved]
+
+    selected_source_labels = {source_label} if source_label else None
+    final: list[str] = []
+    for combo_key, motposts in approved:
+        motpost_set = set(motposts)
+        ok = True
+        for rule, rule_kontos, rule_label in netting_rules:
+            if not (motpost_set & rule_kontos):
+                continue
+            try:
+                tolerance = float(getattr(rule, "netting_tolerance", 1.0) or 0.0)
+            except Exception:
+                tolerance = 1.0
+            matched = find_expected_combos_by_netting_regnskapslinjer(
+                [combo_key],
+                df_scope=df_scope,
+                selected_accounts=selected_accounts,
+                selected_regnskapslinjer=selected_source_labels,
+                expected_regnskapslinjer=[rule_label],
+                konto_regnskapslinje_map=label_map,
+                selected_direction=selected_direction,
+                tolerance=max(tolerance, 0.0),
+                empty_label=empty_label,
+            )
+            if combo_key not in matched:
+                ok = False
+                break
+        if ok:
+            final.append(combo_key)
+    return final
+
+
 def normalize_direction(selected_direction: str | None) -> str:
     """Normaliser retning til en av: 'alle', 'debet', 'kredit'."""
     s = (selected_direction or "").strip().lower()

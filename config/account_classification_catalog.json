@@ -1,0 +1,421 @@
+{
+  "groups": [
+    {
+      "id": "Skyldig MVA",
+      "label": "Skyldig MVA",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 10,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Inngående MVA",
+      "label": "Inngående MVA",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 20,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Utgående MVA",
+      "label": "Utgående MVA",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 30,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Lønnskostnad",
+      "label": "Lønnskostnad",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 40,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Feriepenger",
+      "label": "Feriepenger",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 50,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Skyldig lønn",
+      "label": "Skyldig lønn",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 60,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Skyldig feriepenger",
+      "label": "Skyldig feriepenger",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 70,
+      "applies_to": ["analyse"],
+      "aliases": ["feriepenger gjeld"]
+    },
+    {
+      "id": "Skyldig arbeidsgiveravgift",
+      "label": "Skyldig arbeidsgiveravgift",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 80,
+      "applies_to": ["analyse"],
+      "aliases": ["aga gjeld"]
+    },
+    {
+      "id": "Skyldig arbeidsgiveravgift av feriepenger",
+      "label": "Skyldig arbeidsgiveravgift av feriepenger",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 90,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Kostnadsført arbeidsgiveravgift",
+      "label": "Kostnadsført arbeidsgiveravgift",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 100,
+      "applies_to": ["analyse"],
+      "aliases": ["aga kostnad"]
+    },
+    {
+      "id": "Kostnadsført arbeidsgiveravgift av feriepenger",
+      "label": "Kostnadsført arbeidsgiveravgift av feriepenger",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 110,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Pensjonskostnad",
+      "label": "Pensjonskostnad",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 120,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Skyldig pensjon",
+      "label": "Skyldig pensjon",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 130,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Betalbar skatt",
+      "label": "Betalbar skatt",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 140,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Utsatt skatt",
+      "label": "Utsatt skatt",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 150,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Skattetrekk",
+      "label": "Skattetrekk",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 160,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["forskuddstrekk"]
+    },
+    {
+      "id": "Driftskonto",
+      "label": "Driftskonto",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 170,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Skattetrekkskonto",
+      "label": "Skattetrekkskonto",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 180,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "Sparekonto",
+      "label": "Sparekonto",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 190,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Kundefordringer",
+      "label": "Kundefordringer",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 200,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Leverandørgjeld",
+      "label": "Leverandørgjeld",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 210,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Mellomværende konsern",
+      "label": "Mellomværende konsern",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 220,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Ansvarlig lån",
+      "label": "Ansvarlig lån",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 230,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Maskiner og utstyr",
+      "label": "Maskiner og utstyr",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 240,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Inventar",
+      "label": "Inventar",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 250,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "IT-utstyr",
+      "label": "IT-utstyr",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 260,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Biler",
+      "label": "Biler",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 270,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Gevinst-/tapskonto",
+      "label": "Gevinst-/tapskonto",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 280,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Egenkapital",
+      "label": "Egenkapital",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 290,
+      "applies_to": ["analyse"],
+      "aliases": []
+    },
+    {
+      "id": "Utbytte",
+      "label": "Utbytte",
+      "category": "legacy_group",
+      "active": true,
+      "sort_order": 300,
+      "applies_to": ["analyse", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "100_loenn_ol",
+      "label": "Post 100 Lønn o.l.",
+      "category": "payroll_rf1022_group",
+      "active": true,
+      "sort_order": 1000,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["lønn", "lonn", "fastlonn", "timelonn", "feriepenger", "bonus", "provisjon", "lonnskostnad"],
+      "exclude_aliases": ["aga", "arbeidsgiveravgift", "arb avg", "forskuddstrekk", "skattetrekk"]
+    },
+    {
+      "id": "100_refusjon",
+      "label": "Post 100 Refusjon",
+      "category": "payroll_rf1022_group",
+      "active": true,
+      "sort_order": 1010,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["refusjon", "sykepengerrefusjon", "sykepenger refusjon", "nav refusjon", "foreldrepengerefusjon", "foreldrepenger refusjon"]
+    },
+    {
+      "id": "111_naturalytelser",
+      "label": "Post 111 Naturalytelser",
+      "category": "payroll_rf1022_group",
+      "active": true,
+      "sort_order": 1020,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["naturalytelse", "naturalytelser", "telefon", "mobil", "ekom", "elektronisk kommunikasjon", "fri bil", "firmabil", "bilfordel", "forsikring", "helseforsikring"]
+    },
+    {
+      "id": "112_pensjon",
+      "label": "Post 112 Pensjon",
+      "category": "payroll_rf1022_group",
+      "active": true,
+      "sort_order": 1030,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["pensjon", "otp", "obligatorisk tjenestepensjon", "innskuddspensjon", "pensjonspremie", "pensjonskostnad"]
+    }
+  ],
+  "tags": [
+    {
+      "id": "aga_pliktig",
+      "label": "AGA-pliktig",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 10,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["aga", "arbeidsgiveravgift", "arbeidsgiver avgift", "arb avg"]
+    },
+    {
+      "id": "oppgavepliktig",
+      "label": "Oppgavepliktig",
+      "category": "control_tag",
+      "active": true,
+      "sort_order": 20,
+      "applies_to": ["a07", "kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "opplysningspliktig",
+      "label": "Opplysningspliktig",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 25,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["oppgavepliktig", "innberetningspliktig", "a melding"]
+    },
+    {
+      "id": "feriepenger_gjeld",
+      "label": "Skyldig feriepenger",
+      "category": "control_tag",
+      "active": true,
+      "sort_order": 30,
+      "applies_to": ["kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "aga_gjeld",
+      "label": "Skyldig arbeidsgiveravgift",
+      "category": "control_tag",
+      "active": true,
+      "sort_order": 40,
+      "applies_to": ["kontrolloppstilling"],
+      "aliases": []
+    },
+    {
+      "id": "pensjon",
+      "label": "Pensjon",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 50,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["pensjon", "otp", "obligatorisk tjenestepensjon", "innskuddspensjon", "pensjonspremie"]
+    },
+    {
+      "id": "finansskatt_pliktig",
+      "label": "Finansskatt-pliktig",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 55,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["finansskatt", "finansskattepliktig", "finansskatt grunnlag"]
+    },
+    {
+      "id": "refusjon",
+      "label": "Refusjon",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 60,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["refusjon", "sykepengerefusjon", "sykepenger refusjon", "nav refusjon", "foreldrepengerefusjon"]
+    },
+    {
+      "id": "naturalytelse",
+      "label": "Naturalytelse",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 70,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["naturalytelse", "naturalytelser", "telefon", "mobil", "ekom", "elektronisk kommunikasjon", "fri bil", "firmabil", "bilfordel", "forsikring", "helseforsikring"]
+    },
+    {
+      "id": "feriepengergrunnlag",
+      "label": "Feriepengegrunnlag",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 75,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["feriepengegrunnlag", "grunnlag feriepenger", "feriepenger"]
+    },
+    {
+      "id": "styrehonorar",
+      "label": "Styrehonorar",
+      "category": "payroll_tag",
+      "active": true,
+      "sort_order": 80,
+      "applies_to": ["analyse", "a07", "kontrolloppstilling"],
+      "aliases": ["styrehonorar", "styregodtgjorelse", "styreverv", "vervsgodtgjorelse"]
+    },
+    {
+      "id": "utbytte",
+      "label": "Utbytte",
+      "category": "control_tag",
+      "active": true,
+      "sort_order": 90,
+      "applies_to": ["kontrolloppstilling"],
+      "aliases": []
+    }
+  ]
+}

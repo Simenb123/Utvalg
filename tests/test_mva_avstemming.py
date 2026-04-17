@@ -103,6 +103,75 @@ class TestBuildMvaPivot:
         assert "" not in codes
         assert "1" in codes
 
+    def test_client_mapping_normalizes_codes(self, monkeypatch):
+        """build_mva_pivot med klient-mapping normaliserer klient-koder til SAF-T."""
+        import page_analyse_mva
+
+        fake_mapping = {"MVA25": "1", "MVA_INN25": "11"}
+
+        def fake_load(_client):
+            return fake_mapping
+
+        def fake_system(_client):
+            return ""
+
+        monkeypatch.setattr(
+            "regnskap_client_overrides.load_mva_code_mapping", fake_load,
+        )
+        monkeypatch.setattr(
+            "regnskap_client_overrides.load_accounting_system", fake_system,
+        )
+
+        df = self._make_df([
+            ["MVA25", 250.0, "2025-01-15", "3000", 1000.0],
+            ["MVA_INN25", -250.0, "2025-01-20", "4300", -1000.0],
+        ])
+        result = page_analyse_mva.build_mva_pivot(df, client="DemoAS")
+
+        codes = result["MVA-kode"].tolist()
+        assert "1" in codes
+        assert "11" in codes
+        assert "MVA25" not in codes  # rå-koden er normalisert bort
+
+    def test_client_mapping_empty_is_noop(self, monkeypatch):
+        """Tom mapping + tomt system → oppfører seg som før (regresjon)."""
+        import page_analyse_mva
+
+        monkeypatch.setattr(
+            "regnskap_client_overrides.load_mva_code_mapping", lambda _c: {},
+        )
+        monkeypatch.setattr(
+            "regnskap_client_overrides.load_accounting_system", lambda _c: "",
+        )
+
+        df = self._make_df([
+            ["1", 250.0, "2025-01-15", "3000", 1000.0],
+        ])
+        result = page_analyse_mva.build_mva_pivot(df, client="DemoAS")
+        codes = result["MVA-kode"].tolist()
+        assert "1" in codes
+
+    def test_client_mapping_unknown_code_kept(self, monkeypatch):
+        """Ukjent rå-kode som ikke er i mapping beholdes som-er."""
+        import page_analyse_mva
+
+        monkeypatch.setattr(
+            "regnskap_client_overrides.load_mva_code_mapping",
+            lambda _c: {"MVA25": "1"},
+        )
+        monkeypatch.setattr(
+            "regnskap_client_overrides.load_accounting_system", lambda _c: "",
+        )
+
+        df = self._make_df([
+            ["MVA25", 250.0, "2025-01-15", "3000", 1000.0],
+            ["UKJENT", 100.0, "2025-01-15", "3000", 400.0],
+        ])
+        result = page_analyse_mva.build_mva_pivot(df, client="DemoAS")
+        codes = result["MVA-kode"].tolist()
+        assert "1" in codes
+        assert "UKJENT" in codes
+
 
 # ---------------------------------------------------------------------------
 # mva_avstemming — month_to_termin (same logic, separate module)
@@ -240,6 +309,98 @@ class TestParseSkatteetaten:
 
         assert result.mva_per_termin.get(6, 0) == 10000.0
         assert result.mva_per_termin.get(1, 0) == 20000.0
+
+    def test_parse_transaksjoner_sheet(self, tmp_path):
+        """Transaksjoner-arket leses inn som raw_transaksjoner."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Kontoutskrift gjelder"
+        ws1.append(["Kontoutskrift"])
+
+        ws2 = wb.create_sheet("Krav")
+        ws2.append(["Forfallsdato", "Kravbeskrivelse", "Kravgruppe",
+                    "År", "Periode", "Periode fra-til", "Opprinnelig beløp"])
+        ws2.append([None, "Mva-melding", "Merverdiavgift", 2025, 1, "", 10000.0])
+
+        ws3 = wb.create_sheet("Transaksjoner")
+        ws3.append(["Dato", "Tekst", "Debet", "Kredit", "Saldo"])
+        ws3.append(["2025-03-10", "Innbetaling MVA T1", 0.0, 10000.0, -10000.0])
+        ws3.append(["2025-05-10", "Innbetaling MVA T2", 0.0, 5000.0, -5000.0])
+
+        path = tmp_path / "kontoutskrift_trans.xlsx"
+        wb.save(path)
+
+        from mva_avstemming import parse_skatteetaten_kontoutskrift
+        result = parse_skatteetaten_kontoutskrift(path, year=2025)
+
+        assert result.raw_transaksjoner is not None
+        assert len(result.raw_transaksjoner) == 2
+        assert "Tekst" in result.raw_transaksjoner.columns
+
+
+# ---------------------------------------------------------------------------
+# SkatteetatenData — serialisering (for klient-persistens)
+# ---------------------------------------------------------------------------
+
+class TestSkatteetatenDataSerialize:
+    def test_roundtrip_basic_fields(self):
+        from mva_avstemming import SkatteetatenData
+
+        sd = SkatteetatenData(
+            org_nr="123456789",
+            company="Test AS",
+            period="2025",
+            year=2025,
+            mva_per_termin={1: 50000.0, 2: 75000.0},
+            aga_per_termin={1: 30000.0},
+            forskuddstrekk_per_termin={1: 80000.0},
+        )
+        data = sd.to_dict()
+        restored = SkatteetatenData.from_dict(data)
+
+        assert restored.org_nr == "123456789"
+        assert restored.company == "Test AS"
+        assert restored.period == "2025"
+        assert restored.year == 2025
+        assert restored.mva_per_termin == {1: 50000.0, 2: 75000.0}
+        assert restored.aga_per_termin == {1: 30000.0}
+        assert restored.forskuddstrekk_per_termin == {1: 80000.0}
+
+    def test_roundtrip_preserves_raw_frames(self):
+        from mva_avstemming import SkatteetatenData
+
+        krav = pd.DataFrame([
+            {"Kravgruppe": "Merverdiavgift", "Periode": 1, "Opprinnelig beløp": 10000.0},
+        ])
+        trans = pd.DataFrame([
+            {"Dato": "2025-03-10", "Tekst": "MVA T1", "Debet": 0.0, "Kredit": 10000.0},
+        ])
+        sd = SkatteetatenData(
+            mva_per_termin={1: 10000.0},
+            raw_krav=krav,
+            raw_transaksjoner=trans,
+        )
+        data = sd.to_dict()
+        restored = SkatteetatenData.from_dict(data)
+
+        assert restored.raw_krav is not None and len(restored.raw_krav) == 1
+        assert restored.raw_transaksjoner is not None
+        assert restored.raw_transaksjoner.iloc[0]["Tekst"] == "MVA T1"
+
+    def test_from_dict_handles_missing_and_invalid(self):
+        from mva_avstemming import SkatteetatenData
+
+        # Tom dict → default-objekt
+        empty = SkatteetatenData.from_dict({})
+        assert empty.org_nr == ""
+        assert empty.mva_per_termin == {}
+        assert empty.raw_krav is None
+
+        # Ugyldig year → None
+        sd = SkatteetatenData.from_dict({"year": "ikke-et-tall"})
+        assert sd.year is None
 
 
 # ---------------------------------------------------------------------------

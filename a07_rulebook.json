@@ -1,0 +1,103 @@
+{
+  "aliases": {
+    "feriepenger": ["skyldig feriepenger", "påløpte feriepenger", "pålopte feriepenger", "feriepengegjeld"],
+    "tilskuddogpremietilpensjon": ["pensjon", "otp"],
+    "sumavgiftsgrunnlagrefusjon": ["refusjon", "sykepengerefusjon", "foreldrepengerefusjon"],
+    "elektroniskkommunikasjon": ["telefon", "mobil", "ekom"],
+    "skattepliktigdelforsikringer": ["forsikring", "helseforsikring"],
+    "styrehonoraroggodtgjoerelseverv": ["styrehonorar", "styre", "verv"],
+    "bil": ["fri bil", "firmabil"],
+    "yrkebiltjenstligbehovlistepris": ["yrkebil", "listepris", "fri bil", "firmabil"],
+    "fastloenn": ["lønn", "lonn", "fastlønn", "fastlonn"],
+    "forskuddstrekk": ["trekk", "forskuddstrekk"],
+    "aga": ["arbeidsgiveravgift", "aga"]
+  },
+  "rules": {
+    "fastloenn": {
+      "label": "Fastlønn",
+      "allowed_ranges": ["5000-5091"],
+      "keywords": ["lønn", "lonn", "fastlønn", "fastlonn"],
+      "boost_accounts": [5000],
+      "basis": "Endring"
+    },
+    "feriepenger": {
+      "label": "Feriepenger",
+      "allowed_ranges": ["5002", "5020", "5092", "5096", "2940"],
+      "keywords": ["feriepenger", "skyldig feriepenger", "periodisering av feriepenger", "etterlønn", "etterlonn"],
+      "boost_accounts": [5002, 5020, 5092, 5096, 2940],
+      "special_add": [
+        {
+          "account": "2940",
+          "basis": "Endring",
+          "weight": 1.0
+        }
+      ],
+      "basis": "UB"
+    },
+    "tilskuddOgPremieTilPensjon": {
+      "label": "Pensjon",
+      "allowed_ranges": ["5420-5429", "5952-5953"],
+      "keywords": ["pensjon", "otp"],
+      "boost_accounts": [5420, 5952, 5953],
+      "basis": "Endring"
+    },
+    "sumAvgiftsgrunnlagRefusjon": {
+      "label": "Refusjon",
+      "allowed_ranges": ["5800-5899"],
+      "keywords": ["refusjon", "sykepenger", "foreldrepenger"],
+      "boost_accounts": [5800],
+      "basis": "Endring"
+    },
+    "elektroniskKommunikasjon": {
+      "label": "Elektronisk kommunikasjon",
+      "allowed_ranges": ["5210-5219"],
+      "keywords": ["telefon", "mobil", "ekom"],
+      "boost_accounts": [5210],
+      "basis": "Endring"
+    },
+    "skattepliktigDelForsikringer": {
+      "label": "Skattepliktig del forsikringer",
+      "allowed_ranges": ["5250-5259", "5280-5289", "5320-5329"],
+      "keywords": ["forsikring", "helseforsikring"],
+      "boost_accounts": [5250, 5280, 5320],
+      "basis": "Endring"
+    },
+    "styrehonorarOgGodtgjoerelseVerv": {
+      "label": "Styrehonorar og godtgjørelse verv",
+      "allowed_ranges": ["5330-5339", "5390-5399"],
+      "keywords": ["styre", "styrehonorar", "honorar", "verv"],
+      "boost_accounts": [5330, 5390],
+      "basis": "Endring"
+    },
+    "bil": {
+      "label": "Bil",
+      "allowed_ranges": ["5200-5209"],
+      "keywords": ["bil", "fri bil", "firmabil"],
+      "boost_accounts": [5200],
+      "basis": "Endring"
+    },
+    "yrkebilTjenstligbehovListepris": {
+      "label": "Yrkebil tjenstlig behov listepris",
+      "allowed_ranges": ["5200-5209"],
+      "keywords": ["yrkebil", "listepris", "fri bil", "firmabil"],
+      "boost_accounts": [5200],
+      "basis": "Endring"
+    },
+    "forskuddstrekk": {
+      "label": "Forskuddstrekk",
+      "allowed_ranges": ["2600-2699"],
+      "keywords": ["trekk", "forskuddstrekk"],
+      "boost_accounts": [2600],
+      "basis": "UB",
+      "expected_sign": -1
+    },
+    "aga": {
+      "label": "Arbeidsgiveravgift",
+      "allowed_ranges": ["2770-2799"],
+      "keywords": ["arbeidsgiveravgift", "aga"],
+      "boost_accounts": [2770, 2785],
+      "basis": "UB",
+      "expected_sign": -1
+    }
+  }
+}

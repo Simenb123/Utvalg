@@ -51,8 +51,113 @@ class SkatteetatenData:
     forskuddstrekk_per_termin: dict[int, float] = field(default_factory=dict)
     # Rå Krav-data for referanse
     raw_krav: Optional[pd.DataFrame] = None
+    # Rå Transaksjoner-data (bevegelser på skattekonto)
+    raw_transaksjoner: Optional[pd.DataFrame] = None
     # År filtrert på (None = alle)
     year: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        """Serialiser til JSON-kompatibel dict (for klient-persistens)."""
+        def _jsonable(val):
+            if val is None:
+                return None
+            if isinstance(val, (pd.Timestamp,)):
+                if pd.isna(val):
+                    return None
+                return val.isoformat()
+            # numpy-skalare
+            try:
+                import numpy as np
+                if isinstance(val, np.generic):
+                    if isinstance(val, np.floating) and np.isnan(val):
+                        return None
+                    return val.item()
+            except Exception:
+                pass
+            if isinstance(val, float):
+                import math
+                if math.isnan(val):
+                    return None
+                return val
+            if isinstance(val, (int, str, bool)):
+                return val
+            # datetime/date fallback
+            try:
+                import datetime as _dt
+                if isinstance(val, (_dt.datetime, _dt.date)):
+                    return val.isoformat()
+            except Exception:
+                pass
+            return str(val)
+
+        def _df_to_records(df: Optional[pd.DataFrame]) -> list:
+            if df is None or df.empty:
+                return []
+            try:
+                records = df.astype(object).where(df.notna(), None).to_dict("records")
+                return [
+                    {str(k): _jsonable(v) for k, v in rec.items()}
+                    for rec in records
+                ]
+            except Exception:
+                return []
+
+        return {
+            "org_nr": self.org_nr,
+            "company": self.company,
+            "period": self.period,
+            "year": self.year,
+            "mva_per_termin": {str(k): float(v) for k, v in self.mva_per_termin.items()},
+            "aga_per_termin": {str(k): float(v) for k, v in self.aga_per_termin.items()},
+            "forskuddstrekk_per_termin": {
+                str(k): float(v) for k, v in self.forskuddstrekk_per_termin.items()
+            },
+            "raw_krav": _df_to_records(self.raw_krav),
+            "raw_transaksjoner": _df_to_records(self.raw_transaksjoner),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SkatteetatenData":
+        """Deserialisér fra dict lagret via to_dict."""
+        if not isinstance(data, dict):
+            return cls()
+
+        def _to_int_keys(d) -> dict[int, float]:
+            out: dict[int, float] = {}
+            if not isinstance(d, dict):
+                return out
+            for k, v in d.items():
+                try:
+                    out[int(k)] = float(v)
+                except (TypeError, ValueError):
+                    continue
+            return out
+
+        def _records_to_df(records) -> Optional[pd.DataFrame]:
+            if not records:
+                return None
+            try:
+                return pd.DataFrame(records)
+            except Exception:
+                return None
+
+        result = cls(
+            org_nr=str(data.get("org_nr", "") or ""),
+            company=str(data.get("company", "") or ""),
+            period=str(data.get("period", "") or ""),
+            mva_per_termin=_to_int_keys(data.get("mva_per_termin")),
+            aga_per_termin=_to_int_keys(data.get("aga_per_termin")),
+            forskuddstrekk_per_termin=_to_int_keys(data.get("forskuddstrekk_per_termin")),
+            raw_krav=_records_to_df(data.get("raw_krav")),
+            raw_transaksjoner=_records_to_df(data.get("raw_transaksjoner")),
+        )
+        yr = data.get("year")
+        if yr is not None:
+            try:
+                result.year = int(yr)
+            except (TypeError, ValueError):
+                result.year = None
+        return result
 
 
 def parse_skatteetaten_kontoutskrift(
@@ -147,6 +252,13 @@ def parse_skatteetaten_kontoutskrift(
             result.forskuddstrekk_per_termin[termin] = (
                 result.forskuddstrekk_per_termin.get(termin, 0.0) + amount
             )
+
+    # Les Transaksjoner-arket (valgfritt — brukes i "Skyldig saldo"-fanen)
+    try:
+        df_trans = pd.read_excel(p, sheet_name="Transaksjoner")
+        result.raw_transaksjoner = df_trans
+    except Exception as exc:
+        log.debug("Kunne ikke lese Transaksjoner-arket: %s", exc)
 
     return result
 

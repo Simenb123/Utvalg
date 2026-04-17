@@ -233,6 +233,38 @@ class TestUiMainVersionType:
             except Exception:
                 pass
 
+    def test_on_tb_ready_does_not_navigate_to_consolidation(self):
+        """Bruker skal bli værende på gjeldende fane etter SB-valg."""
+        import session
+        import ui_main
+
+        session.set_tb(_sample_tb())
+        app = ui_main.create_app()
+        try:
+            try:
+                app.withdraw()
+            except Exception:
+                pass
+
+            setattr(app, "after_idle", lambda fn: fn())
+            setattr(app, "after", lambda _ms, fn: fn())
+
+            selected = []
+
+            class _NB:
+                def select(self, tab):
+                    selected.append(tab)
+            app.nb = _NB()  # type: ignore[assignment]
+
+            app._on_tb_ready()
+
+            assert selected == [], f"Skulle ikke auto-navigere, men valgte: {selected}"
+        finally:
+            try:
+                app.destroy()
+            except Exception:
+                pass
+
 
 # ---------------------------------------------------------------------------
 # 4. ConsolidationPage._update_session_tb_button

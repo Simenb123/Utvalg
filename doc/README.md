@@ -1,5 +1,11 @@
 # Utvalg
 
+## Lønn og klassifisering
+
+- [`SALDOBALANSE_LONN_ARBEIDSFLYT.md`](SALDOBALANSE_LONN_ARBEIDSFLYT.md) - daglig arbeidsflyt i `Saldobalanse` for A07, RF-1022 og læring.
+- [`KLASSIFISERINGSFELTER_LONN.md`](KLASSIFISERINGSFELTER_LONN.md) - forklaring av felter, forslag, historikk, status og lønnsflagg.
+- [`RF1022_BEHANDLINGSLOGIKK.md`](RF1022_BEHANDLINGSLOGIKK.md) - workbook-logikken for RF-1022, inkludert skyldig/påløpt og periodisering.
+
 ---
 
 ## Arbeidsmetode — ideer og oppgaver

@@ -66,6 +66,15 @@ def _company_b_tb() -> pd.DataFrame:
     })
 
 
+def _company_line_basis() -> pd.DataFrame:
+    return pd.DataFrame({
+        "regnr": [10, 11],
+        "regnskapslinje": ["Eiendeler", "Inntekter"],
+        "ub": [75.0, -40.0],
+        "review_status": ["approved", "approved"],
+    })
+
+
 def _sample_project(with_elimination: bool = True) -> ConsolidationProject:
     eliminations = []
     if with_elimination:
@@ -172,6 +181,55 @@ class TestRunConsolidation:
         # 25 + (-25) = 0 netto eliminering paa regnr 10
         assert r10["eliminering"] == 0.0
 
+    def test_konto_level_elimination_aggregates_to_regnr(self, _mock_config):
+        """Konto-level elimination should aggregate up to regnr level."""
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+                CompanyTB(company_id="b", name="Dat", row_count=2),
+            ],
+            eliminations=[
+                EliminationJournal(
+                    journal_id="e1", name="Konto-elim",
+                    lines=[
+                        # konto 1000 maps to regnr 10 via company_a_tb
+                        EliminationLine(regnr=10, amount=30.0, konto="1000"),
+                        EliminationLine(regnr=10, amount=-30.0, konto="1500"),
+                    ],
+                ),
+            ],
+        )
+        tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
+        result_df, _ = run_consolidation(proj, tbs)
+
+        leaf = result_df[~result_df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        # Both konto lines map to regnr 10: 30 + (-30) = 0
+        assert r10["eliminering"] == pytest.approx(0.0)
+        assert r10["konsolidert"] == pytest.approx(r10["sum_foer_elim"])
+
+    def test_konto_elimination_warns_on_unmapped_konto(self, _mock_config):
+        """Konto-level elimination with unknown konto should warn."""
+        proj = ConsolidationProject(
+            client="Test", year="2025",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2),
+            ],
+            eliminations=[
+                EliminationJournal(
+                    journal_id="e1", name="Bad konto",
+                    lines=[
+                        EliminationLine(regnr=0, amount=50.0, konto="9999"),
+                        EliminationLine(regnr=0, amount=-50.0, konto="9998"),
+                    ],
+                ),
+            ],
+        )
+        tbs = {"a": _company_a_tb()}
+        _, run_result = run_consolidation(proj, tbs)
+        assert any("9999" in w for w in run_result.warnings)
+
     def test_hash_determinism(self, _mock_config):
         proj = _sample_project()
         tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
@@ -255,6 +313,60 @@ class TestRunConsolidation:
         )
         _, run_result = run_consolidation(proj, {"a": _company_a_tb()})
         assert any("ikke balansert" in w for w in run_result.warnings)
+
+    def test_mixed_tb_and_line_basis_companies(self, _mock_config):
+        proj = ConsolidationProject(
+            client="Test",
+            year="2025",
+            parent_company_id="a",
+            companies=[
+                CompanyTB(company_id="a", name="Mor", row_count=2, basis_type="tb"),
+                CompanyTB(company_id="b", name="Rapporteringspakke", row_count=2, basis_type="regnskapslinje"),
+            ],
+        )
+
+        result_df, run_result = run_consolidation(
+            proj,
+            {"a": _company_a_tb(), "b": _company_line_basis()},
+        )
+
+        leaf = result_df[~result_df["sumpost"]]
+        r10 = leaf[leaf["regnr"] == 10].iloc[0]
+        r11 = leaf[leaf["regnr"] == 11].iloc[0]
+
+        assert r10["Mor"] == 100.0
+        assert r10["Rapporteringspakke"] == 75.0
+        assert r10["sum_foer_elim"] == 175.0
+        assert r11["Rapporteringspakke"] == -40.0
+        assert run_result.account_details is not None
+        detail = run_result.account_details
+        assert "review_status" in detail.columns
+        assert "Rapporteringspakke" in result_df.columns
+
+    def test_line_basis_uses_fx_rules_from_regnr(self, _mock_config):
+        proj = ConsolidationProject(
+            client="Test",
+            year="2025",
+            reporting_currency="NOK",
+            companies=[
+                CompanyTB(
+                    company_id="b",
+                    name="USD Datter",
+                    row_count=2,
+                    basis_type="regnskapslinje",
+                    currency_code="USD",
+                    closing_rate=10.0,
+                    average_rate=8.0,
+                ),
+            ],
+        )
+
+        result_df, run_result = run_consolidation(proj, {"b": _company_line_basis()})
+        leaf = result_df[~result_df["sumpost"]]
+
+        assert leaf.loc[leaf["regnr"] == 10, "USD Datter"].iloc[0] == pytest.approx(75.0 * 8.0)
+        assert leaf.loc[leaf["regnr"] == 11, "USD Datter"].iloc[0] == pytest.approx(-40.0 * 8.0)
+        assert run_result.currency_details
 
 
 class TestParentCompanyInResult:
@@ -661,6 +773,44 @@ class TestParentMappingFromAnalyse:
         # Should not have called Analyse loader for daughter
         mock_load.assert_not_called()
         assert result == {"3000": 20}
+
+
+# ---------------------------------------------------------------------------
+# UI helpers
+# ---------------------------------------------------------------------------
+
+class TestUiLabelHelpers:
+    def test_source_display_skips_netto_hint_for_line_basis_sources(self):
+        from page_consolidation import _source_display
+
+        assert _source_display("rl_excel", False) == "Regnskapslinjer"
+        assert _source_display("pdf_regnskap", False) == "PDF-regnskap"
+        assert _source_display("excel", False) == "TB-fil (kun netto)"
+
+    def test_build_detail_meta_text_for_line_basis_pdf_includes_review_summary(self):
+        from page_consolidation import _build_detail_meta_text
+
+        company = CompanyTB(
+            company_id="c1",
+            name="Rapporteringspakke AS",
+            source_type="pdf_regnskap",
+            row_count=2,
+            basis_type="regnskapslinje",
+            has_ib=False,
+        )
+        basis = pd.DataFrame(
+            {
+                "regnr": [10, 11],
+                "regnskapslinje": ["Eiendeler", "Inntekter"],
+                "ub": [100.0, -50.0],
+                "review_status": ["approved", ""],
+            }
+        )
+
+        assert (
+            _build_detail_meta_text(company, basis)
+            == "Regnskapslinje-grunnlag | PDF-regnskap | 2 linjer | 1 godkjent"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2762,7 +2912,44 @@ class TestDetailTreeAggregation:
         assert kwargs["values"][2] == 695
         assert kwargs["values"][5] == "300,00"
         assert kwargs["values"][6] == "300,00"
-        assert page._detail_count_var.value == "1 kontoer"
+        assert page._detail_count_var.value == "1 konto"
+
+    def test_populate_line_basis_detail_tree_formats_pdf_rows(self, _mock_config):
+        from page_consolidation import ConsolidationPage
+
+        page = ConsolidationPage.__new__(ConsolidationPage)
+        page._tk_ok = False
+        page._tree_detail = MagicMock()
+        page._tree_detail.get_children.return_value = []
+        page._detail_hide_zero_var = MagicMock()
+        page._detail_hide_zero_var.get.return_value = False
+        page._detail_count_var = _SettableVar()
+
+        basis = pd.DataFrame(
+            {
+                "regnr": [10],
+                "regnskapslinje": ["Eiendeler"],
+                "source_regnskapslinje": ["Eiendeler i årsregnskap"],
+                "ub": [1234.5],
+                "source_page": [2],
+                "confidence": [0.83],
+                "review_status": ["approved"],
+            }
+        )
+
+        page._populate_line_basis_detail_tree(basis)
+
+        page._tree_detail.insert.assert_called_once()
+        _, kwargs = page._tree_detail.insert.call_args
+        assert kwargs["values"][0] == 10
+        assert kwargs["values"][1] == "Eiendeler"
+        assert kwargs["values"][2] == "Eiendeler i årsregnskap"
+        assert kwargs["values"][3] == "1 234,50"
+        assert kwargs["values"][4] == 2
+        assert kwargs["values"][5] == "Godkjent"
+        assert kwargs["values"][6] == "83%"
+        assert kwargs["tags"] == ("approved",)
+        assert page._detail_count_var.value == "1 linje"
 
     def test_change_mapping_deduplicates_selected_accounts(self, _mock_config):
         from page_consolidation import ConsolidationPage

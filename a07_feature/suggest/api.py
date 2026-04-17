@@ -18,6 +18,7 @@ from .helpers import (
     available_basis,
 )
 from .models import (
+    AccountUsageFeatures,
     BASIS_ALIASES,
     BASIS_DEBET,
     BASIS_ENDRING,
@@ -31,6 +32,7 @@ from .models import (
     SuggestionRow,
 )
 from .rulebook import Rulebook, RulebookRule, load_rulebook
+from .usage import build_account_usage_features, score_usage_signal
 
 
 def suggest_mapping_candidates(
@@ -68,9 +70,12 @@ def suggest_mapping_candidates(
 __all__ = [
     "SuggestConfig",
     "SuggestionRow",
+    "AccountUsageFeatures",
     "suggest_mappings",
     "suggest_mapping_candidates",
     "apply_suggestion_to_mapping",
+    "build_account_usage_features",
+    "score_usage_signal",
     "EXCLUDED_A07_CODES",
     "PAYROLL_TOKENS",
     "BASIS_UB",

@@ -27,7 +27,13 @@ SUPPORTED_EXTENSIONS = {
     ".bmp",
 }
 
-_NUMBER_FRAGMENT = r"-?\d[\d\s.\u00a0]*(?:[,.]\d{2})"
+# Matches amounts in multiple formats:
+#   Norwegian: 1 990,00 | 1.990,00 | 1990,00
+#   English:   1,990.00 | 1990.00
+#   No decimals: 1990 | 1 990 | 1.990
+#   Negative:  -500,00
+# The regex uses alternatives: first try with decimals, then whole numbers.
+_NUMBER_FRAGMENT = r"-?\d[\d\s.,\u00a0]*\d"
 _COMPANY_SUFFIX_RE = re.compile(r"\b(?:AS|ASA|ENK|AB|OY|LTD|LLC|INC|GMBH|BV|SA|SPA)\b", re.IGNORECASE)
 _PDF_TEXT_THRESHOLD = 40
 
@@ -86,9 +92,19 @@ _PERIOD_PATTERNS = [
     re.compile(r"(?im)\b(?:periode|period|kontraktsperiode|leieperiode|abonnementsperiode)\b\s*[:\-]?\s*(.{4,60})$"),
     re.compile(r"(?im)\b(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\s*(?:[-–]\s*|til\s+)\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"),
 ]
+# Supplier label patterns.
+#
+# NOTE: "fra" (Norwegian for "from") used to be included in the first pattern
+# together with "leverandør"/"supplier", but it matched any occurrence of the
+# word "fra" in ordinary prose (e.g. "trekk fra eget betalingskort"), which
+# captured garbage text as the supplier name.  It is now pulled out into its
+# own pattern which REQUIRES an explicit delimiter (":" or "-") AND must be at
+# the start of a line, so it only matches label-like constructs such as
+# "Fra: Lyse Tele AS".
 _SUPPLIER_LABEL_PATTERNS = [
-    re.compile(r"(?im)\b(?:leverand[øo]r|supplier|fra)\b\s*[:\-]?\s*(.+)$"),
+    re.compile(r"(?im)\b(?:leverand[øo]r|supplier)\b\s*[:\-]?\s*(.+)$"),
     re.compile(r"(?im)\b(?:selger|seller)\b\s*[:\-]?\s*(.+)$"),
+    re.compile(r"(?im)^\s*fra\s*[:\-]\s*(.+)$"),
 ]
 _INVOICE_PAGE_POSITIVE_PATTERNS = (
     r"\binvoice\b",
@@ -778,8 +794,74 @@ def _ocr_image(path: Path) -> str:
         return pytesseract.image_to_string(image) or ""
 
 
+def _extract_supplier_from_foretaksregisteret(
+    segments: list[TextSegment], source_hint: str
+) -> FieldEvidence | None:
+    """Highest-priority supplier source: the legally-mandated Norwegian
+    "Foretaksregisteret" footer line.
+
+    Norwegian business invoices MUST identify the legal entity of the issuer
+    via a footer line that references "Foretaksregisteret".  Common shapes:
+
+        "Lyse Tele AS, Breiflåtveien 18, 4017 Stavanger, Foretaksregisteret NO 912 672 808 MVA"
+        "... \n Lyse Tele AS \n Foretaksregisteret NO ..."
+
+    This is authoritative because it names the *principal* supplier even
+    when the visible invoice header carries an agent/processor (e.g. the
+    invoicing service "Amili Collection AS" acting on behalf of Lyse Tele).
+    """
+    for segment in segments:
+        if _is_bilagsprint_segment(segment.text):
+            continue
+        all_lines = _extract_candidate_lines(segment.text, max_lines=500)
+        for i, line in enumerate(all_lines):
+            if "foretaksregisteret" not in line.lower():
+                continue
+            # Same-line pattern: "Name AS, Address, Zipcode City, Foretaksregisteret NO ..."
+            # Take text up to the first comma and see if it parses as a company.
+            head = line.split(",", 1)[0].strip()
+            normalized = _normalize_supplier_name(head)
+            if normalized and _COMPANY_SUFFIX_RE.search(normalized):
+                return FieldEvidence(
+                    field_name="supplier_name",
+                    normalized_value=normalized,
+                    raw_value=head,
+                    source=segment.source or source_hint,
+                    confidence=0.75,
+                    page=segment.page,
+                    bbox=segment.bbox,
+                )
+            # Multi-line pattern: the company name is on a neighboring line.
+            window = all_lines[max(0, i - 5):i] + all_lines[i + 1:i + 6]
+            for nearby in window:
+                normalized = _normalize_supplier_name(nearby)
+                if normalized and _COMPANY_SUFFIX_RE.search(normalized):
+                    return FieldEvidence(
+                        field_name="supplier_name",
+                        normalized_value=normalized,
+                        raw_value=nearby,
+                        source=segment.source or source_hint,
+                        confidence=0.7,
+                        page=segment.page,
+                        bbox=segment.bbox,
+                    )
+    return None
+
+
 def _extract_supplier_evidence(text: str, segments: list[TextSegment], source_hint: str) -> FieldEvidence | None:
-    for segment in segments or [TextSegment(text=text, source=source_hint)]:
+    seg_list = segments or [TextSegment(text=text, source=source_hint)]
+
+    # Priority 1: "Foretaksregisteret" footer — legally authoritative in Norway.
+    # This must win over header text because the visible header can carry an
+    # invoicing agent (e.g. Amili Collection AS) rather than the legal issuer.
+    evidence = _extract_supplier_from_foretaksregisteret(seg_list, source_hint)
+    if evidence is not None:
+        return evidence
+
+    # Priority 2: explicit label patterns ("Leverandør:", "Supplier:", "Fra: X").
+    for segment in seg_list:
+        if _is_bilagsprint_segment(segment.text):
+            continue
         for pattern in _SUPPLIER_LABEL_PATTERNS:
             match = pattern.search(segment.text)
             if not match:
@@ -796,7 +878,10 @@ def _extract_supplier_evidence(text: str, segments: list[TextSegment], source_hi
                     bbox=segment.bbox,
                 )
 
-    for segment in segments or [TextSegment(text=text, source=source_hint)]:
+    # Priority 3: header candidate lines (first 20 lines, require company suffix).
+    for segment in seg_list:
+        if _is_bilagsprint_segment(segment.text):
+            continue
         candidate_lines = _extract_candidate_lines(segment.text, max_lines=20)
         for line in candidate_lines:
             normalized = _normalize_supplier_name(line)
@@ -811,6 +896,7 @@ def _extract_supplier_evidence(text: str, segments: list[TextSegment], source_hi
                     bbox=segment.bbox,
                 )
 
+        # Priority 4: high-uppercase-ratio line (fallback for ALL-CAPS headers).
         for line in candidate_lines:
             candidate = _normalize_supplier_name(line)
             if not candidate:
@@ -842,6 +928,10 @@ def _first_match_evidence(
 ) -> FieldEvidence | None:
     candidates: list[tuple[float, FieldEvidence]] = []
     for segment_index, segment in enumerate(segments or [TextSegment(text=text, source=source_hint)]):
+        # Skip bilagsprint segments entirely — these are accounting-system
+        # printouts (Tripletex cover pages) and should never provide field values.
+        if _is_bilagsprint_segment(segment.text):
+            continue
         for pattern_index, pattern in enumerate(patterns):
             for match in pattern.finditer(segment.text):
                 raw_value = str(match.group(1) or "")
@@ -881,6 +971,14 @@ def _score_field_match(
 ) -> float:
     rank = 1000.0
     rank -= segment_index * 25.0
+
+    # Heavy penalty for bilagsprint pages — these are accounting-system
+    # printouts (Tripletex cover pages) that contain registered data, NOT
+    # the actual vendor invoice.  Without this penalty, fields like amount,
+    # date, and invoice number on the bilagsprint can outscore the real
+    # invoice fields, causing the viewer to jump to page 1.
+    if _is_bilagsprint_segment(segment_text):
+        rank -= 500.0
 
     if field_name in {"total_amount", "subtotal_amount", "vat_amount"}:
         rank -= pattern_index * 120.0
@@ -1151,10 +1249,45 @@ def _parse_amount(value: Any) -> float | None:
     text = text.replace("\u00a0", " ")
     text = re.sub(r"[^\d,.\- ]+", "", text)
     text = text.replace(" ", "")
-    if text.count(",") > 1 and "." not in text:
-        text = text.replace(",", "")
-    elif "," in text:
-        text = text.replace(".", "").replace(",", ".")
+
+    has_comma = "," in text
+    has_dot = "." in text
+
+    if has_comma and has_dot:
+        # Both separators present — the LAST one is the decimal separator.
+        last_comma = text.rfind(",")
+        last_dot = text.rfind(".")
+        if last_comma > last_dot:
+            # Norwegian: 1.990,00 → comma is decimal
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            # English: 1,990.00 → dot is decimal
+            text = text.replace(",", "")
+    elif has_comma:
+        if text.count(",") > 1:
+            # Multiple commas, all thousands: 1,000,000
+            text = text.replace(",", "")
+        else:
+            # Single comma — check if it looks like thousands (e.g. 1,990)
+            parts = text.split(",")
+            if len(parts[1]) == 3 and len(parts[0]) <= 3:
+                # Thousands separator: 1,990 → 1990
+                text = text.replace(",", "")
+            else:
+                # Decimal: 798,31 or 59,00
+                text = text.replace(",", ".")
+    elif has_dot:
+        if text.count(".") > 1:
+            # Multiple dots, all thousands: 1.000.000
+            text = text.replace(".", "")
+        else:
+            # Single dot — check if it looks like thousands (e.g. 1.990)
+            parts = text.split(".")
+            if len(parts[1]) == 3 and len(parts[0]) <= 3:
+                # Thousands separator: 1.990 → 1990
+                text = text.replace(".", "")
+            # else: decimal dot, keep as-is (e.g. 0.50, 1990.00)
+
     try:
         return float(text)
     except Exception:

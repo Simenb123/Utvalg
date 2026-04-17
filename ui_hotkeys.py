@@ -249,11 +249,15 @@ def install_global_hotkeys(
     enable_ctrl_c: bool = True,
     enable_selection_summary: bool = True,
     status_setter: Optional[Callable[[str], None]] = None,
+    selection_summary_require_opt_in: bool = False,
     **_ignored: Any,
 ) -> Optional[GlobalHotkeyHandler]:
     """Installer globale hotkeys (idempotent).
 
     `status_setter` brukes av selection-summary for å skrive tekst et sted.
+    `selection_summary_require_opt_in` sendes videre til selection-summary slik
+    at bare eksplisitt registrerte Treeviews bidrar til footeren.
+
     Vi aksepterer også **_ignored for å være robust mot gamle parametre i kall.
 
     Returnerer handler (for testing), eller eksisterende handler hvis allerede installert.
@@ -281,19 +285,130 @@ def install_global_hotkeys(
                 pass
 
     if enable_selection_summary:
-        ui_selection_summary.install_global_selection_summary(root, status_setter=status_setter)
+        ui_selection_summary.install_global_selection_summary(
+            root,
+            status_setter=status_setter,
+            require_opt_in=selection_summary_require_opt_in,
+        )
 
     return st.handler
+
+
+# --------------------------------------------------------------------------------------
+# Column autofit (dobbeltklikk på header-separator)
+# --------------------------------------------------------------------------------------
+
+def _autofit_column(tree: Any, col_id: str) -> None:
+    """Autofit en Treeview-kolonne basert på synlig innhold."""
+    try:
+        heading_text = _tree_get_heading_text(tree, col_id)
+        max_len = len(heading_text)
+
+        for idx, iid in enumerate(tree.get_children("")):
+            if idx >= 200:
+                break
+            try:
+                val = str(tree.set(iid, col_id)).strip()
+                if val and val.lower() not in ("nan", "none"):
+                    max_len = max(max_len, min(len(val), 60))
+            except Exception:
+                continue
+            # Sjekk barn (for hierarkiske trær)
+            for child_iid in tree.get_children(iid):
+                if idx >= 200:
+                    break
+                try:
+                    val = str(tree.set(child_iid, col_id)).strip()
+                    if val and val.lower() not in ("nan", "none"):
+                        max_len = max(max_len, min(len(val), 60))
+                except Exception:
+                    continue
+
+        # ~8px per tegn + padding
+        new_width = max(30, min(500, (max_len * 8) + 24))
+        tree.column(col_id, width=new_width)
+    except Exception:
+        pass
+
+
+def _install_autofit_on_tree(tree: Any) -> None:
+    """Bind dobbeltklikk på header-separator til autofit."""
+    if not _tree_is_treeview(tree):
+        return
+    if getattr(tree, "_autofit_installed", False):
+        return
+
+    def _on_header_double(event: Any) -> None:
+        region = ""
+        try:
+            region = tree.identify_region(event.x, event.y)
+        except Exception:
+            return
+        if region == "separator":
+            try:
+                col_id = tree.identify_column(event.x)
+                # col_id er f.eks. "#1" — oversett til kolonne-id
+                if col_id and col_id.startswith("#"):
+                    col_num = int(col_id[1:])
+                    cols = _tree_get_columns(tree)
+                    if 0 < col_num <= len(cols):
+                        _autofit_column(tree, cols[col_num - 1])
+            except Exception:
+                pass
+
+    try:
+        tree.bind("<Double-1>", _on_header_double, add="+")
+        tree._autofit_installed = True  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def install_autofit_all(root: Any) -> None:
+    """Installer autofit på alle eksisterende og fremtidige Treeview-widgets.
+
+    Bruker after() for å periodisk sjekke nye treeviews (enkel tilnærming
+    uten å hookte widget-opprettelse).
+    """
+    _seen: set[int] = set()
+
+    def _scan() -> None:
+        try:
+            _scan_children(root)
+        except Exception:
+            pass
+        try:
+            root.after(3000, _scan)
+        except Exception:
+            pass
+
+    def _scan_children(widget: Any) -> None:
+        try:
+            for child in widget.winfo_children():
+                wid = id(child)
+                if wid not in _seen and _tree_is_treeview(child):
+                    _seen.add(wid)
+                    _install_autofit_on_tree(child)
+                _scan_children(child)
+        except Exception:
+            pass
+
+    # Kjør første scan etter at GUI er bygget opp
+    try:
+        root.after(500, _scan)
+    except Exception:
+        pass
 
 
 # Re-export summerings-helpers (kjekt å gjenbruke i andre moduler / tester)
 guess_sum_columns = ui_selection_summary.guess_sum_columns
 treeview_selection_sums = ui_selection_summary.treeview_selection_sums
 build_selection_summary_text = ui_selection_summary.build_selection_summary_text
+register_treeview_selection_summary = ui_selection_summary.register_treeview_selection_summary
 
 
 __all__ = [
     "install_global_hotkeys",
+    "install_autofit_all",
     "GlobalHotkeyHandler",
     "treeview_select_all",
     "listbox_select_all",
@@ -302,4 +417,5 @@ __all__ = [
     "guess_sum_columns",
     "treeview_selection_sums",
     "build_selection_summary_text",
+    "register_treeview_selection_summary",
 ]

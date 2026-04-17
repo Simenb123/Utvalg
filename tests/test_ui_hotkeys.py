@@ -191,9 +191,9 @@ def test_install_global_hotkeys_ctrl_a_ctrl_c_and_selection_summary() -> None:
     assert "2\t200" in root.clipboard
     assert "\r" not in root.clipboard
 
-    # Selection summary updates status
+    # Selection summary updates status (v1.1-format: "N rader valgt | ...")
     root.bindings["<<TreeviewSelect>>"][0](ev)
-    assert "Markert:" in last_status["txt"]
+    assert "valgt" in last_status["txt"]
     assert "Beløp:" in last_status["txt"]
 
 

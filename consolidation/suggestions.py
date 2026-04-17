@@ -90,12 +90,63 @@ _RULES: list[MatchRule] = [
         label="Investering mot EK (template)",
         template_only=True,
     ),
+    # --- Utvidede varianter ---
+    MatchRule(
+        kind="intercompany",
+        pattern_a=r"kundefordring.*(?:konsern|foretak|same\s*konsern)",
+        pattern_b=r"leverand.rgjeld.*(?:konsern|foretak|same\s*konsern)",
+        label="Konsern kundefordring/leverandørgjeld",
+    ),
+    MatchRule(
+        kind="intercompany",
+        pattern_a=r"(?:annen|andre)\s*(?:lang|kort).*fordring.*(?:konsern|foretak)",
+        pattern_b=r"(?:annen|andre)\s*(?:lang|kort).*gjeld.*(?:konsern|foretak)",
+        label="Annen konsernfordring/-gjeld",
+    ),
+    MatchRule(
+        kind="group_contribution",
+        pattern_a=r"konsernbidrag.*mottatt|mottatt.*konsernbidrag",
+        pattern_b=r"konsernbidrag.*(?:avgitt|ytt)|(?:avgitt|ytt).*konsernbidrag",
+        label="Konsernbidrag (mottatt/avgitt, variant)",
+    ),
+    MatchRule(
+        kind="interest",
+        pattern_a=r"(?:annen\s*)?finansinntekt.*(?:konsern|foretak)",
+        pattern_b=r"(?:annen\s*)?finanskostnad.*(?:konsern|foretak)",
+        label="Konsern finansinntekt/-kostnad",
+    ),
 ]
 
 
+def _normalize_line_name(text: str) -> str:
+    """Normaliser regnskapslinjenavn for fuzzy matching."""
+    t = text.lower().strip()
+    replacements = {
+        "æ": "ae", "ø": "oe", "å": "aa",
+        "é": "e", "ü": "u",
+        "-": " ", "/": " ", "&": " og ",
+    }
+    for src, dst in replacements.items():
+        t = t.replace(src, dst)
+    return " ".join(t.split())
+
+
 def _match_pattern(text: str, pattern: str) -> bool:
-    """Case-insensitive regex match."""
-    return bool(re.search(pattern, text, re.IGNORECASE))
+    """Case-insensitive regex match with fuzzy normalization."""
+    if re.search(pattern, text, re.IGNORECASE):
+        return True
+    # Try normalized form
+    normalized = _normalize_line_name(text)
+    normalized_pattern = _normalize_line_name(pattern)
+    if re.search(pattern, normalized, re.IGNORECASE):
+        return True
+    # Keyword containment fallback: all words in pattern present in text
+    pattern_words = set(re.findall(r"\w+", normalized_pattern))
+    if pattern_words and len(pattern_words) >= 2:
+        text_words = set(re.findall(r"\w+", normalized))
+        if pattern_words.issubset(text_words):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------

@@ -418,3 +418,79 @@ class TestModelBackwardsCompat:
         assert line.counterparty_company_id == "c2"
         assert line.source_currency == "SEK"
         assert line.fx_rate_used == 0.95
+
+
+class TestFuzzyMatching:
+    """Test fuzzy / normalized matching in suggestions."""
+
+    def test_normalized_name_matches(self):
+        """Regnskapslinje with Norwegian chars should match via normalization."""
+        proj = _project()
+        regnr_to_name = {
+            10: "Fordring konsernselskap",
+            20: "Gjeld konsernselskap",
+        }
+        tbs = {
+            "mor": _mapped_tb({10: 500_000.0}),
+            "dat": _mapped_tb({20: -500_000.0}),
+        }
+        # These match the "konsernfordring"/"konserngjeld" patterns via
+        # keyword containment after normalization
+        from consolidation.suggestions import _match_pattern
+        assert _match_pattern("Konsernfordringer", r"konsernfordring")
+        assert _match_pattern("Konserngjeld langsiktig", r"konserngjeld")
+
+    def test_kundefordring_leverandorgjeld_konsern(self):
+        """Extended rule: kundefordring/leverandørgjeld konsern."""
+        proj = _project()
+        regnr_to_name = {
+            15: "Kundefordringer mot foretak i konsern",
+            25: "Leverandørgjeld mot foretak i konsern",
+        }
+        tbs = {
+            "mor": _mapped_tb({15: 300_000.0}),
+            "dat": _mapped_tb({25: -300_000.0}),
+        }
+        suggestions = generate_suggestions(proj, tbs, regnr_to_name)
+        assert len(suggestions) > 0
+        assert any(s.kind == "intercompany" for s in suggestions)
+
+
+class TestKontoElimination:
+    """Test konto-level elimination aggregation."""
+
+    def test_aggregate_by_konto(self):
+        from consolidation.elimination import aggregate_eliminations_by_konto
+        journal = EliminationJournal(
+            lines=[
+                EliminationLine(regnr=10, amount=100.0, konto="1500"),
+                EliminationLine(regnr=20, amount=-100.0, konto="2400"),
+                EliminationLine(regnr=30, amount=50.0),  # no konto
+            ]
+        )
+        result = aggregate_eliminations_by_konto([journal])
+        assert result == {"1500": 100.0, "2400": -100.0}
+
+    def test_aggregate_by_regnr_excludes_konto_lines(self):
+        from consolidation.elimination import aggregate_eliminations_by_regnr
+        journal = EliminationJournal(
+            lines=[
+                EliminationLine(regnr=10, amount=100.0, konto="1500"),
+                EliminationLine(regnr=10, amount=200.0),  # regnr-level
+            ]
+        )
+        result = aggregate_eliminations_by_regnr([journal])
+        assert result == {10: 200.0}  # only the regnr-level line
+
+    def test_konto_line_roundtrip(self):
+        """EliminationLine with konto survives serialization."""
+        line = EliminationLine(regnr=10, amount=500.0, konto="1500", description="Test")
+        proj = ConsolidationProject(
+            client="T", year="2025",
+            eliminations=[EliminationJournal(lines=[line])],
+        )
+        d = project_to_dict(proj)
+        restored = project_from_dict(d)
+        restored_line = restored.eliminations[0].lines[0]
+        assert restored_line.konto == "1500"
+        assert restored_line.regnr == 10

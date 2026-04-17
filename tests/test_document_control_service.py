@@ -76,6 +76,8 @@ def test_extract_invoice_fields_from_xml_reads_ubl_invoice() -> None:
         "subtotal_amount": "1000.00",
         "total_amount": "1250.00",
         "vat_amount": "250.00",
+        "description": "",
+        "period": "",
     }
     assert confidence["total_amount"] == 0.99
 

@@ -17,6 +17,8 @@ import theme
 # Pages / views
 from page_dataset import DatasetPage
 from page_analyse import AnalysePage
+from page_saldobalanse import SaldobalansePage
+from page_admin import AdminPage
 from page_a07 import A07Page
 from page_utvalg_strata import UtvalgStrataPage
 
@@ -25,7 +27,9 @@ from page_utvalg_strata import UtvalgStrataPage
 from page_utvalg import UtvalgPage
 from page_logg import LoggPage
 from page_consolidation import ConsolidationPage
+from page_ar import ARPage
 from page_regnskap import RegnskapPage
+from page_materiality import MaterialityPage
 from page_mva import MvaPage
 from page_lonn import LonnPage
 from page_skatt import SkattPage
@@ -35,6 +39,36 @@ try:
     from page_fagchat import FagchatPage
 except Exception:
     FagchatPage = None  # type: ignore
+
+try:
+    from page_documents import DocumentsPage
+except Exception:
+    DocumentsPage = None  # type: ignore
+
+try:
+    from page_statistikk import StatistikkPage
+except Exception:
+    StatistikkPage = None  # type: ignore
+
+try:
+    from page_oversikt import OversiktPage
+except Exception:
+    OversiktPage = None  # type: ignore
+
+try:
+    from page_driftsmidler import DriftsmidlerPage
+except Exception:
+    DriftsmidlerPage = None  # type: ignore
+
+try:
+    from page_revisjonshandlinger import RevisjonshandlingerPage
+except Exception:
+    RevisjonshandlingerPage = None  # type: ignore
+
+try:
+    from page_scoping import ScopingPage
+except Exception:
+    ScopingPage = None  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -164,48 +198,92 @@ class App(tk.Tk):
         except Exception:
             pass
 
+        # Global footer må pakkes før notebook slik at den reserverer plass
+        # i bunnen før notebooken fyller resten.
         self.nb = ttk.Notebook(self)
+        self._build_global_footer()
         self.nb.pack(fill="both", expand=True)
 
         # Pages
         self.page_dataset = DatasetPage(self.nb)
         self.page_analyse = AnalysePage(self.nb)
+        self.page_saldobalanse = SaldobalansePage(self.nb)
+        self.page_admin = AdminPage(self.nb)
         self.page_a07 = A07Page(self.nb)
+        self.page_ar = ARPage(self.nb)
         self.page_utvalg = UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample)
         self.page_resultat = UtvalgPage(self.nb)
         self.page_logg = LoggPage(self.nb)
         self.page_consolidation = ConsolidationPage(self.nb)
         self.page_regnskap = RegnskapPage(self.nb)
+        self.page_materiality = MaterialityPage(self.nb)
         self.page_mva = MvaPage(self.nb)
         self.page_lonn = LonnPage(self.nb)
         self.page_skatt = SkattPage(self.nb)
         self.page_reskontro = ReskontroPage(self.nb)
         self.page_fagchat = FagchatPage(self.nb) if FagchatPage is not None else None
+        self.page_documents = DocumentsPage(self.nb) if DocumentsPage is not None else None
+        self.page_statistikk = StatistikkPage(self.nb) if StatistikkPage is not None else None
+        self.page_driftsmidler = DriftsmidlerPage(self.nb) if DriftsmidlerPage is not None else None
+        self.page_revisjonshandlinger = RevisjonshandlingerPage(self.nb) if RevisjonshandlingerPage is not None else None
+        self.page_oversikt = OversiktPage(self.nb, nb=self.nb, dataset_page=self.page_dataset) if OversiktPage is not None else None
 
+        if self.page_oversikt is not None:
+            self.nb.add(self.page_oversikt, text="Oversikt")
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
+        self.nb.add(self.page_saldobalanse, text="Saldobalanse")
+        self.nb.add(self.page_admin, text="Admin")
         self.nb.add(self.page_reskontro, text="Reskontro")
         self.nb.add(self.page_regnskap, text="Regnskap")
+        if self.page_driftsmidler is not None:
+            self.nb.add(self.page_driftsmidler, text="Driftsmidler")
+        self.nb.add(self.page_materiality, text="Vesentlighet")
+        if ScopingPage is not None:
+            self.page_scoping = ScopingPage(self.nb)
+            self.nb.add(self.page_scoping, text="Scoping")
+        else:
+            self.page_scoping = None
         self.nb.add(self.page_mva, text="MVA")
         self.nb.add(self.page_lonn, text="Lønn")
         self.nb.add(self.page_skatt, text="Skatt")
         self.nb.add(self.page_a07, text="A07")
+        self.nb.add(self.page_ar, text="AR")
         self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
-        self.nb.add(self.page_logg, text="Logg")
+        if self.page_revisjonshandlinger is not None:
+            self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         if self.page_fagchat is not None:
             self.nb.add(self.page_fagchat, text="Fagchat")
+        if self.page_documents is not None:
+            self.nb.add(self.page_documents, text="Dokumenter")
+        if self.page_statistikk is not None:
+            self.nb.add(self.page_statistikk, text="Statistikk")
+        try:
+            self.nb.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
+        except Exception:
+            pass
 
         # Koble RegnskapPage og MvaPage til AnalysePage som datakilde
         if hasattr(self.page_regnskap, "set_analyse_page"):
             self.page_regnskap.set_analyse_page(self.page_analyse)
+        if hasattr(self.page_saldobalanse, "set_analyse_page"):
+            self.page_saldobalanse.set_analyse_page(self.page_analyse)
+        if hasattr(self.page_admin, "set_analyse_page"):
+            self.page_admin.set_analyse_page(self.page_analyse)
         if hasattr(self.page_mva, "set_analyse_page"):
             self.page_mva.set_analyse_page(self.page_analyse)
         if hasattr(self.page_lonn, "set_analyse_page"):
             self.page_lonn.set_analyse_page(self.page_analyse)
         if hasattr(self.page_skatt, "set_analyse_page"):
             self.page_skatt.set_analyse_page(self.page_analyse)
+        if self.page_statistikk is not None and hasattr(self.page_statistikk, "set_analyse_page"):
+            self.page_statistikk.set_analyse_page(self.page_analyse)
+        if self.page_driftsmidler is not None and hasattr(self.page_driftsmidler, "set_analyse_page"):
+            self.page_driftsmidler.set_analyse_page(self.page_analyse)
+        if self.page_driftsmidler is not None and hasattr(self.page_regnskap, "set_driftsmidler_page"):
+            self.page_regnskap.set_driftsmidler_page(self.page_driftsmidler)
 
         # Gi AnalysePage callback for "Til utvalg"
         if hasattr(self.page_analyse, "set_utvalg_callback"):
@@ -222,6 +300,65 @@ class App(tk.Tk):
         # Forsøk å koble DatasetPage -> on ready hook slik at Analyse oppdateres etter import
         self._maybe_install_dataset_ready_hook()
 
+        # Start alltid paa Oversikt ved oppstart
+        self._restore_last_tab()
+
+    def _build_global_footer(self) -> None:
+        """Bygg en diskret footer-linje nederst i hovedvinduet.
+
+        Venstre felt viser selection-summary for aktiv Treeview.
+        Høyre felt viser vanlige statusmeldinger.
+        """
+        try:
+            # Separator over footeren gir en subtil toppkant uten SUNKEN-look.
+            sep = ttk.Separator(self, orient="horizontal")
+            sep.pack(side="bottom", fill="x")
+
+            footer = ttk.Frame(self, padding=(8, 2))
+            footer.pack(side="bottom", fill="x")
+
+            sel_lbl = ttk.Label(footer, text="", anchor="w")
+            sel_lbl.pack(side="left", fill="x", expand=True)
+
+            status_lbl = ttk.Label(footer, text="", anchor="e", foreground="#6B5540")
+            status_lbl.pack(side="right")
+
+            self._footer_frame = footer
+            self._footer_selection_label = sel_lbl
+            self._footer_status_label = status_lbl
+        except Exception:
+            self._footer_frame = None
+            self._footer_selection_label = None
+            self._footer_status_label = None
+
+    def set_selection_summary(self, text: str) -> None:
+        """Skriv tekst i venstre footer-felt (selection-summary)."""
+        lbl = getattr(self, "_footer_selection_label", None)
+        if lbl is None:
+            return
+        try:
+            lbl.config(text=str(text) if text else "")
+        except Exception:
+            pass
+
+    def clear_selection_summary(self) -> None:
+        """Tøm venstre footer-felt."""
+        self.set_selection_summary("")
+
+    def set_status_message(self, text: str) -> None:
+        """Skriv tekst i høyre footer-felt (vanlige statusmeldinger)."""
+        lbl = getattr(self, "_footer_status_label", None)
+        if lbl is None:
+            return
+        try:
+            lbl.config(text=str(text) if text else "")
+        except Exception:
+            pass
+
+    def set_status(self, text: str) -> None:
+        """Bakoverkompatibelt alias til `set_status_message`."""
+        self.set_status_message(text)
+
     def _init_headless(self) -> None:
         """Initialiserer en minimal app når Tk ikke kan brukes."""
         # Minimal notebook-stub
@@ -230,8 +367,15 @@ class App(tk.Tk):
             add=lambda *_args, **_kwargs: None,
         )
 
+        # Footer-stubs (no-op, men samme API som GUI-varianten)
+        self._footer_frame = None
+        self._footer_selection_label = None
+        self._footer_status_label = None
+
         # Minimal pages/stubs som testene forventer
         self.page_analyse = SimpleNamespace(dataset=None)  # type: ignore[assignment]
+        self.page_saldobalanse = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_admin = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
 
         # DatasetPage må eksponere .dp, og DatasetPane må ha ._on_ready
         dp_stub = SimpleNamespace(_on_ready=None)
@@ -239,15 +383,20 @@ class App(tk.Tk):
 
         # Resten brukes ikke av testene, men vi setter dem for robusthet
         self.page_a07 = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
+        self.page_ar = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
         self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
         self.page_logg = SimpleNamespace()  # type: ignore[assignment]
         self.page_consolidation = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_regnskap = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_materiality = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_mva = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_lonn = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_skatt = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_reskontro = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_driftsmidler = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_revisjonshandlinger = None
+        self.page_oversikt = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
 
         # Installer hook slik at testene kan finne dp._on_ready og kalle callback
         self._maybe_install_dataset_ready_hook()
@@ -341,6 +490,186 @@ class App(tk.Tk):
             # Ikke kræsje appen om hook feiler
             return
 
+    def _restore_last_tab(self) -> None:
+        """Velg oppstartsfanen.
+
+        Appen skal alltid aapne paa Oversikt, ikke siste aktive fane.
+        Fallback er foerste tilgjengelige fane hvis Oversikt ikke finnes.
+        """
+        try:
+            oversikt_page = getattr(self, "page_oversikt", None)
+            if oversikt_page is not None:
+                self.nb.select(oversikt_page)
+                return
+            tabs = self.nb.tabs()
+            if tabs:
+                self.nb.select(tabs[0])
+        except Exception:
+            pass
+
+    def _save_current_tab(self) -> None:
+        """Lagre aktiv fane i preferences."""
+        try:
+            import preferences
+            selected_id = self.nb.select()
+            tab_text = self.nb.tab(selected_id, "text")
+            if tab_text:
+                preferences.set("ui.last_tab", tab_text)
+        except Exception:
+            pass
+
+    def _on_notebook_tab_changed(self, _event=None) -> None:
+        self._save_current_tab()
+
+        # Nullstill selection-summary når man bytter fane, slik at en markering
+        # på Analyse ikke blir stående igjen nederst på en annen side.
+        try:
+            self.clear_selection_summary()
+        except Exception:
+            pass
+
+        try:
+            selected_id = self.nb.select()
+            selected_widget = self.nametowidget(selected_id)
+        except Exception:
+            return
+
+        self._sync_session_context_from_dataset_store()
+
+        if selected_widget is getattr(self, "page_consolidation", None):
+            try:
+                self.after_idle(self._refresh_consolidation_from_session)
+            except Exception:
+                self._refresh_consolidation_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_a07", None):
+            try:
+                self.after_idle(self._refresh_a07_from_session)
+            except Exception:
+                self._refresh_a07_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_saldobalanse", None):
+            try:
+                self.after_idle(self._refresh_saldobalanse_from_session)
+            except Exception:
+                self._refresh_saldobalanse_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_admin", None):
+            try:
+                self.after_idle(self._refresh_admin_from_session)
+            except Exception:
+                self._refresh_admin_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_ar", None):
+            try:
+                self.after_idle(self._refresh_ar_from_session)
+            except Exception:
+                self._refresh_ar_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_revisjonshandlinger", None):
+            try:
+                self.after_idle(self._refresh_handlinger_from_session)
+            except Exception:
+                self._refresh_handlinger_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_scoping", None):
+            try:
+                self.after_idle(self._refresh_scoping_from_session)
+            except Exception:
+                self._refresh_scoping_from_session()
+
+    def _dataset_store_context(self) -> tuple[str | None, str | None]:
+        try:
+            dp = getattr(self.page_dataset, "dp", None)
+            if dp is None:
+                dp = getattr(self.page_dataset, "dataset_pane", None)
+            if dp is None:
+                dp = getattr(self.page_dataset, "pane", None)
+            sec = getattr(dp, "_store_section", None) if dp else None
+            if sec is None:
+                return None, None
+            client = (getattr(sec, "client_var", None) and sec.client_var.get() or "").strip() or None
+            year = (getattr(sec, "year_var", None) and sec.year_var.get() or "").strip() or None
+            return client, year
+        except Exception:
+            return None, None
+
+    def _sync_session_context_from_dataset_store(self) -> tuple[str | None, str | None]:
+        client = (getattr(session, "client", None) or "").strip() or None
+        year = (getattr(session, "year", None) or "").strip() or None
+        store_client, store_year = self._dataset_store_context()
+        if store_client:
+            client = store_client
+        if store_year:
+            year = store_year
+        try:
+            session.client = client
+            session.year = year
+        except Exception:
+            pass
+        return client, year
+
+    def _refresh_consolidation_from_session(self) -> None:
+        try:
+            if hasattr(self.page_consolidation, "refresh_from_session") and callable(getattr(self.page_consolidation, "refresh_from_session")):
+                self.page_consolidation.refresh_from_session(session)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("Consolidation refresh after tab change failed")
+
+    def _refresh_a07_from_session(self) -> None:
+        try:
+            if hasattr(self.page_a07, "refresh_from_session") and callable(getattr(self.page_a07, "refresh_from_session")):
+                self.page_a07.refresh_from_session(session)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("A07 refresh after tab change failed")
+
+    def _refresh_saldobalanse_from_session(self) -> None:
+        try:
+            if hasattr(self.page_saldobalanse, "refresh_from_session") and callable(getattr(self.page_saldobalanse, "refresh_from_session")):
+                self.page_saldobalanse.refresh_from_session(session)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("Saldobalanse refresh after tab change failed")
+
+    def _refresh_admin_from_session(self) -> None:
+        try:
+            if hasattr(self.page_admin, "refresh_from_session") and callable(getattr(self.page_admin, "refresh_from_session")):
+                self.page_admin.refresh_from_session(session)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("Admin refresh after tab change failed")
+
+    def _refresh_ar_from_session(self) -> None:
+        try:
+            if hasattr(self.page_ar, "refresh_from_session") and callable(getattr(self.page_ar, "refresh_from_session")):
+                self.page_ar.refresh_from_session(session)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("AR refresh after tab change failed")
+
+    def _refresh_handlinger_from_session(self) -> None:
+        try:
+            page = getattr(self, "page_revisjonshandlinger", None)
+            if page is not None and hasattr(page, "on_client_changed"):
+                client = getattr(session, "client", None)
+                year = getattr(session, "year", None)
+                page.on_client_changed(client, year)
+        except Exception:
+            log.exception("Handlinger refresh after tab change failed")
+
+    def _refresh_scoping_from_session(self) -> None:
+        try:
+            page = getattr(self, "page_scoping", None)
+            if page is not None and hasattr(page, "on_client_changed"):
+                client = getattr(session, "client", None)
+                year = getattr(session, "year", None)
+                page.on_client_changed(client, year)
+        except Exception:
+            log.exception("Scoping refresh after tab change failed")
+
     def _on_data_ready(self, df: pd.DataFrame) -> None:
         """Kalles når dataset er lastet.
 
@@ -357,11 +686,7 @@ class App(tk.Tk):
 
         # Oppdater session.client / session.year fra DatasetPane sin store-seksjon
         try:
-            dp = getattr(self.page_dataset, "dp", None) or getattr(self.page_dataset, "dataset_pane", None) or getattr(self.page_dataset, "pane", None)
-            sec = getattr(dp, "_store_section", None) if dp else None
-            if sec is not None:
-                session.client = (getattr(sec, "client_var", None) and sec.client_var.get() or "").strip() or None
-                session.year = (getattr(sec, "year_var", None) and sec.year_var.get() or "").strip() or None
+            self._sync_session_context_from_dataset_store()
         except Exception:
             pass
 
@@ -387,12 +712,12 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Resultat refresh after dataset load failed")
 
-        def _refresh_consolidation() -> None:
+        def _refresh_saldobalanse() -> None:
             try:
-                if hasattr(self.page_consolidation, "refresh_from_session") and callable(getattr(self.page_consolidation, "refresh_from_session")):
-                    self.page_consolidation.refresh_from_session(session)  # type: ignore[attr-defined]
+                if hasattr(self.page_saldobalanse, "refresh_from_session") and callable(getattr(self.page_saldobalanse, "refresh_from_session")):
+                    self.page_saldobalanse.refresh_from_session(session)  # type: ignore[attr-defined]
             except Exception:
-                log.exception("Consolidation refresh after dataset load failed")
+                log.exception("Saldobalanse refresh after dataset load failed")
 
         def _refresh_regnskap() -> None:
             try:
@@ -400,6 +725,13 @@ class App(tk.Tk):
                     self.page_regnskap.refresh_from_session(session)  # type: ignore[attr-defined]
             except Exception:
                 log.exception("Regnskap refresh after dataset load failed")
+
+        def _refresh_materiality() -> None:
+            try:
+                if hasattr(self.page_materiality, "refresh_from_session") and callable(getattr(self.page_materiality, "refresh_from_session")):
+                    self.page_materiality.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Materiality refresh after dataset load failed")
 
         def _refresh_mva() -> None:
             try:
@@ -429,24 +761,66 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Reskontro refresh after dataset load failed")
 
+        def _refresh_documents() -> None:
+            try:
+                if hasattr(self, "page_documents") and self.page_documents is not None:
+                    if hasattr(self.page_documents, "refresh_from_session"):
+                        self.page_documents.refresh_from_session(session)
+            except Exception:
+                log.exception("Documents refresh after dataset load failed")
+
+        def _refresh_statistikk() -> None:
+            try:
+                if hasattr(self, "page_statistikk") and self.page_statistikk is not None:
+                    if hasattr(self.page_statistikk, "refresh_from_session"):
+                        self.page_statistikk.refresh_from_session(session)
+            except Exception:
+                log.exception("Statistikk refresh after dataset load failed")
+
+        def _refresh_driftsmidler() -> None:
+            try:
+                if hasattr(self, "page_driftsmidler") and self.page_driftsmidler is not None:
+                    if hasattr(self.page_driftsmidler, "refresh_from_session"):
+                        self.page_driftsmidler.refresh_from_session(session)
+            except Exception:
+                log.exception("Driftsmidler refresh after dataset load failed")
+
+        def _refresh_oversikt() -> None:
+            try:
+                if hasattr(self, "page_oversikt") and self.page_oversikt is not None:
+                    if hasattr(self.page_oversikt, "refresh_from_session"):
+                        self.page_oversikt.refresh_from_session(session)
+            except Exception:
+                log.exception("Oversikt refresh after dataset load failed")
+
         try:
             self.after_idle(_refresh_analyse)
             self.after(25, _refresh_resultat)
-            self.after(50, _refresh_consolidation)
-            self.after(75, _refresh_regnskap)
-            self.after(100, _refresh_mva)
-            self.after(125, _refresh_lonn)
-            self.after(150, _refresh_skatt)
-            self.after(175, _refresh_reskontro)
+            self.after(40, _refresh_saldobalanse)
+            self.after(60, _refresh_regnskap)
+            self.after(85, _refresh_materiality)
+            self.after(110, _refresh_mva)
+            self.after(135, _refresh_lonn)
+            self.after(160, _refresh_skatt)
+            self.after(185, _refresh_reskontro)
+            self.after(210, _refresh_documents)
+            self.after(235, _refresh_statistikk)
+            self.after(260, _refresh_driftsmidler)
+            self.after(310, _refresh_oversikt)
         except Exception:
             _refresh_analyse()
             _refresh_resultat()
-            _refresh_consolidation()
+            _refresh_saldobalanse()
             _refresh_regnskap()
+            _refresh_materiality()
             _refresh_mva()
             _refresh_lonn()
             _refresh_skatt()
             _refresh_reskontro()
+            _refresh_documents()
+            _refresh_statistikk()
+            _refresh_driftsmidler()
+            _refresh_oversikt()
 
         # Vis Analyse som neste steg
         try:
@@ -474,19 +848,39 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Consolidation refresh after TB load failed")
 
+        def _refresh_saldobalanse() -> None:
+            try:
+                if hasattr(self.page_saldobalanse, "refresh_from_session") and callable(getattr(self.page_saldobalanse, "refresh_from_session")):
+                    self.page_saldobalanse.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Saldobalanse refresh after TB load failed")
+
+        def _refresh_ar() -> None:
+            try:
+                if hasattr(self.page_ar, "refresh_from_session") and callable(getattr(self.page_ar, "refresh_from_session")):
+                    self.page_ar.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("AR refresh after TB load failed")
+
+        def _refresh_materiality() -> None:
+            try:
+                if hasattr(self.page_materiality, "refresh_from_session") and callable(getattr(self.page_materiality, "refresh_from_session")):
+                    self.page_materiality.refresh_from_session(session)  # type: ignore[attr-defined]
+            except Exception:
+                log.exception("Materiality refresh after TB load failed")
+
         try:
             self.after_idle(_refresh_analyse)
-            self.after(25, _refresh_consolidation)
+            self.after(20, _refresh_saldobalanse)
+            self.after(35, _refresh_consolidation)
+            self.after(60, _refresh_ar)
+            self.after(85, _refresh_materiality)
         except Exception:
             _refresh_analyse()
+            _refresh_saldobalanse()
             _refresh_consolidation()
-
-        # Vis Konsolidering som neste steg (TB-only → konsolidering er primær bruk)
-        try:
-            if hasattr(self, "nb") and hasattr(self.nb, "select"):
-                self.nb.select(self.page_consolidation)
-        except Exception:
-            pass
+            _refresh_ar()
+            _refresh_materiality()
 
     def _on_analyse_send_to_utvalg(self, accounts: List[str]) -> None:
         """Callback fra Analyse-fanen ("Til utvalg")."""
@@ -559,6 +953,29 @@ def create_app() -> App:
     return App()
 
 
+def install_runtime_ui_behaviors(app: "App") -> None:
+    """Installer runtime-oppførsel som skal være lik uansett entrypoint.
+
+    Samlet på ett sted slik at både `app.py` og `ui_main.__main__` gir
+    identisk oppførsel (globale hotkeys, autofit, opt-in selection-summary
+    som skriver til app-footeren).
+    """
+    try:
+        import ui_hotkeys
+
+        setter = getattr(app, "set_selection_summary", None)
+        ui_hotkeys.install_global_hotkeys(
+            app,
+            status_setter=setter if callable(setter) else None,
+            selection_summary_require_opt_in=True,
+        )
+        ui_hotkeys.install_autofit_all(app)
+    except Exception:
+        # Runtime-oppsett skal aldri stoppe oppstart
+        log.exception("install_runtime_ui_behaviors failed")
+
+
 if __name__ == "__main__":
     app = create_app()
+    install_runtime_ui_behaviors(app)
     app.mainloop()

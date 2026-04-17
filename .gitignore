@@ -30,6 +30,10 @@ clients/
 clients_index.json
 clients_index.stamp
 utvalg_data_dir.txt
+utvalg_sources_dir.txt
+
+# Vector DB (RAG) — binær, genereres lokalt
+ragdb/
 
 # Local build outputs
 build_exe/
@@ -38,9 +42,17 @@ dist_exe/
 
 # Binary test/doc data
 doc/*.xlsx
+doc/*.docx
+doc/*.doc
 
 # Sensitiv klientdata — skal ALDRI commites
 doc/files/
+
+# Temp export files
+temp_*.xls
+temp_*.xlsx
+tmp_*.txt
+tmp_*.xlsx
 
 # OS cruft
 Thumbs.db

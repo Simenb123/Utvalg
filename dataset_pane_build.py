@@ -113,7 +113,10 @@ def build_dataset(req: BuildRequest) -> BuildResult:
                 header_row=req.header_row,
             )
 
-            # 1) Hvis UI allerede har valgt en lagret versjon, bruk den direkte.
+            # 1) Hvis UI allerede har valgt en lagret versjon, bruk den direkte —
+            #    men bare hvis brukerens valgte filsti faktisk peker på samme versjon.
+            #    Ellers har brukeren valgt en ny fil via «Velg fil…», og vi må
+            #    behandle den som ny versjon (ikke gjenbruke gammel ID/cache).
             if req.store_version_id:
                 v = client_store.get_version(
                     req.store_client,
@@ -121,7 +124,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
                     dtype=req.store_dtype,
                     version_id=req.store_version_id,
                 )
-                if v is not None:
+                if v is not None and _paths_equal(v.path, req.path):
                     stored_version_id = v.id
                     stored_path = v.path
                     version_meta = v.meta
@@ -347,3 +350,18 @@ def _is_inside_root(p: Path, root: Path) -> bool:
         return str(pr).startswith(str(rr) + os.sep)
     except Exception:
         return str(p).startswith(str(root))
+
+
+def _paths_equal(a: str | Path | None, b: str | Path | None) -> bool:
+    """Sammenlign to filstier robust på tvers av case og separator.
+
+    Ikke bruk resolve() på nettverksstier — det kan blokkere.
+    """
+    if not a or not b:
+        return False
+    try:
+        na = os.path.normcase(os.path.normpath(str(a)))
+        nb = os.path.normcase(os.path.normpath(str(b)))
+        return na == nb
+    except Exception:
+        return str(a) == str(b)

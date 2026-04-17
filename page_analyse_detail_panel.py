@@ -220,8 +220,24 @@ def _selected_detail_account(page: Any) -> str:
     return value
 
 
-def _set_selected_detail_account(page: Any, konto: str) -> None:
-    setattr(page, "_detail_selected_account", str(konto or "").strip())
+def _is_detail_selection_explicit(page: Any) -> bool:
+    return bool(getattr(page, "_detail_selected_account_explicit", False))
+
+
+def _set_selected_detail_account(page: Any, konto: str, *, explicit: bool = False) -> None:
+    value = str(konto or "").strip()
+    setattr(page, "_detail_selected_account", value)
+    setattr(page, "_detail_selected_account_explicit", bool(explicit and value))
+
+
+def reset_detail_selection(page: Any) -> None:
+    """Clear detail-account selection so transactions fall back to full scope.
+
+    Called from pivot-selection hooks when the active scope changes (e.g. a new
+    regnskapslinje is selected) so a stale auto-selected detail account never
+    narrows the transactions view.
+    """
+    _set_selected_detail_account(page, "", explicit=False)
 
 
 def get_selected_detail_account_row(page: Any) -> pd.Series | None:
@@ -314,7 +330,7 @@ def _restore_detail_selection(page: Any) -> None:
             item_to_focus = item
 
     if not item_to_focus:
-        _set_selected_detail_account(page, "")
+        _set_selected_detail_account(page, "", explicit=False)
         _render_suggestion_rows(page)
         return
 
@@ -329,7 +345,9 @@ def _restore_detail_selection(page: Any) -> None:
         konto = str(tree.set(item_to_focus, "Konto") or "").strip()
     except Exception:
         konto = ""
-    _set_selected_detail_account(page, konto)
+    was_explicit = _is_detail_selection_explicit(page)
+    keep_explicit = bool(was_explicit and selected_account and konto == selected_account)
+    _set_selected_detail_account(page, konto, explicit=keep_explicit)
     _render_suggestion_rows(page)
 
 
@@ -386,7 +404,7 @@ def on_detail_account_selected(page: Any, _event: Any = None) -> None:
     except Exception:
         selection = []
     if not selection:
-        _set_selected_detail_account(page, "")
+        _set_selected_detail_account(page, "", explicit=False)
         _render_suggestion_rows(page)
         try:
             page._refresh_transactions_view()
@@ -399,7 +417,7 @@ def on_detail_account_selected(page: Any, _event: Any = None) -> None:
         konto = str(tree.set(item, "Konto") or "").strip()
     except Exception:
         konto = ""
-    _set_selected_detail_account(page, konto)
+    _set_selected_detail_account(page, konto, explicit=bool(konto))
     _render_suggestion_rows(page)
     try:
         page._refresh_transactions_view()
@@ -604,7 +622,7 @@ def explain_selected_account(page: Any, *, messagebox: Any) -> None:
 
 def selected_transaction_accounts(page: Any, default_accounts: list[str]) -> list[str]:
     selected_account = _selected_detail_account(page)
-    if selected_account:
+    if selected_account and _is_detail_selection_explicit(page):
         return [selected_account]
     return list(default_accounts)
 
@@ -674,9 +692,9 @@ def jump_to_analysis_context(page: Any, context: dict[str, object] | None) -> No
         _select_account_items(page, accounts)
 
     if len(accounts) == 1:
-        _set_selected_detail_account(page, accounts[0])
+        _set_selected_detail_account(page, accounts[0], explicit=True)
     else:
-        _set_selected_detail_account(page, "")
+        _set_selected_detail_account(page, "", explicit=False)
 
     refresh_detail_panel(page)
     try:
@@ -696,5 +714,6 @@ __all__ = [
     "refresh_detail_panel",
     "reject_suggestion_for_selected_account",
     "remove_override_for_selected_account",
+    "reset_detail_selection",
     "selected_transaction_accounts",
 ]

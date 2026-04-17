@@ -10,6 +10,7 @@ import pandas as pd
 
 from document_control_app_service import (
     analyze_document_for_bilag,
+    find_or_extract_bilag_document,
     load_saved_review,
     save_document_review,
     suggest_documents_for_bilag,
@@ -68,157 +69,219 @@ class DocumentControlDialog(tk.Toplevel):
         self.field_vars = {key: tk.StringVar(value="") for key, _ in FIELD_ORDER}
 
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
+        self.rowconfigure(2, weight=1)  # main body expands
 
         self._build_ui()
         self._load_saved_record()
+        # Always try the extracted sub-PDF from the voucher index.
+        # This upgrades bundle-PDF paths (slow, 1000+ pages) to the small extracted file.
+        self._try_auto_load_from_voucher()
         self._refresh_suggestions(auto_select=not bool(self.var_file_path.get().strip()))
-        self._update_tab_help_text()
 
         self.grab_set()
         self.focus_set()
 
     def _build_ui(self) -> None:
-        header = ttk.Frame(self, padding=12)
+        # ── Row 0: Header ──────────────────────────────────────────────────
+        header = ttk.Frame(self, padding=(12, 10, 12, 6))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
 
-        title = f"Dokumentkontroll for bilag {self._bilag}"
+        title = f"Dokumentkontroll — bilag {self._bilag}"
         if self._client or self._year:
-            title += f"  ({self._client or 'ukjent klient'} / {self._year or 'ukjent år'})"
+            title += f"  ({self._client or ''} / {self._year or ''})"
         ttk.Label(header, text=title, font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(header, text=self._build_context_summary(), wraplength=1080).grid(
-            row=1, column=0, sticky="w", pady=(6, 0)
+        ttk.Label(header, text=self._build_context_summary(), foreground="#555").grid(
+            row=1, column=0, sticky="w", pady=(2, 0)
         )
 
-        file_bar = ttk.Frame(self, padding=(12, 0, 12, 8))
+        # ── Row 1: Compact action bar ───────────────────────────────────────
+        file_bar = ttk.Frame(self, padding=(12, 0, 12, 6))
         file_bar.grid(row=1, column=0, sticky="ew")
         file_bar.columnconfigure(1, weight=1)
 
+        # Document path row
         ttk.Label(file_bar, text="Dokument").grid(row=0, column=0, sticky="w", padx=(0, 8))
         ttk.Entry(file_bar, textvariable=self.var_file_path).grid(row=0, column=1, sticky="ew")
-        ttk.Button(file_bar, text="Velg dokument...", command=self._choose_file).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(file_bar, text="Les opplysninger", command=self._run_analysis).grid(row=0, column=3, padx=(8, 0))
-        ttk.Button(file_bar, text="Apne fil", command=self._open_file).grid(row=0, column=4, padx=(8, 0))
-        ttk.Label(file_bar, textvariable=self.var_status, wraplength=1080).grid(
-            row=1, column=0, columnspan=5, sticky="w", pady=(8, 0)
+        ttk.Button(file_bar, text="Velg...", command=self._choose_file, width=8).grid(
+            row=0, column=2, padx=(6, 0)
+        )
+        btn_analyse = ttk.Button(file_bar, text="Les opplysninger", command=self._run_analysis)
+        btn_analyse.grid(row=0, column=3, padx=(6, 0))
+        ttk.Button(file_bar, text="Apne", command=self._open_file, width=6).grid(
+            row=0, column=4, padx=(6, 0)
         )
 
-        ttk.Label(file_bar, text="Mulige dokumenter").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
-        self.cmb_suggestions = ttk.Combobox(file_bar, textvariable=self.var_suggestion, state="readonly")
-        self.cmb_suggestions.grid(row=2, column=1, sticky="ew", pady=(8, 0))
-        ttk.Button(file_bar, text="Finn mulige dokumenter", command=self._refresh_suggestions).grid(
-            row=2, column=2, padx=(8, 0), pady=(8, 0)
+        # Status + suggestions on same line
+        ttk.Label(file_bar, textvariable=self.var_status, foreground="#555").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(4, 0)
         )
-        ttk.Button(file_bar, text="Velg dette dokumentet", command=self._use_selected_suggestion).grid(
-            row=2, column=3, padx=(8, 0), pady=(8, 0)
+        self.cmb_suggestions = ttk.Combobox(
+            file_bar, textvariable=self.var_suggestion, state="readonly", width=32
+        )
+        self.cmb_suggestions.grid(row=1, column=3, sticky="ew", pady=(4, 0), padx=(6, 0))
+        ttk.Button(file_bar, text="Bruk", command=self._use_selected_suggestion, width=5).grid(
+            row=1, column=4, pady=(4, 0), padx=(4, 0)
         )
 
-        help_bar = ttk.Frame(self, padding=(12, 0, 12, 8))
-        help_bar.grid(row=2, column=0, sticky="ew")
-        help_bar.columnconfigure(0, weight=1)
-        ttk.Label(help_bar, textvariable=self.var_tab_help, wraplength=1080).grid(row=0, column=0, sticky="w")
+        # Thin separator
+        ttk.Separator(self, orient="horizontal").grid(row=1, column=0, sticky="ew",
+                                                       padx=0, pady=(0, 0), ipadx=0)
 
-        self.body = ttk.Notebook(self)
-        self.body.grid(row=3, column=0, sticky="nsew", padx=12, pady=(0, 8))
-        self.body.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        # ── Row 2: Vertical split — viewer LEFT, notebook RIGHT ─────────────
+        paned = tk.PanedWindow(
+            self,
+            orient=tk.HORIZONTAL,
+            sashrelief=tk.FLAT,
+            sashwidth=6,
+            bg="#d0d0d0",
+        )
+        paned.grid(row=2, column=0, sticky="nsew", padx=8, pady=4)
 
-        self._tab_document = ttk.Frame(self.body, padding=12)
-        self._tab_document.columnconfigure(0, weight=1)
-        self._tab_document.rowconfigure(1, weight=1)
-        self.body.add(self._tab_document, text="Dokument")
+        # ── Left pane: PDF viewer ──────────────────────────────────────────
+        left_frame = ttk.Frame(paned)
+        left_frame.columnconfigure(0, weight=1)
+        left_frame.rowconfigure(1, weight=1)
 
-        document_toolbar = ttk.Frame(self._tab_document)
-        document_toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        document_toolbar.columnconfigure(1, weight=1)
-
-        ttk.Label(document_toolbar, text="Marker felt").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        # Marker-felt toolbar (above viewer)
+        viewer_toolbar = ttk.Frame(left_frame, padding=(0, 0, 0, 4))
+        viewer_toolbar.grid(row=0, column=0, sticky="ew")
+        viewer_toolbar.columnconfigure(1, weight=1)
+        ttk.Label(viewer_toolbar, text="Gå til felt").grid(row=0, column=0, sticky="w", padx=(0, 6))
         self.cmb_highlight_field = ttk.Combobox(
-            document_toolbar,
-            textvariable=self.var_highlight_field,
-            state="disabled",
+            viewer_toolbar, textvariable=self.var_highlight_field, state="disabled"
         )
         self.cmb_highlight_field.grid(row=0, column=1, sticky="ew")
         self.cmb_highlight_field.bind("<<ComboboxSelected>>", self._on_highlight_field_selected)
-        ttk.Button(document_toolbar, text="Vis i dokumentet", command=self._highlight_selected_field).grid(
-            row=0, column=2, padx=(8, 0)
+        ttk.Button(viewer_toolbar, text="Vis", command=self._highlight_selected_field, width=4).grid(
+            row=0, column=2, padx=(4, 0)
         )
-        ttk.Button(document_toolbar, text="Fjern markering", command=self._clear_viewer_highlight).grid(
-            row=0, column=3, padx=(8, 0)
+        ttk.Button(viewer_toolbar, text="✕", command=self._clear_viewer_highlight, width=3).grid(
+            row=0, column=3, padx=(2, 0)
         )
 
-        self.preview = DocumentPreviewFrame(self._tab_document)
+        self.preview = DocumentPreviewFrame(left_frame)
         self.preview.grid(row=1, column=0, sticky="nsew")
 
-        tab_fields = ttk.Frame(self.body, padding=12)
+        paned.add(left_frame, minsize=380, stretch="always")
+
+        # ── Right pane: Notebook ───────────────────────────────────────────
+        right_frame = ttk.Frame(paned)
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+
+        self.body = ttk.Notebook(right_frame)
+        self.body.grid(row=0, column=0, sticky="nsew")
+        self.body.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        # Tab: Opplysninger (fields)
+        tab_fields = ttk.Frame(self.body, padding=10)
         tab_fields.columnconfigure(1, weight=1)
+        tab_fields.rowconfigure(len(FIELD_ORDER) + 1, weight=1)
         self.body.add(tab_fields, text="Opplysninger")
 
         for row_index, (key, label) in enumerate(FIELD_ORDER):
-            ttk.Label(tab_fields, text=label).grid(row=row_index, column=0, sticky="w", padx=(0, 10), pady=4)
+            ttk.Label(tab_fields, text=label).grid(
+                row=row_index, column=0, sticky="w", padx=(0, 8), pady=3
+            )
             entry = ttk.Entry(tab_fields, textvariable=self.field_vars[key])
-            entry.grid(row=row_index, column=1, sticky="ew", pady=4)
-            entry.bind("<FocusIn>", lambda _event, field_key=key: self._focus_field_in_viewer(field_key))
+            entry.grid(row=row_index, column=1, sticky="ew", pady=3)
+            entry.bind("<FocusIn>", lambda _event, k=key: self._focus_field_in_viewer(k))
             self._field_entries[key] = entry
 
-        tab_checks = ttk.Frame(self.body, padding=12)
+        # Separator + notes inline in Opplysninger tab
+        ttk.Separator(tab_fields, orient="horizontal").grid(
+            row=len(FIELD_ORDER), column=0, columnspan=2, sticky="ew", pady=(10, 6)
+        )
+        ttk.Label(tab_fields, text="Notater").grid(
+            row=len(FIELD_ORDER) + 1, column=0, sticky="nw", pady=(0, 4)
+        )
+        self.txt_notes = tk.Text(tab_fields, height=4, wrap="word")
+        self.txt_notes.grid(
+            row=len(FIELD_ORDER) + 1, column=1, sticky="nsew", pady=(0, 4)
+        )
+        notes_scroll = ttk.Scrollbar(tab_fields, orient="vertical", command=self.txt_notes.yview)
+        self.txt_notes.configure(yscrollcommand=notes_scroll.set)
+        notes_scroll.grid(row=len(FIELD_ORDER) + 1, column=2, sticky="ns")
+
+        # Tab: Sjekk mot bilaget
+        tab_checks = ttk.Frame(self.body, padding=10)
         tab_checks.columnconfigure(0, weight=1)
         tab_checks.rowconfigure(1, weight=1)
         self.body.add(tab_checks, text="Sjekk mot bilaget")
         ttk.Label(
             tab_checks,
-            text="Her ser du om opplysningene fra dokumentet stemmer mot de valgte bilagslinjene.",
-        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
-        self.txt_validation = tk.Text(tab_checks, wrap="word", height=18)
+            text="Om opplysningene fra dokumentet stemmer mot bilagslinjene.",
+            foreground="#555",
+        ).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.txt_validation = tk.Text(tab_checks, wrap="word")
         self.txt_validation.grid(row=1, column=0, sticky="nsew")
-        validation_scroll = ttk.Scrollbar(tab_checks, orient="vertical", command=self.txt_validation.yview)
-        self.txt_validation.configure(yscrollcommand=validation_scroll.set)
-        validation_scroll.grid(row=1, column=1, sticky="ns")
+        ttk.Scrollbar(tab_checks, orient="vertical", command=self.txt_validation.yview).grid(
+            row=1, column=1, sticky="ns"
+        )
+        self.txt_validation.configure(
+            yscrollcommand=tab_checks.children["!scrollbar"].set
+        )
 
-        tab_text = ttk.Frame(self.body, padding=12)
+        # Tab: Lest tekst
+        tab_text = ttk.Frame(self.body, padding=10)
         tab_text.columnconfigure(0, weight=1)
         tab_text.rowconfigure(0, weight=1)
         self.body.add(tab_text, text="Lest tekst")
         self.txt_raw = tk.Text(tab_text, wrap="word")
         self.txt_raw.grid(row=0, column=0, sticky="nsew")
-        raw_scroll = ttk.Scrollbar(tab_text, orient="vertical", command=self.txt_raw.yview)
-        self.txt_raw.configure(yscrollcommand=raw_scroll.set)
-        raw_scroll.grid(row=0, column=1, sticky="ns")
+        ttk.Scrollbar(tab_text, orient="vertical", command=self.txt_raw.yview).grid(
+            row=0, column=1, sticky="ns"
+        )
+        self.txt_raw.configure(yscrollcommand=tab_text.children["!scrollbar"].set)
 
-        tab_evidence = ttk.Frame(self.body, padding=12)
+        # Tab: Bevis (Hvor fant vi det?)
+        tab_evidence = ttk.Frame(self.body, padding=10)
         tab_evidence.columnconfigure(0, weight=1)
         tab_evidence.rowconfigure(0, weight=1)
-        self.body.add(tab_evidence, text="Hvor fant vi det?")
+        self.body.add(tab_evidence, text="Bevis")
         self.txt_evidence = tk.Text(tab_evidence, wrap="word")
         self.txt_evidence.grid(row=0, column=0, sticky="nsew")
-        evidence_scroll = ttk.Scrollbar(tab_evidence, orient="vertical", command=self.txt_evidence.yview)
-        self.txt_evidence.configure(yscrollcommand=evidence_scroll.set)
-        evidence_scroll.grid(row=0, column=1, sticky="ns")
+        ttk.Scrollbar(tab_evidence, orient="vertical", command=self.txt_evidence.yview).grid(
+            row=0, column=1, sticky="ns"
+        )
+        self.txt_evidence.configure(yscrollcommand=tab_evidence.children["!scrollbar"].set)
 
-        tab_metadata = ttk.Frame(self.body, padding=12)
+        # Tab: Teknisk info
+        tab_metadata = ttk.Frame(self.body, padding=10)
         tab_metadata.columnconfigure(0, weight=1)
         tab_metadata.rowconfigure(0, weight=1)
-        self.body.add(tab_metadata, text="Teknisk info")
+        self.body.add(tab_metadata, text="Teknisk")
         self.txt_metadata = tk.Text(tab_metadata, wrap="word")
         self.txt_metadata.grid(row=0, column=0, sticky="nsew")
-        metadata_scroll = ttk.Scrollbar(tab_metadata, orient="vertical", command=self.txt_metadata.yview)
-        self.txt_metadata.configure(yscrollcommand=metadata_scroll.set)
-        metadata_scroll.grid(row=0, column=1, sticky="ns")
+        ttk.Scrollbar(tab_metadata, orient="vertical", command=self.txt_metadata.yview).grid(
+            row=0, column=1, sticky="ns"
+        )
+        self.txt_metadata.configure(yscrollcommand=tab_metadata.children["!scrollbar"].set)
 
-        notes_frame = ttk.LabelFrame(self, text="Notater", padding=12)
-        notes_frame.grid(row=4, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        notes_frame.columnconfigure(0, weight=1)
-        self.txt_notes = tk.Text(notes_frame, height=5, wrap="word")
-        self.txt_notes.grid(row=0, column=0, sticky="ew")
-        notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=self.txt_notes.yview)
-        self.txt_notes.configure(yscrollcommand=notes_scroll.set)
-        notes_scroll.grid(row=0, column=1, sticky="ns")
+        paned.add(right_frame, minsize=320, stretch="always")
 
-        footer = ttk.Frame(self, padding=(12, 0, 12, 12))
-        footer.grid(row=5, column=0, sticky="ew")
+        # Set initial sash position after layout
+        self.after(50, lambda: self._set_initial_sash(paned))
+
+        # ── Row 3: Footer ──────────────────────────────────────────────────
+        footer = ttk.Frame(self, padding=(12, 4, 12, 10))
+        footer.grid(row=3, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
-        ttk.Button(footer, text="Lagre vurdering", command=self._save_record).grid(row=0, column=1, sticky="e")
-        ttk.Button(footer, text="Lukk", command=self.destroy).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        ttk.Button(footer, text="Lagre vurdering", command=self._save_record).grid(
+            row=0, column=1, sticky="e"
+        )
+        ttk.Button(footer, text="Lukk", command=self.destroy).grid(
+            row=0, column=2, sticky="e", padx=(8, 0)
+        )
+
+    def _set_initial_sash(self, paned: tk.PanedWindow) -> None:
+        try:
+            total = paned.winfo_width()
+            if total > 100:
+                paned.sash_place(0, int(total * 0.58), 0)
+        except Exception:
+            pass
 
     def _build_context_summary(self) -> str:
         row_count = len(self._df_bilag)
@@ -238,23 +301,65 @@ class DocumentControlDialog(tk.Toplevel):
         return "Dette sammenlignes mot bilaget: " + " | ".join(parts)
 
     def _on_tab_changed(self, _event: tk.Event[tk.Misc]) -> None:
-        self._update_tab_help_text()
+        pass  # no tab help bar in new layout
 
-    def _update_tab_help_text(self) -> None:
+    # ------------------------------------------------------------------
+    # Voucher PDF helpers
+    # ------------------------------------------------------------------
+
+    def _import_voucher_pdf(self) -> None:
+        """Let user choose a Tripletex voucher bundle PDF and import it."""
+        path = filedialog.askopenfilename(
+            title="Velg Tripletex bilagseksport (PDF)",
+            filetypes=[("PDF-filer", "*.pdf"), ("Alle filer", "*.*")],
+        )
+        if not path:
+            return
+
+        self.var_status.set("Importerer bilagsfil — dette kan ta litt tid for store filer...")
+        self.update_idletasks()
+
         try:
-            current_tab = self.body.tab(self.body.select(), "text")
-        except Exception:
-            current_tab = "Dokument"
+            from document_control_voucher_index import import_voucher_pdf
 
-        help_text = {
-            "Dokument": "Se dokumentet her. Velg et felt i listen for a hoppe til stedet der det ble funnet.",
-            "Opplysninger": "Her ser du hvilke opplysninger dokumentleseren fant. Rett dem hvis noe er feil.",
-            "Sjekk mot bilaget": "Her ser du om dokumentet stemmer mot de valgte bilagslinjene.",
-            "Lest tekst": "Dette er teksten som ble lest ut av dokumentet. Mest nyttig ved feilsoking.",
-            "Hvor fant vi det?": "Her ser du hvor hvert felt kom fra, hvilken side det ble funnet pa, og hvor sikkert treffet var.",
-            "Teknisk info": "Teknisk informasjon om tekstkilder, profiler og motorvalg. Nyttig ved feilsoking.",
-        }.get(current_tab, "")
-        self.var_tab_help.set(help_text)
+            entries = import_voucher_pdf(
+                path,
+                client=self._client,
+                year=self._year,
+                copy_to_vouchers=True,
+            )
+            self.var_status.set(
+                f"Importert: {len(entries)} bilag fra {Path(path).name}. "
+                "Klikk 'Finn bilag automatisk' for å bruke filen."
+            )
+        except Exception as exc:
+            messagebox.showerror("Bilagsimport", f"Kunne ikke importere filen.\n\n{exc}")
+
+    def _auto_find_from_voucher(self) -> None:
+        """Extract this bilag's pages from any known voucher PDF."""
+        self.var_status.set("Søker etter bilaget i bilagseksport-filer...")
+        self.update_idletasks()
+
+        extracted = find_or_extract_bilag_document(
+            self._bilag,
+            client=self._client,
+            year=self._year,
+        )
+        if extracted is None:
+            self.var_status.set(
+                "Fant ikke bilaget i noen bilagseksport-fil. "
+                "Importer en Tripletex-PDF med 'Importer bilagsfil' eller velg dokument manuelt."
+            )
+            return
+
+        self.var_file_path.set(str(extracted))
+        self._reset_analysis_view_state()
+        self.preview.load_file(str(extracted))
+        self.var_status.set(
+            f"Fant bilaget automatisk: {extracted.name}. "
+            "Klikk 'Les opplysninger' for å analysere."
+        )
+        self._save_record(silent=True)
 
     def _choose_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -333,9 +438,11 @@ class DocumentControlDialog(tk.Toplevel):
         payload = load_saved_review(self._client, self._year, self._bilag)
         if not payload:
             self._reset_analysis_view_state(clear_notes=True)
-            self.preview.load_file(None)
             return
 
+        # Restore file path and field data — but do NOT load the viewer here.
+        # The viewer is loaded after we've resolved the best document (extracted
+        # sub-PDF preferred over raw bundle PDF).
         self.var_file_path.set(payload.get("file_path", ""))
         self.var_status.set(
             "Fant en tidligere lagret vurdering. Du kan lese dokumentet pa nytt eller justere opplysningene manuelt."
@@ -346,14 +453,46 @@ class DocumentControlDialog(tk.Toplevel):
 
         self._field_evidence_by_key = dict(payload.get("field_evidence", {}) or {})
         self._refresh_highlight_options()
-        self.preview.load_file(self.var_file_path.get().strip())
 
         self._replace_text(self.txt_validation, "\n".join(payload.get("validation_messages", [])))
         self._replace_text(self.txt_raw, payload.get("raw_text_excerpt", ""))
         self._replace_text(self.txt_evidence, self._format_saved_evidence(payload))
         self._replace_text(self.txt_metadata, self._format_saved_metadata(payload))
         self._replace_text(self.txt_notes, payload.get("notes", ""))
-        self._highlight_first_available_field(select_tab=False)
+        # Viewer loaded later by _try_auto_load_from_voucher or fallback below
+
+    def _try_auto_load_from_voucher(self) -> None:
+        """Try to find/use the extracted sub-PDF for this bilag.
+
+        Always runs on startup.  If the voucher index has an entry, we extract
+        (or reuse the cached extraction) and prefer that small file over any
+        large bundle PDF that may be stored in the saved record.
+        After this method the viewer is loaded with the best available file.
+        """
+        extracted: Path | None = None
+        try:
+            extracted = find_or_extract_bilag_document(
+                self._bilag,
+                client=self._client,
+                year=self._year,
+            )
+        except Exception:
+            pass
+
+        if extracted is not None:
+            # Upgrade file path to the small extracted PDF
+            self.var_file_path.set(str(extracted))
+            if not self.var_status.get().startswith("Fant en tidligere"):
+                self.var_status.set(
+                    f"Bilaget ble funnet automatisk: {extracted.name}. "
+                    "Klikk 'Les opplysninger' for å lese av verdiene."
+                )
+
+        # Load viewer with whatever we resolved (extracted, saved path, or nothing)
+        resolved_path = self.var_file_path.get().strip()
+        self.preview.load_file(resolved_path if resolved_path else None)
+        if extracted is not None:
+            self._highlight_first_available_field(select_tab=False)
 
     def _refresh_suggestions(self, auto_select: bool = False) -> None:
         self._suggestions = suggest_documents_for_bilag(
@@ -429,8 +568,7 @@ class DocumentControlDialog(tk.Toplevel):
         target = preview_target_from_evidence(field_key, self._field_evidence_by_key, label=label)
         if target is None:
             return False
-        if select_tab:
-            self.body.select(self._tab_document)
+        # Viewer is always visible in the left pane; no tab switch needed
         self.preview.set_highlight(target)
         matching_label = next(
             (display_label for display_label, key in self._highlight_field_lookup.items() if key == field_key),

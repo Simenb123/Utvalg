@@ -7,10 +7,15 @@ import mva_system_defaults
 
 
 def test_get_default_mapping_returns_dict():
+    # Alle systemer skal gi en dict. Kun systemer som bruker SAF-T
+    # StandardTaxCode direkte (Tripletex, PowerOffice GO, SAF-T Standard)
+    # har en ikke-tom default; resten må mappes eksplisitt per klient.
+    identity_systems = {"Tripletex", "PowerOffice GO", "SAF-T Standard"}
     for system in mva_system_defaults.supported_systems():
         mapping = mva_system_defaults.get_default_mapping(system)
         assert isinstance(mapping, dict), f"Forventet dict for {system}"
-        assert len(mapping) > 0, f"Tom mapping for {system}"
+        if system in identity_systems:
+            assert len(mapping) > 0, f"Tom mapping for {system}"
 
 
 def test_all_mapped_values_are_valid_standard_codes():
@@ -30,16 +35,28 @@ def test_identity_mapping_for_saft_standard():
         assert code == saft_code, f"SAF-T Standard skal ha 1:1-mapping, men {code!r} -> {saft_code!r}"
 
 
-def test_unknown_system_returns_identity():
+def test_unknown_system_returns_empty():
+    # Ukjente systemer skal gi TOM mapping, ikke anta 1:1.
     mapping = mva_system_defaults.get_default_mapping("UkjentSystem123")
+    assert mapping == {}
+
+
+def test_empty_system_returns_empty():
+    mapping = mva_system_defaults.get_default_mapping("")
+    assert mapping == {}
+
+
+def test_tripletex_uses_identity():
+    mapping = mva_system_defaults.get_default_mapping("Tripletex")
     assert len(mapping) > 0
     for code, saft_code in mapping.items():
         assert code == saft_code
 
 
-def test_empty_system_returns_identity():
-    mapping = mva_system_defaults.get_default_mapping("")
-    assert len(mapping) > 0
+def test_visma_business_krever_manuell_mapping():
+    # Visma Business har ikke 1:1 med SAF-T — default skal være tom.
+    mapping = mva_system_defaults.get_default_mapping("Visma Business")
+    assert mapping == {}
 
 
 def test_supported_systems_matches_accounting_systems():

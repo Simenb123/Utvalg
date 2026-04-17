@@ -9,6 +9,8 @@ import pytest
 from openpyxl import load_workbook
 
 from consolidation.models import (
+    AssociateAdjustmentRow,
+    AssociateCase,
     CompanyTB,
     EliminationJournal,
     EliminationLine,
@@ -113,7 +115,7 @@ class TestWorkbookStructure:
 
     def test_five_sheets(self):
         wb = _build_sample_wb()
-        assert len(wb.sheetnames) == 5
+        assert len(wb.sheetnames) == 6  # +1 for Konsolidert SB
 
 
 class TestKonsernoppstilling:
@@ -231,3 +233,47 @@ class TestSaveWorkbook:
         # Reopen and verify
         wb = load_workbook(result)
         assert "Konsernoppstilling" in wb.sheetnames
+
+
+def test_export_includes_associate_workpaper_sheet() -> None:
+    associate = AssociateCase(
+        case_id="assoc1",
+        name="Tilknyttet AS",
+        investor_company_id="a",
+        ownership_pct=35.0,
+        opening_carrying_amount=1000.0,
+        share_of_result=120.0,
+        line_mapping={"investment_regnr": 575, "result_regnr": 100, "other_equity_regnr": 695, "retained_earnings_regnr": 705},
+        manual_adjustment_rows=[
+            AssociateAdjustmentRow(label="Emisjon", amount=25.0, offset_regnr=695, description="Kapitalendring")
+        ],
+        journal_id="ek1",
+    )
+    journal = EliminationJournal(
+        journal_id="ek1",
+        name="EK-metode: Tilknyttet AS",
+        kind="equity_method",
+        source_associate_case_id="assoc1",
+        locked=True,
+        lines=[
+            EliminationLine(regnr=575, company_id="a", amount=120.0, description="EK-metode Andel resultat"),
+            EliminationLine(regnr=100, company_id="a", amount=-120.0, description="EK-metode Andel resultat"),
+        ],
+    )
+
+    wb = build_consolidation_workbook(
+        _sample_result_df(),
+        _sample_companies(),
+        _sample_eliminations() + [journal],
+        _sample_mapped_tbs(),
+        _sample_run_result(),
+        client="TestKonsern",
+        year="2025",
+        associate_cases=[associate],
+        regnr_to_name={100: "Inntekt på investering i tilknyttet selskap", 575: "Investeringer i tilknyttet selskap", 695: "Annen egenkapital"},
+    )
+
+    assert "EK - Tilknyttet AS" in wb.sheetnames
+    ws = wb["EK - Tilknyttet AS"]
+    assert ws["A1"].value == "Tilknyttet selskap"
+    assert ws["B1"].value == "Tilknyttet AS"

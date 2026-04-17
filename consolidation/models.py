@@ -37,7 +37,8 @@ class CompanyTB:
     company_id: str = field(default_factory=_new_id)
     name: str = ""
     source_file: str = ""
-    source_type: str = ""          # "excel" | "csv" | "saft"
+    source_type: str = ""          # "excel" | "csv" | "saft" | "rl_excel" | "rl_csv" | "pdf_regnskap"
+    basis_type: str = "tb"         # "tb" | "regnskapslinje"
     imported_at: float = field(default_factory=_now)
     row_count: int = 0
     has_ib: bool = False
@@ -45,6 +46,19 @@ class CompanyTB:
     currency_code: str = ""
     closing_rate: float = 1.0      # sluttkurs (balanse)
     average_rate: float = 1.0      # snittkurs (resultat)
+
+    @property
+    def is_line_basis(self) -> bool:
+        return str(self.basis_type or "").strip().lower() == "regnskapslinje"
+
+
+def _default_associate_line_mapping() -> dict[str, int]:
+    return {
+        "investment_regnr": 575,
+        "result_regnr": 100,
+        "other_equity_regnr": 695,
+        "retained_earnings_regnr": 705,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +95,8 @@ class EliminationLine:
     source_currency: str = ""        # original valuta (tom = NOK)
     source_amount: float = 0.0       # beloep i original valuta
     fx_rate_used: float = 0.0        # kurs brukt ved konvertering
+    # Kontonivå-eliminering (valgfritt — tom = regnskapslinje-nivå)
+    konto: str = ""                  # kontonummer fra SB
 
 
 @dataclass
@@ -97,6 +113,10 @@ class EliminationJournal:
     source_suggestion_key: str = ""
     # Status: "draft" | "active"
     status: str = "active"
+    locked: bool = False
+    locked_reason: str = ""
+    source_associate_case_id: str = ""
+    generation_hash: str = ""
 
     @property
     def is_balanced(self) -> bool:
@@ -199,10 +219,56 @@ class RunResult:
 
 
 # ---------------------------------------------------------------------------
+# Associate / equity method
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AssociateAdjustmentRow:
+    """Ekstra EK-metode-justering med egen motpost."""
+
+    row_id: str = field(default_factory=_new_id)
+    label: str = ""
+    amount: float = 0.0
+    offset_regnr: int = 0
+    description: str = ""
+
+
+@dataclass
+class AssociateCase:
+    """Arbeidspapir for ett tilknyttet selskap etter EK-metoden."""
+
+    case_id: str = field(default_factory=_new_id)
+    name: str = ""
+    investor_company_id: str = ""
+    ownership_pct: float = 0.0
+    status: str = "draft"          # "draft" | "generated" | "stale"
+    source_mode: str = "manual"    # "manual" | "line_basis" | "pdf"
+    notes: str = ""
+    line_mapping: dict[str, int] = field(default_factory=_default_associate_line_mapping)
+    journal_id: str = ""
+    generation_hash: str = ""
+    last_generated_at: float = 0.0
+    acquisition_date: str = ""
+    opening_carrying_amount: float = 0.0
+    share_of_result: float = 0.0
+    share_of_other_equity: float = 0.0
+    dividends: float = 0.0
+    impairment: float = 0.0
+    excess_value_amortization: float = 0.0
+    manual_adjustment_rows: list[AssociateAdjustmentRow] = field(default_factory=list)
+    # Goodwill / merverdi
+    acquisition_cost: float = 0.0
+    share_of_net_assets_at_acquisition: float = 0.0
+    goodwill_useful_life_years: int = 5
+    goodwill_method: str = "linear"
+
+
+# ---------------------------------------------------------------------------
 # Project (root container)
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 
 
 @dataclass
@@ -216,6 +282,7 @@ class ConsolidationProject:
     updated_at: float = field(default_factory=_now)
     parent_company_id: str = ""     # company_id for morselskapet
     companies: list[CompanyTB] = field(default_factory=list)
+    associate_cases: list[AssociateCase] = field(default_factory=list)
     mapping_config: MappingConfig = field(default_factory=MappingConfig)
     eliminations: list[EliminationJournal] = field(default_factory=list)
     runs: list[RunResult] = field(default_factory=list)
@@ -227,6 +294,8 @@ class ConsolidationProject:
     # Forslag review-state (persisterte noekler)
     ignored_suggestion_keys: list[str] = field(default_factory=list)
     applied_suggestion_keys: list[str] = field(default_factory=list)
+    # Standard regnskapslinjer for nye EK-saker
+    default_associate_line_mapping: dict[str, int] = field(default_factory=dict)
 
     def find_company(self, company_id: str) -> CompanyTB | None:
         for c in self.companies:
@@ -238,6 +307,18 @@ class ConsolidationProject:
         for j in self.eliminations:
             if j.journal_id == journal_id:
                 return j
+        return None
+
+    def find_associate_case(self, case_id: str) -> AssociateCase | None:
+        for case in self.associate_cases:
+            if case.case_id == case_id:
+                return case
+        return None
+
+    def find_associate_case_by_journal(self, journal_id: str) -> AssociateCase | None:
+        for case in self.associate_cases:
+            if case.journal_id == journal_id:
+                return case
         return None
 
     def ensure_elimination_voucher_numbers(self) -> bool:
@@ -309,6 +390,20 @@ def project_from_dict(d: dict[str, Any]) -> ConsolidationProject:
         c_clean = {k: v for k, v in c_raw.items() if k in known}
         companies.append(CompanyTB(**c_clean))
 
+    associate_cases = []
+    for case_raw in d.pop("associate_cases", []):
+        case_raw = dict(case_raw)
+        row_known = {f.name for f in AssociateAdjustmentRow.__dataclass_fields__.values()}
+        rows = []
+        for row_raw in case_raw.pop("manual_adjustment_rows", []):
+            row_clean = {k: v for k, v in row_raw.items() if k in row_known}
+            rows.append(AssociateAdjustmentRow(**row_clean))
+        case_known = {f.name for f in AssociateCase.__dataclass_fields__.values()}
+        case_clean = {k: v for k, v in case_raw.items() if k in case_known}
+        if "line_mapping" not in case_clean or not isinstance(case_clean["line_mapping"], dict):
+            case_clean["line_mapping"] = _default_associate_line_mapping()
+        associate_cases.append(AssociateCase(**case_clean, manual_adjustment_rows=rows))
+
     mc_raw = d.pop("mapping_config", {})
     mapping_config = MappingConfig(
         company_overrides=mc_raw.get("company_overrides", {}),
@@ -335,6 +430,7 @@ def project_from_dict(d: dict[str, Any]) -> ConsolidationProject:
     return ConsolidationProject(
         **d_clean,
         companies=companies,
+        associate_cases=associate_cases,
         mapping_config=mapping_config,
         eliminations=eliminations,
         runs=runs,

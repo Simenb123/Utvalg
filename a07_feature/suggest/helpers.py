@@ -23,7 +23,16 @@ _word_re = re.compile(r"[A-Za-z0-9]+")
 
 def _norm_token(token: str) -> str:
     text = token.strip().lower()
-    text = text.replace("ø", "oe").replace("æ", "ae").replace("å", "aa")
+    replacements = {
+        "ø": "oe",
+        "æ": "ae",
+        "å": "aa",
+        "Ã¸": "oe",
+        "Ã¦": "ae",
+        "Ã¥": "aa",
+    }
+    for before, after in replacements.items():
+        text = text.replace(before, after)
     return text
 
 
@@ -220,6 +229,7 @@ def _score_account(
     acct_tokens: Set[str],
     konto: Any,
     rule: Optional[RulebookRule],
+    usage_score: float = 0.0,
 ) -> Tuple[float, Tuple[str, ...]]:
     gl_abs = abs(float(gl_amount))
     target = abs(float(target_abs))
@@ -233,12 +243,29 @@ def _score_account(
 
     rule_score = 0.0
     sign_score = 1.0
+    exclude_hits: Tuple[str, ...] = ()
     if rule:
         in_range = 1.0 if _konto_in_ranges(konto, rule.allowed_ranges) else 0.0
         boosted = 1.0 if (_konto_int(konto) in set(rule.boost_accounts)) else 0.0
         rule_score = 0.5 * in_range + 0.5 * boosted
         if rule.expected_sign in (1, -1):
             sign_score = 1.0 if float(gl_amount) * float(rule.expected_sign) >= 0 else 0.0
+        if rule.exclude_keywords:
+            exclude_tokens = set()
+            for keyword in rule.exclude_keywords:
+                exclude_tokens |= _tokenize(str(keyword or ""))
+            exclude_hits = tuple(sorted(exclude_tokens & acct_tokens))
 
-    score = 0.50 * amount_score + 0.25 * token_score + 0.15 * rule_score + 0.10 * sign_score
+    rule_signal = (0.7 * rule_score + 0.3 * sign_score) if rule else 0.0
+    usage_signal = max(0.0, min(1.0, float(usage_score or 0.0)))
+    amount_weight = 0.40
+    if rule and (rule.allowed_ranges or rule.boost_accounts or rule.keywords):
+        anchor_signal = max(token_score, rule_score, usage_signal)
+        if anchor_signal <= 0.0:
+            amount_weight = 0.08
+    score = amount_weight * amount_score + 0.20 * token_score + 0.15 * rule_signal + 0.10 * usage_signal
+    if exclude_hits:
+        if rule_score <= 0.0:
+            return 0.0, ()
+        score *= 0.25
     return max(0.0, min(1.0, score)), hits

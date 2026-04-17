@@ -47,11 +47,40 @@ def test_build_motpost_scope_label_and_value_for_regnskapslinjer() -> None:
     assert vm.build_motpost_scope_value(items) == "10 Salgsinntekt, 40 LÃ¸nnskostnad"
 
 
-def test_build_motpost_expected_label_and_value() -> None:
-    items = ("610 Kundefordringer", "790 Skyldig offentlige avgifter")
+def test_build_motpost_rule_set_summary_text_uses_rule_list() -> None:
+    from motpost.expected_rules import ExpectedRule, ExpectedRuleSet
 
-    assert vm.build_motpost_expected_label(items) == "Forventede regnskapslinjer (2):"
-    assert vm.build_motpost_expected_value(items) == "610 Kundefordringer, 790 Skyldig offentlige avgifter"
+    label_map = {
+        "1500": "610 Kundefordringer",
+        "2700": "790 Skyldig off.avg.",
+    }
+    empty_text = vm.build_motpost_rule_set_summary_text(
+        ExpectedRuleSet(source_regnr=10, selected_direction="alle"),
+        konto_regnskapslinje_map=label_map,
+    )
+    assert "ingen regler" in empty_text.lower()
+
+    rule_set = ExpectedRuleSet(
+        source_regnr=10,
+        selected_direction="alle",
+        rules=(
+            ExpectedRule(target_regnr=610, account_mode="all"),
+            ExpectedRule(
+                target_regnr=790,
+                account_mode="selected",
+                allowed_accounts=("2740", "2770"),
+                requires_netting=True,
+                netting_tolerance=1.0,
+            ),
+        ),
+    )
+    text = vm.build_motpost_rule_set_summary_text(
+        rule_set, konto_regnskapslinje_map=label_map
+    )
+    assert "Forventningsregler (2)" in text
+    assert "610 Kundefordringer" in text
+    assert "790 Skyldig off.avg." in text
+    assert "utligning" in text
 
 
 class DummyEntry:

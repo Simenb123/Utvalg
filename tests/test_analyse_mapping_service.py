@@ -91,3 +91,66 @@ def test_problem_mapping_issues_and_summary_only_include_nonzero_problems() -> N
     assert [issue.konto for issue in problems] == ["9999"]
     assert svc.get_problem_accounts(issues) == ["9999"]
     assert "9999" in svc.summarize_mapping_issues(issues)
+
+
+def test_enrich_mapping_issues_with_regnskapslinje_suggestion() -> None:
+    issue = svc.UnmappedAccountIssue(
+        "1500",
+        "Kundefordringer",
+        "HB",
+        1_000.0,
+        None,
+        "",
+        "unmapped",
+        ib=0.0,
+        movement=1_000.0,
+        ub=1_000.0,
+    )
+    regnskapslinjer = pd.DataFrame(
+        {
+            "nr": [1460],
+            "regnskapslinje": ["Kundefordringer"],
+            "sumpost": ["nei"],
+            "Formel": [""],
+        }
+    )
+
+    enriched = svc.enrich_mapping_issues_with_suggestions(
+        [issue],
+        regnskapslinjer=regnskapslinjer,
+        rulebook_document={
+            "rules": {
+                "1460": {
+                    "aliases": ["kundefordring"],
+                    "account_ranges": ["1500-1599"],
+                    "normal_balance_hint": "debet_typisk",
+                }
+            }
+        },
+    )
+
+    assert enriched[0].suggested_regnr == 1460
+    assert enriched[0].suggested_regnskapslinje == "Kundefordringer"
+    assert enriched[0].suggestion_source == "alias"
+    assert enriched[0].confidence_bucket == "Middels"
+    assert "navn/alias" in enriched[0].suggestion_reason
+
+
+def test_summarize_mapping_issues_mentions_smart_suggestions() -> None:
+    issues = [
+        svc.UnmappedAccountIssue(
+            "1500",
+            "Kundefordringer",
+            "HB",
+            1_000.0,
+            None,
+            "",
+            "unmapped",
+            suggested_regnr=1460,
+            suggested_regnskapslinje="Kundefordringer",
+        )
+    ]
+
+    summary = svc.summarize_mapping_issues(issues)
+
+    assert "smartforslag" in summary

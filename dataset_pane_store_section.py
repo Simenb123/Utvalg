@@ -117,7 +117,9 @@ class ClientStoreSection:
     dtype: str = "hb"
 
     # Ikke en del av init-signaturen – brukes for søk/filtrering og prefs
+    _all_clients_unfiltered: List[str] = field(default_factory=list, init=False, repr=False)
     _all_clients: List[str] = field(default_factory=list, init=False, repr=False)
+    _my_clients_var: Optional[tk.BooleanVar] = field(default=None, init=False, repr=False)
     _last_persisted_client: str = field(default="", init=False, repr=False)
     _last_persisted_year: str = field(default="", init=False, repr=False)
     # Brukes for å kunne tvinge oppdatering av filsti når bruker faktisk bytter
@@ -167,10 +169,16 @@ class ClientStoreSection:
             cb_hb=w.cb_hb,
         )
 
+        sec._my_clients_var = w.my_clients_var
+        sec._info_labels = w.info_labels
+
         # Bindings
         w.btn_pick_client.configure(command=sec._on_pick_client)
         w.btn_settings.configure(command=sec._on_open_settings)
         w.btn_versions.configure(command=sec._on_open_versions_dialog)
+
+        # "Mine klienter"-toggle
+        w.my_clients_var.trace_add("write", lambda *_: sec._on_my_clients_toggle())
 
         # NB: Full refresh kan være tregt hvis man blar fort i comboboxen.
         # Vi debounce'er refresh for bedre UX.
@@ -193,6 +201,7 @@ class ClientStoreSection:
         if c and c != self._last_persisted_client:
             try:
                 preferences.set_last_client(c)
+                preferences.add_recent_client(c)
                 self._last_persisted_client = c
             except Exception:
                 pass
@@ -255,6 +264,42 @@ class ClientStoreSection:
         # Begrens for å unngå ekstremt store lister i GUI
         self.cb_client["values"] = vals[:2000]
 
+    def _apply_my_filter(self, clients: List[str]) -> List[str]:
+        """Filtrer klientliste til 'mine klienter' hvis toggle er aktiv."""
+        if not self._my_clients_var or not self._my_clients_var.get():
+            return clients
+        try:
+            from client_meta_index import get_index
+            from client_store_enrich import is_my_client
+            import team_config
+            user = team_config.current_user()
+            if not user:
+                return clients
+            index = get_index()
+            return [c for c in clients
+                    if is_my_client(index.get(c, {}), user.visena_initials, user.full_name)]
+        except Exception:
+            return clients
+
+    def _on_my_clients_toggle(self) -> None:
+        """Håndter endring av 'Mine klienter'-toggle."""
+        self._all_clients = self._apply_my_filter(self._all_clients_unfiltered)
+        self.cb_client["values"] = self._all_clients
+        self._update_storage_label()
+
+    def _update_storage_label(self) -> None:
+        total = len(self._all_clients_unfiltered)
+        shown = len(self._all_clients)
+        try:
+            base = app_paths.data_dir()
+        except Exception:
+            base = None
+        if self._my_clients_var and self._my_clients_var.get():
+            extra = f" (mine: {shown} av {total})"
+        else:
+            extra = f" (klienter: {total})"
+        self.lbl_storage.configure(text=f"Datamappe: {base or '-'}{extra}")
+
     def refresh(self) -> None:
         """Oppdater klient- og versjonsdropdowns."""
 
@@ -285,10 +330,16 @@ class ClientStoreSection:
             log.warning("Kunne ikke liste klienter: %s", e)
             clients = []
 
-        extra = f" (klienter: {len(clients)})" if clients else ""
-        self.lbl_storage.configure(text=f"Datamappe: {base or '-'}{extra}")
+        self._all_clients_unfiltered = list(clients)
+        self._all_clients = self._apply_my_filter(self._all_clients_unfiltered)
 
-        self._all_clients = list(clients)
+        total = len(self._all_clients_unfiltered)
+        shown = len(self._all_clients)
+        if self._my_clients_var and self._my_clients_var.get():
+            extra = f" (mine: {shown} av {total})" if clients else ""
+        else:
+            extra = f" (klienter: {total})" if clients else ""
+        self.lbl_storage.configure(text=f"Datamappe: {base or '-'}{extra}")
 
         # Bevar ev. søkestreng i inputfeltet, men vis alltid full liste når dropdown åpnes.
         try:
@@ -350,6 +401,30 @@ class ClientStoreSection:
             self._last_applied_year = y
 
         self._persist_prefs()
+        self._update_client_info()
+
+    def _update_client_info(self) -> None:
+        """Oppdater klient-infopanelet med metadata fra lokal indeks."""
+        labels = getattr(self, "_info_labels", None)
+        if not labels:
+            return
+
+        client = self._client()
+        if not client:
+            for lbl in labels.values():
+                lbl.configure(text="\u2013")
+            return
+
+        try:
+            from client_meta_index import get_index
+            meta = get_index().get(client, {})
+        except Exception:
+            meta = {}
+
+        labels["orgnr"].configure(text=meta.get("org_number") or "\u2013")
+        labels["knr"].configure(text=meta.get("client_number") or "\u2013")
+        labels["ansvarlig"].configure(text=meta.get("responsible") or "\u2013")
+        labels["manager"].configure(text=meta.get("manager") or "\u2013")
 
     def _on_create_client(self) -> None:
         if not _HAS_CLIENT_STORE or client_store is None:
@@ -393,14 +468,23 @@ class ClientStoreSection:
             messagebox.showerror("Klient", f"Kunne ikke åpne klientvelger: {e}")
             return
 
+        # Last metadata-indeks for rik visning
+        try:
+            from client_meta_index import get_index
+            meta = get_index()
+        except Exception:
+            meta = None
+
         # Start alltid med tomt søkefelt, men forhåndsmarkér gjeldende klient i lista.
         current = str(self.client_var.get() or "")
         chosen = open_client_picker(
             self.frame,
             clients,
+            client_meta=meta,
             initial_query="",
             initial_selection=current,
             title="Velg klient",
+            show_mine_filter=True,
         )
 
         if chosen:
@@ -449,12 +533,36 @@ class ClientStoreSection:
         if v is None:
             return
 
+        tb_df = None
         try:
             from trial_balance_reader import read_trial_balance
             tb_df = read_trial_balance(v.path)
-        except Exception:
-            log.exception("Failed to read SB file %s", v.path)
-            messagebox.showerror("Saldobalanse", f"Kunne ikke lese saldobalanse:\n{v.path}")
+        except Exception as read_exc:
+            log.info("Auto-import av SB feilet, åpner preview-fallback: %s", read_exc)
+            # Fallback: la brukeren mappe kolonner manuelt via TBPreviewDialog.
+            parent_widget = getattr(self, "frame", None)
+            try:
+                from tb_preview_dialog import open_tb_preview
+                preview = open_tb_preview(
+                    parent_widget,
+                    v.path,
+                    initial_name=str(c or ""),
+                )
+            except Exception as preview_exc:
+                log.exception("TBPreviewDialog feilet for %s", v.path)
+                messagebox.showerror(
+                    "Saldobalanse",
+                    f"Kunne ikke lese saldobalanse:\n{v.path}\n\nÅrsak: {read_exc}\n"
+                    f"Preview-dialog feilet: {preview_exc}",
+                )
+                return
+
+            if preview is None:
+                # Bruker avbrøt — ingen feilmelding, ingen session-endring.
+                return
+            tb_df, _name = preview
+
+        if tb_df is None:
             return
 
         try:

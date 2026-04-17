@@ -91,7 +91,12 @@ def _cached_motpost_frame(page: Any, df: pd.DataFrame) -> pd.DataFrame:
     return prepared
 
 
-def _build_rl_scope_context(*, page: Any, df_scope: pd.DataFrame) -> dict[str, Any]:
+def _build_rl_scope_context(
+    *,
+    page: Any,
+    df_scope: pd.DataFrame,
+    df_all: pd.DataFrame | None = None,
+) -> dict[str, Any]:
     try:
         agg_var = getattr(page, "_var_aggregering", None)
         agg_mode = str(agg_var.get()) if agg_var is not None else ""
@@ -112,53 +117,118 @@ def _build_rl_scope_context(*, page: Any, df_scope: pd.DataFrame) -> dict[str, A
 
     scope_items = [f"{int(regnr)} {str(navn or '').strip()}".strip() for regnr, navn in selected_rows]
 
-    konto_regnskapslinje_map: dict[str, str] = {}
-    try:
-        intervals = getattr(page, "_rl_intervals", None)
-        regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
-        if (
-            isinstance(df_scope, pd.DataFrame)
-            and not df_scope.empty
-            and intervals is not None
-            and regnskapslinjer is not None
-            and "Konto" in df_scope.columns
-        ):
-            from regnskap_mapping import apply_account_overrides, apply_interval_mapping, normalize_regnskapslinjer
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
 
-            konto_values = df_scope["Konto"].dropna().map(konto_to_str)
-            konto_values = [k for k in pd.unique(konto_values) if k]
-            probe = pd.DataFrame({"konto": konto_values})
-            mapped = apply_interval_mapping(probe, intervals, konto_col="konto").mapped
+    def _map_kontos(df_src: pd.DataFrame | None) -> dict[str, str]:
+        result: dict[str, str] = {}
+        try:
+            if (
+                isinstance(df_src, pd.DataFrame)
+                and not df_src.empty
+                and intervals is not None
+                and regnskapslinjer is not None
+                and "Konto" in df_src.columns
+            ):
+                from regnskap_mapping import apply_account_overrides, apply_interval_mapping, normalize_regnskapslinjer
 
-            try:
-                account_overrides = page_analyse_rl._load_current_client_account_overrides()
-            except Exception:
-                account_overrides = None
-            mapped = apply_account_overrides(mapped, account_overrides, konto_col="konto")
+                konto_values = df_src["Konto"].dropna().map(konto_to_str)
+                konto_values = [k for k in pd.unique(konto_values) if k]
+                if not konto_values:
+                    return {}
+                probe = pd.DataFrame({"konto": konto_values})
+                mapped = apply_interval_mapping(probe, intervals, konto_col="konto").mapped
 
-            regn = normalize_regnskapslinjer(regnskapslinjer)[["regnr", "regnskapslinje"]].copy()
-            regn["regnr"] = regn["regnr"].astype(int)
-            regn["rl_label"] = regn["regnr"].map(str) + " " + regn["regnskapslinje"].fillna("").astype(str).str.strip()
-            name_map = {
-                int(row.regnr): str(row.rl_label).strip()
-                for row in regn.itertuples(index=False)
-            }
-            for row in mapped.itertuples(index=False):
-                konto = str(getattr(row, "konto", "") or "").strip()
-                regnr = getattr(row, "regnr", None)
-                if not konto or pd.isna(regnr):
+                try:
+                    account_overrides = page_analyse_rl._load_current_client_account_overrides()
+                except Exception:
+                    account_overrides = None
+                mapped = apply_account_overrides(mapped, account_overrides, konto_col="konto")
+
+                regn = normalize_regnskapslinjer(regnskapslinjer)[["regnr", "regnskapslinje"]].copy()
+                regn["regnr"] = regn["regnr"].astype(int)
+                regn["rl_label"] = regn["regnr"].map(str) + " " + regn["regnskapslinje"].fillna("").astype(str).str.strip()
+                name_map = {
+                    int(row.regnr): str(row.rl_label).strip()
+                    for row in regn.itertuples(index=False)
+                }
+                for row in mapped.itertuples(index=False):
+                    konto = str(getattr(row, "konto", "") or "").strip()
+                    regnr = getattr(row, "regnr", None)
+                    if not konto or pd.isna(regnr):
+                        continue
+                    try:
+                        result[konto] = name_map.get(int(regnr), str(int(regnr)))
+                    except Exception:
+                        continue
+        except Exception:
+            return {}
+        return result
+
+    konto_regnskapslinje_map = _map_kontos(df_scope)
+    full_konto_regnskapslinje_map = _map_kontos(df_all) if df_all is not None else {}
+    # Merge scope-mappingen inn (scope har alltid forrang om den finnes)
+    if konto_regnskapslinje_map:
+        for k, v in konto_regnskapslinje_map.items():
+            full_konto_regnskapslinje_map.setdefault(k, v)
+
+    full_konto_sum_map: dict[str, float] = {}
+    if isinstance(df_all, pd.DataFrame) and not df_all.empty and {"Konto", "Beløp"} <= set(df_all.columns):
+        try:
+            grouped = (
+                df_all[["Konto", "Beløp"]]
+                .dropna(subset=["Konto"])
+                .assign(Konto=lambda d: d["Konto"].map(konto_to_str))
+                .groupby("Konto")["Beløp"]
+                .sum()
+            )
+            for konto, value in grouped.items():
+                key = str(konto or "").strip()
+                if not key:
                     continue
                 try:
-                    konto_regnskapslinje_map[konto] = name_map.get(int(regnr), str(int(regnr)))
+                    full_konto_sum_map[key] = float(value)
                 except Exception:
                     continue
+        except Exception:
+            full_konto_sum_map = {}
+
+    # Saldobalanse: Konto -> {kontonavn, ib, ub, netto}
+    full_konto_sb_map: dict[str, dict[str, object]] = {}
+    try:
+        sb_df = page._get_effective_sb_df() if hasattr(page, "_get_effective_sb_df") else None
     except Exception:
-        konto_regnskapslinje_map = {}
+        sb_df = None
+    if isinstance(sb_df, pd.DataFrame) and not sb_df.empty and "konto" in sb_df.columns:
+        for row in sb_df.itertuples(index=False):
+            try:
+                konto = konto_to_str(getattr(row, "konto"))
+            except Exception:
+                continue
+            if not konto:
+                continue
+            entry: dict[str, object] = {}
+            navn = getattr(row, "kontonavn", None)
+            if navn is not None and str(navn).strip():
+                entry["kontonavn"] = str(navn).strip()
+            for field in ("ib", "ub", "netto"):
+                val = getattr(row, field, None)
+                try:
+                    if val is None or pd.isna(val):
+                        continue
+                    entry[field] = float(val)
+                except Exception:
+                    continue
+            if entry:
+                full_konto_sb_map[konto] = entry
 
     return {
         "scope_mode": "regnskapslinje",
         "scope_items": scope_items,
         "konto_regnskapslinje_map": konto_regnskapslinje_map,
+        "full_konto_regnskapslinje_map": full_konto_regnskapslinje_map,
+        "full_konto_sum_map": full_konto_sum_map,
+        "full_konto_sb_map": full_konto_sb_map,
     }
 
 
@@ -266,7 +336,9 @@ def open_motpost(
         _show_error(messagebox, "Motpost", "Motpostanalyse er ikke tilgjengelig (mangler GUI-støtte).")
         return
 
-    extra_context = _build_rl_scope_context(page=page, df_scope=df_scope)
+    extra_context = _build_rl_scope_context(
+        page=page, df_scope=df_scope, df_all=df_all_prepared
+    )
 
     try:
         show_motpost_konto(

@@ -189,7 +189,7 @@ def treeview_to_sheet(
     *,
     title: str,
     heading: str | None = None,
-    bold_tags: tuple[str, ...] = ("header", "sum", "sumline", "sumline_major"),
+    bold_tags: tuple[str, ...] = ("header", "sum", "sumline", "sumline_major", "sumline_total"),
     bg_tags: dict[str, str] | None = None,
 ) -> dict:
     """Konverter en ttk.Treeview til et sheet-dict for export_trees_to_excel.

@@ -148,6 +148,17 @@ class DatasetPane(ttk.Frame):
             except Exception:
                 pass
 
+        # I SAF-T-modus: skjul avanserte felt (de er uansett auto-mappet og låst)
+        adv_container = getattr(self, "_advanced_container", None)
+        if adv_container is not None:
+            try:
+                if saft_mode:
+                    adv_container.grid_remove()
+                else:
+                    adv_container.grid()
+            except Exception:
+                pass
+
     def _set_readiness(self, text: str, *, level: str) -> None:
         label = getattr(self, "_readiness_lbl", None)
         if label is None:
@@ -200,6 +211,13 @@ class DatasetPane(ttk.Frame):
                 "Du valgte en SQLite-cache (.sqlite). Velg grunnlagsfilen (Excel/CSV/SAF-T) i stedet.",
             )
             return
+        # Signaler at vi har valgt en ny fil som ikke er lagret versjon ennå:
+        # tøm Kildeversjon-dropdown så Bygg-flyten ikke gjenbruker gammel versjon/cache.
+        if self._store_section is not None:
+            try:
+                self._store_section.hb_var.set("")
+            except Exception:
+                pass
         self._set_path(path, refresh_headers=True, refresh_sheet=True)
     def _preview(self) -> None:
         p = self._get_path_or_warn()
@@ -498,6 +516,31 @@ class DatasetPane(ttk.Frame):
         except Exception:
             return {}
 
+    def _invalidate_sb_for_current_year(self) -> None:
+        """Slett aktiv SB-versjon for gjeldende klient/år.
+
+        Brukes når en ny HB er lastet opp, slik at SB regenereres fra
+        den nye kildefilen i stedet for å vise utdaterte tall.
+        """
+        if self._store_section is None:
+            return
+        try:
+            client = (self._store_section.client_var.get() or "").strip()
+            year = (self._store_section.year_var.get() or "").strip()
+        except Exception:
+            return
+        if not client or not year:
+            return
+        try:
+            import client_store
+            existing = client_store.get_active_version(client, year=year, dtype="sb")
+            if existing is None:
+                return
+            client_store.delete_version(client, year=year, dtype="sb", version_id=existing.id)
+            logger.info("Invaliderte SB for %s/%s etter ny HB-versjon", client, year)
+        except Exception:
+            logger.debug("Invalidate SB feilet", exc_info=True)
+
     def _auto_create_sb_from_saft(
         self,
         *,
@@ -584,6 +627,34 @@ class DatasetPane(ttk.Frame):
                     self._store_section.refresh()
             except Exception:
                 logger.exception("Kunne ikke oppdatere store UI etter auto-opprettet SB")
+
+            # Load the newly-created SB into session so Analyse gets fresh tb_df
+            # and fjorårs-sammenligning er basert på nye tall.
+            try:
+                import client_store
+                from trial_balance_reader import read_trial_balance
+                import session as _session
+                import bus
+
+                v = client_store.get_active_version(client, year=year, dtype="sb")
+                if v is not None and Path(v.path).exists():
+                    tb_df = read_trial_balance(Path(v.path))
+                    if tb_df is not None and not tb_df.empty:
+                        _session.set_tb(tb_df)
+                        _session.client = client
+                        _session.year = year
+                        # Reset Analyse's fjor-SB-cache så neste refresh laster på nytt
+                        try:
+                            app = getattr(_session, "APP", None)
+                            page_analyse = getattr(app, "page_analyse", None)
+                            if page_analyse is not None:
+                                setattr(page_analyse, "_rl_sb_prev_df", None)
+                        except Exception:
+                            logger.debug("Kunne ikke nullstille _rl_sb_prev_df", exc_info=True)
+                        bus.emit("TB_LOADED", tb_df)
+            except Exception:
+                logger.exception("Kunne ikke laste ny SB inn i session etter auto-opprett")
+
             try:
                 self._set_status("Datasett klart. Saldobalanse fra SAF-T er opprettet i bakgrunnen.", level="ready")
             except Exception:
@@ -733,7 +804,14 @@ class DatasetPane(ttk.Frame):
 
         # Auto-opprett SB fra SAF-T hvis det er en SAF-T-fil og ingen aktiv SB finnes.
         # Den tunge jobben må gå i bakgrunnstråd, ellers ser appen ut til å henge.
+        # Ved ny HB-versjon (ikke duplikat): invalider eksisterende SB så den
+        # regenereres fra den nye kildefilen.
         if self._store_section is not None and is_saft_path(self.path_var.get()):
+            if res.stored_version_id and not res.stored_was_duplicate:
+                try:
+                    self._invalidate_sb_for_current_year()
+                except Exception:
+                    logger.debug("Kunne ikke invalidere SB etter ny HB-versjon", exc_info=True)
             try:
                 self.after_idle(self._schedule_auto_create_sb_from_saft)
             except Exception:

@@ -27,6 +27,32 @@ def _fmt_cfg_meta(meta: dict) -> str:
     bits = [b for b in [fn, ts, sha_short] if b]
     return " | ".join(bits) if bits else "(importert)"
 
+
+def _fmt_active_source(source: str) -> str:
+    """Visningsnavn for aktiv baseline-source."""
+
+    mapping = {
+        "json": "JSON",
+        "excel": "Excel",
+        "missing": "mangler",
+    }
+    return mapping.get(str(source or ""), "ukjent")
+
+
+def format_active_baseline_label(kind_label: str, source: str) -> str:
+    """Bygg 'Aktiv <kind>-baseline: …'-label for settings-UI."""
+
+    return f"Aktiv {kind_label}-baseline: {_fmt_active_source(source)}"
+
+
+def build_replace_baseline_confirm_text(kind_label: str) -> str:
+    """Bekreftelsestekst for 'Importer og erstatt' — brukes før Excel overskriver JSON."""
+
+    return (
+        f"Dette vil erstatte gjeldende global {kind_label}-baseline i JSON med innholdet "
+        "fra Excel.\n\nFortsette?"
+    )
+
 # preferences.py (eldre kode) eksponerer load()/save().
 # I nyere endringer ønsket vi mer eksplisitte navn (load_preferences/save_preferences).
 # For bakoverkompatibilitet støtter vi begge.
@@ -175,16 +201,34 @@ class SettingsView:
         ttk.Label(reg, text="Regnskapslinjer:").grid(row=0, column=0, sticky="w")
         self.lbl_regn = ttk.Label(reg, text="")
         self.lbl_regn.grid(row=0, column=1, sticky="w", padx=(6, 0))
-        ttk.Button(reg, text="Importer…", command=self._import_regnskapslinjer).grid(row=0, column=2, sticky="e")
+        ttk.Button(reg, text="Importer og erstatt…", command=self._import_regnskapslinjer).grid(row=0, column=2, sticky="e")
 
-        ttk.Label(reg, text="Kontoplan-mapping:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.lbl_regn_src = ttk.Label(reg, text="")
+        self.lbl_regn_src.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
+        ttk.Label(reg, text="Kontoplan-mapping:").grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.lbl_map = ttk.Label(reg, text="")
-        self.lbl_map.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=(6, 0))
-        ttk.Button(reg, text="Importer…", command=self._import_kontoplan_mapping).grid(
-            row=1, column=2, sticky="e", pady=(6, 0)
+        self.lbl_map.grid(row=2, column=1, sticky="w", padx=(6, 0), pady=(6, 0))
+        ttk.Button(reg, text="Importer og erstatt…", command=self._import_kontoplan_mapping).grid(
+            row=2, column=2, sticky="e", pady=(6, 0)
         )
 
+        self.lbl_map_src = ttk.Label(reg, text="")
+        self.lbl_map_src.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+
         self._refresh_regnskap_info()
+
+        # --- Aksjonærregister (global CSV-import) ---
+        ar = ttk.LabelFrame(frm, text="Aksjonærregister (AR)", padding=8)
+        ar.pack(fill=tk.X, pady=(12, 0))
+        ar.columnconfigure(1, weight=1)
+
+        ttk.Label(ar, text="Register-CSV:").grid(row=0, column=0, sticky="w")
+        self.lbl_ar = ttk.Label(ar, text="")
+        self.lbl_ar.grid(row=0, column=1, sticky="w", padx=(6, 0))
+        ttk.Button(ar, text="Importer…", command=self._import_ar_registry_csv).grid(row=0, column=2, sticky="e")
+
+        self._refresh_ar_info()
 
         btn = ttk.Frame(frm)
         btn.pack(fill=tk.X, pady=(16, 0))
@@ -324,9 +368,25 @@ class SettingsView:
             st = regnskap_config.get_status()
             self.lbl_regn.configure(text=_fmt_cfg_meta(st.regnskapslinjer_meta))
             self.lbl_map.configure(text=_fmt_cfg_meta(st.kontoplan_mapping_meta))
+            if hasattr(self, "lbl_regn_src"):
+                self.lbl_regn_src.configure(
+                    text=format_active_baseline_label(
+                        "regnskapslinje", st.regnskapslinjer_active_source
+                    )
+                )
+            if hasattr(self, "lbl_map_src"):
+                self.lbl_map_src.configure(
+                    text=format_active_baseline_label(
+                        "kontoplan", st.kontoplan_mapping_active_source
+                    )
+                )
         except Exception:
             self.lbl_regn.configure(text="(ukjent)")
             self.lbl_map.configure(text="(ukjent)")
+            if hasattr(self, "lbl_regn_src"):
+                self.lbl_regn_src.configure(text="")
+            if hasattr(self, "lbl_map_src"):
+                self.lbl_map_src.configure(text="")
 
     def _import_regnskapslinjer(self) -> None:
         fn = filedialog.askopenfilename(
@@ -335,6 +395,13 @@ class SettingsView:
             filetypes=[("Excel", "*.xlsx *.xls"), ("Alle filer", "*.*")],
         )
         if not fn:
+            return
+
+        if not messagebox.askyesno(
+            "Importer og erstatt",
+            build_replace_baseline_confirm_text("regnskapslinje"),
+            parent=self.win,
+        ):
             return
 
         try:
@@ -356,6 +423,13 @@ class SettingsView:
         if not fn:
             return
 
+        if not messagebox.askyesno(
+            "Importer og erstatt",
+            build_replace_baseline_confirm_text("kontoplan"),
+            parent=self.win,
+        ):
+            return
+
         try:
             import regnskap_config
 
@@ -365,6 +439,55 @@ class SettingsView:
             return
 
         self._refresh_regnskap_info()
+
+    # ------------------ Aksjonærregister ------------------
+
+    def _refresh_ar_info(self) -> None:
+        try:
+            from ar_store import list_imported_years
+            years = list_imported_years()
+            if years:
+                self.lbl_ar.config(text=f"Importert for: {', '.join(years)}")
+            else:
+                self.lbl_ar.config(text="(ikke importert)")
+        except Exception:
+            self.lbl_ar.config(text="(ikke tilgjengelig)")
+
+    def _import_ar_registry_csv(self) -> None:
+        fn = filedialog.askopenfilename(
+            parent=self.win,
+            title="Importer aksjonærregister (CSV)",
+            filetypes=[("CSV", "*.csv"), ("Alle filer", "*.*")],
+        )
+        if not fn:
+            return
+
+        from ar_store import parse_year_from_filename
+        default_year = parse_year_from_filename(fn)
+        year = simpledialog.askstring(
+            "Aksjonærregister",
+            "År for aksjonærregisteret:",
+            initialvalue=default_year,
+            parent=self.win,
+        )
+        if not year:
+            return
+
+        try:
+            from ar_store import import_registry_csv
+            meta = import_registry_csv(Path(fn), year=str(year).strip())
+            rows = meta.get("rows_read", 0)
+            rels = meta.get("relations_count", 0)
+            messagebox.showinfo(
+                "Aksjonærregister",
+                f"Importert: {rows} rader, {rels} relasjoner for {year}.",
+                parent=self.win,
+            )
+        except Exception as e:
+            messagebox.showerror("Aksjonærregister", f"Kunne ikke importere: {e}", parent=self.win)
+            return
+
+        self._refresh_ar_info()
 
     # ------------------ Preferences ------------------
 

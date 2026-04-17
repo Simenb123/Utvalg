@@ -34,6 +34,7 @@ import pandas as pd
 import tkinter as tk
 from tkinter import ttk
 
+from materiality_store import DEFAULT_SELECTION_THRESHOLD_KEY, SELECTION_THRESHOLD_LABELS
 from selection_studio_helpers import (
     PopulationMetrics,
     build_population_summary_text,
@@ -173,6 +174,13 @@ class SelectionStudio(ttk.Frame):
         self.var_risk = tk.StringVar(value="Middels")
         self.var_confidence = tk.StringVar(value="90%")
         self.var_tolerable_error = tk.StringVar(value="")
+        self.var_materiality_choice = tk.StringVar(
+            value=SELECTION_THRESHOLD_LABELS[DEFAULT_SELECTION_THRESHOLD_KEY]
+        )
+        self.var_materiality_info = tk.StringVar(value="Ingen aktiv vesentlighet valgt.")
+        self.var_materiality_override_info = tk.StringVar(
+            value="Overstyrer du tolererbar feil her, gjelder det bare denne analysen."
+        )
         self.var_method = tk.StringVar(value="quantile")
         self.var_k = tk.IntVar(value=1)
 
@@ -185,6 +193,19 @@ class SelectionStudio(ttk.Frame):
 
         self.var_recommendation = tk.StringVar(value="")
         self.var_base_summary = tk.StringVar(value="Ingen data lastet.")
+
+        # Beregning section: structured labels
+        self.var_calc_tolerable = tk.StringVar(value="")
+        self.var_calc_confidence = tk.StringVar(value="")
+        self.var_calc_suggestion = tk.StringVar(value="")
+        self.var_pop_line = tk.StringVar(value="")
+        self.var_spec_line = tk.StringVar(value="")
+        self.var_rest_line = tk.StringVar(value="")
+        self.var_drawing_frame_info = tk.StringVar(value="")
+
+        self._materiality_payload: dict[str, Any] | None = None
+        self._materiality_threshold_key = DEFAULT_SELECTION_THRESHOLD_KEY
+        self._materiality_choice_labels = list(SELECTION_THRESHOLD_LABELS.values())
 
         # Alias for older/newer code paths (avoids runtime AttributeError)
         self._var_base_summary = self.var_base_summary
@@ -312,6 +333,12 @@ class SelectionStudio(ttk.Frame):
     def _refresh_all(self) -> None:
         _refresh.refresh_all(self)
 
+    def set_materiality_context(self, active_materiality: object, threshold_key: str | None) -> None:
+        _refresh.set_materiality_context(self, active_materiality, threshold_key)
+
+    def _on_materiality_choice_selected(self) -> None:
+        _refresh.on_materiality_choice_selected(self)
+
     def _apply_filters(self, df: pd.DataFrame, *, apply_amount_filter: bool = True) -> pd.DataFrame:
         return _filters.apply_filters(self, df, apply_amount_filter=apply_amount_filter)
 
@@ -334,7 +361,18 @@ class SelectionStudio(ttk.Frame):
         return _selection.draw_stratified_sample(self, remaining_bilag_df, n)
 
     def _populate_tree(self, df: pd.DataFrame) -> None:
-        _selection.populate_tree(self, df)
+        try:
+            from document_control_app_service import load_document_statuses
+
+            bilag_keys = [str(bilag or "").strip() for bilag in df["Bilag"].tolist()] if "Bilag" in df.columns else []
+            dok_statuses = load_document_statuses(
+                getattr(session, "client", None),
+                getattr(session, "year", None),
+                bilag_keys,
+            )
+        except Exception:
+            dok_statuses = None
+        _selection.populate_tree(self, df, dok_statuses=dok_statuses)
 
     def _commit_selection(self) -> None:
         _actions.commit_selection(self)
@@ -350,6 +388,12 @@ class SelectionStudio(ttk.Frame):
 
     def _open_drilldown(self) -> None:
         _actions.open_drilldown(self, open_dialog=_open_bilag_drill_dialog)
+
+    def _open_voucher_setup(self) -> None:
+        _actions.open_voucher_setup(self)
+
+    def _open_batch_document_control(self) -> None:
+        _actions.open_batch_document_control(self)
 
     def _build_bilag_df(self, df: pd.DataFrame) -> pd.DataFrame:
         return _selection.build_bilag_df(df)

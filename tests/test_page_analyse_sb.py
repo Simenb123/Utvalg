@@ -377,12 +377,12 @@ def test_refresh_sb_view_shows_ok_and_vedlegg(monkeypatch, tmp_path):
 
     tree = page._sb_tree
     values_by_konto = {row[0]: row for row in tree.rows.values()}
-    # Kolonneorden: Konto, Kontonavn, OK, Vedlegg, Gruppe, IB, Endring, UB, UB_fjor, Antall
+    # Kolonneorden: Konto, Kontonavn, OK, OK_av, OK_dato, Vedlegg, Gruppe, IB, Endring, UB, UB_fjor, ...
     assert values_by_konto["1500"][2] == "OK"
-    assert values_by_konto["1500"][3] == "1"
+    assert values_by_konto["1500"][5] == "1"
     # Konto 1000 har ingen review-data → tomme celler
     assert values_by_konto["1000"][2] == ""
-    assert values_by_konto["1000"][3] == ""
+    assert values_by_konto["1000"][5] == ""
 
 
 # =====================================================================
@@ -933,9 +933,9 @@ def test_sb_remember_column_widths_persists_with_own_key(monkeypatch):
     assert saved["analyse.sb_cols.widths"].get("Kontonavn") == 250
 
 
-# Kolonne-indeks for UB_fjor i ny SB-layout: Konto, Kontonavn, OK, Vedlegg,
-# Gruppe, IB, Endring, UB, UB_fjor, Antall
-_UB_FJOR_IDX = 8
+# Kolonne-indeks for UB_fjor i ny SB-layout: Konto, Kontonavn, OK, OK_av,
+# OK_dato, Vedlegg, Gruppe, IB, Endring, UB, UB_fjor, Antall
+_UB_FJOR_IDX = 10
 
 
 def test_resolve_raw_kontonavn_returns_dataframe_value_not_display() -> None:

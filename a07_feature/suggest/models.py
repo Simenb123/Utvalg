@@ -65,7 +65,17 @@ SUGGEST_OUT_COLUMNS: Tuple[str, ...] = (
     "HitTokens",
     "HistoryAccounts",
     "Explain",
+    "UsedRulebook",
+    "UsedHistory",
+    "UsedUsage",
+    "UsedSpecialAdd",
+    "UsedResidual",
+    "AmountEvidence",
+    "AmountDiffAbs",
+    "AnchorSignals",
 )
+
+AMOUNT_EVIDENCE_VALUES: Tuple[str, ...] = ("exact", "within_tolerance", "near", "weak")
 
 
 @dataclass(frozen=True)
@@ -112,6 +122,20 @@ class SuggestionRow:
             within_tolerance=bool(getattr(row, "get", lambda k, d=None: d)("WithinTolerance", False)),
             hit_tokens=hit_tokens,
         )
+
+
+@dataclass(frozen=True)
+class AccountUsageFeatures:
+    posting_count: int = 0
+    unique_vouchers: int = 0
+    active_months: int = 0
+    monthly_regularity: float = 0.0
+    positive_ratio: float = 0.0
+    negative_ratio: float = 0.0
+    repeat_amount_ratio: float = 0.0
+    top_text_tokens: Tuple[str, ...] = ()
+    top_counterparty_accounts: Tuple[str, ...] = ()
+    top_counterparty_prefixes: Tuple[str, ...] = ()
 
 
 @dataclass

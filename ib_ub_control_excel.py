@@ -1,10 +1,15 @@
-"""Excel-arbeidspapir for IB/UB-kontroll (SB/HB-avstemming).
+"""Excel-arbeidspapir for SB/HB-avstemming og IB/UB-kontinuitetskontroll.
 
-Genererer en arbeidsbokmed fire ark:
+SB/HB-arbeidsboken har fire ark:
   - Oppsummering: totaler og nøkkeltall
   - Avstemming pr konto: full kontovisning
   - Avstemming pr RL: aggregert til regnskapslinje (hvis mapping finnes)
   - Avvik: kun kontoer med differanse
+
+IB/UB-arbeidsboken har tre ark:
+  - Oppsummering: totaler og nøkkeltall
+  - IB/UB pr konto: IB(i år) vs UB(fjor) per konto
+  - Avvik: kontoer der IB ≠ UB fjor
 """
 
 from __future__ import annotations
@@ -274,3 +279,170 @@ def _write_data_rows(
                     for ci in range(len(cols)):
                         c = ws.cell(row=row_idx, column=ci + 1)
                         c.fill = _AVVIK_FILL
+
+
+# ===========================================================================
+# IB/UB-kontinuitetskontroll (IB i år == UB fjor)
+# ===========================================================================
+
+def build_continuity_workpaper(
+    account_df: pd.DataFrame,
+    *,
+    summary: Optional[Dict[str, object]] = None,
+    client: str | None = None,
+    year: str | int | None = None,
+) -> Workbook:
+    """Bygg IB/UB-kontinuitetskontroll arbeidspapir."""
+    wb = Workbook()
+
+    _build_continuity_summary_sheet(wb, summary or {}, client=client, year=year)
+    _build_continuity_account_sheet(wb, account_df, client=client, year=year)
+    _build_continuity_discrepancy_sheet(wb, account_df, client=client, year=year)
+
+    if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
+        del wb["Sheet"]
+
+    return wb
+
+
+def _build_continuity_summary_sheet(
+    wb: Workbook,
+    summary: Dict[str, object],
+    *,
+    client: str | None = None,
+    year: str | int | None = None,
+) -> None:
+    ws = wb.create_sheet("Oppsummering")
+
+    title_parts = ["IB/UB Kontinuitetskontroll"]
+    if client:
+        title_parts.append(str(client))
+    if year not in {None, ""}:
+        title_parts.append(str(year))
+    title = " — ".join(title_parts)
+
+    prev_year = ""
+    try:
+        prev_year = str(int(year) - 1) if year else ""
+    except (ValueError, TypeError):
+        pass
+
+    ws.merge_cells("A1:D1")
+    ws["A1"] = title
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A1"].fill = _TITLE_FILL
+
+    ws.merge_cells("A2:D2")
+    ws["A2"] = f"Generert {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    ws["A2"].font = Font(italic=True, color="666666")
+
+    ws.merge_cells("A3:D3")
+    ws["A3"] = f"Kontroll: IB {year or 'i år'} skal stemme med UB {prev_year or 'fjor'}"
+    ws["A3"].font = Font(italic=True, color="333333")
+
+    row = 5
+    items = [
+        (f"Sum IB {year or 'i år'}", summary.get("total_ib_current", 0)),
+        (f"Sum UB {prev_year or 'fjor'}", summary.get("total_ub_previous", 0)),
+        ("Total differanse", summary.get("total_differanse", 0)),
+        ("", ""),
+        ("Antall kontoer med saldo", summary.get("antall_kontoer", 0)),
+        ("Antall avvik", summary.get("antall_avvik", 0)),
+        (f"Kun i {year or 'i år'} (ny konto)", summary.get("kun_i_current", 0)),
+        (f"Kun i {prev_year or 'fjor'} (fjernet konto)", summary.get("kun_i_previous", 0)),
+    ]
+    for label, value in items:
+        ws.cell(row=row, column=1, value=label).font = Font(bold=True)
+        cell = ws.cell(row=row, column=2, value=value if value != "" else None)
+        if isinstance(value, float):
+            cell.number_format = _AMOUNT_FMT
+        if label == "Total differanse" and isinstance(value, (int, float)) and abs(float(value)) > 0.01:
+            cell.fill = _AVVIK_FILL
+            cell.font = Font(bold=True, color="CC0000")
+        if label == "Antall avvik" and isinstance(value, int) and value > 0:
+            cell.fill = _AVVIK_FILL
+            cell.font = Font(bold=True, color="CC0000")
+        row += 1
+
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 18
+    ws.sheet_properties.tabColor = "4472C4"
+
+
+def _build_continuity_account_sheet(
+    wb: Workbook,
+    account_df: pd.DataFrame,
+    *,
+    client: str | None = None,
+    year: str | int | None = None,
+) -> None:
+    ws = wb.create_sheet("IB UB pr konto")
+
+    prev_year = ""
+    try:
+        prev_year = str(int(year) - 1) if year else ""
+    except (ValueError, TypeError):
+        pass
+
+    title = "IB/UB-kontinuitet pr konto"
+    if client:
+        title += f" — {client}"
+    if year not in {None, ""}:
+        title += f" {year}"
+
+    headers = ["Konto", "Kontonavn", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
+    cols = ["konto", "kontonavn", "ib_current", "ub_previous", "differanse"]
+    amount_cols = {2, 3, 4}
+
+    _write_title_and_header(ws, title, headers, span=len(headers))
+    _write_data_rows(ws, account_df, cols, amount_cols, highlight_col=4)
+
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 36
+    for c in "CDE":
+        ws.column_dimensions[c].width = 18
+    ws.freeze_panes = "A5"
+    ws.auto_filter.ref = f"A4:E{max(5, 4 + len(account_df))}"
+    ws.sheet_properties.tabColor = "4472C4"
+
+
+def _build_continuity_discrepancy_sheet(
+    wb: Workbook,
+    account_df: pd.DataFrame,
+    *,
+    client: str | None = None,
+    year: str | int | None = None,
+) -> None:
+    ws = wb.create_sheet("Avvik")
+    discrepancies = account_df.loc[account_df["har_avvik"]].copy()
+
+    prev_year = ""
+    try:
+        prev_year = str(int(year) - 1) if year else ""
+    except (ValueError, TypeError):
+        pass
+
+    title = "IB/UB-avvik"
+    if client:
+        title += f" — {client}"
+    if year not in {None, ""}:
+        title += f" {year}"
+
+    headers = ["Konto", "Kontonavn", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
+    cols = ["konto", "kontonavn", "ib_current", "ub_previous", "differanse"]
+    amount_cols = {2, 3, 4}
+
+    _write_title_and_header(ws, title, headers, span=len(headers))
+
+    if discrepancies.empty:
+        ws.cell(row=5, column=1, value="Ingen avvik — IB stemmer med UB fjor ✓")
+        ws["A5"].font = Font(color="006100")
+    else:
+        _write_data_rows(ws, discrepancies, cols, amount_cols, highlight_col=4)
+
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 36
+    for c in "CDE":
+        ws.column_dimensions[c].width = 18
+    ws.freeze_panes = "A5"
+    ws.sheet_properties.tabColor = "FF0000" if not discrepancies.empty else "70AD47"

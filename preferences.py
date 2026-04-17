@@ -210,6 +210,35 @@ def get_last_client() -> str | None:
     with _LOCK:
         return _DATA.get("last_client")
 
+def get_recent_clients(max_count: int = 8) -> list[dict]:
+    """Returner siste brukte klienter som [{name, timestamp}, ...], nyeste først."""
+    with _LOCK:
+        items = _DATA.get("global", {}).get("recent_clients", [])
+        if not isinstance(items, list):
+            return []
+        return items[:max_count]
+
+
+def add_recent_client(client_name: str) -> None:
+    """Legg til / bump en klient til toppen av recent-listen (cap 20)."""
+    if not client_name or not client_name.strip():
+        return
+    client_name = client_name.strip()
+    with _LOCK:
+        import time
+        g = _DATA.setdefault("global", {})
+        items = g.get("recent_clients", [])
+        if not isinstance(items, list):
+            items = []
+        # Fjern eksisterende oppføring
+        items = [r for r in items if r.get("name") != client_name]
+        # Sett inn øverst
+        items.insert(0, {"name": client_name, "timestamp": time.time()})
+        # Cap på 20
+        g["recent_clients"] = items[:20]
+        _save()
+
+
 def load() -> Dict[str, Any]:
     with _LOCK:
         return {

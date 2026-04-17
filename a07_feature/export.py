@@ -12,6 +12,7 @@ from openpyxl.styles import Font, PatternFill
 _AMOUNT_COLUMNS = {
     "Belop",
     "A07_Belop",
+    "A07",
     "GL_Belop",
     "GL_Sum",
     "Diff",
@@ -115,6 +116,7 @@ def export_a07_workbook(
     overview_df: pd.DataFrame | None,
     reconcile_df: pd.DataFrame | None,
     mapping_df: pd.DataFrame | None,
+    control_statement_df: pd.DataFrame | None = None,
     suggestions_df: pd.DataFrame | None = None,
     unmapped_df: pd.DataFrame | None = None,
 ) -> Path:
@@ -126,6 +128,8 @@ def export_a07_workbook(
         ("Avstemming", _prepare_sheet(reconcile_df)),
         ("Mapping", _prepare_sheet(mapping_df)),
     ]
+    if control_statement_df is not None and not control_statement_df.empty:
+        sheets.append(("Kontrolloppstilling", _prepare_sheet(control_statement_df)))
     if suggestions_df is not None and not suggestions_df.empty:
         sheets.append(("Forslag", _prepare_sheet(suggestions_df)))
     if unmapped_df is not None and not unmapped_df.empty:

@@ -8,9 +8,219 @@ saldobalanse-tall og flyter gjennom pivot og SB-visning automatisk.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+import re
 from typing import Any, Optional
 
 import pandas as pd
+
+_EXCEL_EXTS = {".xlsx", ".xlsm", ".xltx", ".xltm", ".xls"}
+
+
+@dataclass(frozen=True)
+class SupplementaryImportResult:
+    entries: list[dict]
+    total_rows: int
+    imported_rows: int
+    skipped_rows: int
+
+
+def import_entries_from_excel(path: str | Path) -> SupplementaryImportResult:
+    """Importer tilleggsposteringer fra Excel-formatet brukt for ÅO-posteringer."""
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(file_path)
+    if file_path.suffix.lower() not in _EXCEL_EXTS:
+        raise ValueError("Kun Excel-filer (.xlsx/.xlsm/.xltx/.xltm/.xls) støttes.")
+
+    from excel_importer import read_excel_robust
+
+    df = read_excel_robust(str(file_path))
+    return _parse_import_dataframe(df)
+
+
+def _parse_import_dataframe(df: pd.DataFrame) -> SupplementaryImportResult:
+    if df is None or df.empty:
+        return SupplementaryImportResult(entries=[], total_rows=0, imported_rows=0, skipped_rows=0)
+
+    col_konto = _find_source_col(df, "kontonr", "kontonummer", "konto", "account")
+    col_bilag = _find_source_col(df, "bilagsnr", "bilagsnummer", "bilag", "voucher")
+    col_text = _find_source_col(df, "tekst", "beskrivelse", "description", "transaksjonsbeskrivelse")
+    col_kontonavn = _find_source_col(df, "kontonavn", "accountname", "account name")
+    col_netto = _find_source_col(df, "netto", "beløp", "belop", "amount")
+    col_debet = _find_source_col(df, "debet", "debit")
+    col_kredit = _find_source_col(df, "kredit", "credit")
+    col_bilag_prefix = _find_adjacent_blank_col(df, anchor_col=col_bilag)
+
+    if not col_konto:
+        raise ValueError("Fant ikke kolonne for kontonummer i importfilen.")
+    if not any((col_netto, col_debet, col_kredit)):
+        raise ValueError("Fant ikke kolonne for beløp/netto/debet/kredit i importfilen.")
+
+    entries: list[dict] = []
+    total_rows = len(df.index)
+
+    for _, row in df.iterrows():
+        konto = _clean_account(row.get(col_konto))
+        amount = _resolve_amount(row, col_netto=col_netto, col_debet=col_debet, col_kredit=col_kredit)
+        if not konto or amount is None or abs(amount) < 0.005:
+            continue
+        entries.append(
+            {
+                "bilag": _build_bilag(
+                    row.get(col_bilag_prefix) if col_bilag_prefix else None,
+                    row.get(col_bilag) if col_bilag else None,
+                ),
+                "konto": konto,
+                "belop": amount,
+                "beskrivelse": _first_text(
+                    row.get(col_text) if col_text else None,
+                    row.get(col_kontonavn) if col_kontonavn else None,
+                ),
+            }
+        )
+
+    return SupplementaryImportResult(
+        entries=entries,
+        total_rows=total_rows,
+        imported_rows=len(entries),
+        skipped_rows=max(total_rows - len(entries), 0),
+    )
+
+
+def _find_source_col(df: pd.DataFrame, *candidates: str) -> str | None:
+    norms = {str(col): _norm_text(col) for col in df.columns}
+    for candidate in candidates:
+        wanted = _norm_text(candidate)
+        for col, normalized in norms.items():
+            if normalized == wanted:
+                return col
+    for candidate in candidates:
+        wanted = _norm_text(candidate)
+        for col, normalized in norms.items():
+            if wanted and wanted in normalized:
+                return col
+    return None
+
+
+def _find_adjacent_blank_col(df: pd.DataFrame, *, anchor_col: str | None) -> str | None:
+    if not anchor_col:
+        return None
+    columns = list(df.columns)
+    try:
+        idx = columns.index(anchor_col)
+    except ValueError:
+        return None
+    for neighbour in (idx - 1, idx + 1):
+        if 0 <= neighbour < len(columns):
+            name = str(columns[neighbour])
+            if _is_blank_header(name):
+                return name
+    return None
+
+
+def _norm_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _is_blank_header(value: Any) -> bool:
+    text = str(value or "").strip().casefold()
+    return text == "" or text.startswith("unnamed:")
+
+
+def _clean_account(value: Any) -> str:
+    text = _stringify_cell(value)
+    if not text:
+        return ""
+    digits = re.sub(r"\D+", "", text)
+    return digits or text
+
+
+def _build_bilag(prefix: Any, bilagsnr: Any) -> str:
+    parts = [_stringify_cell(prefix), _stringify_cell(bilagsnr)]
+    return " ".join(part for part in parts if part)
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = _stringify_cell(value)
+        if text:
+            return text
+    return ""
+
+
+def _stringify_cell(value: Any) -> str:
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return f"{value}".rstrip("0").rstrip(".")
+
+    text = str(value or "").strip()
+    if not text or text.casefold() in {"nan", "none"}:
+        return ""
+    if re.fullmatch(r"-?\d+\.0+", text):
+        return text.split(".", 1)[0]
+    return text
+
+
+def _to_float(value: Any) -> float | None:
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value or "").strip()
+    if not text or text.casefold() in {"nan", "none"}:
+        return None
+
+    text = text.replace("\u00a0", " ").replace("\u202f", " ").replace(" ", "")
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    else:
+        text = text.replace(",", ".")
+
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _resolve_amount(
+    row: pd.Series,
+    *,
+    col_netto: str | None,
+    col_debet: str | None,
+    col_kredit: str | None,
+) -> float | None:
+    netto = _to_float(row.get(col_netto)) if col_netto else None
+    if netto is not None and abs(netto) > 0.005:
+        return netto
+
+    debet = _to_float(row.get(col_debet)) if col_debet else None
+    kredit = _to_float(row.get(col_kredit)) if col_kredit else None
+    amount = (debet or 0.0) - (kredit or 0.0)
+    if abs(amount) > 0.005:
+        return amount
+
+    if netto is not None:
+        return netto
+    return None
 
 
 # =====================================================================
@@ -102,17 +312,17 @@ def open_dialog(parent: Any, *, client: str, year: str,
     """Åpne dialogen for tilleggsposteringer."""
     try:
         import tkinter as tk
-        from tkinter import ttk
+        from tkinter import filedialog, messagebox, ttk
     except Exception:
         return
 
-    import regnskap_client_overrides
     import formatting
+    import regnskap_client_overrides
 
     entries = regnskap_client_overrides.load_supplementary_entries(client, year)
 
     dlg = tk.Toplevel(parent)
-    dlg.title(f"Tilleggsposteringer \u2014 {client} ({year})")
+    dlg.title(f"Tilleggsposteringer — {client} ({year})")
     dlg.transient(parent)
     dlg.grab_set()
     dlg.minsize(750, 400)
@@ -195,6 +405,75 @@ def open_dialog(parent: Any, *, client: str, year: str,
             _refresh_tree(),
         ))
 
+    def _import_entries() -> None:
+        path = filedialog.askopenfilename(
+            parent=dlg,
+            title="Importer ÅO-posteringer",
+            filetypes=[
+                ("Excel-filer", "*.xlsx *.xlsm *.xltx *.xltm *.xls"),
+                ("Alle filer", "*.*"),
+            ],
+        )
+        if not path:
+            return
+
+        try:
+            result = import_entries_from_excel(path)
+        except Exception as exc:
+            messagebox.showerror(
+                "Tilleggsposteringer",
+                f"Kunne ikke importere filen.\n\n{exc}",
+                parent=dlg,
+            )
+            return
+
+        if not result.entries:
+            messagebox.showinfo(
+                "Tilleggsposteringer",
+                "Fant ingen posteringer med konto og beløp i filen.",
+                parent=dlg,
+            )
+            return
+
+        had_existing = bool(state["entries"])
+        import_mode = "append"
+        if had_existing:
+            ask_choice = getattr(messagebox, "askyesnocancel", None)
+            if callable(ask_choice):
+                replace = ask_choice(
+                    "Tilleggsposteringer",
+                    "Det finnes allerede tilleggsposteringer i dialogen.\n\n"
+                    "Velg Ja for å erstatte dem, Nei for å legge importen til eksisterende linjer.",
+                    parent=dlg,
+                )
+                if replace is None:
+                    return
+            else:
+                replace = messagebox.askyesno(
+                    "Tilleggsposteringer",
+                    "Det finnes allerede tilleggsposteringer i dialogen.\n\n"
+                    "Velg Ja for å erstatte dem. Velg Nei for å legge importen til eksisterende linjer.",
+                    parent=dlg,
+                )
+            import_mode = "replace" if replace else "append"
+
+        if import_mode == "replace":
+            state["entries"] = list(result.entries)
+        else:
+            state["entries"].extend(result.entries)
+
+        _set_changed()
+        _refresh_tree()
+
+        lines = [f"Importerte {result.imported_rows} ÅO-posteringer fra Excel."]
+        if import_mode == "replace":
+            lines.append("Eksisterende linjer i dialogen ble erstattet.")
+        elif had_existing:
+            lines.append("Importen ble lagt til eksisterende linjer i dialogen.")
+        if result.skipped_rows:
+            lines.append(f"Hoppet over {result.skipped_rows} rad(er) uten gyldig konto/beløp.")
+        messagebox.showinfo("Tilleggsposteringer", "\n".join(lines), parent=dlg)
+
     def _edit_entry() -> None:
         sel = tree.selection()
         if not sel:
@@ -237,6 +516,7 @@ def open_dialog(parent: Any, *, client: str, year: str,
     tree.bind("<Delete>", lambda _e: _delete_entries())
 
     ttk.Button(btn_frame, text="Legg til", command=_add_entry).pack(side="left", padx=(0, 4))
+    ttk.Button(btn_frame, text="Importer Excel...", command=_import_entries).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Rediger", command=_edit_entry).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Slett", command=_delete_entries).pack(side="left", padx=(0, 4))
 

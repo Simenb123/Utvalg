@@ -28,6 +28,26 @@ except Exception:  # pragma: no cover
 import pandas as pd
 
 import formatting
+from reskontro_brreg_helpers import (  # noqa: E402
+    _brreg_status_text,
+    _brreg_has_risk,
+    _fmt_nok,
+    _fmt_pct,
+    _compute_nokkeltall,
+)
+from reskontro_open_items import (  # noqa: E402
+    _is_invoice_tekst,
+    _is_payment_tekst,
+    _is_non_invoice_tekst,
+    _RE_FAKTURA_NR,
+    _extract_faktura_nr,
+    _compute_open_items,
+    _compute_open_items_with_confidence,
+    _compute_aging_buckets,
+    _match_open_against_period,
+)
+import reskontro_brreg_panel  # noqa: E402
+import reskontro_popups  # noqa: E402
 
 try:
     from ui_treeview_sort import enable_treeview_sorting as _enable_sort
@@ -137,6 +157,28 @@ _DETAIL_COLS = (
     "Tekst", "Beløp", "MVA-kode", "MVA-beløp", "Referanse", "Valuta",
 )
 _TAG_MVA_LINE = "mva_line"  # transaksjonsrad som har MVA-kode
+_TAG_MOTPOST  = "motpost"   # motpost-linje (innrykket under hovedtransaksjon)
+
+# Visningsnavn i høyrepanelene (må matche verdier i comboboxene)
+_UPPER_VIEW_ALLE   = "Alle transaksjoner"
+_UPPER_VIEW_APNE   = "\u00c5pne poster"
+_LOWER_VIEW_BRREG  = "BRREG-info"
+_LOWER_VIEW_NESTE  = "Transaksjoner neste periode"
+_LOWER_VIEW_BETALT = "Betalinger"
+
+_OPEN_ITEMS_COLS = (
+    "Status", "Dato", "Bilag", "FakturaNr", "Tekst",
+    "Fakturabeløp", "Betalt (i år)", "Gjenstår",
+)
+_SUBSEQ_COLS = (
+    "Dato", "Bilag", "Konto", "Kontonavn", "Tekst",
+    "Beløp", "MVA-kode", "MVA-beløp", "Referanse",
+)
+_PAYMENTS_COLS = (
+    "Status", "FakturaBilag", "FakturaNr",
+    "Betaling dato", "Betaling bilag", "Betaling tekst",
+    "Betalt beløp", "Resterende",
+)
 
 # ---------------------------------------------------------------------------
 # Tags
@@ -304,382 +346,8 @@ def _build_detail(df: pd.DataFrame, *, nr: str, mode: str) -> pd.DataFrame:
     return sub
 
 
-def _brreg_status_text(enhet: dict) -> str:
-    """Kort statustekst for master-listen."""
-    flags = []
-    if enhet.get("slettedato"):
-        flags.append("Slettet")
-    if enhet.get("konkurs"):
-        flags.append("Konkurs")
-    if enhet.get("underTvangsavvikling"):
-        flags.append("Tvangsavvikling")
-    if enhet.get("underAvvikling"):
-        flags.append("Avvikling")
-    return "  ".join(f"\u26a0 {f}" for f in flags) if flags else "\u2713 Aktiv"
-
-
-def _brreg_has_risk(enhet: dict) -> bool:
-    return any(enhet.get(k) for k in (
-        "konkurs", "underAvvikling", "underTvangsavvikling")) or bool(
-        enhet.get("slettedato"))
-
-
-def _fmt_nok(val: float | None, decimals: int = 0) -> str:
-    """Formater regnskapstall. Standard uten desimaler (heltall)."""
-    if val is None:
-        return "—"
-    return formatting.fmt_amount(val, decimals)
-
-
-def _fmt_pct(val: float | None) -> str:
-    if val is None:
-        return "—"
-    return f"{val:.1f} %"
-
-
-def _compute_nokkeltall(regnsk: dict) -> list[tuple[str, str, str]]:
-    """Beregn nøkkeltall fra regnskapstall.
-
-    Returnerer liste av (label, verdi_str, risiko_tag) der risiko_tag er
-    "ok", "warn" eller "bad".
-    """
-    rows: list[tuple[str, str, str]] = []
-    if not regnsk:
-        return rows
-
-    def _g(k: str) -> float | None:
-        v = regnsk.get(k)
-        return float(v) if v is not None else None
-
-    omloep     = _g("sum_omloepsmidler")
-    kgj        = _g("kortsiktig_gjeld")
-    ek         = _g("sum_egenkapital")
-    eiendeler  = _g("sum_eiendeler")
-    aarsres    = _g("aarsresultat")
-    driftsinnt = _g("driftsinntekter")
-    sum_gjeld  = _g("sum_gjeld")
-
-    # Likviditetsgrad 1 (current ratio)
-    if omloep is not None and kgj and kgj != 0:
-        lg1 = omloep / kgj
-        tag = "ok" if lg1 >= 1.5 else ("warn" if lg1 >= 1.0 else "bad")
-        rows.append(("Likviditetsgrad 1", f"{lg1:.2f}", tag))
-
-    # Arbeidskapital
-    if omloep is not None and kgj is not None:
-        ak = omloep - kgj
-        tag = "ok" if ak >= 0 else "bad"
-        rows.append(("Arbeidskapital", _fmt_nok(ak), tag))
-
-    # Egenkapitalandel
-    if ek is not None and eiendeler and eiendeler != 0:
-        eka = ek / eiendeler * 100
-        tag = "ok" if eka >= 30 else ("warn" if eka >= 10 else "bad")
-        rows.append(("Egenkapitalandel", _fmt_pct(eka), tag))
-    elif ek is not None and ek < 0:
-        rows.append(("Egenkapital", "⚠ Negativ", "bad"))
-
-    # Gjeldsgrad
-    if ek is not None and ek > 0 and sum_gjeld is not None:
-        gg = sum_gjeld / ek
-        tag = "ok" if gg <= 3 else ("warn" if gg <= 5 else "bad")
-        rows.append(("Gjeldsgrad", f"{gg:.2f}", tag))
-
-    # Resultatmargin
-    if aarsres is not None and driftsinnt and driftsinnt != 0:
-        margin = aarsres / driftsinnt * 100
-        tag = "ok" if margin >= 5 else ("warn" if margin >= 0 else "bad")
-        rows.append(("Resultatmargin", _fmt_pct(margin), tag))
-    elif aarsres is not None and aarsres < 0:
-        rows.append(("Årsresultat", "⚠ Negativt resultat", "bad"))
-
-    return rows
-
-
 # ---------------------------------------------------------------------------
 # Hoved-side
-# ---------------------------------------------------------------------------
-# Åpne poster — matching-logikk
-# ---------------------------------------------------------------------------
-
-def _is_invoice_tekst(tekst: str) -> bool:
-    t = tekst.lower()
-    return any(k in t for k in ("faktura", "invoice", "kreditnota", "credit note"))
-
-
-def _is_payment_tekst(tekst: str) -> bool:
-    t = tekst.lower()
-    return any(k in t for k in (
-        "betaling", "innbetaling", "betalt", "payment", "avregning",
-        "utbetaling", "remittering",
-    ))
-
-
-_RE_FAKTURA_NR = re.compile(
-    r'(?:faktura\s+(?:nummer\s+)?|kreditnota\s+|invoice\s+(?:number\s+)?)(\d{4,})',
-    re.IGNORECASE,
-)
-
-
-def _extract_faktura_nr(tekst: str) -> str | None:
-    """Trekk ut faktura-nummeret fra en tekst-streng.
-
-    Eksempler:
-      "Faktura nummer 23660 til Veidekke..."  → "23660"
-      "Betaling for faktura 23660 kontonummer..." → "23660"
-      "Kreditnota 12345"                      → "12345"
-    Returnerer None hvis ingen match.
-    """
-    m = _RE_FAKTURA_NR.search(tekst)
-    return m.group(1) if m else None
-
-
-def _compute_open_items(
-    df: pd.DataFrame, *, nr: str, mode: str
-) -> pd.DataFrame:
-    """Identifiser åpne (ubetalte) fakturaer for én kunde/leverandør.
-
-    Matching-strategi:
-      1. Trekk ut faktura-nummeret fra tekst på hver transaksjonslinje.
-         - Faktura-linje:  "Faktura nummer 23660 til..." → fnr="23660"
-         - Betalings-linje: "Betaling for faktura 23660..." → fnr="23660"
-      2. Grupper faktura-linjer per bilag (én faktura = ett bilag).
-         Nøkkelen for matching er det UTTRUKNE faktura-nummeret (fnr),
-         IKKE bilag-nummeret (som er forskjellig fra faktura-nummeret).
-      3. Betalinger matchet via fnr fra tekst.
-         Fallback: Referanse-feltet, eller bilag-nr i betalings-tekst.
-      4. Faktura-status:
-         - Gjenstår ≈ 0  → «✓ Betalt»
-         - 0 < betalt < 100 %  → «~ Delvis betalt»
-         - Ingen betaling funnet → «✗ Åpen»
-
-    Returnerer DataFrame med én rad per faktura-bilag:
-      Bilag, FakturaNr, Dato, Tekst, Fakturabeløp, Betalt (i år), Gjenstår, Status
-    """
-    nr_col = "Kundenr" if mode == "kunder" else "Leverandørnr"
-    if nr_col not in df.columns:
-        return pd.DataFrame()
-    sub = df[df[nr_col].astype(str).str.strip() == nr].copy()
-    if sub.empty:
-        return pd.DataFrame()
-
-    sub["__belop__"] = pd.to_numeric(
-        sub["Beløp"] if "Beløp" in sub.columns else 0,
-        errors="coerce").fillna(0.0)
-    sub["__bilag__"] = (sub["Bilag"].astype(str).str.strip()
-                        if "Bilag" in sub.columns else "")
-    sub["__ref__"]   = (sub["Referanse"].fillna("").astype(str).str.strip()
-                        if "Referanse" in sub.columns else "")
-    sub["__tekst__"] = (sub["Tekst"].fillna("").astype(str)
-                        if "Tekst" in sub.columns else "")
-    sub["__dato__"]  = (sub["Dato"].astype(str).str[:10]
-                        if "Dato" in sub.columns else "")
-    sub["__fnr__"]   = sub["__tekst__"].apply(_extract_faktura_nr)
-
-    is_pay = sub["__tekst__"].apply(_is_payment_tekst)
-    is_inv = sub["__tekst__"].apply(_is_invoice_tekst)
-
-    if mode == "kunder":
-        inv_sign = sub["__belop__"] > 0.01
-        pay_sign = sub["__belop__"] < -0.01
-    else:
-        inv_sign = sub["__belop__"] < -0.01
-        pay_sign = sub["__belop__"] > 0.01
-
-    # Invoice rows: invoice tekst with correct sign, OR correct sign without payment tekst
-    inv_mask = (is_inv & inv_sign) | (inv_sign & ~is_pay)
-    # Payment rows: payment tekst with correct sign
-    pay_mask = is_pay & pay_sign
-
-    invoice_rows = sub[inv_mask]
-    payment_rows = sub[pay_mask]
-
-    # --- Build payment lookup: fnr → accumulated paid amount ---
-    # Each payment row has __fnr__ = the faktura-nr it references in its tekst
-    pay_by_fnr: dict[str, float] = {}
-    for _, pr in payment_rows.iterrows():
-        fnr = pr["__fnr__"]
-        if fnr:
-            pay_by_fnr[fnr] = pay_by_fnr.get(fnr, 0.0) + float(pr["__belop__"])
-        # Also index by Referanse (if numeric) as fallback
-        ref = pr["__ref__"]
-        if ref and ref.isdigit() and len(ref) >= 4:
-            pay_by_fnr.setdefault(ref, 0.0)
-            pay_by_fnr[ref] += float(pr["__belop__"])
-
-    # --- Group invoice rows by bilag ---
-    inv_by_bilag: dict[str, dict] = {}
-    for _, ir in invoice_rows.iterrows():
-        bilag = ir["__bilag__"]
-        if bilag not in inv_by_bilag:
-            inv_by_bilag[bilag] = {
-                "bilag": bilag,
-                "dato":  ir["__dato__"],
-                "tekst": ir["__tekst__"],
-                "fnr":   ir["__fnr__"],
-                "total": 0.0,
-            }
-        inv_by_bilag[bilag]["total"] += float(ir["__belop__"])
-        if inv_by_bilag[bilag]["fnr"] is None and ir["__fnr__"] is not None:
-            inv_by_bilag[bilag]["fnr"] = ir["__fnr__"]
-
-    # --- Compute paid / remaining per invoice ---
-    rows: list[dict] = []
-    for bilag, bg in sorted(inv_by_bilag.items(), key=lambda x: x[1]["dato"]):
-        fnr   = bg["fnr"]
-        total = bg["total"]
-        paid  = 0.0
-
-        # Primary: match by faktura-nr extracted from tekst
-        if fnr and fnr in pay_by_fnr:
-            paid = pay_by_fnr[fnr]
-        # Fallback: betalinger som refererer til selve bilag-nummeret
-        if abs(paid) < 0.001 and bilag in pay_by_fnr:
-            paid = pay_by_fnr[bilag]
-
-        remaining = total + paid   # paid is negative for AR → reduces balance
-
-        if abs(remaining) < 0.01:
-            status = "✓ Betalt"
-        elif abs(paid) > 0.001:
-            status = "~ Delvis betalt"
-        else:
-            status = "✗ Åpen"
-
-        rows.append({
-            "Bilag":         bilag,
-            "FakturaNr":     fnr or "",
-            "Dato":          bg["dato"],
-            "Tekst":         bg["tekst"],
-            "Fakturabeløp":  total,
-            "Betalt (i år)": paid if abs(paid) > 0.001 else None,
-            "Gjenstår":      remaining,
-            "Status":        status,
-        })
-
-    if not rows:
-        return pd.DataFrame()
-    result = pd.DataFrame(rows)
-    order  = {"✗ Åpen": 0, "~ Delvis betalt": 1, "✓ Betalt": 2}
-    result["__sort__"] = result["Status"].map(order).fillna(3)
-    return result.sort_values(["__sort__", "Dato"]).drop(columns="__sort__").reset_index(drop=True)
-
-
-def _match_open_against_period(
-    open_invoices: pd.DataFrame,
-    subseq_df: pd.DataFrame,
-    *,
-    nr: str,
-    mode: str,
-) -> pd.DataFrame:
-    """Match åpne fakturaer (fra _compute_open_items) mot etterfølgende periode.
-
-    Kun fakturaer med Status = «✗ Åpen» tas med.
-    Matching mot etterfølgende periode:
-      a) Betalings Referanse = faktura-bilag
-      b) Faktura-bilag finnes i betalingens Tekst
-
-    Returnerer DataFrame:
-      Status, Bilag, Dato, Tekst, Gjenstår (år N),
-      Betalt dato, Betalt beløp, Resterende
-    """
-    if open_invoices.empty:
-        return pd.DataFrame()
-
-    open_only = open_invoices[open_invoices["Status"] == "✗ Åpen"]
-    if open_only.empty:
-        return pd.DataFrame()
-
-    nr_col = "Kundenr" if mode == "kunder" else "Leverandørnr"
-    if nr_col not in subseq_df.columns:
-        # Etterfølgende fil har ingen reskontro-kolonne — matcher kun på bilag/tekst
-        subseq_sub = subseq_df.copy()
-    else:
-        subseq_sub = subseq_df[
-            subseq_df[nr_col].astype(str).str.strip() == str(nr)].copy()
-
-    subseq_sub["__s_belop__"] = pd.to_numeric(
-        subseq_sub["Beløp"] if "Beløp" in subseq_sub.columns else 0,
-        errors="coerce").fillna(0.0)
-    subseq_sub["__s_ref__"]  = (
-        subseq_sub["Referanse"].fillna("").astype(str).str.strip()
-        if "Referanse" in subseq_sub.columns else "")
-    subseq_sub["__s_tekst__"] = (
-        subseq_sub["Tekst"].fillna("").astype(str)
-        if "Tekst" in subseq_sub.columns else "")
-    subseq_sub["__s_dato__"]  = (
-        subseq_sub["Dato"].astype(str).str[:10]
-        if "Dato" in subseq_sub.columns else "")
-
-    # Pre-compute faktura_nr for all subsequent rows (to avoid recomputing per invoice)
-    subseq_sub["__s_fnr__"] = subseq_sub["__s_tekst__"].apply(_extract_faktura_nr)
-
-    rows: list[dict] = []
-    for _, inv_row in open_only.iterrows():
-        inv_bilag  = str(inv_row["Bilag"])
-        inv_fnr    = str(inv_row.get("FakturaNr", "") or "")
-        gjenstar_n = float(inv_row["Gjenstår"])
-
-        paid = pd.DataFrame()
-        if not subseq_sub.empty:
-            candidates = pd.DataFrame()
-
-            # a) Match via faktura-nr fra tekst: etterfølgende betaling som
-            #    refererer til samme faktura-nr som denne fakturaen.
-            if inv_fnr:
-                m_fnr = subseq_sub[subseq_sub["__s_fnr__"] == inv_fnr]
-                candidates = pd.concat([candidates, m_fnr])
-
-            # b) Referanse-felt = faktura-bilag eller faktura-nr
-            if inv_fnr:
-                m_ref = subseq_sub[subseq_sub["__s_ref__"] == inv_fnr]
-                candidates = pd.concat([candidates, m_ref])
-            m_ref2 = subseq_sub[subseq_sub["__s_ref__"] == inv_bilag]
-            candidates = pd.concat([candidates, m_ref2])
-
-            # c) Fallback: faktura-bilag i tekst
-            if len(inv_bilag) >= 4:
-                m_txt = subseq_sub[
-                    subseq_sub["__s_tekst__"].str.contains(
-                        inv_bilag, na=False, regex=False)]
-                candidates = pd.concat([candidates, m_txt])
-
-            if not candidates.empty:
-                candidates = candidates.drop_duplicates()
-                # Behold kun betalings-rader
-                paid = candidates[candidates["__s_tekst__"].apply(_is_payment_tekst)]
-
-        paid_belop = float(paid["__s_belop__"].sum()) if not paid.empty else 0.0
-        paid_dato  = (str(paid["__s_dato__"].min())
-                      if not paid.empty else "")
-        resterende = gjenstar_n + paid_belop
-
-        if abs(resterende) < 0.01:
-            status = "✓ Betalt"
-        elif abs(paid_belop) > 0.001:
-            status = "~ Delvis betalt"
-        else:
-            status = "✗ Fortsatt åpen"
-
-        rows.append({
-            "Status":          status,
-            "Bilag":           inv_bilag,
-            "Dato":            str(inv_row.get("Dato", ""))[:10],
-            "Tekst":           str(inv_row.get("Tekst", "")),
-            "Gjenstår (år N)": gjenstar_n,
-            "Betalt dato":     paid_dato,
-            "Betalt beløp":    paid_belop if abs(paid_belop) > 0.001 else None,
-            "Resterende":      resterende,
-        })
-
-    if not rows:
-        return pd.DataFrame()
-    result = pd.DataFrame(rows)
-    order  = {"✗ Fortsatt åpen": 0, "~ Delvis betalt": 1, "✓ Betalt": 2}
-    result["__sort__"] = result["Status"].map(order).fillna(3)
-    return result.sort_values(["__sort__", "Dato"]).drop(columns="__sort__")
-
-
 # ---------------------------------------------------------------------------
 
 class ReskontroPage(ttk.Frame):  # type: ignore[misc]
@@ -722,6 +390,9 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         df = getattr(_session, "dataset", None)
         self._df = df if _has_reskontro_data(df) else None
         self._refresh_all()
+        # Auto-start BRREG-sjekk i bakgrunn etter kort forsinkelse
+        if self._df is not None and self._orgnr_map:
+            self.after(500, self._auto_brreg_all)
 
     # ------------------------------------------------------------------
     # UI-bygging
@@ -761,6 +432,9 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         ttk.Button(tb, text="Eksporter til Excel\u2026",
                    command=self._export_excel).pack(side="left", padx=(6, 0))
 
+        ttk.Button(tb, text="Reskontrorapport (PDF)\u2026",
+                   command=self._export_pdf_report).pack(side="left", padx=(6, 0))
+
         ttk.Separator(tb, orient="vertical").pack(side="left", fill="y",
                                                    padx=(8, 8), pady=2)
 
@@ -775,10 +449,9 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
                         command=self._on_decimals_toggle).pack(side="left",
                                                                 padx=(6, 0))
 
-        self._alle_trans_btn = ttk.Button(
-            tb, text="Alle trans.", command=self._show_all_transactions,
-            width=10)
-        self._alle_trans_btn.pack(side="left", padx=(6, 0))
+        ttk.Button(
+            tb, text="Saldoliste\u2026", command=self._show_saldoliste_popup,
+        ).pack(side="left", padx=(6, 0))
 
         pane = ttk.PanedWindow(self, orient="horizontal")
         pane.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 0))
@@ -822,50 +495,159 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
                                      foreground="#777")
         self._recon_lbl.grid(row=0, column=2, sticky="e", padx=(12, 2))
 
-        # ---- Høyre: transaksjoner + BRREG-panel ----
+        # ---- Høyre: vertikal PanedWindow (resizable) ----
         right = ttk.Frame(pane)
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=2)
-        right.rowconfigure(3, weight=1)
+        right.rowconfigure(0, weight=1)
         pane.add(right, weight=2)
 
-        detail_hdr = ttk.Frame(right)
-        detail_hdr.grid(row=0, column=0, columnspan=2, sticky="ew",
-                        padx=4, pady=(4, 2))
-        detail_hdr.columnconfigure(0, weight=1)
+        right_pane = ttk.PanedWindow(right, orient="vertical")
+        right_pane.grid(row=0, column=0, sticky="nsew")
+
+        # === Øvre høyrepanel: valgt visning for valgt kunde/leverandør ===
+        upper_container = ttk.Frame(right_pane)
+        upper_container.columnconfigure(0, weight=1)
+        upper_container.rowconfigure(1, weight=1)
+
+        upper_hdr = ttk.Frame(upper_container)
+        upper_hdr.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
+        upper_hdr.columnconfigure(0, weight=1)
         self._detail_lbl = ttk.Label(
-            detail_hdr, text="Velg en post for å se transaksjoner",
+            upper_hdr, text="Velg en post for å se transaksjoner",
             font=("TkDefaultFont", 9, "bold"))
         self._detail_lbl.grid(row=0, column=0, sticky="w")
-        self._open_items_btn = ttk.Button(
-            detail_hdr, text="Åpne poster",
-            command=self._show_open_items_popup, width=12)
-        self._open_items_btn.grid(row=0, column=1, padx=(6, 0))
-        self._subseq_btn = ttk.Button(
-            detail_hdr, text="Etterfølgende periode\u2026",
-            command=self._open_subsequent_period, width=22)
-        self._subseq_btn.grid(row=0, column=2, padx=(4, 0))
+        ttk.Label(upper_hdr, text="Visning:").grid(
+            row=0, column=1, sticky="e", padx=(6, 2))
+        self._upper_view_var = tk.StringVar(value=_UPPER_VIEW_ALLE)
+        self._upper_view_cb = ttk.Combobox(
+            upper_hdr, textvariable=self._upper_view_var,
+            values=(_UPPER_VIEW_ALLE, _UPPER_VIEW_APNE),
+            state="readonly", width=18)
+        self._upper_view_cb.grid(row=0, column=2, sticky="e")
+        self._upper_view_cb.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._on_upper_view_change())
 
-        self._detail_tree = self._make_detail_tree(right)
-        self._detail_tree.grid(row=1, column=0, sticky="nsew", padx=(4, 0))
-        vsb2 = ttk.Scrollbar(right, orient="vertical",
+        # Innholdsflaten i øvre panel — bytter mellom detail_tree og open_items_tree
+        self._upper_content = ttk.Frame(upper_container)
+        self._upper_content.grid(row=1, column=0, sticky="nsew", padx=(4, 0))
+        self._upper_content.columnconfigure(0, weight=1)
+        self._upper_content.rowconfigure(0, weight=1)
+
+        self._detail_tree_frame = ttk.Frame(self._upper_content)
+        self._detail_tree_frame.columnconfigure(0, weight=1)
+        self._detail_tree_frame.rowconfigure(0, weight=1)
+        self._detail_tree = self._make_detail_tree(self._detail_tree_frame)
+        self._detail_tree.grid(row=0, column=0, sticky="nsew")
+        vsb2 = ttk.Scrollbar(self._detail_tree_frame, orient="vertical",
                               command=self._detail_tree.yview)
-        vsb2.grid(row=1, column=1, sticky="ns")
-        hsb2 = ttk.Scrollbar(right, orient="horizontal",
+        vsb2.grid(row=0, column=1, sticky="ns")
+        hsb2 = ttk.Scrollbar(self._detail_tree_frame, orient="horizontal",
                               command=self._detail_tree.xview)
-        hsb2.grid(row=2, column=0, sticky="ew", padx=(4, 0))
+        hsb2.grid(row=1, column=0, sticky="ew")
         self._detail_tree.configure(yscrollcommand=vsb2.set,
                                     xscrollcommand=hsb2.set)
 
-        # BRREG-infopanel
-        self._brreg_frame = ttk.LabelFrame(
-            right, text="BRREG-info", padding=(4, 4))
-        self._brreg_frame.grid(row=3, column=0, columnspan=2,
-                                sticky="nsew", padx=4, pady=(4, 0))
-        self._brreg_frame.rowconfigure(0, weight=1)
+        self._open_items_frame = ttk.Frame(self._upper_content)
+        self._open_items_frame.columnconfigure(0, weight=1)
+        self._open_items_frame.rowconfigure(0, weight=1)
+        self._open_items_tree = self._make_open_items_tree(
+            self._open_items_frame)
+        self._open_items_tree.grid(row=0, column=0, sticky="nsew")
+        vsb_oi = ttk.Scrollbar(self._open_items_frame, orient="vertical",
+                                command=self._open_items_tree.yview)
+        vsb_oi.grid(row=0, column=1, sticky="ns")
+        hsb_oi = ttk.Scrollbar(self._open_items_frame, orient="horizontal",
+                                command=self._open_items_tree.xview)
+        hsb_oi.grid(row=1, column=0, sticky="ew")
+        self._open_items_tree.configure(yscrollcommand=vsb_oi.set,
+                                        xscrollcommand=hsb_oi.set)
+
+        # Start med Alle transaksjoner synlig
+        self._detail_tree_frame.grid(row=0, column=0, sticky="nsew")
+
+        right_pane.add(upper_container, weight=2)
+
+        # === Nedre høyrepanel: BRREG / neste periode / betalinger ===
+        lower_container = ttk.Frame(right_pane)
+        lower_container.columnconfigure(0, weight=1)
+        lower_container.rowconfigure(1, weight=1)
+
+        lower_hdr = ttk.Frame(lower_container)
+        lower_hdr.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
+        lower_hdr.columnconfigure(2, weight=1)
+        ttk.Label(lower_hdr, text="Info:").grid(
+            row=0, column=0, sticky="w", padx=(0, 4))
+        self._lower_view_var = tk.StringVar(value=_LOWER_VIEW_BRREG)
+        self._lower_view_cb = ttk.Combobox(
+            lower_hdr, textvariable=self._lower_view_var,
+            values=(_LOWER_VIEW_BRREG, _LOWER_VIEW_NESTE, _LOWER_VIEW_BETALT),
+            state="readonly", width=28)
+        self._lower_view_cb.grid(row=0, column=1, sticky="w")
+        self._lower_view_cb.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self._on_lower_view_change())
+        self._load_subseq_btn = ttk.Button(
+            lower_hdr, text="Last inn etterfølgende periode\u2026",
+            command=self._open_subsequent_period)
+        # pakkes inn/ut dynamisk i _refresh_lower_panel
+
+        self._lower_content = ttk.Frame(lower_container)
+        self._lower_content.grid(row=1, column=0, sticky="nsew", padx=(4, 0))
+        self._lower_content.columnconfigure(0, weight=1)
+        self._lower_content.rowconfigure(0, weight=1)
+
+        # BRREG
+        self._brreg_frame = ttk.Frame(self._lower_content)
         self._brreg_frame.columnconfigure(0, weight=1)
+        self._brreg_frame.rowconfigure(0, weight=1)
         self._brreg_info_labels: dict[str, tk.StringVar] = {}
         self._build_brreg_panel()
+
+        # Neste periode
+        self._subseq_frame = ttk.Frame(self._lower_content)
+        self._subseq_frame.columnconfigure(0, weight=1)
+        self._subseq_frame.rowconfigure(1, weight=1)
+        self._subseq_empty_lbl = ttk.Label(
+            self._subseq_frame, text="", foreground="#666",
+            font=("TkDefaultFont", 9))
+        self._subseq_empty_lbl.grid(row=0, column=0, columnspan=2,
+                                     sticky="w", padx=4, pady=(2, 2))
+        self._subseq_tree = self._make_subseq_tree(self._subseq_frame)
+        self._subseq_tree.grid(row=1, column=0, sticky="nsew")
+        vsb_ss = ttk.Scrollbar(self._subseq_frame, orient="vertical",
+                                command=self._subseq_tree.yview)
+        vsb_ss.grid(row=1, column=1, sticky="ns")
+        hsb_ss = ttk.Scrollbar(self._subseq_frame, orient="horizontal",
+                                command=self._subseq_tree.xview)
+        hsb_ss.grid(row=2, column=0, sticky="ew")
+        self._subseq_tree.configure(yscrollcommand=vsb_ss.set,
+                                     xscrollcommand=hsb_ss.set)
+
+        # Betalinger
+        self._payments_frame = ttk.Frame(self._lower_content)
+        self._payments_frame.columnconfigure(0, weight=1)
+        self._payments_frame.rowconfigure(1, weight=1)
+        self._payments_empty_lbl = ttk.Label(
+            self._payments_frame, text="", foreground="#666",
+            font=("TkDefaultFont", 9))
+        self._payments_empty_lbl.grid(row=0, column=0, columnspan=2,
+                                       sticky="w", padx=4, pady=(2, 2))
+        self._payments_tree = self._make_payments_tree(self._payments_frame)
+        self._payments_tree.grid(row=1, column=0, sticky="nsew")
+        vsb_pm = ttk.Scrollbar(self._payments_frame, orient="vertical",
+                                command=self._payments_tree.yview)
+        vsb_pm.grid(row=1, column=1, sticky="ns")
+        hsb_pm = ttk.Scrollbar(self._payments_frame, orient="horizontal",
+                                command=self._payments_tree.xview)
+        hsb_pm.grid(row=2, column=0, sticky="ew")
+        self._payments_tree.configure(yscrollcommand=vsb_pm.set,
+                                       xscrollcommand=hsb_pm.set)
+
+        # Start med BRREG synlig
+        self._brreg_frame.grid(row=0, column=0, sticky="nsew")
+
+        right_pane.add(lower_container, weight=1)
 
     def _make_master_tree(self, parent: Any) -> Any:
         tree = ttk.Treeview(parent, columns=_MASTER_COLS, show="headings",
@@ -930,6 +712,71 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         _setup_tree(tree, extended=True)
         return tree
 
+    def _make_open_items_tree(self, parent: Any) -> Any:
+        tree = ttk.Treeview(parent, columns=_OPEN_ITEMS_COLS, show="headings",
+                             selectmode="extended")
+        widths = {
+            "Status": 110, "Dato": 90, "Bilag": 80, "FakturaNr": 100,
+            "Tekst": 280, "Fakturabeløp": 120, "Betalt (i år)": 120,
+            "Gjenstår": 120,
+        }
+        right_cols = {"Fakturabeløp", "Betalt (i år)", "Gjenstår"}
+        for col in _OPEN_ITEMS_COLS:
+            tree.heading(col, text=col,
+                         anchor="e" if col in right_cols else "w")
+            tree.column(col, width=widths.get(col, 90),
+                        anchor="e" if col in right_cols else "w",
+                        stretch=col == "Tekst")
+        tree.tag_configure(_TAG_NEG,     foreground="red")
+        tree.tag_configure(_TAG_HEADER,  background="#E8EFF7",
+                           font=("TkDefaultFont", 9, "bold"))
+        tree.bind("<Double-1>", self._on_detail_double_click)
+        _setup_tree(tree, extended=True)
+        return tree
+
+    def _make_subseq_tree(self, parent: Any) -> Any:
+        tree = ttk.Treeview(parent, columns=_SUBSEQ_COLS, show="headings",
+                             selectmode="extended")
+        widths = {
+            "Dato": 90, "Bilag": 80, "Konto": 70, "Kontonavn": 170,
+            "Tekst": 240, "Beløp": 110, "MVA-kode": 70, "MVA-beløp": 100,
+            "Referanse": 90,
+        }
+        right_cols = {"Beløp", "MVA-beløp"}
+        for col in _SUBSEQ_COLS:
+            tree.heading(col, text=col,
+                         anchor="e" if col in right_cols else "w")
+            tree.column(col, width=widths.get(col, 90),
+                        anchor="e" if col in right_cols else "w",
+                        stretch=col in ("Tekst", "Kontonavn"))
+        tree.tag_configure(_TAG_NEG,     foreground="red")
+        tree.tag_configure(_TAG_HEADER,  background="#E8EFF7",
+                           font=("TkDefaultFont", 9, "bold"))
+        tree.tag_configure(_TAG_MVA_LINE, background="#F0FFF0")
+        _setup_tree(tree, extended=True)
+        return tree
+
+    def _make_payments_tree(self, parent: Any) -> Any:
+        tree = ttk.Treeview(parent, columns=_PAYMENTS_COLS, show="headings",
+                             selectmode="extended")
+        widths = {
+            "Status": 110, "FakturaBilag": 100, "FakturaNr": 100,
+            "Betaling dato": 100, "Betaling bilag": 110,
+            "Betaling tekst": 260, "Betalt beløp": 110, "Resterende": 110,
+        }
+        right_cols = {"Betalt beløp", "Resterende"}
+        for col in _PAYMENTS_COLS:
+            tree.heading(col, text=col,
+                         anchor="e" if col in right_cols else "w")
+            tree.column(col, width=widths.get(col, 90),
+                        anchor="e" if col in right_cols else "w",
+                        stretch=col == "Betaling tekst")
+        tree.tag_configure(_TAG_NEG,     foreground="red")
+        tree.tag_configure(_TAG_HEADER,  background="#E8EFF7",
+                           font=("TkDefaultFont", 9, "bold"))
+        _setup_tree(tree, extended=True)
+        return tree
+
     def _detail_decimals(self) -> int:
         """Returnerer antall desimaler for detaljvisning basert på toggle."""
         try:
@@ -945,321 +792,46 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
             return 2
 
     def _on_detail_double_click(self, event: Any) -> None:
-        """Dobbeltklikk på transaksjon → vis alle linjer for samme bilag."""
-        tree = self._detail_tree
+        """Dobbeltklikk på transaksjon → vis alle linjer for samme bilag.
+
+        Leser fra treet dobbeltklikket skjedde i (``event.widget``), og
+        slår opp Bilag-kolonnen dynamisk — kolonneindeksen er ulik i
+        flat transaksjonsliste og i åpne-poster-visningen.
+        """
+        tree = getattr(event, "widget", None) or self._detail_tree
         item = tree.identify_row(event.y)
         if not item:
             return
-        vals = tree.item(item, "values")
-        if not vals or len(vals) < 2:
+        try:
+            cols = list(tree["columns"])
+        except Exception:
+            cols = list(_DETAIL_COLS)
+        try:
+            bilag_idx = cols.index("Bilag")
+        except ValueError:
             return
-        bilag = str(vals[1]).strip()
-        if not bilag or bilag == "":
+        vals = tree.item(item, "values")
+        if not vals or bilag_idx >= len(vals):
+            return
+        bilag = str(vals[bilag_idx]).strip()
+        if not bilag:
             return
         self._open_bilag_popup(bilag)
 
     def _open_bilag_popup(self, bilag: str) -> None:
-        """Vis popup med ALLE HB-linjer for bilag (inkl. MVA-linje på konto 27xx).
-
-        Søker i hele datasettet (ikke kun reskontro-linjer), slik at
-        motkonto, inntektslinje og MVA-linje vises med tilhørende MVA-kode.
-        """
-        if self._df is None:
-            return
-        if "Bilag" not in self._df.columns:
-            return
-
-        # Søk i HELE datasettet — inkluderer alle kontolinjer, ikke bare reskontro
-        mask = self._df["Bilag"].astype(str).str.strip() == bilag
-        sub  = self._df[mask].copy()
-        if sub.empty:
-            return
-        if "Dato" in sub.columns:
-            sub = sub.sort_values("Dato")
-
-        win = _make_popup(self,
-                          title=f"Bilag {bilag}  —  alle HB-linjer (inkl. MVA-posteringer)",
-                          geometry="960x340")
-
-        cols = ("Dato", "Konto", "Kontonavn", "Tekst",
-                "Beløp", "MVA-kode", "MVA-beløp", "Valuta")
-        tree = ttk.Treeview(win, columns=cols, show="headings", selectmode="browse")
-        widths = {"Dato": 90, "Konto": 65, "Kontonavn": 170, "Tekst": 230,
-                  "Beløp": 110, "MVA-kode": 70, "MVA-beløp": 100, "Valuta": 55}
-        right = {"Beløp", "MVA-beløp"}
-        for c in cols:
-            tree.heading(c, text=c, anchor="e" if c in right else "w")
-            tree.column(c, width=widths.get(c, 90),
-                        anchor="e" if c in right else "w",
-                        stretch=c in ("Tekst", "Kontonavn"))
-        tree.tag_configure(_TAG_NEG,      foreground="red")
-        tree.tag_configure(_TAG_MVA_LINE, background="#F0FFF0")
-        _setup_tree(tree, extended=True)
-
-        vsb = ttk.Scrollbar(win, orient="vertical",   command=tree.yview)
-        hsb = ttk.Scrollbar(win, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        win.rowconfigure(0, weight=1)
-        win.columnconfigure(0, weight=1)
-
-        df_cols = list(sub.columns)
-
-        def _v(col: str, row: Any, default: Any = "") -> Any:
-            return row[col] if col in df_cols else default
-
-        dec = self._detail_decimals()
-        total = 0.0
-        for _, row in sub.iterrows():
-            dato     = str(_v("Dato",     row, ""))[:10]
-            konto    = str(_v("Konto",    row, ""))
-            knavn    = str(_v("Kontonavn",row, ""))
-            tekst    = str(_v("Tekst",    row, ""))
-            valuta   = str(_v("Valuta",   row, ""))
-            mva_kode = str(_v("MVA-kode", row, ""))
-            if mva_kode in ("nan", "None"):
-                mva_kode = ""
-            try:
-                belop = float(_v("Beløp", row, 0.0))
-            except (ValueError, TypeError):
-                belop = 0.0
-            try:
-                mva_b_raw = _v("MVA-beløp", row, None)
-                mva_b = float(mva_b_raw) if mva_b_raw not in (None, "", "nan") else None
-            except (ValueError, TypeError):
-                mva_b = None
-
-            total += belop
-            has_mva = bool(mva_kode or (mva_b is not None and abs(mva_b) > 0.001))
-            row_tags: list[str] = []
-            if belop < 0:
-                row_tags.append(_TAG_NEG)
-            if has_mva:
-                row_tags.append(_TAG_MVA_LINE)
-            tree.insert("", "end", values=(
-                dato, konto, knavn, tekst,
-                formatting.fmt_amount(belop, dec),
-                mva_kode,
-                formatting.fmt_amount(mva_b, dec) if mva_b is not None else "",
-                valuta,
-            ), tags=tuple(row_tags))
-
-        tree.insert("", "end", values=(
-            "", "", "", f"\u03a3 {len(sub)} linjer",
-            formatting.fmt_amount(total, dec),
-            "", "", "",
-        ), tags=(_TAG_HEADER,))
-
-        dato_str = ""
-        try:
-            if "Dato" in df_cols:
-                dato_str = f"  —  {str(sub['Dato'].iloc[0])[:10]}"
-        except Exception:
-            pass
-        ttk.Label(win, text=f"Bilag {bilag}{dato_str}  •  netto {formatting.fmt_amount(total, dec)}",
-                  font=("TkDefaultFont", 9, "bold")).grid(
-            row=2, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 4))
+        reskontro_popups.open_bilag_popup(self, bilag)
 
     def _build_brreg_panel(self) -> None:
-        """Bygg tk.Text-basert BRREG-panel med farge-tags."""
-        f = self._brreg_frame
-
-        self._brreg_text = tk.Text(
-            f, state="disabled", wrap="word",
-            font=("TkDefaultFont", 9),
-            relief="flat", borderwidth=0,
-            height=8, cursor="arrow",
-        )
-        vsb = ttk.Scrollbar(f, orient="vertical", command=self._brreg_text.yview)
-        self._brreg_text.configure(yscrollcommand=vsb.set)
-        self._brreg_text.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-
-        # Tags
-        bg = self._brreg_text.cget("background")
-        self._brreg_text.tag_configure("heading",  font=("TkDefaultFont", 9, "bold"), foreground="#1a4c7a")
-        self._brreg_text.tag_configure("key",      foreground="#555555")
-        self._brreg_text.tag_configure("val",      foreground="#111111")
-        self._brreg_text.tag_configure("warn",     foreground="#C75000")
-        self._brreg_text.tag_configure("ok",       foreground="#1a7a2a")
-        self._brreg_text.tag_configure("bad",      foreground="#C75000")
-        self._brreg_text.tag_configure("dim",      foreground="#888888")
-
-        self._clear_brreg_panel()
+        reskontro_brreg_panel.build_brreg_panel(self, parent=self._brreg_frame)
 
     def _brreg_write(self, *parts: tuple[str, str]) -> None:
-        """Hjelpemetode: sett inn (tekst, tag)-par i _brreg_text."""
-        t = self._brreg_text
-        t.configure(state="normal")
-        for text, tag in parts:
-            t.insert("end", text, tag)
-        t.configure(state="disabled")
+        reskontro_brreg_panel.brreg_write(self, *parts)
 
     def _clear_brreg_panel(self) -> None:
-        t = self._brreg_text
-        t.configure(state="normal")
-        t.delete("1.0", "end")
-        t.configure(state="disabled")
-        self._brreg_write(
-            ("— kjør BRREG-sjekk for å hente data —", "dim"),
-        )
+        reskontro_brreg_panel.clear_brreg_panel(self)
 
     def _update_brreg_panel(self, orgnr: str) -> None:
-        """Fyll BRREG-panelet med data for valgt orgnr."""
-        t = self._brreg_text
-        t.configure(state="normal")
-        t.delete("1.0", "end")
-        t.configure(state="disabled")
-
-        def w(*parts: tuple[str, str]) -> None:
-            self._brreg_write(*parts)
-
-        def kv(key: str, val: str, val_tag: str = "val") -> None:
-            w((f"  {key}: ", "key"), (val + "\n", val_tag))
-
-        if not orgnr or orgnr not in self._brreg_data:
-            msg = "Ikke hentet — trykk BRREG-sjekk" if orgnr else "— velg en post —"
-            w((msg, "dim"))
-            return
-
-        rec    = self._brreg_data[orgnr]
-        enhet  = rec.get("enhet") or {}
-        regnsk = rec.get("regnskap") or {}
-
-        # --- Firmainformasjon ---
-        w(("Firmainformasjon\n", "heading"))
-        kv("Orgnr", orgnr)
-
-        if not enhet:
-            kv("Status", "Ikke funnet i Enhetsregisteret", "bad")
-            return
-
-        try:
-            import brreg_client as _brreg
-            exempt = _brreg.is_likely_exempt(enhet.get("naeringskode", ""))
-        except Exception:
-            exempt = False
-
-        status_txt = _brreg_status_text(enhet)
-        status_tag = "bad" if any(
-            enhet.get(k) for k in ("konkurs", "underAvvikling", "underTvangsavvikling")
-        ) else "ok"
-        kv("Status", status_txt, status_tag)
-
-        mva_reg = enhet.get("registrertIMvaregisteret", False)
-        mva_txt = "✓ Ja" if mva_reg else "✗ Nei"
-        kv("MVA-registrert", mva_txt, "ok" if mva_reg else "bad")
-        kv("Org.form", enhet.get("organisasjonsform", "") or "—")
-        kv("Adresse", enhet.get("forretningsadresse", "") or "—")
-
-        nk = enhet.get("naeringskode", "")
-        nn = enhet.get("naeringsnavn", "")
-        bransje_txt = f"{nk} {nn}".strip() if nk else nn
-        kv("Bransje", bransje_txt or "—")
-        if exempt:
-            w(("  ⚠ Bransjen er typisk unntatt MVA\n", "warn"))
-
-        if not regnsk:
-            w(("\nRegnskap\n", "heading"))
-            w(("  Ikke tilgjengelig\n", "dim"))
-            return
-
-        # --- Resultatregnskap ---
-        valuta  = regnsk.get("valuta", "NOK")
-        fra     = regnsk.get("fra_dato", "")[:10]
-        til     = regnsk.get("til_dato", "")[:10]
-        aar     = regnsk.get("regnskapsaar", "")
-        periode = f"{fra} – {til}" if fra and til else aar
-        w((f"\nResultatregnskap {aar}  ({valuta}  {periode})\n", "heading"))
-
-        def _r(key: str, label: str, val_tag: str = "val") -> None:
-            v = regnsk.get(key)
-            kv(label, _fmt_nok(v) if v is not None else "—", val_tag)
-
-        _r("driftsinntekter",    "Driftsinntekter")
-        _r("driftskostnader",    "Driftskostnader")
-        _r("driftsresultat",     "Driftsresultat")
-        w(("  —\n", "dim"))
-        _r("finansinntekter",    "Finansinntekter")
-        _r("finanskostnader",    "Finanskostnader")
-        _r("netto_finans",       "Netto finans")
-        w(("  —\n", "dim"))
-        _r("resultat_for_skatt", "Res. før skatt")
-
-        aarsres_v = regnsk.get("aarsresultat")
-        driftsinnt_v = regnsk.get("driftsinntekter")
-        aarsres_tag = "val"
-        if aarsres_v is not None and aarsres_v < 0:
-            aarsres_tag = "bad"
-        _r("aarsresultat", "Årsresultat", aarsres_tag)
-
-        rev_txt = regnsk.get("revisorberetning", "")
-        if regnsk.get("ikke_revidert") or regnsk.get("fravalg_revisjon"):
-            kv("Revisjon", rev_txt, "warn")
-        else:
-            kv("Revisjon", rev_txt, "ok")
-
-        # --- Balanse ---
-        w((f"\nBalanse ({aar})\n", "heading"))
-        _r("sum_anleggsmidler",  "Anleggsmidler")
-        _r("sum_omloepsmidler",  "Omløpsmidler")
-        _r("sum_eiendeler",      "Sum eiendeler")
-        w(("  —\n", "dim"))
-
-        ek_v = regnsk.get("sum_egenkapital")
-        ek_tag = "bad" if (ek_v is not None and ek_v < 0) else "val"
-        _r("sum_egenkapital",    "Egenkapital", ek_tag)
-        w(("  —\n", "dim"))
-        _r("langsiktig_gjeld",   "Langsiktig gjeld")
-        _r("kortsiktig_gjeld",   "Kortsiktig gjeld")
-        _r("sum_gjeld",          "Sum gjeld")
-
-        # --- Nøkkeltall ---
-        nokkeltall = _compute_nokkeltall(regnsk)
-        if nokkeltall:
-            w(("\nNøkkeltall\n", "heading"))
-            risk_map = {"ok": "ok", "warn": "warn", "bad": "bad"}
-            for label, verdi, risiko in nokkeltall:
-                tag = risk_map.get(risiko, "val")
-                kv(label, verdi, tag)
-
-        # --- Risikovurdering (kun kunder med åpen saldo) ---
-        has_ub = False
-        try:
-            if self._master_df is not None and "nr" in self._master_df.columns:
-                sel_nr = self._selected_nr
-                if sel_nr:
-                    row_m = self._master_df[self._master_df["nr"].astype(str) == sel_nr]
-                    if not row_m.empty:
-                        ub_val = float(row_m["ub"].iloc[0])
-                        has_ub = abs(ub_val) > 0.01
-        except Exception:
-            pass
-
-        if has_ub and self._mode == "kunder":
-            w(("\nRisikovurdering — tapsavsetning\n", "heading"))
-            if _brreg_has_risk(enhet):
-                w(("  ⚠ Konkurs/avvikling — vurder 100 % avsetning\n", "bad"))
-            else:
-                risk_signals = []
-                if ek_v is not None and ek_v < 0:
-                    risk_signals.append("Negativ egenkapital")
-                omloep_v = regnsk.get("sum_omloepsmidler")
-                kgj_v    = regnsk.get("kortsiktig_gjeld")
-                if omloep_v is not None and kgj_v and kgj_v != 0:
-                    lg1 = omloep_v / kgj_v
-                    if lg1 < 1.0:
-                        risk_signals.append(f"Likviditetsgrad {lg1:.2f} < 1,0")
-                if aarsres_v is not None and aarsres_v < 0:
-                    risk_signals.append("Negativt årsresultat")
-                if risk_signals:
-                    w(("  ⚠ Risikosignaler:\n", "warn"))
-                    for s in risk_signals:
-                        w((f"    • {s}\n", "warn"))
-                else:
-                    w(("  ✓ Ingen umiddelbare risikosignaler\n", "ok"))
+        reskontro_brreg_panel.update_brreg_panel(self, orgnr)
 
     # ------------------------------------------------------------------
     # Refresh
@@ -1269,20 +841,31 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         """Re-render master og detail med ny desimal-innstilling."""
         self._apply_filter()
         if self._selected_nr:
-            self._populate_detail(self._selected_nr)
+            self._refresh_upper_panel()
+            self._refresh_lower_panel()
 
     def _on_mode_change(self) -> None:
         self._mode = self._mode_var.get()
         self._selected_nr = ""
         self._detail_tree.delete(*self._detail_tree.get_children())
+        self._open_items_tree.delete(*self._open_items_tree.get_children())
+        self._subseq_tree.delete(*self._subseq_tree.get_children())
+        self._payments_tree.delete(*self._payments_tree.get_children())
         self._detail_lbl.configure(text="Velg en post for å se transaksjoner")
         self._clear_brreg_panel()
         self._refresh_all()
 
     def _refresh_all(self) -> None:
         self._detail_tree.delete(*self._detail_tree.get_children())
+        self._open_items_tree.delete(*self._open_items_tree.get_children())
+        self._subseq_tree.delete(*self._subseq_tree.get_children())
+        self._payments_tree.delete(*self._payments_tree.get_children())
         self._detail_lbl.configure(text="Velg en post for å se transaksjoner")
         self._clear_brreg_panel()
+        try:
+            self._refresh_lower_panel()
+        except Exception:
+            pass
 
         if not _has_reskontro_data(self._df):
             self._master_tree.delete(*self._master_tree.get_children())
@@ -1472,9 +1055,42 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         if not sel:
             return
         self._selected_nr = sel[0]
-        self._populate_detail(self._selected_nr)
+        self._refresh_upper_panel()
         orgnr = self._orgnr_map.get(self._selected_nr, "")
-        self._update_brreg_panel(orgnr)
+        # BRREG: hent automatisk hvis ikke cachet
+        if (self._lower_view_var.get() == _LOWER_VIEW_BRREG
+                and orgnr and orgnr not in self._brreg_data):
+            self._auto_fetch_brreg_single(orgnr)
+        else:
+            self._refresh_lower_panel()
+
+    def _auto_fetch_brreg_single(self, orgnr: str) -> None:
+        """Hent BRREG-data for ett enkelt orgnr i bakgrunn og oppdater panelet."""
+        if not orgnr or len(orgnr) != 9 or not orgnr.isdigit():
+            self._update_brreg_panel(orgnr)
+            return
+        self._brreg_write(("Henter BRREG-data\u2026", "dim"))
+
+        def _run() -> None:
+            try:
+                import brreg_client as _brreg
+                enhet = _brreg.fetch_enhet(orgnr)
+                regnskap = _brreg.fetch_regnskap(orgnr)
+                result = {"enhet": enhet, "regnskap": regnskap}
+                self.after(0, lambda: self._on_single_brreg_done(orgnr, result))
+            except Exception as exc:
+                log.warning("Auto BRREG-henting feilet for %s: %s", orgnr, exc)
+                self.after(0, lambda: self._update_brreg_panel(orgnr))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_single_brreg_done(self, orgnr: str, result: dict) -> None:
+        """Kalles når enkelt BRREG-henting er ferdig."""
+        self._brreg_data[orgnr] = result
+        if self._lower_view_var.get() == _LOWER_VIEW_BRREG:
+            self._update_brreg_panel(orgnr)
+        # Oppdater master-treet for å vise MVA/status/bransje
+        self._apply_filter()
 
     def _on_detail_select(self, _event: Any = None) -> None:
         """Oppdater statuslinje med antall markerte rader og sum beløp."""
@@ -1534,6 +1150,7 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
             menu.grab_release()
 
     def _populate_detail(self, nr: str) -> None:
+        """Flat transaksjonsliste (Ã©n rad per transaksjon) for valgt nr."""
         tree = self._detail_tree
         tree.delete(*tree.get_children())
 
@@ -1542,34 +1159,39 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
 
         sub = _build_detail(self._df, nr=nr, mode=self._mode)
         if sub.empty:
+            self._update_detail_header(nr, n_tx=0, total=0.0)
             return
 
-        cols = list(sub.columns)
-
-        def _v(col: str, row: Any, default: Any = "") -> Any:
-            return row[col] if col in cols else default
+        def _v_any(col: str, row: Any, default: Any = "") -> Any:
+            try:
+                val = row[col]
+                if val is None or (isinstance(val, float) and str(val) == "nan"):
+                    return default
+                return val
+            except (KeyError, IndexError):
+                return default
 
         total = 0.0
         debet = 0.0
         kredit = 0.0
         dec = self._detail_decimals()
         for _, row in sub.iterrows():
-            dato      = str(_v("Dato",      row, ""))[:10]
-            bilag     = str(_v("Bilag",     row, ""))
-            konto     = str(_v("Konto",     row, ""))
-            knavn     = str(_v("Kontonavn", row, ""))
-            tekst     = str(_v("Tekst",     row, ""))
-            ref       = str(_v("Referanse", row, ""))
-            valuta    = str(_v("Valuta",    row, ""))
-            mva_kode  = str(_v("MVA-kode",  row, ""))
+            dato      = str(_v_any("Dato",      row, ""))[:10]
+            bilag     = str(_v_any("Bilag",     row, ""))
+            konto     = str(_v_any("Konto",     row, ""))
+            knavn     = str(_v_any("Kontonavn", row, ""))
+            tekst     = str(_v_any("Tekst",     row, ""))
+            ref       = str(_v_any("Referanse", row, ""))
+            valuta    = str(_v_any("Valuta",    row, ""))
+            mva_kode  = str(_v_any("MVA-kode",  row, ""))
             if mva_kode in ("nan", "None"):
                 mva_kode = ""
             try:
-                belop = float(_v("Beløp", row, 0.0))
+                belop = float(_v_any("Beløp", row, 0.0))
             except (ValueError, TypeError):
                 belop = 0.0
             try:
-                mva_belop_raw = _v("MVA-beløp", row, None)
+                mva_belop_raw = _v_any("MVA-beløp", row, None)
                 mva_belop = float(mva_belop_raw) if mva_belop_raw not in (None, "", "nan") else None
             except (ValueError, TypeError):
                 mva_belop = None
@@ -1586,6 +1208,7 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
                 tags.append(_TAG_NEG)
             if has_mva:
                 tags.append(_TAG_MVA_LINE)
+
             tree.insert("", "end", values=(
                 dato, bilag, konto, knavn, tekst,
                 formatting.fmt_amount(belop, dec),
@@ -1603,27 +1226,316 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
             "", "", "", "",
         ), tags=(_TAG_HEADER,))
 
-        navn = ""
-        try:
-            navn_col = "Kundenavn" if self._mode == "kunder" else "Leverandørnavn"
-            if navn_col in cols:
-                navn = str(sub[navn_col].iloc[0])
-        except Exception:
-            pass
-
-        mode_str = "Kunde" if self._mode == "kunder" else "Leverandør"
-        lbl = f"{mode_str} {nr}"
-        if navn:
-            lbl += f"  \u2014  {navn}"
-        lbl += f"  ({len(sub)} transaksjoner, UB {formatting.fmt_amount(total)})"
-        self._detail_lbl.configure(text=lbl)
+        self._update_detail_header(nr, n_tx=len(sub), total=total)
         self._status_lbl.configure(
             text=(f"Markert: 1 rad  |  Beløp: {formatting.fmt_amount(total, dec)}"
                   f"  \u2022  D: {formatting.fmt_amount(debet, dec)}"
                   f"  K: {formatting.fmt_amount(kredit, dec)}"))
 
+    def _update_detail_header(self, nr: str, *, n_tx: int, total: float) -> None:
+        navn = self._navn_for_nr(nr)
+        mode_str = "Kunde" if self._mode == "kunder" else "Leverandør"
+        lbl = f"{mode_str} {nr}"
+        if navn:
+            lbl += f"  \u2014  {navn}"
+        ub_display = total
+        if self._master_df is not None:
+            row_m = self._master_df[self._master_df["nr"].astype(str) == nr]
+            if not row_m.empty:
+                ub_display = float(row_m["ub"].iloc[0])
+        lbl += f"  ({n_tx} transaksjoner, UB {formatting.fmt_amount(ub_display)})"
+        self._detail_lbl.configure(text=lbl)
+
     # ------------------------------------------------------------------
-    # Åpne poster
+    # Visningsbytte: øvre og nedre høyrepanel
+    # ------------------------------------------------------------------
+
+    def _on_upper_view_change(self) -> None:
+        view = self._upper_view_var.get()
+        if view == _UPPER_VIEW_APNE:
+            self._detail_tree_frame.grid_remove()
+            self._open_items_frame.grid(row=0, column=0, sticky="nsew")
+        else:
+            self._open_items_frame.grid_remove()
+            self._detail_tree_frame.grid(row=0, column=0, sticky="nsew")
+        self._refresh_upper_panel()
+
+    def _on_lower_view_change(self) -> None:
+        self._refresh_lower_panel()
+
+    def _refresh_upper_panel(self) -> None:
+        """Render innhold i øvre høyrepanel basert på valgt visning."""
+        view = self._upper_view_var.get()
+        nr = self._selected_nr
+        if view == _UPPER_VIEW_APNE:
+            self._populate_open_items_inline(nr)
+        else:
+            if nr:
+                self._populate_detail(nr)
+            else:
+                self._detail_tree.delete(*self._detail_tree.get_children())
+                self._detail_lbl.configure(
+                    text="Velg en post for å se transaksjoner")
+
+    def _refresh_lower_panel(self) -> None:
+        """Render innhold i nedre høyrepanel basert på valgt visning."""
+        view = self._lower_view_var.get()
+
+        # Skjul alle, vis valgt
+        for fr in (self._brreg_frame, self._subseq_frame, self._payments_frame):
+            try:
+                fr.grid_remove()
+            except Exception:
+                pass
+
+        # Kontekstuell "Last inn etterfølgende periode…"-knapp
+        need_subseq = view in (_LOWER_VIEW_NESTE, _LOWER_VIEW_BETALT)
+        has_subseq = self._subsequent_df is not None and not self._subsequent_df.empty
+        try:
+            if need_subseq and not has_subseq:
+                self._load_subseq_btn.grid(
+                    row=0, column=3, sticky="e", padx=(6, 0))
+            else:
+                self._load_subseq_btn.grid_remove()
+        except Exception:
+            pass
+
+        if view == _LOWER_VIEW_BRREG:
+            self._brreg_frame.grid(row=0, column=0, sticky="nsew")
+            orgnr = self._orgnr_map.get(self._selected_nr, "") if self._selected_nr else ""
+            self._update_brreg_panel(orgnr)
+        elif view == _LOWER_VIEW_NESTE:
+            self._subseq_frame.grid(row=0, column=0, sticky="nsew")
+            self._populate_subseq_tree(self._selected_nr)
+        elif view == _LOWER_VIEW_BETALT:
+            self._payments_frame.grid(row=0, column=0, sticky="nsew")
+            self._populate_payments_tree(self._selected_nr)
+
+    def _populate_open_items_inline(self, nr: str) -> None:
+        """Render åpne poster for valgt nr direkte i øvre tree."""
+        tree = self._open_items_tree
+        tree.delete(*tree.get_children())
+
+        if not nr:
+            self._detail_lbl.configure(
+                text="Velg en post for å se åpne poster")
+            return
+        if self._df is None or self._master_df is None:
+            return
+
+        ub = 0.0
+        ib = 0.0
+        row_m = self._master_df[self._master_df["nr"].astype(str) == nr]
+        if not row_m.empty:
+            ub = float(row_m["ub"].iloc[0])
+            ib = float(row_m["ib"].iloc[0])
+
+        result_df, conf = _compute_open_items_with_confidence(
+            self._df, nr=nr, mode=self._mode, ub=ub, ib=ib)
+
+        dec = self._detail_decimals()
+        n_open = 0
+        sum_open = 0.0
+        for _, r in result_df.iterrows():
+            status = str(r.get("Status", ""))
+            dato   = str(r.get("Dato", ""))[:10]
+            bilag  = str(r.get("Bilag", ""))
+            fnr    = str(r.get("FakturaNr", "") or "")
+            tekst  = str(r.get("Tekst", ""))
+            try:
+                fakt   = float(r.get("Fakturabeløp", 0) or 0)
+                betalt = float(r.get("Betalt (i år)", 0) or 0)
+                gjen   = float(r.get("Gjenstår", 0) or 0)
+            except (ValueError, TypeError):
+                fakt = betalt = gjen = 0.0
+
+            tags: list[str] = []
+            if gjen < 0:
+                tags.append(_TAG_NEG)
+
+            tree.insert("", "end", values=(
+                status, dato, bilag, fnr, tekst,
+                formatting.fmt_amount(fakt, dec),
+                formatting.fmt_amount(betalt, dec),
+                formatting.fmt_amount(gjen, dec),
+            ), tags=tuple(tags))
+
+            if "\u00c5pen" in status or "Delvis" in status:
+                n_open += 1
+                sum_open += gjen
+
+        tree.insert("", "end", values=(
+            "", "", "", "", f"\u03a3 {n_open} åpne",
+            "", "", formatting.fmt_amount(sum_open, dec),
+        ), tags=(_TAG_HEADER,))
+
+        navn = self._navn_for_nr(nr)
+        mode_str = "Kunde" if self._mode == "kunder" else "Leverandør"
+        lbl = f"{mode_str} {nr}"
+        if navn:
+            lbl += f"  \u2014  {navn}"
+        lbl += (f"  ({len(result_df)} linjer, {n_open} åpne, "
+                f"UB {formatting.fmt_amount(ub)})")
+        if conf:
+            lbl += f"  — tillit: {conf.get('level', '')}"
+        self._detail_lbl.configure(text=lbl)
+
+    def _populate_subseq_tree(self, nr: str) -> None:
+        """Render transaksjoner for valgt nr i etterfølgende periode."""
+        tree = self._subseq_tree
+        tree.delete(*tree.get_children())
+
+        if self._subsequent_df is None or self._subsequent_df.empty:
+            self._subseq_empty_lbl.configure(
+                text="Ingen etterfølgende periode er lastet.")
+            return
+        if not nr:
+            self._subseq_empty_lbl.configure(
+                text="Velg en post til venstre for å se transaksjoner i "
+                     f"etterfølgende periode ({self._subsequent_label}).")
+            return
+
+        sub = _build_detail(self._subsequent_df, nr=nr, mode=self._mode)
+        if sub.empty:
+            self._subseq_empty_lbl.configure(
+                text=(f"Ingen transaksjoner for {nr} i etterfølgende "
+                      f"periode ({self._subsequent_label})."))
+            return
+        self._subseq_empty_lbl.configure(
+            text=f"Etterfølgende periode: {self._subsequent_label}  "
+                 f"({len(sub)} transaksjoner)")
+
+        def _v(col: str, row: Any, default: Any = "") -> Any:
+            try:
+                val = row[col]
+                if val is None or (isinstance(val, float) and str(val) == "nan"):
+                    return default
+                return val
+            except (KeyError, IndexError):
+                return default
+
+        dec = self._detail_decimals()
+        total = 0.0
+        for _, row in sub.iterrows():
+            dato  = str(_v("Dato",      row, ""))[:10]
+            bilag = str(_v("Bilag",     row, ""))
+            konto = str(_v("Konto",     row, ""))
+            knavn = str(_v("Kontonavn", row, ""))
+            tekst = str(_v("Tekst",     row, ""))
+            ref   = str(_v("Referanse", row, ""))
+            mva_kode = str(_v("MVA-kode", row, ""))
+            if mva_kode in ("nan", "None"):
+                mva_kode = ""
+            try:
+                belop = float(_v("Beløp", row, 0.0))
+            except (ValueError, TypeError):
+                belop = 0.0
+            try:
+                mva_raw = _v("MVA-beløp", row, None)
+                mva_belop = float(mva_raw) if mva_raw not in (None, "", "nan") else None
+            except (ValueError, TypeError):
+                mva_belop = None
+            total += belop
+
+            tags: list[str] = []
+            if belop < 0:
+                tags.append(_TAG_NEG)
+            if mva_kode or (mva_belop is not None and abs(mva_belop) > 0.001):
+                tags.append(_TAG_MVA_LINE)
+
+            tree.insert("", "end", values=(
+                dato, bilag, konto, knavn, tekst,
+                formatting.fmt_amount(belop, dec),
+                mva_kode,
+                formatting.fmt_amount(mva_belop, dec) if mva_belop is not None else "",
+                ref,
+            ), tags=tuple(tags))
+
+        tree.insert("", "end", values=(
+            "", "", "", "", f"\u03a3 {len(sub)} trans.",
+            formatting.fmt_amount(total, dec), "", "", "",
+        ), tags=(_TAG_HEADER,))
+
+    def _populate_payments_tree(self, nr: str) -> None:
+        """Render matchede betalinger for åpne poster."""
+        tree = self._payments_tree
+        tree.delete(*tree.get_children())
+
+        if self._subsequent_df is None or self._subsequent_df.empty:
+            self._payments_empty_lbl.configure(
+                text="Ingen etterfølgende periode er lastet — "
+                     "matching krever at neste SAF-T er lastet inn.")
+            return
+        if not nr:
+            self._payments_empty_lbl.configure(
+                text="Velg en post til venstre for å se matchede betalinger.")
+            return
+        if self._df is None or self._master_df is None:
+            return
+
+        ub = 0.0
+        ib = 0.0
+        row_m = self._master_df[self._master_df["nr"].astype(str) == nr]
+        if not row_m.empty:
+            ub = float(row_m["ub"].iloc[0])
+            ib = float(row_m["ib"].iloc[0])
+
+        open_df, _ = _compute_open_items_with_confidence(
+            self._df, nr=nr, mode=self._mode, ub=ub, ib=ib)
+        if open_df.empty:
+            self._payments_empty_lbl.configure(
+                text=f"Ingen åpne poster for {nr} — ingenting å matche.")
+            return
+
+        matched = _match_open_against_period(
+            open_df, self._subsequent_df, nr=nr, mode=self._mode)
+        if matched.empty:
+            self._payments_empty_lbl.configure(
+                text=f"Ingen matchende betalinger i {self._subsequent_label} "
+                     f"for åpne poster på {nr}.")
+            return
+
+        self._payments_empty_lbl.configure(
+            text=f"Matchet mot: {self._subsequent_label}  "
+                 f"({len(matched)} linjer)")
+
+        dec = self._detail_decimals()
+        sum_betalt = 0.0
+        sum_rest = 0.0
+        for _, r in matched.iterrows():
+            status = str(r.get("Status", ""))
+            f_bilag = str(r.get("Bilag", ""))
+            f_nr    = str(r.get("FakturaNr", "") or "")
+            p_dato  = str(r.get("Betalt dato", "") or "")
+            p_bilag = str(r.get("Betalt bilag", "") or "")
+            p_tekst = str(r.get("Tekst", ""))
+            try:
+                p_belop = float(r.get("Betalt beløp") or 0.0)
+                rest   = float(r.get("Resterende") or 0.0)
+            except (ValueError, TypeError):
+                p_belop = 0.0
+                rest = 0.0
+
+            tags: list[str] = []
+            if rest < 0:
+                tags.append(_TAG_NEG)
+
+            tree.insert("", "end", values=(
+                status, f_bilag, f_nr, p_dato, p_bilag, p_tekst,
+                formatting.fmt_amount(p_belop, dec),
+                formatting.fmt_amount(rest, dec),
+            ), tags=tuple(tags))
+            sum_betalt += p_belop
+            sum_rest += rest
+
+        tree.insert("", "end", values=(
+            "", "", "", "", "", f"\u03a3 {len(matched)} linjer",
+            formatting.fmt_amount(sum_betalt, dec),
+            formatting.fmt_amount(sum_rest, dec),
+        ), tags=(_TAG_HEADER,))
+
+    # ------------------------------------------------------------------
+    # Åpne poster (legacy popups — brukes fortsatt for Saldoliste)
     # ------------------------------------------------------------------
 
     def _navn_for_nr(self, nr: str) -> str:
@@ -1641,99 +1553,13 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         return ""
 
     def _show_open_items_popup(self) -> None:
-        """Vis popup med åpne (ubetalte) fakturaer for valgt kunde/leverandør."""
-        if not self._selected_nr or self._df is None:
-            return
+        reskontro_popups.show_open_items_popup(self)
 
-        result_df = _compute_open_items(
-            self._df, nr=self._selected_nr, mode=self._mode)
-        if result_df.empty:
-            return
-
-        dec      = self._detail_decimals()
-        mode_str = "Kunde" if self._mode == "kunder" else "Leverandør"
-        navn     = self._navn_for_nr(self._selected_nr)
-        title_str = f"{mode_str} {self._selected_nr}" + (f"  —  {navn}" if navn else "")
-
-        open_df   = result_df[result_df["Status"] == "✗ Åpen"]
-        closed_df = result_df[result_df["Status"] == "✓ Betalt"]
-        sum_open  = float(open_df["Gjenstår"].sum()) if not open_df.empty else 0.0
-
-        win = _make_popup(self, title=f"Åpne poster  —  {title_str}", geometry="940x440")
-
-        ttk.Label(
-            win,
-            text=(f"✗ {len(open_df)} åpne fakturaer   ✓ {len(closed_df)} betalt i samme år   "
-                  f"|   Sum åpne: {formatting.fmt_amount(sum_open, dec)}"),
-            font=("TkDefaultFont", 9, "bold"),
-        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 2))
-        ttk.Label(
-            win,
-            text=("Matching: faktura-bilag mot betalings-bilag via faktura-nr i Tekst.  "
-                  "Åpne poster = fakturaer uten tilsvarende betaling i samme periode."),
-            foreground="#666", font=("TkDefaultFont", 8),
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4))
-
-        # Vis alle fakturaer — åpne øverst, betalte nederst
-        cols = ("Status", "Dato", "Bilag", "Tekst", "Fakturabeløp",
-                "Betalt (i år)", "Gjenstår")
-        tree = ttk.Treeview(win, columns=cols, show="headings", selectmode="browse")
-        widths = {"Status": 80, "Dato": 90, "Bilag": 80, "Tekst": 280,
-                  "Fakturabeløp": 120, "Betalt (i år)": 120, "Gjenstår": 120}
-        right_cols = {"Fakturabeløp", "Betalt (i år)", "Gjenstår"}
-        for c in cols:
-            tree.heading(c, text=c, anchor="e" if c in right_cols else "w")
-            tree.column(c, width=widths.get(c, 90),
-                        anchor="e" if c in right_cols else "w",
-                        stretch=c in ("Tekst",))
-        tree.tag_configure("open",    foreground="#C00000", background="#FFF0F0")
-        tree.tag_configure("partial", foreground="#8B4500")
-        tree.tag_configure("closed",  foreground="#1a7a2a")
-        tree.tag_configure(_TAG_HEADER, background="#E8EFF7",
-                           font=("TkDefaultFont", 9, "bold"))
-        _setup_tree(tree, extended=True)
-
-        vsb = ttk.Scrollbar(win, orient="vertical",   command=tree.yview)
-        hsb = ttk.Scrollbar(win, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        tree.grid(row=2, column=0, sticky="nsew")
-        vsb.grid(row=2, column=1, sticky="ns")
-        hsb.grid(row=3, column=0, sticky="ew")
-        win.rowconfigure(2, weight=1)
-        win.columnconfigure(0, weight=1)
-
-        for _, row in result_df.iterrows():
-            status  = str(row["Status"])
-            betalt  = row.get("Betalt (i år)")
-            gjenst  = row.get("Gjenstår")
-            tag = "open" if status == "✗ Åpen" else ("partial" if status == "~ Delvis betalt" else "closed")
-            tree.insert("", "end", values=(
-                status,
-                str(row.get("Dato", ""))[:10],
-                str(row.get("Bilag", "")),
-                str(row.get("Tekst", "")),
-                formatting.fmt_amount(row.get("Fakturabeløp"), dec),
-                formatting.fmt_amount(betalt, dec) if betalt is not None else "",
-                formatting.fmt_amount(gjenst, dec) if gjenst is not None else "",
-            ), tags=(tag,))
-
-        tree.insert("", "end", values=(
-            "", "", "", f"\u03a3 {len(open_df)} åpne  /  {len(closed_df)} betalt",
-            formatting.fmt_amount(result_df["Fakturabeløp"].sum(), dec),
-            "", formatting.fmt_amount(sum_open, dec),
-        ), tags=(_TAG_HEADER,))
-
-        btns = ttk.Frame(win)
-        btns.grid(row=4, column=0, columnspan=2, sticky="ew", padx=4, pady=(4, 6))
-        if self._subsequent_df is not None:
-            ttk.Button(
-                btns, text=f"Matcher mot {self._subsequent_label[:30]}\u2026",
-                command=self._show_subsequent_match_popup,
-            ).pack(side="left")
-        ttk.Button(btns, text="Lukk", command=win.destroy).pack(side="right")
+    def _show_saldoliste_popup(self) -> None:
+        reskontro_popups.show_saldoliste_popup(self)
 
     def _open_subsequent_period(self) -> None:
-        """Last inn SAF-T for etterfølgende periode og match mot åpne poster."""
+        """Last inn SAF-T for etterfølgende periode."""
         try:
             from tkinter import filedialog
         except Exception:
@@ -1750,7 +1576,10 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
         if not path:
             return
 
-        self._subseq_btn.configure(state="disabled", text="Laster\u2026")
+        try:
+            self._load_subseq_btn.configure(state="disabled", text="Laster\u2026")
+        except Exception:
+            pass
 
         def _load() -> None:
             try:
@@ -1761,13 +1590,15 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
                 self.after(0, lambda: self._on_subseq_loaded(df2, label))
             except Exception as exc:
                 log.exception("Etterfølgende SAF-T lasting feilet: %s", exc)
-                self.after(0, lambda e=exc: (
-                    self._subseq_btn.configure(
-                        state="normal",
-                        text="Etterfølgende periode\u2026"),
-                    self._status_lbl.configure(
-                        text=f"Feil ved lasting: {e}"),
-                ))
+                def _fail(e: Exception = exc) -> None:
+                    try:
+                        self._load_subseq_btn.configure(
+                            state="normal",
+                            text="Last inn etterfølgende periode\u2026")
+                    except Exception:
+                        pass
+                    self._status_lbl.configure(text=f"Feil ved lasting: {e}")
+                self.after(0, _fail)
 
         import threading as _thr
         _thr.Thread(target=_load, daemon=True).start()
@@ -1775,184 +1606,37 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
     def _on_subseq_loaded(self, df2: pd.DataFrame, label: str) -> None:
         self._subsequent_df    = df2
         self._subsequent_label = label
-        self._subseq_btn.configure(
-            state="normal",
-            text=f"Matcher: {label[:20]}\u2026")
+        try:
+            self._load_subseq_btn.configure(
+                state="normal",
+                text="Last inn etterfølgende periode\u2026")
+        except Exception:
+            pass
         self._status_lbl.configure(
             text=f"Etterfølgende periode lastet: {label}")
-        # Hvis en post allerede er valgt, åpne matching direkte
-        if self._selected_nr:
-            self._show_subsequent_match_popup()
+        # Refresh nedre panel — viser matching/transaksjoner om valgt visning
+        # trenger det. Ingen automatisk popup lenger.
+        self._refresh_lower_panel()
 
     def _show_subsequent_match_popup(self) -> None:
-        """Vis popup med matching av åpne poster mot etterfølgende periode."""
-        if not self._selected_nr or self._df is None or self._subsequent_df is None:
-            return
-
-        open_invoices = _compute_open_items(
-            self._df, nr=self._selected_nr, mode=self._mode)
-        if open_invoices.empty:
-            return
-
-        result_df = _match_open_against_period(
-            open_invoices, self._subsequent_df,
-            nr=self._selected_nr, mode=self._mode)
-
-        dec  = self._detail_decimals()
-        navn = self._navn_for_nr(self._selected_nr)
-
-        win = _make_popup(
-            self,
-            title=(f"Åpne poster vs {self._subsequent_label}  —  "
-                   f"{'Kunde' if self._mode == 'kunder' else 'Leverandør'} "
-                   f"{self._selected_nr}{' — ' + navn if navn else ''}"),
-            geometry="1020x440",
-        )
-
-        if not result_df.empty:
-            n_paid    = (result_df["Status"] == "✓ Betalt").sum()
-            n_partial = (result_df["Status"] == "~ Delvis betalt").sum()
-            n_open    = (result_df["Status"] == "✗ Fortsatt åpen").sum()
-            sum_rest  = float(result_df["Resterende"].sum())
-        else:
-            n_paid = n_partial = n_open = 0
-            sum_rest = 0.0
-
-        n_all_open = len(open_invoices[open_invoices["Status"] == "✗ Åpen"])
-        ttk.Label(
-            win,
-            text=(f"År N: {n_all_open} åpne fakturaer   |   "
-                  f"Matchet mot: {self._subsequent_label}   |   "
-                  f"✓ {n_paid} betalt   ~ {n_partial} delvis   ✗ {n_open} fortsatt åpen   |   "
-                  f"Resterende: {formatting.fmt_amount(sum_rest, dec)}"),
-            font=("TkDefaultFont", 9, "bold"),
-        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 4))
-
-        cols = ("Status", "Dato", "Bilag", "Tekst",
-                "Gjenstår (år N)", "Betalt dato", "Betalt beløp", "Resterende")
-        tree = ttk.Treeview(win, columns=cols, show="headings", selectmode="browse")
-        widths = {"Status": 130, "Dato": 90, "Bilag": 80, "Tekst": 240,
-                  "Gjenstår (år N)": 120, "Betalt dato": 90,
-                  "Betalt beløp": 120, "Resterende": 120}
-        right_cols = {"Gjenstår (år N)", "Betalt beløp", "Resterende"}
-        for c in cols:
-            tree.heading(c, text=c, anchor="e" if c in right_cols else "w")
-            tree.column(c, width=widths.get(c, 90),
-                        anchor="e" if c in right_cols else "w",
-                        stretch=c in ("Tekst",))
-        tree.tag_configure("paid",    foreground="#1a7a2a")
-        tree.tag_configure("partial", foreground="#8B4500")
-        tree.tag_configure("open",    foreground="#C00000", background="#FFF0F0")
-        tree.tag_configure(_TAG_HEADER, background="#E8EFF7",
-                           font=("TkDefaultFont", 9, "bold"))
-        _setup_tree(tree, extended=True)
-
-        vsb = ttk.Scrollbar(win, orient="vertical",   command=tree.yview)
-        hsb = ttk.Scrollbar(win, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        tree.grid(row=1, column=0, sticky="nsew")
-        vsb.grid(row=1, column=1, sticky="ns")
-        hsb.grid(row=2, column=0, sticky="ew")
-        win.rowconfigure(1, weight=1)
-        win.columnconfigure(0, weight=1)
-
-        status_tag_map = {
-            "✓ Betalt":         "paid",
-            "~ Delvis betalt":  "partial",
-            "✗ Fortsatt åpen":  "open",
-        }
-
-        for _, row in result_df.iterrows():
-            status      = str(row.get("Status", ""))
-            dato        = str(row.get("Dato", ""))[:10]
-            bilag       = str(row.get("Bilag", ""))
-            tekst       = str(row.get("Tekst", ""))
-            gjenstar_n  = row.get("Gjenstår (år N)")
-            bet_dato    = str(row.get("Betalt dato", ""))[:10]
-            bet_belop   = row.get("Betalt beløp")
-            resterende  = row.get("Resterende")
-
-            tree.insert("", "end", values=(
-                status, dato, bilag, tekst,
-                formatting.fmt_amount(gjenstar_n, dec) if gjenstar_n is not None else "",
-                bet_dato,
-                formatting.fmt_amount(bet_belop, dec) if bet_belop is not None else "",
-                formatting.fmt_amount(resterende, dec) if resterende is not None else "",
-            ), tags=(status_tag_map.get(status, ""),))
-
-        btns = ttk.Frame(win)
-        btns.grid(row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=(4, 6))
-        ttk.Button(btns, text="Lukk", command=win.destroy).pack(side="right")
-
-    def _show_all_transactions(self) -> None:
-        """Vis alle transaksjoner for gjeldende modus i detaljpanelet."""
-        if self._df is None:
-            return
-
-        nr_col   = "Kundenr"   if self._mode == "kunder" else "Leverandørnr"
-        if nr_col not in self._df.columns:
-            return
-
-        sub = self._df[self._df[nr_col].notna()].copy()
-        if not sub.empty and "Dato" in sub.columns:
-            sub = sub.sort_values(["Dato", nr_col])
-
-        tree = self._detail_tree
-        tree.delete(*tree.get_children())
-
-        cols = list(sub.columns)
-
-        def _v(col: str, row: Any, default: Any = "") -> Any:
-            return row[col] if col in cols else default
-
-        total = debet = kredit = 0.0
-        dec = self._detail_decimals()
-        for _, row in sub.iterrows():
-            dato     = str(_v("Dato",      row, ""))[:10]
-            bilag    = str(_v("Bilag",     row, ""))
-            konto    = str(_v("Konto",     row, ""))
-            knavn    = str(_v("Kontonavn", row, ""))
-            tekst    = str(_v("Tekst",     row, ""))
-            ref      = str(_v("Referanse", row, ""))
-            valuta   = str(_v("Valuta",    row, ""))
-            mva_kode = str(_v("MVA-kode",  row, ""))
-            if mva_kode in ("nan", "None"):
-                mva_kode = ""
-            try:
-                belop = float(_v("Beløp", row, 0.0))
-            except (ValueError, TypeError):
-                belop = 0.0
-            total += belop
-            if belop >= 0:
-                debet += belop
-            else:
-                kredit += belop
-            tags_row: list[str] = []
-            if belop < 0:
-                tags_row.append(_TAG_NEG)
-            if mva_kode:
-                tags_row.append(_TAG_MVA_LINE)
-            tree.insert("", "end", values=(
-                dato, bilag, konto, knavn, tekst,
-                formatting.fmt_amount(belop, dec), mva_kode, "", ref, valuta,
-            ), tags=tuple(tags_row))
-
-        tree.insert("", "end", values=(
-            "", "", "", "",
-            (f"\u03a3 {len(sub)} trans.  "
-             f"D: {formatting.fmt_amount(debet, dec)}  "
-             f"K: {formatting.fmt_amount(kredit, dec)}"),
-            formatting.fmt_amount(total, dec),
-            "", "", "", "",
-        ), tags=(_TAG_HEADER,))
-
-        mode_str = "kunder" if self._mode == "kunder" else "leverandører"
-        self._detail_lbl.configure(
-            text=f"Alle {mode_str}  ({len(sub)} transaksjoner, netto {formatting.fmt_amount(total)})")
+        reskontro_popups.show_subsequent_match_popup(self)
 
     # ------------------------------------------------------------------
     # BRREG-sjekk
     # ------------------------------------------------------------------
+
+    def _auto_brreg_all(self) -> None:
+        """Auto-start BRREG-sjekk for alle orgnr som ikke allerede er hentet."""
+        if self._master_df is None or self._master_df.empty:
+            return
+        # Sjekk om det finnes uhentede orgnr
+        missing = [
+            orgnr for orgnr in self._orgnr_map.values()
+            if orgnr and len(orgnr) == 9 and orgnr.isdigit()
+            and orgnr not in self._brreg_data
+        ]
+        if missing:
+            self._start_brreg_sjekk()
 
     def _start_brreg_sjekk(self) -> None:
         """Start bakgrunnstråd som henter BRREG-data for alle synlige poster."""
@@ -2021,8 +1705,9 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
             parts.append(f"\u2717 {n_no_mva} ikke MVA-reg.")
         self._status_lbl.configure(text="  \u2022  ".join(parts))
 
-        # Oppdater BRREG-panelet for valgt rad
-        if self._selected_nr:
+        # Oppdater BRREG-panelet for valgt rad hvis den visningen er aktiv
+        if (self._selected_nr
+                and self._lower_view_var.get() == _LOWER_VIEW_BRREG):
             orgnr = self._orgnr_map.get(self._selected_nr, "")
             if orgnr:
                 self._update_brreg_panel(orgnr)
@@ -2061,10 +1746,25 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
                     _TAG_MVA_WARN:   "FFF8E1",
                 },
             )
+            # Eksporter treet som faktisk er synlig i øvre høyrepanel —
+            # brukeren forventer at det de ser er det de får.
+            upper_view = ""
+            try:
+                upper_view = self._upper_view_var.get()
+            except Exception:
+                upper_view = _UPPER_VIEW_ALLE
+            if upper_view == _UPPER_VIEW_APNE:
+                upper_tree  = self._open_items_tree
+                upper_title = "Åpne poster"
+                upper_head  = f"Åpne poster: {self._selected_nr}"
+            else:
+                upper_tree  = self._detail_tree
+                upper_title = "Transaksjoner"
+                upper_head  = f"Transaksjoner: {self._selected_nr}"
             detail_sheet = _xls.treeview_to_sheet(
-                self._detail_tree,
-                title="Transaksjoner",
-                heading=f"Transaksjoner: {self._selected_nr}",
+                upper_tree,
+                title=upper_title,
+                heading=upper_head,
                 bold_tags=(_TAG_HEADER,),
                 bg_tags={_TAG_NEG: "FFEBEE"},
             )
@@ -2073,3 +1773,73 @@ class ReskontroPage(ttk.Frame):  # type: ignore[misc]
                 title="Reskontro", client=client, year=year)
         except Exception as exc:
             log.exception("Reskontro Excel-eksport feilet: %s", exc)
+
+    def _export_pdf_report(self) -> None:
+        from tkinter import filedialog, messagebox
+        if not _has_reskontro_data(self._df):
+            messagebox.showinfo(
+                "Reskontrorapport",
+                "Ingen reskontrodata er lastet. Last inn en SAF-T-fil først.",
+                parent=self,
+            )
+            return
+        try:
+            import session as _session
+            from reskontro_report_engine import compute_reskontro_report
+            from reskontro_report_html import save_report_pdf
+
+            client = getattr(_session, "client", None) or ""
+            year = str(getattr(_session, "year", "") or "")
+
+            sb_df = None
+            try:
+                from page_analyse_rl import load_sb_for_session
+                sb_df = load_sb_for_session()
+            except Exception:
+                sb_df = None
+
+            reference_date = ""
+            if year:
+                reference_date = f"{year}-12-31"
+
+            report = compute_reskontro_report(
+                self._df,
+                mode=self._mode,
+                client=client,
+                year=year,
+                reference_date=reference_date,
+                sb_df=sb_df,
+                top_n=10,
+            )
+
+            mode_label = "kunder" if self._mode == "kunder" else "leverandorer"
+            default_name = f"reskontrorapport_{mode_label}_{client}_{year}.pdf".strip("_")
+            path = filedialog.asksaveasfilename(
+                parent=self,
+                title="Lagre reskontrorapport som PDF",
+                defaultextension=".pdf",
+                initialfile=default_name,
+                filetypes=[("PDF", "*.pdf")],
+            )
+            if not path:
+                return
+
+            saved = save_report_pdf(path, report, top_n=10)
+            try:
+                import os
+                os.startfile(saved)
+            except Exception:
+                pass
+        except ImportError as exc:
+            messagebox.showerror(
+                "Reskontrorapport",
+                f"Playwright mangler: {exc}",
+                parent=self,
+            )
+        except Exception as exc:
+            log.exception("Reskontrorapport PDF-eksport feilet: %s", exc)
+            messagebox.showerror(
+                "Reskontrorapport",
+                f"Kunne ikke generere PDF:\n{exc}",
+                parent=self,
+            )

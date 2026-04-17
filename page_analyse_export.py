@@ -31,7 +31,7 @@ def prepare_transactions_export_sheets(*, page: Any) -> Dict[str, pd.DataFrame]:
     """
     df = getattr(page, "_df_filtered", None)
     if df is None or getattr(df, "empty", True):
-        return {"Transaksjoner": pd.DataFrame()}
+        return {"Hovedbok": pd.DataFrame()}
 
     out = df.copy()
 
@@ -114,7 +114,7 @@ def prepare_transactions_export_sheets(*, page: Any) -> Dict[str, pd.DataFrame]:
     if max_rows > 0 and len(out) > max_rows:
         out = out.head(max_rows).copy()
 
-    return {"Transaksjoner": out}
+    return {"Hovedbok": out}
 
 
 def prepare_pivot_export_sheets(*, page: Any) -> Dict[str, pd.DataFrame]:
@@ -162,7 +162,12 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
     df_filtered = getattr(page, "_df_filtered", None)
     intervals = getattr(page, "_rl_intervals", None)
     regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
-    sb_df = getattr(page, "_rl_sb_df", None)
+
+    # Bruk samme SB-visning som UI-en (respekterer "Inkluder ÅO"-toggle).
+    try:
+        _, _, sb_df = page_analyse_rl._resolve_analysis_sb_views(page)
+    except Exception:
+        sb_df = getattr(page, "_rl_sb_df", None)
 
     if not isinstance(df_filtered, pd.DataFrame) or df_filtered.empty or intervals is None or regnskapslinjer is None:
         rl_df = pd.DataFrame()
@@ -207,10 +212,15 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
         else:
             tx_df = analyse_viewdata.build_transactions_view_df(df_filtered, tx_cols=tx_cols)
 
+    reskontro_df = (df_filtered
+                    if isinstance(df_filtered, pd.DataFrame) and not df_filtered.empty
+                    else pd.DataFrame())
+
     return {
         "rl_df": rl_df if isinstance(rl_df, pd.DataFrame) else pd.DataFrame(),
         "regnskapslinjer": regnskapslinjer,
         "transactions_df": tx_df if isinstance(tx_df, pd.DataFrame) else pd.DataFrame(),
+        "reskontro_df": reskontro_df,
         "client": getattr(session, "client", None) if session is not None else None,
         "year": getattr(session, "year", None) if session is not None else None,
     }

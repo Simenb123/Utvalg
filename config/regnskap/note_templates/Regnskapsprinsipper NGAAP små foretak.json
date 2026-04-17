@@ -1,0 +1,78 @@
+{
+  "name": "Regnskapsprinsipper NGAAP små foretak",
+  "notes": {
+    "lonnsnote": {
+      "ansatte": "",
+      "aarsverk": "",
+      "dl_lonn": "",
+      "dl_pensjon": "",
+      "dl_andre": "",
+      "styre_honorar": "",
+      "rev_lovpaalagt": "",
+      "rev_attestasjon": "",
+      "rev_skatt": "",
+      "rev_andre": ""
+    },
+    "egenkapitalnote": {
+      "utbytte": "",
+      "andre_ek_end": "",
+      "antall_aksjer": "",
+      "paalydende": "",
+      "aksjekapital": "",
+      "overkursfond": ""
+    },
+    "aksjonaernote": {
+      "aks1_navn": "",
+      "aks1_aksjer": "",
+      "aks1_pct": "",
+      "aks2_navn": "",
+      "aks2_aksjer": "",
+      "aks2_pct": "",
+      "aks3_navn": "",
+      "aks3_aksjer": "",
+      "aks3_pct": "",
+      "aks4_navn": "",
+      "aks4_aksjer": "",
+      "aks4_pct": ""
+    },
+    "skattenote": {
+      "perm_forskj": "",
+      "end_midf": "",
+      "grunnlag_skatt": "",
+      "betalbar_skatt": "",
+      "end_utsatt_skatt": "",
+      "midf_dm": "",
+      "midf_gtk": "",
+      "midf_underskudd": "",
+      "midf_andre": "",
+      "midf_sum": "",
+      "utsatt_forplikt": "",
+      "utsatt_fordel": ""
+    },
+    "driftsmidlernote": {
+      "dm_akk_01": "",
+      "dm_tilgang": "",
+      "dm_avgang": "",
+      "dm_akk_31": "",
+      "dm_avskr_01": "",
+      "dm_avskr_aar": "",
+      "dm_avskr_31": "",
+      "dm_plan": "Lineær",
+      "dm_levetid": ""
+    },
+    "bundnemidlernote": {
+      "bundne_skatt": "",
+      "bundne_andre": ""
+    },
+    "gjeldnote": {
+      "gjeld_pant": "",
+      "gjeld_kasse": "",
+      "gjeld_annen": "",
+      "pant_verdi": "",
+      "pant_garanti": ""
+    },
+    "regnskapsprinsipper": {
+      "tekst": "Regnskapsprinsipper\nÅrsregnskapet er satt opp i samsvar med regnskapslovens bestemmelser og god regnskapsskikk for små foretak.\n\nINNTEKTSFØRING\nInntektsføring ved salg av varer skjer på leveringstidspunktet. Tjenester inntektsføres etter hvert som de\nleveres.\n\nKLASSIFISERING OG VURDERING AV KORTSIKTIGE BALANSEPOSTER\nOmløpsmidler og kortsiktig gjeld omfatter normalt poster som forfaller til betaling innen ett år etter\nbalansedagen, samt poster som knytter seg til varekretsløpet. Omløpsmidler vurderes til laveste verdi av\nanskaffelseskost og virkelig verdi.\n\nFORDRINGER\nKundefordringer og andre fordringer oppføres til pålydende etter fradrag for avsetning til forventet tap.\nAvsetning til tap gjøres på grunnlag av en individuell vurdering av de enkelte fordringene.\n\nKLASSIFISERING OG VURDERING AV ANLEGGSMIDLER\nAnleggsmidler omfatter eiendeler bestemt til varig eie og bruk. Anleggsmidler er vurdert til\nanskaffelseskost. Varige driftsmidler balanseføres og avskrives over driftsmidlets økonomiske levetid. .\nVarige driftsmidler nedskrives til gjenvinnbart beløp ved verdifall som forventes ikke å være forbigående.\nGjenvinnbart beløp er det høyeste av netto salgsverdi og verdi i bruk. Nedskrivingen reverseres når\ngrunnlaget for nedskrivingen ikke lenger er til stede.\n\nVARIGE DRIFTSMIDLER\nVarige driftsmidler balanseføres og avskrives lineært over driftsmidlets forventede levetid. Direkte vedlikehold av driftsmidler kostnadsføres løpende.\n\nSKATT\nSkattekostnaden i resultatregnskapet omfatter periodens betalbare skatt og endring i utsatt skatt. Utsatt skatt er beregnet med 22 % på grunnlag av de midlertidige forskjeller som eksisterer mellom regnskapsmessige og skattemessige verdier."
+    }
+  }
+}

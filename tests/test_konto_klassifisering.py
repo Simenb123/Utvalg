@@ -1,8 +1,66 @@
-"""Tests for konto_klassifisering.py"""
+"""Tests for konto_klassifisering.py."""
 from __future__ import annotations
 
-import pytest
 import konto_klassifisering as kk
+
+
+class _FakeApi:
+    def __init__(self, *, loaded: dict[str, str] | None = None) -> None:
+        self.loaded = dict(loaded or {})
+        self.load_calls: list[dict[str, object]] = []
+        self.save_calls: list[dict[str, object]] = []
+        self.control_statement_calls: list[dict[str, object]] = []
+
+    def load_mapping(self, *, client: str, getter=None, **_kwargs):
+        self.load_calls.append({"client": client, "getter": getter})
+        return dict(self.loaded)
+
+    def save_mapping(
+        self,
+        *,
+        client: str,
+        mapping: dict[str, str],
+        setter=None,
+        getter=None,
+        **_kwargs,
+    ):
+        cleaned = {
+            str(account_no).strip(): str(group_name).strip()
+            for account_no, group_name in mapping.items()
+            if str(account_no).strip() and str(group_name).strip()
+        }
+        self.save_calls.append(
+            {
+                "client": client,
+                "mapping": dict(cleaned),
+                "setter": setter,
+                "getter": getter,
+            }
+        )
+        if setter is not None:
+            setter(kk._pref_key(client), dict(cleaned))
+        return None
+
+    def build_control_statement_rows(
+        self,
+        *,
+        client: str,
+        gl_df,
+        year=None,
+        getter=None,
+        include_unclassified: bool = False,
+        **_kwargs,
+    ):
+        self.control_statement_calls.append(
+            {
+                "client": client,
+                "gl_df": gl_df,
+                "year": year,
+                "getter": getter,
+                "include_unclassified": include_unclassified,
+            }
+        )
+        return ["ok"]
 
 
 # ---------------------------------------------------------------------------
@@ -51,39 +109,54 @@ def test_pref_key_different_clients_differ() -> None:
 
 
 # ---------------------------------------------------------------------------
-# load / save (monkeypatched preferences)
+# load / save via profile-backed API
 # ---------------------------------------------------------------------------
 
 def test_load_returns_empty_if_no_data(monkeypatch) -> None:
-    monkeypatch.setattr("preferences.get", lambda key: None)
+    api = _FakeApi(loaded={})
+    monkeypatch.setattr(kk, "_api", lambda: api)
     result = kk.load("TestKlient")
     assert result == {}
+    assert api.load_calls[0]["client"] == "TestKlient"
 
 
 def test_load_returns_empty_if_not_dict(monkeypatch) -> None:
-    monkeypatch.setattr("preferences.get", lambda key: "not a dict")
+    api = _FakeApi(loaded={})
+    monkeypatch.setattr(kk, "_api", lambda: api)
     result = kk.load("TestKlient")
     assert result == {}
 
 
-def test_load_returns_filtered_mapping(monkeypatch) -> None:
-    raw = {"1000": "Inngående MVA", "2000": "", "3000": "Skyldig MVA"}
-    monkeypatch.setattr("preferences.get", lambda key: raw)
+def test_load_returns_profile_backed_mapping(monkeypatch) -> None:
+    api = _FakeApi(loaded={"1000": "Inngående MVA", "3000": "Skyldig MVA"})
+    monkeypatch.setattr(kk, "_api", lambda: api)
     result = kk.load("TestKlient")
     assert result == {"1000": "Inngående MVA", "3000": "Skyldig MVA"}
 
 
+def test_load_uses_profile_api_not_raw_preferences(monkeypatch) -> None:
+    api = _FakeApi(loaded={"1000": "Gruppe A"})
+    monkeypatch.setattr(kk, "_api", lambda: api)
+    monkeypatch.setattr("preferences.get", lambda key: {"9999": "Stale legacy"})
+    result = kk.load("KlientY")
+    assert result == {"1000": "Gruppe A"}
+
+
 def test_save_calls_preferences_set(monkeypatch) -> None:
+    api = _FakeApi()
+    monkeypatch.setattr(kk, "_api", lambda: api)
     saved: dict = {}
     monkeypatch.setattr("preferences.set", lambda key, value: saved.update({key: value}))
     kk.save("TestKlient", {"1000": "Inngående MVA", "2000": ""})
-    # Blank values should be filtered out
     stored = list(saved.values())[0]
     assert "1000" in stored
     assert "2000" not in stored
+    assert api.save_calls[0]["mapping"] == {"1000": "Inngående MVA"}
 
 
 def test_save_filters_blank_values(monkeypatch) -> None:
+    api = _FakeApi()
+    monkeypatch.setattr(kk, "_api", lambda: api)
     saved: dict = {}
     monkeypatch.setattr("preferences.set", lambda key, value: saved.update({key: value}))
     kk.save("KlientX", {"1000": "Gruppe A", "2000": "", "3000": "Gruppe B"})
@@ -174,3 +247,29 @@ def test_build_group_lookup_excludes_unmapped() -> None:
 def test_build_group_lookup_empty_kontoer() -> None:
     mapping = {"1000": "MVA"}
     assert kk.build_group_lookup(mapping, []) == {}
+
+
+# ---------------------------------------------------------------------------
+# control statement bridge
+# ---------------------------------------------------------------------------
+
+def test_build_control_statement_rows_uses_profile_api(monkeypatch) -> None:
+    api = _FakeApi()
+    monkeypatch.setattr(kk, "_api", lambda: api)
+    gl_df = object()
+    result = kk.build_control_statement_rows(
+        "KlientZ",
+        gl_df,
+        year=2025,
+        include_unclassified=True,
+    )
+    assert result == ["ok"]
+    assert api.control_statement_calls == [
+        {
+            "client": "KlientZ",
+            "gl_df": gl_df,
+            "year": 2025,
+            "getter": kk.preferences.get,
+            "include_unclassified": True,
+        }
+    ]

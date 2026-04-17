@@ -12,8 +12,18 @@ class _FakeTree:
         return ("item-1",)
 
     def item(self, _item_id, option):
-        assert option == "values"
-        return ("1001.0", "15.02.2025", "Eksempel", "1250,00")
+        if option == "values":
+            return ("1001.0", "15.02.2025", "Eksempel", "1250,00")
+        if option == "tags":
+            return ()
+        return ()
+
+    def cget(self, _option):
+        # Return a tuple without "Dok." so _refresh_tree_dok_status exits early.
+        return ("Bilag", "Dato", "Tekst", "SumBeløp")
+
+    def get_children(self):
+        return ()
 
 
 def test_open_document_control_uses_selected_bilag_and_full_bilag_rows(monkeypatch) -> None:

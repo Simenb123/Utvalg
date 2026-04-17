@@ -229,14 +229,28 @@ def save_document_review(
     }
     if field_hit_indices:
         payload["field_hit_indices"] = {k: int(v) for k, v in field_hit_indices.items() if v is not None}
+
+    # Save field_evidence (page+bbox coordinates) from dialog or analysis
+    if field_evidence:
+        evidence_payload: dict[str, Any] = {}
+        for k, v in field_evidence.items():
+            if hasattr(v, "to_dict"):
+                evidence_payload[k] = v.to_dict()
+            elif isinstance(v, dict):
+                evidence_payload[k] = v
+        if evidence_payload:
+            payload["field_evidence"] = evidence_payload
+
     if analysis is not None:
         payload["analysis_metadata"] = dict(analysis.metadata or {})
         payload["analysis_source"] = analysis.source
         payload["profile_status"] = analysis.profile_status
-        payload["field_evidence"] = {
-            field_name: evidence.to_dict()
-            for field_name, evidence in (analysis.field_evidence or {}).items()
-        }
+        # Merge analysis evidence (don't overwrite dialog-provided evidence)
+        if not payload.get("field_evidence"):
+            payload["field_evidence"] = {
+                field_name: evidence.to_dict()
+                for field_name, evidence in (analysis.field_evidence or {}).items()
+            }
         payload["confidence"] = analysis.confidence
 
     # ── Coordinate-based profile learning ────────────────────────────────

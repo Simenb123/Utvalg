@@ -79,7 +79,23 @@ def build_ui(studio: Any) -> None:
     ent_tol.grid(row=2, column=1, sticky="ew", padx=6, pady=(6, 2))
     ent_tol.bind("<FocusOut>", lambda _e: studio._format_tolerable_error_entry())
 
-    ttk.Label(lf_sel, text="Metode").grid(row=3, column=0, sticky="w", padx=6, pady=(6, 2))
+    ttk.Label(lf_sel, text="Aktiv terskel").grid(row=3, column=0, sticky="w", padx=6, pady=(2, 2))
+    ttk.Label(lf_sel, textvariable=studio.var_materiality_choice, anchor="w").grid(
+        row=3, column=1, sticky="ew", padx=6, pady=(2, 2)
+    )
+
+    lbl_mat_info = ttk.Label(lf_sel, textvariable=studio.var_materiality_info, foreground="#555", wraplength=260)
+    lbl_mat_info.grid(row=4, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4))
+
+    lbl_mat_override = ttk.Label(
+        lf_sel,
+        textvariable=studio.var_materiality_override_info,
+        foreground="#555",
+        wraplength=260,
+    )
+    lbl_mat_override.grid(row=5, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 4))
+
+    ttk.Label(lf_sel, text="Metode").grid(row=6, column=0, sticky="w", padx=6, pady=(6, 2))
     cmb_method = ttk.Combobox(
         lf_sel,
         textvariable=studio.var_method,
@@ -87,23 +103,62 @@ def build_ui(studio: Any) -> None:
         state="readonly",
         width=12,
     )
-    cmb_method.grid(row=3, column=1, sticky="ew", padx=6, pady=(6, 2))
+    cmb_method.grid(row=6, column=1, sticky="ew", padx=6, pady=(6, 2))
 
-    ttk.Label(lf_sel, text="Antall grupper (k)").grid(row=4, column=0, sticky="w", padx=6, pady=(6, 2))
+    ttk.Label(lf_sel, text="Antall grupper (k)").grid(row=7, column=0, sticky="w", padx=6, pady=(6, 2))
     spn_k = ttk.Spinbox(lf_sel, from_=1, to=12, textvariable=studio.var_k, width=6)
-    spn_k.grid(row=4, column=1, sticky="w", padx=6, pady=(6, 2))
+    spn_k.grid(row=7, column=1, sticky="w", padx=6, pady=(6, 2))
 
-    ttk.Label(lf_sel, text="Utvalgsstørrelse").grid(row=5, column=0, sticky="w", padx=6, pady=(6, 2))
+    ttk.Label(lf_sel, text="Utvalgsstørrelse").grid(row=8, column=0, sticky="w", padx=6, pady=(6, 2))
     spn_n = ttk.Spinbox(lf_sel, from_=0, to=99999, textvariable=studio.var_sample_n, width=8)
-    spn_n.grid(row=5, column=1, sticky="w", padx=6, pady=(6, 2))
+    spn_n.grid(row=8, column=1, sticky="w", padx=6, pady=(6, 2))
     spn_n.bind("<KeyRelease>", lambda _e: studio._sample_size_touched())
 
-    lbl_rec = ttk.Label(lf_sel, textvariable=studio.var_recommendation, wraplength=260)
-    lbl_rec.grid(row=6, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 6))
+    # --- Beregning section (structured calculation summary)
+    lf_calc = ttk.LabelFrame(left, text="Beregning")
+    lf_calc.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+    lf_calc.columnconfigure(1, weight=1)
+
+    ttk.Label(lf_calc, text="Tolererbar feil:").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 1))
+    ttk.Label(lf_calc, textvariable=studio.var_calc_tolerable, anchor="e").grid(
+        row=0, column=1, sticky="ew", padx=6, pady=(6, 1)
+    )
+
+    ttk.Label(lf_calc, text="Konfidensfaktor:").grid(row=1, column=0, sticky="w", padx=6, pady=1)
+    ttk.Label(lf_calc, textvariable=studio.var_calc_confidence, anchor="e").grid(
+        row=1, column=1, sticky="ew", padx=6, pady=1
+    )
+
+    ttk.Label(lf_calc, text="Forslag utvalg:").grid(row=2, column=0, sticky="w", padx=6, pady=1)
+    ttk.Label(lf_calc, textvariable=studio.var_calc_suggestion, anchor="e").grid(
+        row=2, column=1, sticky="ew", padx=6, pady=1
+    )
+
+    ttk.Separator(lf_calc, orient="horizontal").grid(
+        row=3, column=0, columnspan=2, sticky="ew", padx=6, pady=4
+    )
+
+    ttk.Label(lf_calc, text="Populasjon:").grid(row=4, column=0, sticky="w", padx=6, pady=1)
+    ttk.Label(lf_calc, textvariable=studio.var_pop_line, anchor="e").grid(
+        row=4, column=1, sticky="ew", padx=6, pady=1
+    )
+
+    ttk.Label(lf_calc, text="Spesifikk:").grid(row=5, column=0, sticky="w", padx=6, pady=1)
+    ttk.Label(lf_calc, textvariable=studio.var_spec_line, anchor="e").grid(
+        row=5, column=1, sticky="ew", padx=6, pady=1
+    )
+
+    ttk.Label(lf_calc, text="Restpopulasjon:").grid(row=6, column=0, sticky="w", padx=6, pady=1)
+    ttk.Label(lf_calc, textvariable=studio.var_rest_line, anchor="e").grid(
+        row=6, column=1, sticky="ew", padx=6, pady=1
+    )
+
+    lbl_draw_info = ttk.Label(lf_calc, textvariable=studio.var_drawing_frame_info, foreground="#555")
+    lbl_draw_info.grid(row=7, column=0, columnspan=2, sticky="w", padx=6, pady=(4, 6))
 
     # Buttons
     frm_btn = ttk.Frame(left)
-    frm_btn.grid(row=2, column=0, sticky="ew")
+    frm_btn.grid(row=3, column=0, sticky="ew")
     frm_btn.columnconfigure(0, weight=1)
     frm_btn.columnconfigure(1, weight=1)
 
@@ -140,8 +195,18 @@ def build_ui(studio: Any) -> None:
     ttk.Button(frm_top, text="Dokumentkontroll", command=studio._open_document_control).grid(
         row=0, column=3, padx=(6, 0)
     )
+    ttk.Button(
+        frm_top,
+        text="Bilagseksport...",
+        command=studio._open_voucher_setup,
+    ).grid(row=0, column=4, padx=(6, 0))
+    ttk.Button(
+        frm_top,
+        text="Massekjøring...",
+        command=studio._open_batch_document_control,
+    ).grid(row=0, column=5, padx=(6, 0))
 
-    columns = ("Bilag", "Dato", "Tekst", "SumBeløp", "Gruppe", "Intervall")
+    columns = ("Bilag", "Dato", "Tekst", "SumBeløp", "Gruppe", "Intervall", "Dok.")
     studio.tree = ttk.Treeview(tab_utvalg, columns=columns, show="headings", height=18)
     for c in columns:
         studio.tree.heading(c, text=c)
@@ -149,6 +214,13 @@ def build_ui(studio: Any) -> None:
     studio.tree.column("Bilag", width=80, anchor="e")
     studio.tree.column("SumBeløp", width=120, anchor="e")
     studio.tree.column("Dato", width=100, anchor="w")
+    studio.tree.column("Dok.", width=64, anchor="center")
+
+    # Colour tags for document control status
+    studio.tree.tag_configure("dok_ok", foreground="#1a7a1a")
+    studio.tree.tag_configure("dok_avvik", foreground="#b52020")
+    studio.tree.tag_configure("dok_koblet", foreground="#1a5fa8")
+    studio.tree.tag_configure("neg", foreground="#7a1a1a")
 
     vsb = ttk.Scrollbar(tab_utvalg, orient="vertical", command=studio.tree.yview)
     studio.tree.configure(yscrollcommand=vsb.set)

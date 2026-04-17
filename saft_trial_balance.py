@@ -69,7 +69,10 @@ def _iter_general_ledger_accounts(xml_stream) -> list[SaftTrialBalanceRow]:
         local = _local_tag(elem.tag)
 
         if local in ("Account", "GeneralLedgerAccount"):
-            konto = (_find_child_text(elem, "AccountID") or "").strip()
+            konto_raw = (_find_child_text(elem, "AccountID") or "").strip()
+            # Normaliser sammensatte konto-IDer (f.eks. "1941PKEY18820865" → "1941")
+            _m = re.match(r"(\d+)", konto_raw)
+            konto = _m.group(1) if _m else konto_raw
             if not konto:
                 elem.clear()
                 continue

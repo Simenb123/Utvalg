@@ -46,6 +46,8 @@ _COL_ALIASES: Dict[str, List[str]] = {
     "kontonavn": [
         "kontonavn",
         "konto navn",
+        "kontobetegnelse",
+        "kontotekst",
         "beskrivelse",
         "tekst",
         "navn",
@@ -59,6 +61,8 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "ib",
         "ingående",
         "inngående",
+        "inngående saldo",
+        "inngaaende",
         "opening",
         "openingbalance",
         "opening balance",
@@ -78,6 +82,7 @@ _COL_ALIASES: Dict[str, List[str]] = {
         "closingbalance",
         "closing balance",
         "endbalance",
+        "endelig",
         "sluttbalanse",
         "saldo i år",
         "saldoiår",
@@ -129,7 +134,7 @@ def read_trial_balance(
 
     if p.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
         sn = sheet_name or _guess_sheet_name(p)
-        df = pd.read_excel(p, sheet_name=sn, nrows=max_rows)
+        df = _read_sheet_with_detected_header(p, sn, max_rows=max_rows)
     else:
         # CSV/TXT – forsøk å lese med litt fleksibilitet
         df = pd.read_csv(p, nrows=max_rows, sep=None, engine="python")
@@ -138,7 +143,12 @@ def read_trial_balance(
     if df.empty:
         raise ValueError("Saldobalanse-filen ga ingen data (tomt ark/fil).")
 
-    cols = infer_trial_balance_columns(df)
+    # Try year-aware inference first so that Maestro-like files
+    # ("Endelig 2024", "Saldo 2023") resolve without manual mapping.
+    try:
+        cols, _ = infer_columns_with_year_detection(df)
+    except ValueError:
+        cols = infer_trial_balance_columns(df)
     out = _standardize(df, cols)
     return out
 
@@ -252,7 +262,12 @@ def _standardize(df: "pd.DataFrame", cols: TrialBalanceColumns) -> "pd.DataFrame
 
     ib = _to_amount_series(df[cols.ib]) if cols.ib else None
     ub = _to_amount_series(df[cols.ub]) if cols.ub else None
-    netto = _to_amount_series(df[cols.netto]) if cols.netto else None
+    # Defensiv: hvis netto og ub (eller ib) peker på samme kolonne, drop netto
+    # — ellers ville _deriveringen nedenfor maske ut UB-verdien.
+    netto_col = cols.netto
+    if netto_col and (netto_col == cols.ub or netto_col == cols.ib):
+        netto_col = None
+    netto = _to_amount_series(df[netto_col]) if netto_col else None
 
     # Debet/kredit (ofte begge positive) → netto = debet - kredit
     if netto is None and cols.debet and cols.kredit and cols.debet in df.columns and cols.kredit in df.columns:
@@ -295,11 +310,13 @@ def _normalize_konto(v: object) -> str:
     s = str(v).strip()
     if s.lower() == "nan":
         return ""
-    # Fjern alt bortsett fra siffer
-    digits = re.findall(r"\d+", s)
-    if not digits:
+    # Mange regnskapssystemer (f.eks. Way) bruker sammensatte konto-IDer
+    # som "1941PKEY18820865" der de første sifrene er kontonummeret og
+    # suffiksen er en intern nøkkel. Vi bruker kun det ledende tallprefiks.
+    m = re.match(r"(\d+)", s)
+    if not m:
         return ""
-    return "".join(digits)
+    return m.group(1)
 
 
 def _to_amount_series(series: "pd.Series") -> "pd.Series":
@@ -399,30 +416,217 @@ def _score_aliases(norm: str, aliases: Sequence[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Header-robust sheet reading (handles title rows above the real header)
+# ---------------------------------------------------------------------------
+
+def _read_sheet_with_detected_header(
+    path: "str | Path",
+    sheet_name: "str | int | None",
+    *,
+    max_rows: Optional[int] = None,
+) -> "pd.DataFrame":
+    """Les ark med header=None, finn headerrad, bygg ren DataFrame.
+
+    Fallback til standard `pd.read_excel(header=0)` hvis detektoren
+    ikke finner en plausibel headerrad.
+    """
+    import pandas as pd
+
+    try:
+        from excel_import_heuristics import detect_header_row_df, clean_header_cell
+    except Exception:
+        detect_header_row_df = None  # type: ignore[assignment]
+        clean_header_cell = None  # type: ignore[assignment]
+
+    sn = 0 if sheet_name is None else sheet_name
+
+    if detect_header_row_df is None:
+        return pd.read_excel(path, sheet_name=sn, nrows=max_rows)
+
+    try:
+        raw = pd.read_excel(path, sheet_name=sn, header=None)
+    except Exception:
+        return pd.read_excel(path, sheet_name=sn, nrows=max_rows)
+
+    idx = detect_header_row_df(raw)
+    if idx is None:
+        return pd.read_excel(path, sheet_name=sn, nrows=max_rows)
+
+    header_row = raw.iloc[idx].tolist()
+    if clean_header_cell is not None:
+        new_cols = [clean_header_cell(v, i) for i, v in enumerate(header_row)]
+    else:
+        new_cols = [str(v) if v is not None else f"Unnamed: {i}"
+                    for i, v in enumerate(header_row)]
+
+    body = raw.iloc[idx + 1 :].reset_index(drop=True)
+    body.columns = new_cols
+
+    if max_rows is not None and len(body) > max_rows:
+        body = body.head(max_rows).copy()
+    return body
+
+
+# ---------------------------------------------------------------------------
 # Year-number column detection (e.g. "2025" → UB, "2024" → IB)
 # ---------------------------------------------------------------------------
+
+_FORELOBIG_KEYWORDS = ("foreløpig", "forelopig", "korreksjon", "korrigering", "midlertidig", "preliminary")
+_UB_KEYWORDS = ("endelig", "closing", "ub", "sluttbalanse", "sluttsaldo", "utgående", "utgaaende")
+_IB_KEYWORDS = ("ib", "opening", "inngående", "inngaaende", "åpningsbalanse", "apningsbalanse")
+# "saldo" er kontekstavhengig: det betyr UB i nåværende år, IB når året er tidligere.
+_SALDO_KEYWORDS = ("saldo",)
+_NETTO_KEYWORDS = ("endring", "bevegelse", "movement", "netto", "change", "delta")
+
+
+def _classify_year_column(header: str) -> Tuple[Optional[int], Optional[str]]:
+    """Klassifiser et header-navn som (år, rolle).
+
+    Rolle ∈ {"ub", "ib", "netto", "skip", None}.
+    - "skip" markerer kolonner som eksplisitt er urelevante
+      (foreløpig/korreksjon) og skal ignoreres selv om de har år.
+    - None betyr at headeren ikke ser ut som en år-kolonne i det hele tatt.
+    """
+    s = str(header).strip()
+    if not s:
+        return None, None
+
+    m = re.search(r"(19|20)\d{2}", s)
+    if not m:
+        return None, None
+    year = int(m.group(0))
+
+    low = s.lower().replace("_", " ")
+
+    # Eksplisitt "forkastet"-status vinner: urelevante kolonner filtreres helt bort.
+    if any(k in low for k in _FORELOBIG_KEYWORDS):
+        return year, "skip"
+
+    if any(k in low for k in _UB_KEYWORDS):
+        return year, "ub"
+    if any(k in low for k in _IB_KEYWORDS):
+        return year, "ib"
+    if any(k in low for k in _NETTO_KEYWORDS):
+        return year, "netto"
+    if any(k in low for k in _SALDO_KEYWORDS):
+        # "Saldo 2024" i en 2024-fil er UB; i fjoråret er det IB.
+        # Denne nyansen avgjøres av _detect_year_columns via sortert rekkefølge.
+        return year, "saldo"
+
+    # Bare et årstall uten rolle-keyword
+    return year, None
+
 
 def _detect_year_columns(
     columns: Iterable[str],
 ) -> Dict[str, str]:
-    """Detect columns that look like year numbers (e.g. "2025", "2024").
+    """Detect year-columns and map them to canonical {ib, ub, netto}.
 
-    Returns a mapping of {original_column_name: canonical_key} where
-    canonical_key is "ub" (most recent year) or "ib" (previous year).
-    Only returns results if exactly two year-like columns are found.
+    Bruker `_classify_year_column` slik at embedded-year-kolonner som
+    "Endelig 2024" eller "Saldo 2023" også oppdages, ikke bare rene
+    årstall som "2024".
+
+    Regel:
+      - Hvis rolle-keyword finnes, respekteres rollen eksplisitt
+        ("Endelig 2024" → ub, "Endring fra fjoråret" krever eget år).
+      - "Skip"-kolonner (foreløpig/korreksjon) filtreres bort.
+      - "Saldo {år}": eldste år → ib, nyeste år → ub.
+      - For kolonner uten rolle-keyword beholdes gammel heuristikk:
+        eldste år = ib, nyeste år = ub (krever nøyaktig to slike).
     """
-    year_cols: List[tuple] = []
+    classified: List[Tuple[int, str, Optional[str]]] = []  # (year, original_col, role)
+    plain_year: List[Tuple[int, str]] = []
+
     for c in columns:
-        s = str(c).strip()
-        if re.fullmatch(r"\d{4}", s):
-            year_cols.append((int(s), c))
+        year, role = _classify_year_column(c)
+        if year is None:
+            continue
+        if role == "skip":
+            continue
+        if role is None:
+            plain_year.append((year, c))
+        else:
+            classified.append((year, c, role))
 
-    if len(year_cols) != 2:
-        return {}
+    result: Dict[str, str] = {}
 
-    year_cols.sort(key=lambda t: t[0])
-    # Older year → IB, newer year → UB
-    return {year_cols[0][1]: "ib", year_cols[1][1]: "ub"}
+    # 1) Eksplisitte roller — velg vinner pr. (år, rolle) via prioritet.
+    #    "ub"/"ib" vinner over "saldo", "saldo" vinner over "netto".
+    priority = {"ub": 4, "ib": 4, "saldo": 3, "netto": 2}
+    by_role: Dict[Tuple[int, str], str] = {}
+    for year, col, role in classified:
+        key = (year, role)
+        if key not in by_role:
+            by_role[key] = col
+
+    # Oppløs "saldo": bruk kronologi på saldo-kolonner for å avgjøre ib vs ub.
+    #   - To eller flere saldo-kolonner: eldste = ib, nyeste = ub.
+    #   - Én saldo-kolonne + en nyere eksplisitt ub-kolonne: saldo = ib.
+    #   - Én saldo-kolonne uten nyere ub: saldo = ub (f.eks. en enslig
+    #     "Saldo 2024" i et 2024-datasett).
+    saldo_cols = [(y, c) for (y, r), c in by_role.items() if r == "saldo"]
+    saldo_years = sorted({y for y, _ in saldo_cols})
+    explicit_ub_years = sorted(
+        [y for (y, r), _ in by_role.items() if r == "ub"]
+    )
+    newest_ub_year = explicit_ub_years[-1] if explicit_ub_years else None
+    for year, col in saldo_cols:
+        if len(saldo_years) >= 2:
+            resolved_role = "ib" if year == saldo_years[0] else "ub"
+        elif newest_ub_year is not None and year < newest_ub_year:
+            # Eneste saldo-kolonne ligger før det nyeste ub-året → ib
+            resolved_role = "ib"
+        else:
+            resolved_role = "ub"
+        by_role.setdefault((year, resolved_role), col)
+    # Fjern rå "saldo"-nøkler
+    by_role = {k: v for k, v in by_role.items() if k[1] != "saldo"}
+
+    # 2) Fallback: kun årstall uten rolle-keyword. Gammel regel
+    #    (eldste→ib, nyeste→ub) — men bare hvis vi ikke allerede
+    #    har en eksplisitt ub/ib.
+    if plain_year:
+        plain_year.sort(key=lambda t: t[0])
+        if len(plain_year) >= 2:
+            ib_year, ib_col = plain_year[0]
+            ub_year, ub_col = plain_year[-1]
+            by_role.setdefault((ib_year, "ib"), ib_col)
+            by_role.setdefault((ub_year, "ub"), ub_col)
+        # Et enslig år uten rolle-keyword er for tvetydig — ignoreres
+        # (opprinnelig kontrakt; brukeren kan alias-mappe manuelt).
+
+    # 3) Plukk én kolonne pr. kanonisk rolle.
+    #    For ub/ib: velg nyeste/eldste år hvis flere finnes.
+    ub_candidates = sorted(
+        [(y, c) for (y, r), c in by_role.items() if r == "ub"], key=lambda t: t[0]
+    )
+    ib_candidates = sorted(
+        [(y, c) for (y, r), c in by_role.items() if r == "ib"], key=lambda t: t[0]
+    )
+    netto_candidates = sorted(
+        [(y, c) for (y, r), c in by_role.items() if r == "netto"], key=lambda t: t[0]
+    )
+
+    if ub_candidates:
+        result[ub_candidates[-1][1]] = "ub"
+    if ib_candidates:
+        result[ib_candidates[0][1]] = "ib"
+    if netto_candidates:
+        # Velg netto fra samme år som UB hvis mulig
+        ub_year = ub_candidates[-1][0] if ub_candidates else None
+        chosen = None
+        if ub_year is not None:
+            for y, c in netto_candidates:
+                if y == ub_year:
+                    chosen = c
+                    break
+        if chosen is None:
+            chosen = netto_candidates[-1][1]
+        # Ikke la netto overskrive ub/ib
+        if chosen not in result:
+            result[chosen] = "netto"
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +652,7 @@ def read_raw_trial_balance(
 
     if p.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
         sn = sheet_name or _guess_sheet_name(p)
-        df = pd.read_excel(p, sheet_name=sn, nrows=max_rows)
+        df = _read_sheet_with_detected_header(p, sn, max_rows=max_rows)
     else:
         df = pd.read_csv(p, nrows=max_rows, sep=None, engine="python")
 
@@ -468,35 +672,32 @@ def infer_columns_with_year_detection(
     """
     year_map = _detect_year_columns(df.columns)
 
-    # First try standard inference
-    try:
-        cols = infer_trial_balance_columns(df)
-        return cols, year_map
-    except ValueError:
-        pass
+    # Hvis vi har detektert eksplisitte år-kolonner, foretrekk dem framfor
+    # ren alias-matching. Dette beskytter mot tilfeller der alias-matching
+    # kunne tilordnet "Foreløpig 2024" til UB før _classify_year_column
+    # filtrerte bort "foreløpig" som skip.
+    if year_map:
+        rename = {orig: canonical for orig, canonical in year_map.items()}
+        df2 = df.rename(columns=rename)
+        try:
+            cols = infer_trial_balance_columns(df2)
+        except ValueError:
+            # Konto/kontonavn manglet i renamed versjon — fall tilbake på
+            # standard inferens uten rename.
+            cols = infer_trial_balance_columns(df)
+            return cols, year_map
 
-    # If standard failed, try again with year columns injected
-    if not year_map:
-        raise ValueError(
-            "Fant ikke nødvendige kolonner og ingen årstall-kolonner detektert."
-        )
+        reverse = {v: k for k, v in rename.items()}
+        return TrialBalanceColumns(
+            konto=cols.konto,
+            kontonavn=cols.kontonavn,
+            ib=reverse.get(cols.ib, cols.ib) if cols.ib else None,
+            ub=reverse.get(cols.ub, cols.ub) if cols.ub else None,
+            netto=reverse.get(cols.netto, cols.netto) if cols.netto else None,
+            debet=cols.debet,
+            kredit=cols.kredit,
+        ), year_map
 
-    # Build a temporary DataFrame with renamed year columns for inference
-    rename = {}
-    for orig, canonical in year_map.items():
-        rename[orig] = canonical
-    df2 = df.rename(columns=rename)
-
-    cols = infer_trial_balance_columns(df2)
-
-    # Map back to original column names
-    reverse = {v: k for k, v in rename.items()}
-    return TrialBalanceColumns(
-        konto=cols.konto,
-        kontonavn=cols.kontonavn,
-        ib=reverse.get(cols.ib, cols.ib) if cols.ib else None,
-        ub=reverse.get(cols.ub, cols.ub) if cols.ub else None,
-        netto=reverse.get(cols.netto, cols.netto) if cols.netto else None,
-        debet=cols.debet,
-        kredit=cols.kredit,
-    ), year_map
+    # Ingen år-kolonner — bruk standard inferens.
+    cols = infer_trial_balance_columns(df)
+    return cols, year_map

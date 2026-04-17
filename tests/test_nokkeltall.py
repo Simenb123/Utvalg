@@ -121,9 +121,12 @@ class TestNokkeltallEngine:
     def test_top_activity(self):
         from nokkeltall_engine import compute_nokkeltall
         result = compute_nokkeltall(_sample_rl_df())
-        assert len(result.top_activity) == 3
-        # Bankinnskudd has most transactions (3000)
+        # Topp-10 leaf-regnskapslinjer etter volum (bilag eller transaksjoner)
+        assert 1 <= len(result.top_activity) <= 10
+        # Bankinnskudd har flest transaksjoner (3000) i sample
         assert result.top_activity[0]["regnr"] == 655
+        assert result.top_activity[0]["count"] == 3000
+        assert result.top_activity[0]["count_label"] in {"bilag", "transaksjoner"}
 
     def test_kpi_cards(self):
         from nokkeltall_engine import compute_nokkeltall
@@ -144,8 +147,192 @@ class TestNokkeltallEngine:
         from nokkeltall_engine import _format_value
         assert "%" in _format_value(12.5, "pct")
         assert _format_value(None, "pct") == "–"
-        assert "M" in _format_value(5_000_000, "amount")
-        assert "k" in _format_value(500_000, "amount")
+        assert _format_value(5_000_000, "amount") == "5 000 000"
+        assert _format_value(500_000, "amount") == "500 000"
+        assert _format_value(-1_234_567, "amount") == "-1 234 567"
+
+    # ---- Standardvurderinger / observasjoner ---------------------------
+
+    def test_observations_built_for_all_thresholds(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(_sample_rl_df())
+        ids = {o.metric_id for o in result.observations}
+        expected = {
+            "likv1", "likv2", "arb_kap", "ek_andel",
+            "gjeldsgrad", "driftsmargin", "nettoresmargin",
+        }
+        assert expected.issubset(ids)
+
+    def test_observation_critical_when_likv1_below_1(self):
+        from nokkeltall_engine import compute_nokkeltall
+        df = _sample_rl_df()
+        # Blåse opp kortsiktig gjeld → likv1 = 1.3M / 1.5M ≈ 0.87
+        df.loc[df["regnr"] == 810, "UB"] = -1_500_000
+        result = compute_nokkeltall(df)
+        obs = next(o for o in result.observations if o.metric_id == "likv1")
+        assert obs.severity == "critical"
+
+    def test_observation_watch_when_likv1_between_1_and_2(self):
+        from nokkeltall_engine import compute_nokkeltall
+        df = _sample_rl_df()
+        # likv1 = 1.3M / 900k ≈ 1.44 → watch
+        df.loc[df["regnr"] == 810, "UB"] = -900_000
+        result = compute_nokkeltall(df)
+        obs = next(o for o in result.observations if o.metric_id == "likv1")
+        assert obs.severity == "watch"
+
+    def test_observation_ok_when_ek_andel_above_30(self):
+        from nokkeltall_engine import compute_nokkeltall
+        # Sample gir EK-andel ~64% som er klart > 30
+        result = compute_nokkeltall(_sample_rl_df())
+        obs = next(o for o in result.observations if o.metric_id == "ek_andel")
+        assert obs.severity == "ok"
+
+    def test_observation_skipped_when_metric_missing(self):
+        from nokkeltall_engine import compute_nokkeltall
+        df = _sample_rl_df()
+        # Fjern kortsiktig gjeld helt → likv1.value = None
+        df = df[df["regnr"] != 810].reset_index(drop=True)
+        result = compute_nokkeltall(df)
+        assert not any(o.metric_id == "likv1" for o in result.observations)
+
+    # ---- Top changes og konsentrasjon ---------------------------------
+
+    def test_top_changes_classifies_increases_and_decreases(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(_sample_rl_df(with_prev=True))
+        inc = result.top_changes["increases"]
+        dec = result.top_changes["decreases"]
+        # Alle \u00f8kninger har positiv diff, alle reduksjoner negativ
+        assert all(item["diff"] > 0 for item in inc)
+        assert all(item["diff"] < 0 for item in dec)
+        # Sortert avtagende (\u00f8kninger) / tiltagende (reduksjoner) etter |diff|
+        if len(inc) >= 2:
+            assert inc[0]["diff"] >= inc[1]["diff"]
+        if len(dec) >= 2:
+            assert dec[0]["diff"] <= dec[1]["diff"]
+
+    def test_top_changes_empty_without_prev(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(_sample_rl_df(with_prev=False))
+        assert result.top_changes == {"increases": [], "decreases": []}
+
+    def test_concentration_includes_cost_metric(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(_sample_rl_df())
+        labels = [c["label"] for c in result.concentration]
+        assert any("kostnadslinjer" in lbl.lower() for lbl in labels)
+        # Alle verdier er prosent mellom 0 og 100
+        for c in result.concentration:
+            assert 0.0 <= c["value_pct"] <= 100.0
+
+    def test_observation_gjeldsgrad_uses_above_thresholds(self):
+        from nokkeltall_engine import compute_nokkeltall
+        # gjeldsgrad = sum_gjeld / sum_ek. Sample EK = 1.48M.
+        # 6.0 → critical:  gjeld = 6 * 1.48M = 8.88M
+        df = _sample_rl_df()
+        df.loc[df["regnr"] == 820, "UB"] = -8_880_000
+        result_crit = compute_nokkeltall(df)
+        o = next(x for x in result_crit.observations if x.metric_id == "gjeldsgrad")
+        assert o.severity == "critical"
+
+        # 3.5 → watch:  gjeld = 3.5 * 1.48M ≈ 5.18M
+        df2 = _sample_rl_df()
+        df2.loc[df2["regnr"] == 820, "UB"] = -5_180_000
+        result_watch = compute_nokkeltall(df2)
+        o2 = next(x for x in result_watch.observations if x.metric_id == "gjeldsgrad")
+        assert o2.severity == "watch"
+
+        # 2.0 → ok: gjeld = 2 * 1.48M = 2.96M
+        df3 = _sample_rl_df()
+        df3.loc[df3["regnr"] == 820, "UB"] = -2_960_000
+        result_ok = compute_nokkeltall(df3)
+        o3 = next(x for x in result_ok.observations if x.metric_id == "gjeldsgrad")
+        assert o3.severity == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Reskontro tests
+# ---------------------------------------------------------------------------
+
+def _sample_reskontro_df() -> pd.DataFrame:
+    """Minimal transaksjonstabell med reskontro-kolonner."""
+    return pd.DataFrame({
+        "Kundenr":       ["K1", "K1", "K2", "K3", None, None],
+        "Kundenavn":     ["Alpha AS", "Alpha AS", "Beta AS", "Gamma AS", None, None],
+        "KundeIB":       [10000.0, 10000.0, 5000.0, 0.0, None, None],
+        "KundeUB":       [50000.0, 50000.0, 3000.0, 12000.0, None, None],
+        "Leverandørnr":  [None, None, None, None, "L1", "L2"],
+        "Leverandørnavn":[None, None, None, None, "Fabrikk AS", "Service AS"],
+        "LeverandørIB":  [None, None, None, None, -8000.0, -2000.0],
+        "LeverandørUB":  [None, None, None, None, -20000.0, -1000.0],
+        "Beløp":         [60000.0, -20000.0, -2000.0, 12000.0, -15000.0, 1000.0],
+    })
+
+
+class TestReskontro:
+
+    def test_no_reskontro_data_yields_empty_lists(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(_sample_rl_df(), reskontro_df=None)
+        assert result.reskontro_kunder_top_ub == []
+        assert result.reskontro_lev_top_ub == []
+        assert result.reskontro_kunder_top_debet == []
+        assert result.reskontro_lev_top_kredit == []
+
+    def test_kunder_top_ub_sorted_descending_by_abs(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(
+            _sample_rl_df(), reskontro_df=_sample_reskontro_df()
+        )
+        tops = result.reskontro_kunder_top_ub
+        assert len(tops) == 3
+        assert tops[0].nr == "K1"
+        assert tops[0].ub == 50000.0
+        assert tops[1].nr == "K3"
+        assert tops[2].nr == "K2"
+
+    def test_lev_ub_flipped_to_positive(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(
+            _sample_rl_df(), reskontro_df=_sample_reskontro_df()
+        )
+        tops = result.reskontro_lev_top_ub
+        assert len(tops) == 2
+        assert tops[0].nr == "L1"
+        assert tops[0].ub == 20000.0  # -(-20000)
+        assert tops[1].ub == 1000.0
+
+    def test_debet_kredit_split_from_belop_sign(self):
+        from nokkeltall_engine import compute_nokkeltall
+        result = compute_nokkeltall(
+            _sample_rl_df(), reskontro_df=_sample_reskontro_df()
+        )
+        k1 = next(r for r in result.reskontro_kunder_top_ub if r.nr == "K1")
+        assert k1.debet == 60000.0
+        assert k1.kredit == 20000.0
+
+    def test_reskontro_page_rendered_when_data_present(self):
+        from nokkeltall_engine import compute_nokkeltall
+        from nokkeltall_report import build_report_html
+        result = compute_nokkeltall(
+            _sample_rl_df(), reskontro_df=_sample_reskontro_df(),
+            client="Demo", year="2025",
+        )
+        html = build_report_html(result)
+        assert "Reskontro" in html
+        assert "resk-table" in html
+        assert "Alpha AS" in html
+
+    def test_reskontro_page_skipped_when_no_data(self):
+        from nokkeltall_engine import compute_nokkeltall
+        from nokkeltall_report import build_report_html
+        result = compute_nokkeltall(_sample_rl_df(), reskontro_df=None)
+        html = build_report_html(result)
+        # Ingen reskontro-tabell i DOM (CSS-regelen er alltid i <style>)
+        assert '<table class="resk-table"' not in html
+        assert "class=\"resk-grid\"" not in html
+        assert "report-subtitle\">Reskontro" not in html
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +450,7 @@ class TestReport:
         assert saved.endswith(".html")
 
     def test_save_report_pdf(self, tmp_path):
+        pytest.importorskip("playwright", reason="playwright not installed")
         from nokkeltall_report import save_report_pdf
         path = tmp_path / "rapport.pdf"
         saved = save_report_pdf(
@@ -278,12 +466,14 @@ class TestReport:
         assert header == b"%PDF-"
 
     def test_save_pdf_adds_extension(self, tmp_path):
+        pytest.importorskip("playwright", reason="playwright not installed")
         from nokkeltall_report import save_report_pdf
         path = tmp_path / "rapport"
         saved = save_report_pdf(path, rl_df=_sample_rl_df())
         assert saved.endswith(".pdf")
 
     def test_save_pdf_without_prev_year(self, tmp_path):
+        pytest.importorskip("playwright", reason="playwright not installed")
         from nokkeltall_report import save_report_pdf
         path = tmp_path / "no_prev.pdf"
         saved = save_report_pdf(
@@ -295,3 +485,44 @@ class TestReport:
         assert saved.endswith(".pdf")
         import os
         assert os.path.getsize(saved) > 1000  # non-trivial PDF
+
+    # ---- Standardvurderinger på side 3 ---------------------------------
+
+    def test_side3_contains_standardvurderinger(self):
+        from nokkeltall_engine import compute_nokkeltall
+        from nokkeltall_report import build_report_html
+        result = compute_nokkeltall(_sample_rl_df(), client="Demo", year="2025")
+        html = build_report_html(result)
+        assert '<div class="section-title">Standardvurderinger</div>' in html
+        assert 'class="obs-grid"' in html
+        assert "tommelfingerregler" in html
+
+    def test_side3_observation_cards_have_severity_classes(self):
+        from nokkeltall_engine import compute_nokkeltall
+        from nokkeltall_report import build_report_html
+        result = compute_nokkeltall(_sample_rl_df(), client="Demo", year="2025")
+        html = build_report_html(result)
+        has_severity = any(cls in html for cls in
+                           ("obs-ok", "obs-watch", "obs-critical"))
+        assert has_severity
+
+    def test_side3_observations_grouped_by_category(self):
+        from nokkeltall_engine import compute_nokkeltall
+        from nokkeltall_report import build_report_html
+        result = compute_nokkeltall(_sample_rl_df(), client="Demo", year="2025")
+        html = build_report_html(result)
+        # Kategori-overskrifter vises med egen CSS-klasse
+        assert 'class="obs-category">L\u00f8nnsomhet<' in html
+        assert 'class="obs-category">Likviditet<' in html
+        assert 'class="obs-category">Soliditet<' in html
+
+    def test_side3_no_observations_when_empty(self):
+        from nokkeltall_engine import compute_nokkeltall
+        from nokkeltall_report import build_report_html
+        result = compute_nokkeltall(_sample_rl_df(), client="Demo", year="2025")
+        result.observations = []
+        html = build_report_html(result)
+        assert 'class="obs-grid"' not in html
+        # "Standardvurderinger" finnes i CSS-kommentar; sjekk heller at
+        # selve section-title-divet ikke rendres.
+        assert '<div class="section-title">Standardvurderinger</div>' not in html

@@ -13,6 +13,9 @@ from typing import Dict, List, Tuple
 import tkinter as tk
 from tkinter import ttk
 
+# Vanlige valgfrie felt som vises alltid (brukes aktivt av revisor)
+_COMMON_OPTIONAL = {"Kontonavn", "Dato", "Tekst", "Referanse"}
+
 
 def build_ui(
     pane,
@@ -23,7 +26,8 @@ def build_ui(
     """Bygg UI og returner (sheet_combo, status_lbl, combo_vars, combo_widgets)."""
 
     required_fields = ["Konto", "Bilag", "Beløp"]
-    optional_fields = [field for field in canon_fields if field not in required_fields]
+    common_optional = [f for f in canon_fields if f not in required_fields and f in _COMMON_OPTIONAL]
+    advanced_optional = [f for f in canon_fields if f not in required_fields and f not in _COMMON_OPTIONAL]
 
     intro = ttk.Label(
         pane,
@@ -97,10 +101,42 @@ def build_ui(
     required_frame.grid(row=1, column=0, sticky="ew")
     required_frame.columnconfigure(1, weight=1)
 
-    optional_frame = ttk.LabelFrame(mapf, text="Valgfrie felt", padding=10)
-    optional_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-    optional_frame.columnconfigure(1, weight=1)
-    optional_frame.columnconfigure(3, weight=1)
+    # --- Vanlige valgfrie felt (alltid synlige) ---
+    common_frame = ttk.LabelFrame(mapf, text="Valgfrie felt", padding=10)
+    common_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+    common_frame.columnconfigure(1, weight=1)
+    common_frame.columnconfigure(3, weight=1)
+
+    # --- Avanserte valgfrie felt (skjult som standard) ---
+    advanced_container = ttk.Frame(mapf)
+    advanced_container.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+    advanced_container.columnconfigure(0, weight=1)
+
+    _advanced_visible = tk.BooleanVar(value=False)
+
+    def _toggle_advanced():
+        if _advanced_visible.get():
+            advanced_frame.grid(row=1, column=0, sticky="ew")
+            btn_toggle.configure(text="Skjul flere felt")
+        else:
+            advanced_frame.grid_remove()
+            btn_toggle.configure(text="Vis flere felt ({})".format(len(advanced_optional)))
+
+    btn_toggle = ttk.Checkbutton(
+        advanced_container,
+        text="Vis flere felt ({})".format(len(advanced_optional)),
+        variable=_advanced_visible,
+        command=_toggle_advanced,
+        style="Toolbutton.TCheckbutton",
+    )
+    btn_toggle.grid(row=0, column=0, sticky="w")
+
+    advanced_frame = ttk.LabelFrame(advanced_container, text="Kunde / Leverandør / MVA / Valuta", padding=10)
+    advanced_frame.columnconfigure(1, weight=1)
+    advanced_frame.columnconfigure(3, weight=1)
+    # Start skjult
+    advanced_frame.grid(row=1, column=0, sticky="ew")
+    advanced_frame.grid_remove()
 
     combo_vars: Dict[str, tk.StringVar] = {}
     combo_widgets: Dict[str, ttk.Combobox] = {}
@@ -114,16 +150,34 @@ def build_ui(
         combo_vars[canon] = var
         combo_widgets[canon] = cb
 
-    for index, canon in enumerate(optional_fields):
+    for index, canon in enumerate(common_optional):
         row_index = index // 2
         column_offset = (index % 2) * 2
-        ttk.Label(optional_frame, text=f"{canon}:").grid(row=row_index, column=column_offset, sticky="w", pady=2)
+        ttk.Label(common_frame, text=f"{canon}:").grid(row=row_index, column=column_offset, sticky="w", pady=2)
         var = tk.StringVar(value="")
-        cb = ttk.Combobox(optional_frame, textvariable=var, state="readonly", values=("",), height=18)
+        cb = ttk.Combobox(common_frame, textvariable=var, state="readonly", values=("",), height=18)
         cb.grid(row=row_index, column=column_offset + 1, sticky="ew", padx=(8, 12), pady=2)
         cb.bind("<<ComboboxSelected>>", lambda _e: pane._update_build_readiness())
         combo_vars[canon] = var
         combo_widgets[canon] = cb
+
+    for index, canon in enumerate(advanced_optional):
+        row_index = index // 2
+        column_offset = (index % 2) * 2
+        ttk.Label(advanced_frame, text=f"{canon}:").grid(row=row_index, column=column_offset, sticky="w", pady=2)
+        var = tk.StringVar(value="")
+        cb = ttk.Combobox(advanced_frame, textvariable=var, state="readonly", values=("",), height=18)
+        cb.grid(row=row_index, column=column_offset + 1, sticky="ew", padx=(8, 12), pady=2)
+        cb.bind("<<ComboboxSelected>>", lambda _e: pane._update_build_readiness())
+        combo_vars[canon] = var
+        combo_widgets[canon] = cb
+
+    # Lagre referanser for SAF-T-modus (kan kollapse hele seksjonen)
+    pane._optional_section_frame = common_frame
+    pane._advanced_container = advanced_container
+    pane._advanced_frame = advanced_frame
+    pane._advanced_visible_var = _advanced_visible
+    pane._btn_toggle_advanced = btn_toggle
 
     actions = ttk.Frame(pane)
     actions.pack(fill="x", padx=8, pady=(0, 8))

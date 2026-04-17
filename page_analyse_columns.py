@@ -83,6 +83,8 @@ _ANALYSIS_HEADINGS_STATIC = {
     "Konto": "Konto",
     "Kontonavn": "Kontonavn",
     "OK": "OK",
+    "OK_av": "OK av",
+    "OK_dato": "OK dato",
     "Vedlegg": "Vedlegg",
     "Gruppe": "Gruppe",
     "IB": "IB",
@@ -351,10 +353,32 @@ def show_pivot_column_menu(*, page: Any, event: Any) -> None:
                                 label=f"Kommentar for {first_col} {second_col}\u2026",
                                 command=lambda: _open_rl_comment(page=page, regnr=first_col, rl_name=second_col),
                             )
+                            link_label = _action_link_label(
+                                kind="rl", entity_key=first_col, base="Koble til handling"
+                            )
+                            menu.add_command(
+                                label=f"{link_label}\u2026",
+                                command=lambda: _open_action_link(
+                                    page=page, kind="rl",
+                                    entity_key=first_col,
+                                    entity_label=f"{first_col} {second_col}",
+                                ),
+                            )
                         elif agg_mode in ("SB-konto", "HB-konto", ""):
                             menu.add_command(
                                 label=f"Kommentar for {first_col} {second_col}\u2026",
                                 command=lambda: _open_account_comment(page=page, konto=first_col, kontonavn=second_col),
+                            )
+                            link_label = _action_link_label(
+                                kind="account", entity_key=first_col, base="Koble til handling"
+                            )
+                            menu.add_command(
+                                label=f"{link_label}\u2026",
+                                command=lambda: _open_action_link(
+                                    page=page, kind="account",
+                                    entity_key=first_col,
+                                    entity_label=f"{first_col} {second_col}",
+                                ),
                             )
         except Exception:
             pass
@@ -382,6 +406,29 @@ def _open_account_comment(*, page: Any, konto: str, kontonavn: str) -> None:
         import page_analyse_sb
         page_analyse_sb._edit_comment(
             page=page, kind="accounts", key=konto, label=f"{konto} {kontonavn}",
+        )
+    except Exception:
+        pass
+
+
+def _action_link_label(*, kind: str, entity_key: str, base: str) -> str:
+    try:
+        import page_analyse_sb
+        return page_analyse_sb._action_link_menu_label(
+            kind=kind, entity_key=entity_key, base=base,
+        )
+    except Exception:
+        return base
+
+
+def _open_action_link(
+    *, page: Any, kind: str, entity_key: str, entity_label: str
+) -> None:
+    try:
+        import page_analyse_sb
+        page_analyse_sb._open_action_link_dialog(
+            page=page, kind=kind,
+            entity_key=entity_key, entity_label=entity_label,
         )
     except Exception:
         pass
@@ -702,6 +749,17 @@ def load_sb_columns_from_preferences(*, page: Any) -> None:
         stored_visible = None
 
     default_order, default_visible = _sb_defaults(page)
+
+    # Migrer gamle preferanser til ny kanonisk standard (UB <år> + UB <år-1>
+    # + Endring + Endring %) når stored_visible mangler de nye komparative
+    # kolonnene men inneholder legacy-kolonner (IB/Endring intern).
+    if isinstance(stored_visible, list) and stored_visible:
+        has_new_canonical = any(
+            c in stored_visible for c in ("Endring_fjor", "Endring_pct")
+        )
+        has_legacy_intern = any(c in stored_visible for c in ("IB", "Endring"))
+        if has_legacy_intern and not has_new_canonical:
+            stored_visible = None
 
     order = stored_order if isinstance(stored_order, list) else list(default_order)
     visible = stored_visible if isinstance(stored_visible, list) else list(default_visible)

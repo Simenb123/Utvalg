@@ -1,0 +1,375 @@
+{
+  "meta": {
+    "version": 1
+  },
+  "rules": {
+    "10": {
+      "label": "Salgsinntekt"
+    },
+    "30": {
+      "label": "End. beh. varer u. tilv. og ferdigvarer"
+    },
+    "50": {
+      "label": "Avskrivning",
+      "aliases": [
+        "avskrivning"
+      ],
+      "exclude_aliases": [
+        "nedskrivning"
+      ],
+      "normal_balance_hint": "debet_typisk"
+    },
+    "165": {
+      "label": "Skattekostnad på resultat",
+      "aliases": [
+        "skatt",
+        "skattekostnad",
+        "betalbar skatt",
+        "endring utsatt skatt",
+        "endring utsatt skattefordel"
+      ]
+    },
+    "320": {
+      "label": "Avsatt til annen Egenkapital",
+      "aliases": [
+        "overføring annen egenkapital",
+        "egenkapitaldisponering",
+        "disponering egenkapital",
+        "resultatdisponering"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "110": {
+      "label": "Annen renteinntekt",
+      "aliases": [
+        "renteinntekt"
+      ],
+      "exclude_aliases": [
+        "rentekostnad"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "295": {
+      "label": "Avsatt til utbytte",
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "335": {
+      "label": "Overført fra annen egenkapital",
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "300": {
+      "label": "Mottatt konsernbidrag"
+    },
+    "115": {
+      "label": "Annen finansinntekt",
+      "aliases": [
+        "finansinntekt"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "775": {
+      "label": "Kortsiktig gjeld til kredittinstitusjoner",
+      "aliases": [
+        "banklån",
+        "bankgjeld",
+        "kredittinstitusjoner",
+        "Kortsiktig gjeld til kredittinstitusjoner",
+        "Kortsiktig lån til kredittinstitusjoner",
+        "korts"
+      ]
+    },
+    "750": {
+      "label": "Langsiktig geld til kredittinstitusjoner",
+      "aliases": [
+        "banklån",
+        "gjeld til kredittinstitusjoner",
+        "langsiktig gjeld til kredittinstitusjoner",
+        "langsiktig lån til kredittinstitusjoner"
+      ]
+    },
+    "742": {
+      "label": "Ansvarlig lån",
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "795": {
+      "label": "Utbytte",
+      "aliases": [
+        "utbytte",
+        "avsatt til utbytte"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "585": {
+      "label": "Investeringer i aksjer og andeler",
+      "aliases": [
+        "aksjer",
+        "aksjeinvestering"
+      ],
+      "exclude_aliases": [
+        "lån",
+        "MV"
+      ]
+    },
+    "560": {
+      "label": "Investering i datterselskap",
+      "aliases": [
+        "aksjer",
+        "aksje",
+        "aksjeinvestering",
+        "aksjer i datterselskap",
+        "aksjeinvestering i datterselskap"
+      ],
+      "exclude_aliases": [
+        "lån",
+        "lån til foretak i samme konsern",
+        "konsernlån"
+      ]
+    },
+    "570": {
+      "label": "Langsiktig lån til foretak i samme konsern",
+      "aliases": [
+        "lån",
+        "lån til foretak i samme konsern",
+        "konsernlån",
+        "fordring konsern",
+        "MV konsern",
+        "MV"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "591": {
+      "label": "Andre langsiktige fordringer",
+      "aliases": [
+        "MV",
+        "fordring"
+      ]
+    },
+    "590": {
+      "label": "Langsiktige obligasjoner",
+      "aliases": [
+        "obligasjon",
+        "obligasjoner"
+      ],
+      "exclude_aliases": [
+        "aksjer"
+      ]
+    },
+    "575": {
+      "label": "Investeringer i tilknyttet selskap",
+      "aliases": [
+        "ts",
+        "tilknyttet selskap",
+        "aksjer i tilknyttet selskap"
+      ]
+    },
+    "580": {
+      "label": "Lån til tilknyttet selskap og felles kontrollert virksomhet",
+      "aliases": [
+        "lån",
+        "lån til tilknyttet selskap"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "325": {
+      "label": "Overført fra fond for vurderignsforskjeller"
+    },
+    "297": {
+      "label": "Ekstraordinært utbytte",
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "305": {
+      "label": "Avsatt konsernbidrag"
+    },
+    "60": {
+      "label": "Nedskrivning",
+      "aliases": [
+        "nedskrivning"
+      ],
+      "exclude_aliases": [
+        "avskrivning"
+      ]
+    },
+    "90": {
+      "label": "Inntekt på investering i datterselskap"
+    },
+    "140": {
+      "label": "Rentekostnad til foretak i samme konsern",
+      "aliases": [
+        "rentekostnad til foretak i samme konsern"
+      ],
+      "exclude_aliases": [
+        "renteinntekt"
+      ],
+      "normal_balance_hint": "debet_typisk"
+    },
+    "141": {
+      "label": "Rentekostnad til tilknyttet selskap",
+      "aliases": [
+        "rentekostnad til tilknyttet selskap"
+      ],
+      "normal_balance_hint": "debet_typisk"
+    },
+    "145": {
+      "label": "Annen rentekostnad",
+      "aliases": [
+        "rentekostnad"
+      ],
+      "exclude_aliases": [
+        "renteinntekt"
+      ]
+    },
+    "150": {
+      "label": "Annen finanskostnad",
+      "aliases": [
+        "finanskostnad"
+      ],
+      "exclude_aliases": [
+        "finansinntekt"
+      ]
+    },
+    "106": {
+      "label": "Renteinntekt fra tilknyttet selskap",
+      "aliases": [
+        "renteinntekt fra tilknyttet selskap"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "70": {
+      "label": "Annen driftskostnad"
+    },
+    "555": {
+      "label": "Sum varige driftsmidler"
+    },
+    "605": {
+      "label": "Lager av varer og annen beholdning",
+      "aliases": [
+        "varelager"
+      ],
+      "normal_balance_hint": "debet_typisk"
+    },
+    "610": {
+      "label": "Kundefordringer",
+      "aliases": [
+        "kundefordringer"
+      ]
+    },
+    "611": {
+      "label": "Kundefordringer konsern",
+      "aliases": [
+        "kundefordringer til foretak i samme konsern"
+      ]
+    },
+    "615": {
+      "label": "Andre kortsiktige fordringer",
+      "aliases": [
+        "kortsiktige fordringer"
+      ]
+    },
+    "618": {
+      "label": "Kortsiktig lån til foretak i samme konsern",
+      "aliases": [
+        "lån til foretak i samme konsern"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "630": {
+      "label": "Aksjer og andeler i foretak i samme konsern",
+      "aliases": [
+        "aksjeinvestering konsern",
+        "aksjer konsern"
+      ]
+    },
+    "635": {
+      "label": "Markedsbaserte aksjer",
+      "aliases": [
+        "aksjer",
+        "aksjeinvesteringer",
+        "aksjer markedsbaserte",
+        "markedsbaserte investeringer"
+      ]
+    },
+    "640": {
+      "label": "Markedsbaserte obligasjoner"
+    },
+    "645": {
+      "label": "Andre markedsbaserte finansielle instrumenter"
+    },
+    "655": {
+      "label": "Bankinnskudd, kontanter o.l.",
+      "aliases": [
+        "bank",
+        "bankinnskudd"
+      ],
+      "exclude_aliases": [
+        "kassekreditt",
+        "kortsiktig lån",
+        "kortsiktig gjeld",
+        "kassakreditt"
+      ]
+    },
+    "670": {
+      "label": "Aksjekapital",
+      "aliases": [
+        "aksjekapital"
+      ]
+    },
+    "675": {
+      "label": "Egne aksjer",
+      "aliases": [
+        "egne aksjer"
+      ]
+    },
+    "680": {
+      "label": "Overkurs",
+      "aliases": [
+        "overkurs",
+        "overkursfond"
+      ]
+    },
+    "681": {
+      "label": "Annen innskutt egenkapital",
+      "aliases": [
+        "innskutt egenkapital",
+        "annen innskutt kapital",
+        "annen innskutt egenkapital"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "690": {
+      "label": "Fond for vurderingsforksjeller"
+    },
+    "695": {
+      "label": "Annen egenkapital",
+      "aliases": [
+        "annen egenkapital",
+        "egenkapital",
+        "equity",
+        "other equity"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "725": {
+      "label": "Utsatt skatt",
+      "normal_balance_hint": "kredit_typisk"
+    },
+    "798": {
+      "label": "Kortsiktig konserngjeld"
+    },
+    "780": {
+      "label": "Leverandørgjeld"
+    },
+    "730": {
+      "label": "Andre avsetninger for forpliktelser"
+    },
+    "785": {
+      "label": "Betalbar skatt",
+      "aliases": [
+        "betalbar skatt",
+        "forhåndsskatt",
+        "forhåndsskatt utlignet",
+        "forskuddsskatt utlignet"
+      ],
+      "normal_balance_hint": "kredit_typisk"
+    }
+  }
+}

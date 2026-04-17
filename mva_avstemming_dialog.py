@@ -45,12 +45,6 @@ def open_mva_avstemming(parent: tk.Misc, page: Any) -> None:
             messagebox.showwarning("MVA-avstemming", "Ingen data å analysere.")
         return
 
-    # Bygg MVA-pivot fra filtrert data
-    mva_pivot = build_mva_pivot(df_filtered)
-
-    # Kjør kontroller
-    kontroller = mva_avstemming.build_mva_kontroller(df_filtered)
-
     # Hent klient-info
     try:
         import session as _session
@@ -59,6 +53,12 @@ def open_mva_avstemming(parent: tk.Misc, page: Any) -> None:
     except Exception:
         client = ""
         year = ""
+
+    # Bygg MVA-pivot fra filtrert data (med klient-mapping aktivert)
+    mva_pivot = build_mva_pivot(df_filtered, client=str(client) or None)
+
+    # Kjør kontroller
+    kontroller = mva_avstemming.build_mva_kontroller(df_filtered)
 
     win = tk.Toplevel(parent)
     win.title("MVA-avstemming")

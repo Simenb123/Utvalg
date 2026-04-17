@@ -1,32 +1,31 @@
 from __future__ import annotations
 
-import pandas as pd
+import views_rl_account_drill as drill
 
 
-def test_build_leaf_regnskapslinje_choices_returns_sorted_leaf_rows() -> None:
-    from views_rl_account_drill import build_leaf_regnskapslinje_choices
-
-    regnskapslinjer = pd.DataFrame(
-        {
-            "nr": [30, 10, 20],
-            "regnskapslinje": ["Sumlinje", "Salg", "Varekostnad"],
-            "sumpost": ["ja", "nei", "nei"],
-            "Formel": ["10+20", "", ""],
-        }
+def test_resolve_initial_choice_prefers_suggestion_when_available() -> None:
+    choice = drill._resolve_initial_choice(
+        ["10 - Salg", "20 - Kundefordringer"],
+        current_regnr=None,
+        current_regnskapslinje="",
+        suggested_regnr=20,
+        suggested_regnskapslinje="Kundefordringer",
     )
 
-    assert build_leaf_regnskapslinje_choices(regnskapslinjer) == [
-        (10, "Salg"),
-        (20, "Varekostnad"),
-    ]
+    assert choice == "20 - Kundefordringer"
 
 
-def test_format_and_parse_regnskapslinje_choice_roundtrip() -> None:
-    from views_rl_account_drill import format_regnskapslinje_choice, parse_regnskapslinje_choice
+def test_suggestion_info_text_summarizes_why_and_sign_note() -> None:
+    text = drill._suggestion_info_text(
+        suggested_regnr=1460,
+        suggested_regnskapslinje="Kundefordringer",
+        suggestion_reason="navn/alias: kundefordring",
+        suggestion_source="alias",
+        confidence_bucket="Middels",
+        sign_note="Fortegn passer med forventet normalbalanse.",
+    )
 
-    value = format_regnskapslinje_choice(610, "Kundefordringer")
-
-    assert value == "610 - Kundefordringer"
-    assert parse_regnskapslinje_choice(value) == 610
-    assert parse_regnskapslinje_choice("610") == 610
-    assert parse_regnskapslinje_choice("") is None
+    assert "Forslag: 1460 - Kundefordringer" in text
+    assert "Kilde: alias" in text
+    assert "Hvorfor: navn/alias: kundefordring" in text
+    assert "Fortegn:" in text

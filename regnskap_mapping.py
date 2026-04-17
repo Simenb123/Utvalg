@@ -96,6 +96,7 @@ def normalize_regnskapslinjer(df: "pd.DataFrame") -> "pd.DataFrame":
     c_sumnr = pick("sumnr", optional=True)
     c_sumnr2 = pick("sumnr2", optional=True)
     c_sluttsumnr = pick("sluttsumnr", optional=True)
+    c_rb = pick("resultat/balanse", "resultatbalanse", "rb", optional=True)
 
     out = pd.DataFrame()
     out["regnr"] = df[c_nr].map(_to_int)
@@ -121,6 +122,18 @@ def normalize_regnskapslinjer(df: "pd.DataFrame") -> "pd.DataFrame":
     out["sumnr"] = df[c_sumnr].map(_to_int) if c_sumnr else None
     out["sumnr2"] = df[c_sumnr2].map(_to_int) if c_sumnr2 else None
     out["sluttsumnr"] = df[c_sluttsumnr].map(_to_int) if c_sluttsumnr else None
+
+    if c_rb:
+        def _rb_norm(v):
+            s = str(v).strip().lower() if v is not None else ""
+            if s.startswith("balans"):
+                return "balanse"
+            if s.startswith("resultat"):
+                return "resultat"
+            return None
+        out["rb"] = df[c_rb].map(_rb_norm)
+    else:
+        out["rb"] = None
 
     out = out.dropna(subset=["regnr"]).copy()
     out["regnr"] = out["regnr"].astype(int)

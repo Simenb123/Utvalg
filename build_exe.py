@@ -129,8 +129,16 @@ except Exception:
 
 
 def _iter_hidden_imports(opts: BuildOptions) -> List[str]:
-    # app.py importerer ui_main via importlib, så den må eksplisitt inkluderes
-    base = ["ui_main"]
+    # app.py importerer ui_main via importlib, så den må eksplisitt inkluderes.
+    # Fagchat/RAG-avhengigheter importeres dynamisk via sys.path og må med.
+    base = [
+        "ui_main",
+        "openai",
+        "tiktoken",
+        "tiktoken_ext",
+        "tiktoken_ext.openai_public",
+        "dotenv",
+    ]
     extra = [s.strip() for s in (opts.extra_hidden_imports or []) if str(s).strip()]
     out: List[str] = []
     for item in [*base, *extra]:
@@ -167,6 +175,10 @@ def build_pyinstaller_args(project_root: Path, opts: BuildOptions, runtime_hook:
     # Hidden imports
     for mod in _iter_hidden_imports(opts):
         args.extend(["--hidden-import", mod])
+
+    # Collect all submodules for packages with complex internal structure
+    for pkg in ["chromadb"]:
+        args.extend(["--collect-all", pkg])
 
     bundled_rulebook = project_root / "a07_feature" / "defaults" / "global_full_a07_rulebook.json"
     if bundled_rulebook.exists():
@@ -245,7 +257,27 @@ def _copy_sidecar_files(project_root: Path, dist_dir: Path) -> None:
     except Exception as e:
         log.warning("Klarte ikke skrive %s: %s", hint_dst.name, e)
 
-    # 2) Preferences-fallback: legg med nåværende preferences-fil ved siden av exe.
+    # 2) Kildefiler-hint: kopier utvalg_sources_dir.txt hvis den finnes.
+    sources_hint_src = project_root / "utvalg_sources_dir.txt"
+    if sources_hint_src.exists():
+        sources_hint_dst = dist_dir / "utvalg_sources_dir.txt"
+        try:
+            shutil.copy2(sources_hint_src, sources_hint_dst)
+            log.info("Kopierte %s -> %s", sources_hint_src.name, sources_hint_dst)
+        except Exception as e:
+            log.warning("Klarte ikke kopiere %s: %s", sources_hint_src.name, e)
+    else:
+        # Skriv fra sources_dir() hvis tilgjengelig
+        src_dir = app_paths.sources_dir()
+        if src_dir:
+            sources_hint_dst = dist_dir / "utvalg_sources_dir.txt"
+            try:
+                sources_hint_dst.write_text(str(src_dir), encoding="utf-8")
+                log.info("Skrev %s -> %s", sources_hint_dst.name, src_dir)
+            except Exception as e:
+                log.warning("Klarte ikke skrive %s: %s", sources_hint_dst.name, e)
+
+    # 3) Preferences-fallback: legg med nåværende preferences-fil ved siden av exe.
     #    Frozen-modus migrerer denne inn i data_dir/.session ved første kjøring.
     pref_candidates = [
         project_root / ".session" / "preferences.json",

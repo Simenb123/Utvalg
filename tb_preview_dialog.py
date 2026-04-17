@@ -312,12 +312,18 @@ class TBPreviewDialog(tk.Toplevel):
             )
             return
 
-        # Read full file and standardize with user mapping
+        # Read full file and standardize with user mapping.
+        # Viktig: bruk samme header-robuste lesing som readeren, ellers blir
+        # Maestro-lignende filer lest med tittelrad som header ved import.
         try:
             if self._file_path.suffix.lower() in {".xlsx", ".xlsm", ".xls"}:
-                from trial_balance_reader import _guess_sheet_name, _clean_frame
+                from trial_balance_reader import (
+                    _guess_sheet_name,
+                    _clean_frame,
+                    _read_sheet_with_detected_header,
+                )
                 sn = _guess_sheet_name(self._file_path)
-                full_df = pd.read_excel(self._file_path, sheet_name=sn)
+                full_df = _read_sheet_with_detected_header(self._file_path, sn)
                 full_df = _clean_frame(full_df)
             else:
                 from trial_balance_reader import _clean_frame

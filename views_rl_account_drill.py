@@ -47,6 +47,63 @@ def parse_regnskapslinje_choice(value: object) -> int | None:
         return None
 
 
+def _resolve_initial_choice(
+    values: list[str],
+    *,
+    current_regnr: object,
+    current_regnskapslinje: str,
+    suggested_regnr: object = None,
+    suggested_regnskapslinje: str = "",
+) -> str:
+    current_regnr_int = parse_regnskapslinje_choice(current_regnr)
+    current_choice = (
+        format_regnskapslinje_choice(current_regnr_int, str(current_regnskapslinje or ""))
+        if current_regnr_int is not None
+        else ""
+    )
+    suggested_regnr_int = parse_regnskapslinje_choice(suggested_regnr)
+    suggested_choice = (
+        format_regnskapslinje_choice(suggested_regnr_int, str(suggested_regnskapslinje or ""))
+        if suggested_regnr_int is not None
+        else ""
+    )
+    if suggested_choice and suggested_choice in values:
+        return suggested_choice
+    if current_choice and current_choice in values:
+        return current_choice
+    return values[0] if values else ""
+
+
+def _mapping_info_text(konto: str, current_overrides: dict[str, int]) -> str:
+    if konto in current_overrides:
+        return f"Denne kontoen er overstyrt til regnskapslinje {current_overrides[konto]}."
+    return "Denne kontoen bruker standard intervall-mapping."
+
+
+def _suggestion_info_text(
+    *,
+    suggested_regnr: object = None,
+    suggested_regnskapslinje: str = "",
+    suggestion_reason: str = "",
+    suggestion_source: str = "",
+    confidence_bucket: str = "",
+    sign_note: str = "",
+) -> str:
+    regnr = parse_regnskapslinje_choice(suggested_regnr)
+    if regnr is None:
+        return ""
+    lines = [f"Forslag: {format_regnskapslinje_choice(regnr, suggested_regnskapslinje)}"]
+    if confidence_bucket:
+        lines.append(f"Tillit: {confidence_bucket}")
+    if suggestion_source:
+        lines.append(f"Kilde: {str(suggestion_source).replace('_', ' ')}")
+    if suggestion_reason:
+        lines.append(f"Hvorfor: {suggestion_reason}")
+    if sign_note:
+        lines.append(f"Fortegn: {sign_note}")
+    return "\n".join(lines)
+
+
 def open_account_mapping_dialog(
     master: tk.Misc,
     *,
@@ -55,6 +112,12 @@ def open_account_mapping_dialog(
     kontonavn: str,
     current_regnr: object,
     current_regnskapslinje: str,
+    suggested_regnr: object = None,
+    suggested_regnskapslinje: str = "",
+    suggestion_reason: str = "",
+    suggestion_source: str = "",
+    confidence_bucket: str = "",
+    sign_note: str = "",
     regnskapslinjer: Optional[pd.DataFrame] = None,
     on_saved: Optional[Callable[[], None]] = None,
     on_removed: Optional[Callable[[], None]] = None,
@@ -66,9 +129,6 @@ def open_account_mapping_dialog(
     if not choice_pairs:
         messagebox.showerror("Endre mapping", "Fant ingen regnskapslinjer å mappe mot.", parent=master)
         return
-
-    current_regnr_int = parse_regnskapslinje_choice(current_regnr)
-    current_choice = format_regnskapslinje_choice(current_regnr_int or 0, str(current_regnskapslinje or ""))
 
     try:
         import regnskap_client_overrides
@@ -94,19 +154,38 @@ def open_account_mapping_dialog(
     ttk.Label(frm, text="Ny regnskapslinje:").grid(row=2, column=0, sticky="w")
 
     values = [format_regnskapslinje_choice(regnr, navn) for regnr, navn in choice_pairs]
-    var_choice = tk.StringVar(master=win, value=current_choice if current_choice in values else values[0])
+    initial_choice = _resolve_initial_choice(
+        values,
+        current_regnr=current_regnr,
+        current_regnskapslinje=current_regnskapslinje,
+        suggested_regnr=suggested_regnr,
+        suggested_regnskapslinje=suggested_regnskapslinje,
+    )
+    var_choice = tk.StringVar(master=win, value=initial_choice)
     cmb = ttk.Combobox(frm, textvariable=var_choice, values=values, state="readonly", width=40)
     cmb.grid(row=2, column=1, sticky="ew", padx=(8, 0))
     frm.columnconfigure(1, weight=1)
 
-    if konto in current_overrides:
-        info_text = f"Denne kontoen er overstyrt til regnskapslinje {current_overrides[konto]}."
-    else:
-        info_text = "Denne kontoen bruker standard intervall-mapping."
+    info_text = _mapping_info_text(konto, current_overrides)
     ttk.Label(frm, text=info_text).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    suggestion_text = _suggestion_info_text(
+        suggested_regnr=suggested_regnr,
+        suggested_regnskapslinje=suggested_regnskapslinje,
+        suggestion_reason=suggestion_reason,
+        suggestion_source=suggestion_source,
+        confidence_bucket=confidence_bucket,
+        sign_note=sign_note,
+    )
+    if suggestion_text:
+        ttk.Label(
+            frm,
+            text=suggestion_text,
+            justify="left",
+            wraplength=420,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
     btns = ttk.Frame(frm)
-    btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(12, 0))
+    btns.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
 
     def _save() -> None:
         regnr = parse_regnskapslinje_choice(var_choice.get())
@@ -364,6 +443,12 @@ class RLAccountDrillDialog(tk.Toplevel):
             kontonavn=str(selected.get("Kontonavn", "") or "").strip(),
             current_regnr=selected.get("Nr"),
             current_regnskapslinje=str(selected.get("Regnskapslinje", "") or "").strip(),
+            suggested_regnr=selected.get("Forslag Nr"),
+            suggested_regnskapslinje=str(selected.get("Forslag Regnskapslinje", "") or "").strip(),
+            suggestion_reason=str(selected.get("Forslag Hvorfor", "") or "").strip(),
+            suggestion_source=str(selected.get("Forslag Kilde", "") or "").strip(),
+            confidence_bucket=str(selected.get("Forslag Tillit", "") or "").strip(),
+            sign_note=str(selected.get("Fortegn-notat", "") or "").strip(),
             regnskapslinjer=self.regnskapslinjer,
             on_saved=lambda: self._reload_data(konto_to_focus=konto),
             on_removed=lambda: self._reload_data(konto_to_focus=konto),

@@ -309,7 +309,10 @@ def test_account_pivot_refresh_restores_selected_account(monkeypatch) -> None:
         _maybe_auto_fit_pivot_tree=lambda: None,
     )
 
-    page_analyse_pivot.refresh_pivot(page=page)
+    # Test HB-konto-style refresh direkte: etter Pulje A dirigerer refresh_pivot
+    # alle ikke-Regnskapslinje-moduser til SB-konto (som krever _get_effective_sb_df).
+    # Denne testen verifiserer at HB-pivotens refresh fortsatt restaurerer valgt konto.
+    page_analyse_pivot.refresh_hb_konto_pivot(page=page)
 
     assert tree.selection_calls, "Refresh should restore a selection when one existed before refresh"
     selected_item = tree.selection_calls[-1][0]
@@ -439,3 +442,134 @@ def test_rebalance_pivot_tree_columns_keeps_widths_when_no_extra_space() -> None
     assert tree.column("Kontonavn", option="width") == 210
     assert tree.column("Sum", option="width") == 110
     assert tree.column("Antall", option="width") == 60
+
+
+def test_adapt_pivot_columns_for_mode_migrates_legacy_rl_default_columns(monkeypatch) -> None:
+    import page_analyse_columns
+
+    class _DummyTree:
+        def __init__(self):
+            self.columns = (
+                "Konto",
+                "Kontonavn",
+                "IB",
+                "Endring",
+                "Sum",
+                "AO_belop",
+                "UB_for_ao",
+                "UB_etter_ao",
+                "Antall",
+            )
+            self.displaycolumns = ()
+
+        def __getitem__(self, key):
+            if key == "columns":
+                return self.columns
+            raise KeyError(key)
+
+        def __setitem__(self, key, value):
+            if key == "displaycolumns":
+                self.displaycolumns = tuple(value)
+                return
+            raise KeyError(key)
+
+        def heading(self, _col, option=None):
+            if option == "text":
+                return "synlig"
+            return {"text": "synlig"}
+
+    tree = _DummyTree()
+    page = SimpleNamespace(
+        _var_aggregering=_DummyVar("Regnskapslinje"),
+        _pivot_visible_cols=[
+            "Konto",
+            "Kontonavn",
+            "IB",
+            "Endring",
+            "Sum",
+            "AO_belop",
+            "UB_for_ao",
+            "UB_etter_ao",
+            "Antall",
+        ],
+        PIVOT_COLS=tree.columns,
+        PIVOT_COLS_PINNED=("Konto", "Kontonavn"),
+        PIVOT_COLS_DEFAULT_VISIBLE=("Konto", "Kontonavn", "Endring", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_KONTO=("Konto", "Kontonavn", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_RL=("Konto", "Kontonavn", "IB", "Endring", "Sum", "Antall"),
+        _pivot_tree=tree,
+    )
+
+    monkeypatch.setattr(page_analyse_columns, "persist_pivot_visible_columns", lambda **_k: None)
+
+    page_analyse_columns.adapt_pivot_columns_for_mode(page=page)
+
+    assert page._pivot_visible_cols == ["Konto", "Kontonavn", "IB", "Endring", "Sum", "Antall"]
+    assert tree.displaycolumns == ("Konto", "Kontonavn", "IB", "Endring", "Sum", "Antall")
+
+
+def test_pivot_default_for_mode_rl_with_prev_year() -> None:
+    """RL-modus med fjor\u00e5rsdata gir kanonisk rekkefølge."""
+    import page_analyse_columns
+    import pandas as pd
+
+    page = SimpleNamespace(
+        _var_aggregering=_DummyVar("Regnskapslinje"),
+        PIVOT_COLS_DEFAULT_VISIBLE=("Konto", "Kontonavn", "Endring", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_KONTO=("Konto", "Kontonavn", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_RL=(
+            "Konto", "Kontonavn", "Sum", "UB_fjor",
+            "Endring", "Endring_fjor", "Endring_pct", "Antall",
+        ),
+        _rl_sb_prev_df=pd.DataFrame({"konto": ["1000"], "ub": [5.0]}),
+    )
+
+    out = page_analyse_columns.pivot_default_for_mode(page=page)
+    assert out == (
+        "Konto", "Kontonavn", "Sum", "UB_fjor",
+        "Endring", "Endring_fjor", "Endring_pct", "Antall",
+    )
+
+
+def test_pivot_default_for_mode_rl_without_prev_year() -> None:
+    """RL-modus uten fjor\u00e5rsdata dropper UB_fjor/Endring_fjor/Endring_pct
+    uten å sette inn intern 'Endring' som fallback (slank visning)."""
+    import page_analyse_columns
+
+    page = SimpleNamespace(
+        _var_aggregering=_DummyVar("Regnskapslinje"),
+        PIVOT_COLS_DEFAULT_VISIBLE=("Konto", "Kontonavn", "Endring", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_KONTO=("Konto", "Kontonavn", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_RL=(
+            "Konto", "Kontonavn", "Sum", "UB_fjor",
+            "Endring_fjor", "Endring_pct", "Antall",
+        ),
+        _rl_sb_prev_df=None,
+    )
+
+    out = page_analyse_columns.pivot_default_for_mode(page=page)
+    assert "Endring" not in out
+    assert out == ("Konto", "Kontonavn", "Sum", "Antall")
+
+
+def test_pivot_default_for_mode_legacy_konto_maps_to_sb_konto() -> None:
+    """Legacy 'Konto' skal migreres til SB-konto-modus."""
+    import page_analyse_columns
+
+    sb_default = (
+        "Konto", "Kontonavn", "Sum", "UB_fjor",
+        "Endring_fjor", "Endring_pct", "Antall",
+    )
+    page = SimpleNamespace(
+        _var_aggregering=_DummyVar("Konto"),
+        PIVOT_COLS_DEFAULT_VISIBLE=("Konto", "Kontonavn", "Endring", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_KONTO=("Konto", "Kontonavn", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_HB_KONTO=("Konto", "Kontonavn", "Sum", "Antall"),
+        PIVOT_COLS_DEFAULT_SB_KONTO=sb_default,
+        PIVOT_COLS_DEFAULT_RL=sb_default,
+    )
+
+    # Uten fjorsdata gir SB-konto en slank visning uten 'Endring' —
+    # fallback-kolonnen er tilgjengelig via kolonne-menyen.
+    out = page_analyse_columns.pivot_default_for_mode(page=page)
+    assert out == ("Konto", "Kontonavn", "Sum", "Antall")

@@ -98,6 +98,14 @@ def test_suggest_mappings_filters_irrelevant_accounts_and_keeps_columns_stable()
         "HitTokens",
         "HistoryAccounts",
         "Explain",
+        "UsedRulebook",
+        "UsedHistory",
+        "UsedUsage",
+        "UsedSpecialAdd",
+        "UsedResidual",
+        "AmountEvidence",
+        "AmountDiffAbs",
+        "AnchorSignals",
     ]
     assert not df["ForslagKontoer"].astype(str).str.contains("1000").any()
 
@@ -107,6 +115,8 @@ def test_suggest_mappings_filters_irrelevant_accounts_and_keeps_columns_stable()
     assert bool(fast["WithinTolerance"]) is True
     assert str(fast["Basis"]).strip() != ""
     assert "basis=" in str(fast["Explain"])
+    assert str(fast["AmountEvidence"]) in {"exact", "within_tolerance"}
+    assert float(fast["AmountDiffAbs"]) <= 1.0
 
     bonus = df[df["Kode"] == "bonus"].iloc[0]
     assert bonus["ForslagKontoer"] == "5090"
@@ -143,6 +153,7 @@ def test_suggest_residual_only_matches_remaining_amount():
     assert row["ForslagKontoer"] == "5010"
     assert row["GL_Sum"] == 1_000_000
     assert bool(row["WithinTolerance"]) is True
+    assert bool(row["UsedResidual"]) is True
 
 
 def test_apply_suggestion_to_mapping_respects_existing_mapping_by_default():
@@ -262,6 +273,9 @@ def test_suggest_mappings_applies_rulebook_special_add_in_solver(tmp_path):
     assert row["GL_Sum"] == 300.0
     assert bool(row["WithinTolerance"]) is True
     assert "special_add" in str(row["Explain"])
+    assert bool(row["UsedSpecialAdd"]) is True
+    assert bool(row["UsedRulebook"]) is True
+    assert "special_add" in str(row["AnchorSignals"])
 
 
 def test_suggest_mappings_expected_sign_prefers_negative_match(tmp_path):
@@ -312,6 +326,108 @@ def test_suggest_mappings_expected_sign_prefers_negative_match(tmp_path):
     assert row["GL_Sum"] == -59009.1
     assert bool(row["WithinTolerance"]) is True
     assert "sign=-1" in str(row["Explain"])
+    assert bool(row["UsedRulebook"]) is True
+    assert "sign" in str(row["AnchorSignals"])
+
+
+def test_suggest_mappings_sign_evidence_only_when_combo_matches_sign(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "trekkILoennForFerie": {
+                        "basis": "Endring",
+                        "allowed_ranges": ["5200-5399"],
+                        "keywords": ["trekk", "ferie"],
+                        "expected_sign": -1,
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    a07 = pd.DataFrame([{"Kode": "trekkILoennForFerie", "Navn": "Trekk i loenn for ferie", "Belop": -59009.1}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5290", "Navn": "Trekk i loenn for ferie", "Endring": -59009.1},
+            {"Konto": "5291", "Navn": "Trekk i loenn for ferie", "Endring": 59009.1},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={},
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=5,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="Endring",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+        rulebook_path=str(rulebook_path),
+    )
+
+    matching = df.loc[df["ForslagKontoer"] == "5290"].iloc[0]
+    assert "sign" in str(matching["AnchorSignals"])
+    assert bool(matching["UsedRulebook"]) is True
+
+    wrong = df.loc[df["ForslagKontoer"] == "5291"]
+    assert not wrong.empty, "forventet at feil-fortegn-kandidaten også emittes"
+    wrong_row = wrong.iloc[0]
+    assert "sign" not in str(wrong_row["AnchorSignals"]).split(",")
+
+
+def test_suggest_mappings_keyword_match_sets_used_rulebook(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "bonus": {
+                        "label": "Bonus",
+                        "keywords": ["bonus"],
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    a07 = pd.DataFrame([{"Kode": "bonus", "Navn": "Bonus", "Belop": 5000.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5090", "Navn": "Bonus utbetalt", "Endring": 5000.0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={},
+        max_combo=1,
+        candidates_per_code=5,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="Endring",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+        rulebook_path=str(rulebook_path),
+    )
+
+    row = df.loc[df["Kode"] == "bonus"].iloc[0]
+    assert row["ForslagKontoer"] == "5090"
+    assert "bonus" in str(row["HitTokens"])
+    assert bool(row["UsedRulebook"]) is True
+    assert "navnetreff" in str(row["AnchorSignals"])
 
 
 def test_suggest_mappings_prioritizes_previous_year_mapping_when_candidates_are_equal():
@@ -344,3 +460,5 @@ def test_suggest_mappings_prioritizes_previous_year_mapping_when_candidates_are_
     assert bool(row["WithinTolerance"]) is True
     assert row["HistoryAccounts"] == "5001"
     assert "historikk=5001" in str(row["Explain"])
+    assert bool(row["UsedHistory"]) is True
+    assert "historikk" in str(row["AnchorSignals"])

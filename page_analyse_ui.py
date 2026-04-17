@@ -256,6 +256,11 @@ def build_ui(
     if var_max is None:
         var_max = tk.StringVar(master=page, value="")
 
+    rb_filter_options = ("Alle", "Balanse", "Resultat")
+    var_rb = getattr(page, "_var_rb", None)
+    if var_rb is None:
+        var_rb = tk.StringVar(master=page, value=rb_filter_options[0])
+
     mva_code_all_label = str(getattr(page, "MVA_CODE_ALL_LABEL", "Alle"))
     var_mva_code = getattr(page, "_var_mva_code", None)
     if var_mva_code is None:
@@ -379,25 +384,13 @@ def build_ui(
     )
     cmb_dir.grid(row=0, column=3, sticky="w", padx=(4, 12))
 
-    ttk.Label(row1, text="Aggregering:").grid(row=0, column=4, sticky="w", padx=(0, 2))
+    # Aggregering flyttes til over venstre pivot-panel (se lenger ned)
     var_agg = getattr(page, "_var_aggregering", None)
     if var_agg is None:
-        var_agg = tk.StringVar(master=page, value="Konto")
-    cmb_agg = ttk.Combobox(
-        row1,
-        textvariable=var_agg,
-        values=["Konto", "Regnskapslinje", "MVA-kode"],
-        width=16,
-        state="readonly",
-    )
-    cmb_agg.grid(row=0, column=5, sticky="w", padx=(0, 12))
-    _agg_changed = getattr(page, "_on_aggregering_changed", None)
-    if callable(_agg_changed):
-        cmb_agg.bind("<<ComboboxSelected>>", lambda _e: _agg_changed())
-    page._cmb_agg = cmb_agg
+        var_agg = tk.StringVar(master=page, value="Saldobalanse")
     page._var_aggregering = var_agg
 
-    ttk.Label(row1, text="MVA-kode:").grid(row=0, column=6, sticky="w", padx=(0, 2))
+    ttk.Label(row1, text="MVA-kode:").grid(row=0, column=4, sticky="w", padx=(0, 2))
     cmb_mva_code = ttk.Combobox(
         row1,
         textvariable=var_mva_code,
@@ -405,38 +398,46 @@ def build_ui(
         width=12,
         state="readonly",
     )
-    cmb_mva_code.grid(row=0, column=7, sticky="w", padx=(0, 12))
+    cmb_mva_code.grid(row=0, column=5, sticky="w", padx=(0, 12))
 
-    # Spacer to push buttons to the right (keeps room for e.g. date/periode filters later)
-    row1.grid_columnconfigure(8, weight=1)
+    # Spacer to push buttons to the right
+    row1.grid_columnconfigure(6, weight=1)
 
-    columns_cmd = getattr(page, "_open_tx_column_chooser", None)
+    columns_cmd = (
+        getattr(page, "_open_column_chooser", None)
+        or getattr(page, "_open_tx_column_chooser", None)
+    )
     btn_columns = ttk.Button(
         row1,
         text="Kolonner...",
         command=columns_cmd if callable(columns_cmd) else None,
         state=("normal" if callable(columns_cmd) else "disabled"),
     )
-    btn_columns.grid(row=0, column=9, padx=(0, 6), sticky="e")
+    btn_columns.grid(row=0, column=7, padx=(0, 6), sticky="e")
 
     btn_reset = ttk.Button(row1, text="Nullstill", command=page._reset_filters)
-    btn_reset.grid(row=0, column=10, padx=(0, 6), sticky="e")
+    btn_reset.grid(row=0, column=8, padx=(0, 6), sticky="e")
 
     btn_select_all = ttk.Button(row1, text="Marker alle", command=page._select_all_accounts)
-    btn_select_all.grid(row=0, column=11, padx=(0, 6), sticky="e")
+    btn_select_all.grid(row=0, column=9, padx=(0, 6), sticky="e")
+
+    reports_btn = ttk.Menubutton(row1, text="Rapporter ▾", direction="below")
+    reports_btn.grid(row=0, column=10, padx=(0, 6), sticky="e")
 
     actions_btn = ttk.Menubutton(row1, text="Handlinger ▾", direction="below")
-    actions_btn.grid(row=0, column=12, sticky="e")
+    actions_btn.grid(row=0, column=11, sticky="e")
 
     # Datanivå-indikator (Hovedbok / Kun saldobalanse)
     data_level_var = getattr(page, "_var_data_level", None)
     if data_level_var is not None:
         lbl_data_level = ttk.Label(row1, textvariable=data_level_var, style="Muted.TLabel")
-        lbl_data_level.grid(row=0, column=13, sticky="e", padx=(12, 0))
+        lbl_data_level.grid(row=0, column=12, sticky="e", padx=(12, 0))
         page._lbl_data_level = lbl_data_level
 
     actions_menu = tk.Menu(actions_btn, tearoff=False)
     actions_btn["menu"] = actions_menu
+    reports_menu = tk.Menu(reports_btn, tearoff=False)
+    reports_btn["menu"] = reports_menu
 
     # Send markerte kontoer til Utvalg (støtter flere metode-navn)
     send_to_utvalg_cmd = getattr(page, "_send_to_utvalg", None) or getattr(page, "_send_selected_to_utvalg", None)
@@ -458,6 +459,12 @@ def build_ui(
     else:
         actions_menu.add_command(label="RL-drilldown til kontoer", state="disabled")
 
+    open_handl_cmd = getattr(page, "_open_handlinger_for_selected_rl", None)
+    if callable(open_handl_cmd):
+        actions_menu.add_command(label="Åpne Handlinger for valgt RL", command=open_handl_cmd)
+    else:
+        actions_menu.add_command(label="Åpne Handlinger for valgt RL", state="disabled")
+
     nr_series_cmd = getattr(page, "_open_nr_series_control", None)
     if callable(nr_series_cmd):
         actions_menu.add_command(label="Nr.-seriekontroll (valgt scope)", command=nr_series_cmd)
@@ -466,51 +473,51 @@ def build_ui(
 
     export_rl_cmd = getattr(page, "_export_regnskapsoppstilling_excel", None)
     if callable(export_rl_cmd):
-        actions_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", command=export_rl_cmd)
+        reports_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", command=export_rl_cmd)
     else:
-        actions_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", state="disabled")
+        reports_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", state="disabled")
 
     export_nk_cmd = getattr(page, "_export_nokkeltall_html", None)
     if callable(export_nk_cmd):
-        actions_menu.add_command(label="Nøkkeltallsrapport (HTML)", command=export_nk_cmd)
+        reports_menu.add_command(label="Nøkkeltallsrapport (HTML)", command=export_nk_cmd)
     else:
-        actions_menu.add_command(label="Nøkkeltallsrapport (HTML)", state="disabled")
+        reports_menu.add_command(label="Nøkkeltallsrapport (HTML)", state="disabled")
 
     export_nk_pdf_cmd = getattr(page, "_export_nokkeltall_pdf", None)
     if callable(export_nk_pdf_cmd):
-        actions_menu.add_command(label="Nøkkeltallsrapport (PDF)", command=export_nk_pdf_cmd)
+        reports_menu.add_command(label="Nøkkeltallsrapport (PDF)", command=export_nk_pdf_cmd)
     else:
-        actions_menu.add_command(label="Nøkkeltallsrapport (PDF)", state="disabled")
+        reports_menu.add_command(label="Nøkkeltallsrapport (PDF)", state="disabled")
 
     flowchart_html_cmd = getattr(page, "_export_motpost_flowchart_html", None)
     if callable(flowchart_html_cmd):
-        actions_menu.add_command(label="Motpost-flytdiagram (HTML)", command=flowchart_html_cmd)
+        reports_menu.add_command(label="Motpost-flytdiagram (HTML)", command=flowchart_html_cmd)
     else:
-        actions_menu.add_command(label="Motpost-flytdiagram (HTML)", state="disabled")
+        reports_menu.add_command(label="Motpost-flytdiagram (HTML)", state="disabled")
 
     flowchart_pdf_cmd = getattr(page, "_export_motpost_flowchart_pdf", None)
     if callable(flowchart_pdf_cmd):
-        actions_menu.add_command(label="Motpost-flytdiagram (PDF)", command=flowchart_pdf_cmd)
+        reports_menu.add_command(label="Motpost-flytdiagram (PDF)", command=flowchart_pdf_cmd)
     else:
-        actions_menu.add_command(label="Motpost-flytdiagram (PDF)", state="disabled")
+        reports_menu.add_command(label="Motpost-flytdiagram (PDF)", state="disabled")
 
     ib_ub_cmd = getattr(page, "_export_ib_ub_control", None)
     if callable(ib_ub_cmd):
-        actions_menu.add_command(label="SB/HB Avstemming (IB/UB-kontroll)", command=ib_ub_cmd)
+        reports_menu.add_command(label="SB/HB Avstemming", command=ib_ub_cmd)
     else:
-        actions_menu.add_command(label="SB/HB Avstemming (IB/UB-kontroll)", state="disabled")
+        reports_menu.add_command(label="SB/HB Avstemming", state="disabled")
+
+    continuity_cmd = getattr(page, "_export_ib_ub_continuity", None)
+    if callable(continuity_cmd):
+        reports_menu.add_command(label="IB/UB-kontinuitetskontroll", command=continuity_cmd)
+    else:
+        reports_menu.add_command(label="IB/UB-kontinuitetskontroll", state="disabled")
 
     hb_diff_cmd = getattr(page, "_export_hb_version_diff", None)
     if callable(hb_diff_cmd):
-        actions_menu.add_command(label="HB Versjonsdiff", command=hb_diff_cmd)
+        reports_menu.add_command(label="HB Versjonsdiff", command=hb_diff_cmd)
     else:
-        actions_menu.add_command(label="HB Versjonsdiff", state="disabled")
-
-    mva_avstemming_cmd = getattr(page, "_open_mva_avstemming", None)
-    if callable(mva_avstemming_cmd):
-        actions_menu.add_command(label="MVA-avstemming (Skatteetaten)", command=mva_avstemming_cmd)
-    else:
-        actions_menu.add_command(label="MVA-avstemming (Skatteetaten)", state="disabled")
+        reports_menu.add_command(label="HB Versjonsdiff", state="disabled")
 
     ao_cmd = getattr(page, "_open_tilleggsposteringer", None)
     if callable(ao_cmd):
@@ -608,14 +615,6 @@ def build_ui(
     )
     cmb_mva.grid(row=0, column=9, sticky="w", padx=(4, 0))
 
-    btn_mva_setup = ttk.Button(
-        row2,
-        text="MVA-oppsett\u2026",
-        command=page._open_mva_config,
-        style="Secondary.TButton",
-    )
-    btn_mva_setup.grid(row=0, column=10, sticky="w", padx=(8, 0))
-
     # Skjul sumposter (kun relevant for Regnskapslinje-aggregering)
     var_hide_sumposter = getattr(page, "_var_hide_sumposter", None)
     if var_hide_sumposter is not None:
@@ -627,15 +626,33 @@ def build_ui(
         cb_hide_sum.grid(row=0, column=11, sticky="w", padx=(12, 0))
         page._cb_hide_sumposter = cb_hide_sum
 
-    # Skjul nullsaldo-kontoer
+    # Vis nullsaldo-kontoer (speiler _var_hide_zero: checked = vis, unchecked = skjul).
     var_hide_zero = getattr(page, "_var_hide_zero", None)
     if var_hide_zero is not None:
-        cb_hide_zero = ttk.Checkbutton(
-            row2, text="Skjul 0",
-            variable=var_hide_zero,
-            command=page._on_hide_zero_changed,
+        var_show_zero = getattr(page, "_var_show_zero", None)
+        if var_show_zero is None:
+            try:
+                var_show_zero = tk.BooleanVar(master=page, value=not bool(var_hide_zero.get()))
+            except Exception:
+                var_show_zero = tk.BooleanVar(value=not bool(var_hide_zero.get()))
+            page._var_show_zero = var_show_zero
+
+        def _on_show_zero_toggle() -> None:
+            try:
+                var_hide_zero.set(not bool(var_show_zero.get()))
+            except Exception:
+                pass
+            try:
+                page._on_hide_zero_changed()
+            except Exception:
+                pass
+
+        cb_show_zero = ttk.Checkbutton(
+            row2, text="Vis nullsaldo",
+            variable=var_show_zero,
+            command=_on_show_zero_toggle,
         )
-        cb_hide_zero.grid(row=0, column=12, sticky="w", padx=(8, 0))
+        cb_show_zero.grid(row=0, column=12, sticky="w", padx=(8, 0))
 
     # Inkluder tilleggsposteringer (ÅO) med indikator
     var_include_ao = getattr(page, "_var_include_ao", None)
@@ -752,6 +769,7 @@ def build_ui(
     _bind_var_write(var_max, _live_filter_cb)
     _bind_var_write(var_mva_code, _live_filter_cb)
     _bind_var_write(var_mva_mode, _live_filter_cb)
+    _bind_var_write(var_rb, _live_filter_cb)
     _bind_var_write(var_max_rows, _max_rows_cb)
 
     # Expose key widgets for tests / senere tweaks
@@ -776,13 +794,12 @@ def build_ui(
     body = ttk.Frame(page)
     body.pack(fill="both", expand=True, padx=6, pady=(2, 6))
     body.columnconfigure(0, weight=1)
-    body.rowconfigure(2, weight=1)
+    body.rowconfigure(1, weight=1)
 
     lbl_tx_summary = ttk.Label(body, text="Ingen kontoer valgt.")
-    lbl_tx_summary.grid(row=0, column=0, sticky="w", pady=(0, 4))
 
     mapping_banner = ttk.Frame(body, style="Card.TFrame")
-    mapping_banner.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+    mapping_banner.grid(row=0, column=0, sticky="ew", pady=(0, 4))
     mapping_banner.grid_remove()
     mapping_banner.columnconfigure(1, weight=1)
     ttk.Label(mapping_banner, text="Mappingkontroll:", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(8, 6), pady=6)
@@ -806,7 +823,7 @@ def build_ui(
     paned_cls = getattr(ttk, "Panedwindow", None)
     if paned_cls is not None:
         split_body = paned_cls(body, orient="horizontal")
-        split_body.grid(row=2, column=0, sticky="nsew")
+        split_body.grid(row=1, column=0, sticky="nsew")
         pivot_frame = ttk.Frame(split_body)
         tx_frame = ttk.Frame(split_body)
         try:
@@ -821,14 +838,94 @@ def build_ui(
         body.columnconfigure(0, weight=1, uniform="analyse")
         body.columnconfigure(1, weight=3, uniform="analyse")
         pivot_frame = ttk.Frame(body)
-        pivot_frame.grid(row=2, column=0, sticky="nsew", padx=(0, 6))
+        pivot_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 6))
         tx_frame = ttk.Frame(body)
-        tx_frame.grid(row=2, column=1, sticky="nsew")
+        tx_frame.grid(row=1, column=1, sticky="nsew")
         split_body = None
 
     # Pivot (konto-sammendrag)
-    pivot_frame.rowconfigure(0, weight=1)
+    pivot_frame.rowconfigure(2, weight=1)
     pivot_frame.columnconfigure(0, weight=1)
+
+    # Header med Aggregering-dropdown + sammendrag over pivottreet
+    pivot_header = ttk.Frame(pivot_frame)
+    pivot_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+
+    ttk.Label(pivot_header, text="Aggregering:").grid(row=0, column=0, padx=(0, 4))
+    cmb_agg = ttk.Combobox(
+        pivot_header,
+        textvariable=var_agg,
+        values=["Saldobalanse", "Regnskapslinje"],
+        width=16,
+        state="readonly",
+    )
+    cmb_agg.grid(row=0, column=1, sticky="w")
+    _agg_changed = getattr(page, "_on_aggregering_changed", None)
+    if callable(_agg_changed):
+        cmb_agg.bind("<<ComboboxSelected>>", lambda _e: _agg_changed())
+    page._cmb_agg = cmb_agg
+
+    ttk.Label(pivot_header, text="Type:").grid(row=0, column=2, padx=(12, 4))
+    cmb_rb = ttk.Combobox(
+        pivot_header,
+        textvariable=var_rb,
+        values=list(rb_filter_options),
+        width=10,
+        state="readonly",
+    )
+    cmb_rb.grid(row=0, column=3, sticky="w")
+    _rb_changed = (
+        getattr(page, "_on_rb_filter_changed", None)
+        or getattr(page, "_schedule_apply_filters", None)
+    )
+    if callable(_rb_changed):
+        cmb_rb.bind("<<ComboboxSelected>>", lambda _e: _rb_changed())
+    page._cmb_rb = cmb_rb
+
+    # Sammendragsetikett (f.eks. "74 kontoer | Sum UB: -12 643 322,74")
+    pivot_header.columnconfigure(4, weight=1)
+    lbl_tx_summary.grid(in_=pivot_header, row=0, column=5, sticky="e", padx=(8, 0))
+
+    # Søkefelt over pivot-treet (Ctrl+F fokuserer hit)
+    _pivot_search_var = tk.StringVar()
+    pivot_search_entry = ttk.Entry(pivot_frame, textvariable=_pivot_search_var)
+    pivot_search_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+    pivot_search_entry.insert(0, "Sok konto...")
+    pivot_search_entry.configure(foreground="gray")
+    page._pivot_search_var = _pivot_search_var  # type: ignore[attr-defined]
+    page._pivot_search_entry = pivot_search_entry  # type: ignore[attr-defined]
+
+    _pivot_search_placeholder = [True]
+
+    def _pivot_search_focus_in(_e=None):
+        if _pivot_search_placeholder[0]:
+            pivot_search_entry.delete(0, "end")
+            pivot_search_entry.configure(foreground="")
+            _pivot_search_placeholder[0] = False
+
+    def _pivot_search_focus_out(_e=None):
+        if not _pivot_search_var.get().strip():
+            pivot_search_entry.insert(0, "Sok konto...")
+            pivot_search_entry.configure(foreground="gray")
+            _pivot_search_placeholder[0] = True
+
+    def _pivot_search_changed(*_args):
+        if _pivot_search_placeholder[0]:
+            return
+        query = _pivot_search_var.get().strip().lower()
+        if not query:
+            # Fjern filter — vis alle (kall page._apply_pivot_filter hvis finnes)
+            _fn = getattr(page, "_on_pivot_search", None)
+            if callable(_fn):
+                _fn("")
+            return
+        _fn = getattr(page, "_on_pivot_search", None)
+        if callable(_fn):
+            _fn(query)
+
+    pivot_search_entry.bind("<FocusIn>", _pivot_search_focus_in)
+    pivot_search_entry.bind("<FocusOut>", _pivot_search_focus_out)
+    _pivot_search_var.trace_add("write", _pivot_search_changed)
 
     pivot_tree = ttk.Treeview(
         pivot_frame,
@@ -836,7 +933,7 @@ def build_ui(
         show="headings",
         selectmode="extended",
     )
-    pivot_tree.grid(row=0, column=0, sticky="nsew")
+    pivot_tree.grid(row=2, column=0, sticky="nsew")
     for col in pivot_tree["columns"]:
         pivot_tree.heading(col, text=col)
         pivot_tree.column(
@@ -847,31 +944,18 @@ def build_ui(
         )
 
     try:
-        import tkinter.font as tkfont  # type: ignore
+        from theme import style_treeview_tags
 
-        sum_font = tkfont.nametofont("TkDefaultFont").copy()
-        sum_font.configure(weight="bold")
-        major_font = tkfont.nametofont("TkDefaultFont").copy()
-        major_font.configure(weight="bold")
-        # Delsummer: subtil bakgrunn
-        pivot_tree.tag_configure("sumline", background="#EDF1F5", foreground="#2C4A6E", font=sum_font)
-        # Hovedsummer (Driftsresultat, Årsresultat etc.): sterkere visuell markering
-        pivot_tree.tag_configure("sumline_major", background="#D6E2EF", foreground="#1A3350", font=major_font)
-    except Exception:
-        try:
-            pivot_tree.tag_configure("sumline", background="#EDF1F5", foreground="#2C4A6E")
-            pivot_tree.tag_configure("sumline_major", background="#D6E2EF", foreground="#1A3350")
-        except Exception:
-            pass
-    try:
-        pivot_tree.tag_configure("commented", foreground="#1565C0")
+        style_treeview_tags(
+            pivot_tree, "sumline", "sumline_major", "sumline_total", "commented", "zebra"
+        )
     except Exception:
         pass
 
     pv_scroll = ttk.Scrollbar(pivot_frame, orient="vertical", command=pivot_tree.yview)
-    pv_scroll.grid(row=0, column=1, sticky="ns")
+    pv_scroll.grid(row=2, column=1, sticky="ns")
     pv_hscroll = ttk.Scrollbar(pivot_frame, orient="horizontal", command=pivot_tree.xview)
-    pv_hscroll.grid(row=1, column=0, sticky="ew")
+    pv_hscroll.grid(row=3, column=0, sticky="ew")
     pivot_tree.configure(yscrollcommand=pv_scroll.set, xscrollcommand=pv_hscroll.set)
 
     # Høyreklikkmeny for pivot-kolonner (vis/skjul)
@@ -1038,7 +1122,7 @@ def build_ui(
         _tx_mode_cb = ttk.Combobox(
             tx_header,
             textvariable=_var_tx_mode,
-            values=["Transaksjoner", "Saldobalansekontoer", "Nøkkeltall"],
+            values=["Saldobalanse", "Hovedbok"],
             state="readonly",
             width=20,
         )
@@ -1049,7 +1133,7 @@ def build_ui(
         if callable(_on_tx_mode_fn):
             _tx_mode_cb.bind("<<ComboboxSelected>>", lambda _e: _on_tx_mode_fn())
     else:
-        ttk.Label(tx_header, text="Transaksjoner").grid(row=0, column=1, sticky="w")
+        ttk.Label(tx_header, text="Hovedbok").grid(row=0, column=1, sticky="w")
 
     # Knapp: Klassifiser kontoer (åpner konto-gruppe editor)
     def _open_klassifisering() -> None:
@@ -1057,26 +1141,60 @@ def build_ui(
             import session as _session
             import views_konto_klassifisering as _vkk
             _client = getattr(_session, "client", None) or ""
+            _year = getattr(_session, "year", None)
             _sb_df = getattr(page, "_rl_sb_df", None)
-            kontoer: list[tuple[str, str]] = []
+            kontoer: Any = []
             if _sb_df is not None and not _sb_df.empty:
+                import pandas as pd
                 from page_analyse_sb import _resolve_sb_columns
                 _col_map = _resolve_sb_columns(_sb_df)
                 _k = _col_map.get("konto", "")
                 _n = _col_map.get("kontonavn", "")
                 if _k:
-                    seen: set[str] = set()
-                    for _, row in _sb_df[[_k] + ([_n] if _n else [])].drop_duplicates().iterrows():
-                        kstr = str(row[_k]).strip()
-                        nstr = str(row[_n]).strip() if _n else ""
-                        if kstr and kstr not in seen:
-                            seen.add(kstr)
-                            kontoer.append((kstr, nstr))
-                    kontoer.sort(key=lambda x: (int(x[0]) if x[0].isdigit() else 0))
+                    selected_cols: list[str] = [_k]
+                    if _n:
+                        selected_cols.append(_n)
+                    numeric_targets = {
+                        "IB": _col_map.get("ib", ""),
+                        "Endring": _col_map.get("endring", ""),
+                        "UB": _col_map.get("ub", ""),
+                    }
+                    for src in numeric_targets.values():
+                        if src:
+                            selected_cols.append(src)
+
+                    kontoer = _sb_df[selected_cols].copy()
+                    rename_map = {_k: "Konto"}
+                    if _n:
+                        rename_map[_n] = "Navn"
+                    for target, src in numeric_targets.items():
+                        if src:
+                            rename_map[src] = target
+                    kontoer = kontoer.rename(columns=rename_map)
+
+                    if "Navn" not in kontoer.columns:
+                        kontoer["Navn"] = ""
+                    for target in ("IB", "Endring", "UB"):
+                        if target not in kontoer.columns:
+                            kontoer[target] = 0.0
+                        kontoer[target] = pd.to_numeric(kontoer[target], errors="coerce").fillna(0.0)
+
+                    kontoer["Konto"] = kontoer["Konto"].astype(str).str.strip()
+                    kontoer["Navn"] = kontoer["Navn"].astype(str).str.strip()
+                    kontoer = kontoer[kontoer["Konto"] != ""]
+                    kontoer = (
+                        kontoer.groupby(["Konto", "Navn"], as_index=False)[["IB", "Endring", "UB"]]
+                        .sum()
+                    )
+                    kontoer = kontoer.sort_values(
+                        by="Konto",
+                        key=lambda series: pd.to_numeric(series, errors="coerce").fillna(10**12),
+                    ).reset_index(drop=True)
             _vkk.open_klassifisering_editor(
                 page,
                 client=_client,
                 kontoer=kontoer,
+                year=_year,
                 on_save=lambda: _refresh_sb_after_klassifisering(page),
             )
         except Exception as _e:
@@ -1096,6 +1214,32 @@ def build_ui(
         text="Klassifiser kontoer\u2026",
         command=_open_klassifisering,
     ).grid(row=0, column=2, padx=(12, 0), sticky="w")
+
+    # Desimal-toggle
+    _var_dec = getattr(page, "_var_decimals", None)
+    if _var_dec is not None:
+        def _on_decimal_toggle():
+            try:
+                page._on_tx_view_mode_changed()
+            except Exception:
+                pass
+            try:
+                page._refresh_pivot()
+            except Exception:
+                pass
+        ttk.Checkbutton(
+            tx_header, text="Desimaler",
+            variable=_var_dec,
+            command=_on_decimal_toggle,
+        ).grid(row=0, column=3, padx=(12, 0), sticky="w")
+
+    # Eksporter aktiv visning til Excel
+    _export_view_fn = getattr(page, "_export_active_view_excel", None)
+    if callable(_export_view_fn):
+        ttk.Button(
+            tx_header, text="Eksporter\u2026",
+            command=_export_view_fn,
+        ).grid(row=0, column=4, padx=(12, 0), sticky="w")
 
     tx_outer.rowconfigure(1, weight=1)
     tx_outer.columnconfigure(0, weight=1)
@@ -1162,27 +1306,72 @@ def build_ui(
     try:
         nk_frame = ttk.Frame(tx_outer)
         nk_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
-        nk_frame.rowconfigure(0, weight=1)
+        nk_frame.rowconfigure(1, weight=1)
         nk_frame.columnconfigure(0, weight=1)
         nk_frame.grid_remove()  # Skjult som standard
+
+        # Kompakt toolbar for BRREG-henting
+        nk_toolbar = tk.Frame(nk_frame, background="#FFFDF8", padx=8, pady=2)
+        nk_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew")
+
+        nk_brreg_btn = ttk.Button(
+            nk_toolbar, text="Hent BRREG-tall",
+            command=lambda: _nk_fetch_brreg(page), width=16)
+        nk_brreg_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        nk_brreg_label = tk.Label(
+            nk_toolbar, text="", font=("Segoe UI", 8),
+            foreground="#667085", background="#FFFDF8")
+        nk_brreg_label.pack(side=tk.RIGHT, padx=(0, 6))
+
         nk_text = tk.Text(
             nk_frame,
             wrap="word",
             state="disabled",
             relief="flat",
-            bg="#FAFAFA",
-            padx=14,
-            pady=10,
+            bg="#FFFDF8",
+            padx=12,
+            pady=6,
+            font=("Segoe UI", 10),
         )
-        nk_text.grid(row=0, column=0, sticky="nsew")
+        nk_text.grid(row=1, column=0, sticky="nsew")
         nk_scroll = ttk.Scrollbar(nk_frame, orient="vertical", command=nk_text.yview)
-        nk_scroll.grid(row=0, column=1, sticky="ns")
+        nk_scroll.grid(row=1, column=1, sticky="ns")
         nk_text.configure(yscrollcommand=nk_scroll.set)
         page._nk_frame = nk_frame
         page._nk_text = nk_text
+        page._nk_brreg_btn = nk_brreg_btn
+        page._nk_brreg_label = nk_brreg_label
+        page._nk_brreg_data = None  # cached BRREG regnskap
     except Exception:
         page._nk_frame = None
         page._nk_text = None
+
+    # --- MP-frame (motposter) ---
+    try:
+        import page_analyse_sb as _sb_mod
+        mp_frame = _sb_mod.create_mp_tree(tx_outer)
+        if mp_frame is not None:
+            mp_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+            mp_frame.grid_remove()
+            page._mp_frame = mp_frame
+        else:
+            page._mp_frame = None
+    except Exception:
+        page._mp_frame = None
+
+    # Motposter (kontonivå) — aggregert motpost per konto
+    try:
+        import page_analyse_sb as _sb_mod2
+        mp_acct_frame = _sb_mod2.create_mp_account_tree(tx_outer)
+        if mp_acct_frame is not None:
+            mp_acct_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+            mp_acct_frame.grid_remove()
+            page._mp_acct_frame = mp_acct_frame
+        else:
+            page._mp_acct_frame = None
+    except Exception:
+        page._mp_acct_frame = None
 
     # Analyse skal holdes som en ren analyseflate.
     # Mapping-/forslagspanelene bygges fortsatt her som kompatibilitets-shim,
@@ -1195,6 +1384,7 @@ def build_ui(
         detail_toolbar.grid_remove()
     except Exception:
         pass
+    # Fjern mapping-paneler fra PanedWindow, behold kun tx_outer
     if detail_split is not None:
         try:
             detail_split.forget(accounts_outer)
@@ -1312,6 +1502,7 @@ def build_ui(
     page._var_max = var_max
     page._var_mva_code = var_mva_code
     page._var_mva_mode = var_mva_mode
+    page._var_rb = var_rb
     page._ent_search = ent_search
     page._lbl_tx_summary = lbl_tx_summary
     page._body_split = split_body
@@ -1321,6 +1512,91 @@ def build_ui(
     page._detail_suggestion_tree = None
     page._pivot_tree = pivot_tree
     page._tx_tree = tx_tree
+
+    # Registrer Analyse-Treeviews i global selection-summary (opt-in).
+    # Hver registrering får en profil som styrer prioritering, row_noun,
+    # max_items og hide_zero. Pivot-treet bruker en kontekst-resolver som
+    # leser aktiv aggregeringsmodus slik at footer-teksten alltid speiler
+    # den synlige konteksten.
+    try:
+        import ui_selection_summary as _uiss
+
+        def _pivot_priority_resolver(_tree: Any) -> tuple[str, ...]:
+            try:
+                import page_analyse_columns as _pac
+
+                agg = _pac._read_agg_mode(page)
+                has_prev = _pac._has_prev_year(page)
+            except Exception:
+                agg = ""
+                has_prev = False
+            if agg == "HB-konto":
+                return ("Sum", "Antall")
+            if agg in ("SB-konto", "Regnskapslinje"):
+                if has_prev:
+                    return ("Sum", "UB_fjor", "Endring_fjor")
+                return ("Sum", "Endring")
+            # MVA-kode / ukjent: fall tilbake til de mest relevante summerbare
+            return ("Sum", "Antall")
+
+        _uiss.register_treeview_selection_summary(
+            pivot_tree,
+            columns=(
+                "IB", "Endring", "Sum", "AO_belop",
+                "UB_for_ao", "UB_etter_ao", "Antall",
+                "UB_fjor", "Endring_fjor",
+            ),
+            priority_columns=_pivot_priority_resolver,
+            row_noun="rader",
+            max_items=3,
+            hide_zero=True,
+        )
+        _uiss.register_treeview_selection_summary(
+            tx_tree,
+            columns=("Beløp", "MVA-beløp"),
+            priority_columns=("Beløp", "MVA-beløp"),
+            row_noun="transaksjoner",
+            max_items=2,
+            hide_zero=True,
+        )
+        sb_tree = getattr(page, "_sb_tree", None)
+        if sb_tree is not None:
+            _uiss.register_treeview_selection_summary(
+                sb_tree,
+                columns=("IB", "Endring", "UB", "UB_fjor", "Antall"),
+                priority_columns=("UB", "UB_fjor", "Endring"),
+                row_noun="kontoer",
+                max_items=3,
+                hide_zero=True,
+            )
+        mp_frame = getattr(page, "_mp_frame", None)
+        mp_tree = getattr(mp_frame, "_mp_tree", None) if mp_frame is not None else None
+        if mp_tree is not None:
+            _uiss.register_treeview_selection_summary(
+                mp_tree,
+                columns=("Beløp",),
+                priority_columns=("Beløp",),
+                row_noun="poster",
+                max_items=1,
+                hide_zero=True,
+            )
+        mp_acct_frame = getattr(page, "_mp_acct_frame", None)
+        mp_acct_tree = (
+            getattr(mp_acct_frame, "_mp_acct_tree", None)
+            if mp_acct_frame is not None
+            else None
+        )
+        if mp_acct_tree is not None:
+            _uiss.register_treeview_selection_summary(
+                mp_acct_tree,
+                columns=("Sum", "Antall bilag"),
+                priority_columns=("Sum", "Antall bilag"),
+                row_noun="kontoer",
+                max_items=2,
+                hide_zero=True,
+            )
+    except Exception:
+        pass
 
     # Sortering (kolonneklikk)
     try:
@@ -1350,3 +1626,107 @@ def build_ui(
         )
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# BRREG-henting for nøkkeltall
+# ---------------------------------------------------------------------------
+
+def _nk_fetch_brreg(page: Any) -> None:
+    """Hent BRREG-tall for aktiv klient og oppdater nøkkeltallvisningen."""
+    import tkinter.messagebox as _mb
+    import threading
+
+    # Finn orgnr: (1) session.meta, (2) client_store.read_client_meta, (3) manuell prompt
+    orgnr = ""
+    try:
+        import session as _sess
+        meta = getattr(_sess, "meta", None)
+        if isinstance(meta, dict):
+            orgnr = (meta.get("org_number") or "").strip().replace(" ", "")
+    except Exception:
+        _sess = None
+
+    if not orgnr or len(orgnr) != 9:
+        try:
+            import client_store as _cs
+            client_name = getattr(_sess, "client", "") if _sess is not None else ""
+            if client_name:
+                cmeta = _cs.read_client_meta(client_name)
+                if isinstance(cmeta, dict):
+                    orgnr = (cmeta.get("org_number") or "").strip().replace(" ", "")
+        except Exception:
+            pass
+
+    if not orgnr or len(orgnr) != 9:
+        # Be bruker om å oppgi orgnr manuelt
+        try:
+            import tkinter.simpledialog as _sd
+            orgnr = _sd.askstring(
+                "Org.nr",
+                "Skriv inn organisasjonsnummer (9 siffer):",
+                parent=page,
+            )
+        except Exception:
+            return
+        if not orgnr:
+            return
+        orgnr = orgnr.strip().replace(" ", "")
+        if len(orgnr) != 9 or not orgnr.isdigit():
+            _mb.showwarning("Ugyldig org.nr", f"'{orgnr}' er ikke et gyldig 9-sifret organisasjonsnummer.")
+            return
+
+    label = getattr(page, "_nk_brreg_label", None)
+    btn = getattr(page, "_nk_brreg_btn", None)
+    if label:
+        label.configure(text=f"Henter fra BRREG ({orgnr})…")
+    if btn:
+        btn.configure(state="disabled")
+
+    def _worker():
+        try:
+            import brreg_client
+            data = brreg_client.fetch_regnskap(orgnr)
+        except Exception as exc:
+            page.after(0, lambda: _on_done(None, str(exc)))
+            return
+        page.after(0, lambda: _on_done(data, None))
+
+    def _on_done(data, error):
+        if btn:
+            btn.configure(state="normal")
+        if error:
+            if label:
+                label.configure(text="Feil ved BRREG-henting")
+            _mb.showerror("BRREG-feil", f"Kunne ikke hente regnskapsdata:\n{error}")
+            return
+        if data is None:
+            if label:
+                label.configure(text="Ingen regnskap funnet i BRREG")
+            _mb.showinfo("BRREG", f"Ingen innlevert regnskap funnet for org.nr {orgnr}.")
+            return
+
+        page._nk_brreg_data = data
+        brreg_year = data.get("regnskapsaar", "?")
+        if label:
+            label.configure(text=f"BRREG {brreg_year} hentet")
+
+        # Re-render nøkkeltall med BRREG-sammenligning
+        try:
+            page._refresh_nokkeltall_view()
+        except Exception:
+            pass
+
+        # Vis BRREG-kolonner i RL-pivot og re-render
+        try:
+            import page_analyse_columns as _pac
+            _pac.update_pivot_columns_for_brreg(page=page)
+        except Exception:
+            pass
+        try:
+            import page_analyse_rl as _prl
+            _prl.refresh_rl_pivot(page=page)
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()

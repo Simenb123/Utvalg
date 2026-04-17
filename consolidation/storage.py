@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 PROJECT_FILE = "project.json"
 COMPANIES_DIR = "companies"
 EXPORTS_DIR = "exports"
+LINE_BASIS_SUFFIX = ".regnskapslinjer.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +166,49 @@ def load_company_tb(client: str, year: str, company_id: str) -> Optional[pd.Data
 def delete_company_tb(client: str, year: str, company_id: str) -> bool:
     """Slett TB-fil for et selskap."""
     path = _companies_dir(client, year) / f"{company_id}.csv"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def _company_line_basis_path(client: str, year: str, company_id: str) -> Path:
+    return _companies_dir(client, year) / f"{company_id}{LINE_BASIS_SUFFIX}"
+
+
+def save_company_line_basis(client: str, year: str, company_id: str, df: pd.DataFrame) -> Path:
+    """Lagre regnskapslinje-grunnlag som CSV."""
+    path = _company_line_basis_path(client, year, company_id)
+    df.to_csv(path, index=False, encoding="utf-8")
+    logger.info("Saved company line basis %s (%d rows) -> %s", company_id, len(df), path)
+    return path
+
+
+def load_company_line_basis(client: str, year: str, company_id: str) -> Optional[pd.DataFrame]:
+    """Last regnskapslinje-grunnlag for et selskap."""
+    path = _company_line_basis_path(client, year, company_id)
+    if not path.exists():
+        return None
+    try:
+        return pd.read_csv(
+            path,
+            encoding="utf-8",
+            dtype={
+                "regnr": "Int64",
+                "regnskapslinje": str,
+                "source_regnskapslinje": str,
+                "source_text": str,
+                "review_status": str,
+            },
+        )
+    except Exception:
+        logger.exception("Failed to load company line basis from %s", path)
+        return None
+
+
+def delete_company_line_basis(client: str, year: str, company_id: str) -> bool:
+    """Slett regnskapslinje-grunnlag for et selskap."""
+    path = _company_line_basis_path(client, year, company_id)
     if path.exists():
         path.unlink()
         return True

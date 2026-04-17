@@ -33,10 +33,37 @@ import formatting
 
 log = logging.getLogger("app")
 
-# Kolonnenavn brukt i treeview (vises som headings i RL-modus)
-RL_PIVOT_HEADINGS = ("Nr", "Regnskapslinje", "IB", "Endring", "UB", "Antall", "UB i fjor", "Endring (fjor)", "Endring %")
+# Kolonnenavn brukt i treeview (vises som headings i RL-modus).
+# Interne kolonne-IDer er uendret — kun brukerrettet label endres. "Sum" og
+# "UB_fjor" f\u00e5r \u00e5rstall injisert i update_pivot_headings n\u00e5r aktivt \u00e5r er kjent.
+RL_PIVOT_HEADINGS = (
+    "Nr",
+    "Regnskapslinje",
+    "",               # OK — ikke relevant for regnskapslinjer
+    "IB",
+    "Bevegelse i år",
+    "UB",
+    "Tilleggspostering",
+    "UB før ÅO",
+    "UB etter ÅO",
+    "Antall",
+    "UB i fjor",
+    "Endring",
+    "Endring %",
+    "BRREG",
+    "Avvik mot BRREG",
+    "Avvik % mot BRREG",
+)
 # Standard konto-modus headings (for å tilbakestille)
-KONTO_PIVOT_HEADINGS = ("Konto", "Kontonavn", "", "", "Sum", "Antall", "", "", "")
+KONTO_PIVOT_HEADINGS = (
+    "Konto", "Kontonavn", "OK", "", "", "Sum", "", "", "", "Antall",
+    "", "", "", "", "", "",
+)
+# HB-konto: ren HB-pivot – heading "HB-bevegelse" istedenfor "Sum"
+HB_KONTO_PIVOT_HEADINGS = (
+    "Konto", "Kontonavn", "OK", "", "", "HB-bevegelse", "", "", "", "Antall",
+    "", "", "", "", "", "",
+)
 
 
 def _load_current_client_account_overrides() -> dict[str, int]:
@@ -61,6 +88,38 @@ def _load_current_client_account_overrides() -> dict[str, int]:
 
 
 # ---------------------------------------------------------------------------
+# Service-baserte konto -> regnr-helpere
+# ---------------------------------------------------------------------------
+
+
+def _resolve_regnr_for_accounts(
+    accounts: List[str],
+    *,
+    intervals: Optional[pd.DataFrame],
+    regnskapslinjer: Optional[pd.DataFrame],
+    account_overrides: Optional[dict[str, int]] = None,
+) -> pd.DataFrame:
+    """Returner DataFrame[konto, regnr (Int64)] via den kanoniske RL-servicen.
+
+    Bygger en ad-hoc ``RLMappingContext`` rundt de injiserte tabellene
+    slik at Analyse, Saldobalanse og Admin alltid bruker samme
+    konto -> regnr-resolusjon. ``regnr`` er ``pd.NA`` for kontoer som
+    ikke treffer baseline-intervall og ikke har klient-override.
+    """
+    import regnskapslinje_mapping_service as _rl_svc
+
+    context = _rl_svc.load_rl_mapping_context(
+        intervals=intervals,
+        regnskapslinjer=regnskapslinjer,
+        account_overrides=account_overrides or {},
+    )
+    resolved = _rl_svc.resolve_accounts_to_rl(accounts, context=context)
+    if resolved.empty:
+        return pd.DataFrame({"konto": pd.Series(dtype=str), "regnr": pd.Series(dtype="Int64")})
+    return resolved[["konto", "regnr"]].copy()
+
+
+# ---------------------------------------------------------------------------
 # Config-lasting
 # ---------------------------------------------------------------------------
 
@@ -68,20 +127,17 @@ def load_rl_config() -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Last intervall-mapping og regnskapslinjer fra datamappen.
 
     Returnerer (intervals_df, regnskapslinjer_df). Begge kan være None
-    dersom filene ikke er importert ennå.
+    dersom filene ikke er importert ennå. Delegerer til den kanoniske
+    RL-servicen slik at Analyse, Admin og Saldobalanse alle leser fra
+    samme kilde.
     """
     try:
-        import regnskap_config
-        intervals = regnskap_config.load_kontoplan_mapping()
-    except Exception as exc:
-        log.debug("Intervall-mapping ikke tilgjengelig: %s", exc)
-        intervals = None
+        import regnskapslinje_mapping_service as _rl_svc
 
-    try:
-        import regnskap_config
-        regnskapslinjer = regnskap_config.load_regnskapslinjer()
+        intervals, regnskapslinjer = _rl_svc.load_rl_config_dataframes()
     except Exception as exc:
-        log.debug("Regnskapslinjer ikke tilgjengelig: %s", exc)
+        log.debug("RL-config-lasting feilet: %s", exc)
+        intervals = None
         regnskapslinjer = None
 
     return intervals, regnskapslinjer
@@ -131,6 +187,68 @@ def load_sb_for_session() -> Optional[pd.DataFrame]:
     except Exception as exc:
         log.warning("load_sb_for_session: %s", exc)
         return None
+
+
+def _resolve_analysis_sb_views(*, page: Any) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """Returner (grunnlag, AO-justert, effektiv) SB for Analyse."""
+    base_sb_df = getattr(page, "_rl_sb_df", None)
+    adjusted_sb_df = base_sb_df
+
+    try:
+        include_ao = bool(page._include_ao_enabled())
+    except Exception:
+        include_ao = False
+
+    if not isinstance(base_sb_df, pd.DataFrame) or base_sb_df.empty:
+        effective_sb_df = adjusted_sb_df if include_ao else base_sb_df
+        return base_sb_df, adjusted_sb_df, effective_sb_df
+
+    try:
+        import session as _session
+        import regnskap_client_overrides as _rco
+        import tilleggsposteringer as _tillegg
+
+        client = getattr(_session, "client", None) or ""
+        year = str(getattr(_session, "year", None) or "")
+        if client and year:
+            ao_entries = _rco.load_supplementary_entries(client, year)
+            if ao_entries:
+                adjusted_sb_df = _tillegg.apply_to_sb(base_sb_df, ao_entries)
+    except Exception as exc:
+        log.debug("_resolve_analysis_sb_views: AO-justering feilet: %s", exc)
+        adjusted_sb_df = base_sb_df
+
+    effective_sb_df = adjusted_sb_df if include_ao else base_sb_df
+    return base_sb_df, adjusted_sb_df, effective_sb_df
+
+
+def ensure_sb_prev_loaded(*, page: Any) -> Optional[pd.DataFrame]:
+    """Last fjorårs-SB inn på ``page._rl_sb_prev_df`` idempotent.
+
+    Returnerer df (kan være ``None`` hvis fjorårsdata mangler). Tidligere
+    ble dette kun gjort i ``refresh_rl_pivot`` — utvidet hit slik at
+    SB-konto-pivot og høyre SB-tre også får fjorårs-UB uten å måtte
+    innom Regnskapslinje-modus først.
+    """
+    existing = getattr(page, "_rl_sb_prev_df", None)
+    if isinstance(existing, pd.DataFrame):
+        return existing
+    try:
+        import previous_year_comparison
+        import session as _session
+        _client = getattr(_session, "client", None)
+        _year = getattr(_session, "year", None)
+        if not _client or _year is None:
+            return None
+        sb_prev = previous_year_comparison.load_previous_year_sb(_client, _year)
+    except Exception as exc:
+        log.debug("ensure_sb_prev_loaded: %s", exc)
+        return None
+    try:
+        page._rl_sb_prev_df = sb_prev
+    except Exception:
+        pass
+    return sb_prev
 
 
 def _try_repair_empty_sb(
@@ -198,7 +316,9 @@ def build_rl_pivot(
     regnskapslinjer: pd.DataFrame,
     *,
     sb_df: Optional[pd.DataFrame] = None,
+    sb_prev_df: Optional[pd.DataFrame] = None,
     account_overrides: Optional[dict[str, int]] = None,
+    prior_year_overrides: Optional[dict[str, int]] = None,
 ) -> pd.DataFrame:
     """Bygg regnskapslinje-pivot.
 
@@ -211,15 +331,13 @@ def build_rl_pivot(
 
     Returnerer DataFrame med kolonnene:
         regnr (int), regnskapslinje (str), IB (float), Endring (float),
-        UB (float), Antall (int)
+        UB (float), Antall (int), og eventuelt UB_fjor/Endring_fjor/Endring_pct.
 
     Visningsregel:
         Med SB:   vis RL der |UB| > 1e-9 ELLER Antall > 0
         Uten SB:  vis kun RL der Antall > 0
     """
     from regnskap_mapping import (
-        apply_account_overrides,
-        apply_interval_mapping,
         compute_sumlinjer,
         normalize_regnskapslinjer,
     )
@@ -236,10 +354,15 @@ def build_rl_pivot(
     konto_cnt = df_work.groupby("Konto", as_index=False)["_cnt"].sum()
     konto_cnt.rename(columns={"Konto": "konto"}, inplace=True)
 
-    # Map konto → regnr for HB
+    # Map konto → regnr for HB via servicen
     try:
-        cnt_mapped = apply_interval_mapping(konto_cnt, intervals, konto_col="konto").mapped
-        cnt_mapped = apply_account_overrides(cnt_mapped, account_overrides, konto_col="konto")
+        regnr_lookup = _resolve_regnr_for_accounts(
+            konto_cnt["konto"].astype(str).tolist(),
+            intervals=intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
+        cnt_mapped = konto_cnt.merge(regnr_lookup, on="konto", how="left")
     except Exception as exc:
         log.warning("RL-pivot: konto-mapping feilet: %s", exc)
         return _empty_pivot()
@@ -252,12 +375,46 @@ def build_rl_pivot(
     )
     antall_per_regnr["regnr"] = antall_per_regnr["regnr"].astype(int)
 
+    # --- Antall unike bilag per regnr (telles via konto → regnr-mapping) ---
+    # Et bilag som treffer flere konti innenfor samme regnr telles én gang.
+    bilag_col = next(
+        (c for c in ("Bilag", "bilag", "Bilagsnr", "bilagsnr") if c in df_hb.columns),
+        None,
+    )
+    antall_bilag_per_regnr: Optional[pd.DataFrame] = None
+    if bilag_col is not None:
+        try:
+            konto_regnr_map = cnt_mapped[["konto", "regnr"]].dropna(subset=["regnr"]).copy()
+            konto_regnr_map["regnr"] = konto_regnr_map["regnr"].astype(int)
+            hb_bilag = df_hb[["Konto", bilag_col]].copy()
+            hb_bilag["konto"] = hb_bilag["Konto"].astype(str)
+            hb_with_regnr = hb_bilag.merge(konto_regnr_map, on="konto", how="inner")
+            antall_bilag_per_regnr = (
+                hb_with_regnr.groupby("regnr", as_index=False)[bilag_col]
+                .nunique()
+                .rename(columns={bilag_col: "Antall_bilag"})
+            )
+            antall_bilag_per_regnr["regnr"] = antall_bilag_per_regnr["regnr"].astype(int)
+        except Exception as exc:
+            log.warning("RL-pivot: kunne ikke telle unike bilag per regnr: %s", exc)
+            antall_bilag_per_regnr = None
+
     # --- IB og UB ---
     if sb_df is not None and not sb_df.empty and "konto" in sb_df.columns:
-        ib_ub = _aggregate_sb_to_regnr(sb_df, intervals, account_overrides=account_overrides)
+        ib_ub = _aggregate_sb_to_regnr(
+            sb_df,
+            intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
     else:
         # Fallback: bruk HB Beløp som UB
-        ib_ub = _aggregate_hb_to_regnr(df_hb, intervals, account_overrides=account_overrides)
+        ib_ub = _aggregate_hb_to_regnr(
+            df_hb,
+            intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
 
     # --- Merge med regnskapslinjer ---
     try:
@@ -269,11 +426,16 @@ def build_rl_pivot(
 
     merged = leaf.merge(ib_ub, how="left", on="regnr")
     merged = merged.merge(antall_per_regnr, how="left", on="regnr")
+    if antall_bilag_per_regnr is not None:
+        merged = merged.merge(antall_bilag_per_regnr, how="left", on="regnr")
+    else:
+        merged["Antall_bilag"] = 0
 
     merged["IB"] = merged["IB"].fillna(0.0)
     merged["UB"] = merged["UB"].fillna(0.0)
     merged["Endring"] = merged["UB"] - merged["IB"]
     merged["Antall"] = merged["Antall"].fillna(0).astype(int)
+    merged["Antall_bilag"] = merged["Antall_bilag"].fillna(0).astype(int)
 
     all_lines = regn[["regnr", "regnskapslinje", "sumpost", "formel"]].copy()
     if bool(all_lines["sumpost"].any()):
@@ -281,18 +443,21 @@ def build_rl_pivot(
         base_ub = {int(r): float(v) for r, v in zip(merged["regnr"], merged["UB"])}
         base_endring = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Endring"])}
         base_antall = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Antall"])}
+        base_antall_bilag = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Antall_bilag"])}
 
         try:
             ib_values = compute_sumlinjer(base_values=base_ib, regnskapslinjer=regn)
             ub_values = compute_sumlinjer(base_values=base_ub, regnskapslinjer=regn)
             endring_values = compute_sumlinjer(base_values=base_endring, regnskapslinjer=regn)
             antall_values = compute_sumlinjer(base_values=base_antall, regnskapslinjer=regn)
+            antall_bilag_values = compute_sumlinjer(base_values=base_antall_bilag, regnskapslinjer=regn)
         except Exception as exc:
             log.warning("RL-pivot: kunne ikke beregne sumposter: %s", exc)
             ib_values = base_ib
             ub_values = base_ub
             endring_values = base_endring
             antall_values = base_antall
+            antall_bilag_values = base_antall_bilag
 
         all_lines["IB"] = all_lines["regnr"].map(lambda r: float(ib_values.get(int(r), 0.0)))
         all_lines["UB"] = all_lines["regnr"].map(lambda r: float(ub_values.get(int(r), 0.0)))
@@ -302,9 +467,14 @@ def build_rl_pivot(
             .map(lambda r: int(round(float(antall_values.get(int(r), 0.0)))))
             .astype(int)
         )
+        all_lines["Antall_bilag"] = (
+            all_lines["regnr"]
+            .map(lambda r: int(round(float(antall_bilag_values.get(int(r), 0.0)))))
+            .astype(int)
+        )
     else:
         all_lines = all_lines.merge(
-            merged[["regnr", "IB", "Endring", "UB", "Antall"]],
+            merged[["regnr", "IB", "Endring", "UB", "Antall", "Antall_bilag"]],
             how="left",
             on="regnr",
         )
@@ -312,6 +482,7 @@ def build_rl_pivot(
         all_lines["UB"] = all_lines["UB"].fillna(0.0)
         all_lines["Endring"] = all_lines["Endring"].fillna(0.0)
         all_lines["Antall"] = all_lines["Antall"].fillna(0).astype(int)
+        all_lines["Antall_bilag"] = all_lines["Antall_bilag"].fillna(0).astype(int)
 
     # --- Filtrer tomme linjer ---
     if sb_df is not None and not sb_df.empty:
@@ -321,29 +492,51 @@ def build_rl_pivot(
 
     merged = all_lines.loc[mask].sort_values("regnr").reset_index(drop=True)
 
-    return merged[["regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall"]]
+    result = merged[["regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall", "Antall_bilag"]]
+
+    if sb_prev_df is not None and not sb_prev_df.empty:
+        try:
+            import previous_year_comparison
+
+            result = previous_year_comparison.add_previous_year_columns(
+                result,
+                sb_prev_df,
+                intervals,
+                regnskapslinjer,
+                account_overrides=account_overrides,
+                prior_year_overrides=prior_year_overrides,
+            )
+        except Exception as exc:
+            log.warning("build_rl_pivot: fjorårskolonner feilet: %s", exc)
+
+    return result
 
 
 def _aggregate_sb_to_regnr(
     sb_df: pd.DataFrame,
     intervals: pd.DataFrame,
     *,
+    regnskapslinjer: Optional[pd.DataFrame] = None,
     account_overrides: Optional[dict[str, int]] = None,
 ) -> pd.DataFrame:
-    """Aggreger SB (IB/UB) per regnr via intervall-mapping."""
-    from regnskap_mapping import apply_account_overrides, apply_interval_mapping
-
+    """Aggreger SB (IB/UB) per regnr via den kanoniske RL-servicen."""
     work = sb_df[["konto", "ib", "ub"]].copy()
+    work["konto"] = work["konto"].astype(str).str.strip()
     work["ib"] = pd.to_numeric(work["ib"], errors="coerce").fillna(0.0)
     work["ub"] = pd.to_numeric(work["ub"], errors="coerce").fillna(0.0)
 
     try:
-        mapped = apply_interval_mapping(work, intervals, konto_col="konto").mapped
-        mapped = apply_account_overrides(mapped, account_overrides, konto_col="konto")
+        regnr_lookup = _resolve_regnr_for_accounts(
+            work["konto"].tolist(),
+            intervals=intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
     except Exception as exc:
         log.warning("_aggregate_sb_to_regnr: mapping feilet: %s", exc)
         return pd.DataFrame(columns=["regnr", "IB", "UB"])
 
+    mapped = work.merge(regnr_lookup, on="konto", how="left")
     agg = (
         mapped.dropna(subset=["regnr"])
         .groupby("regnr", as_index=False)
@@ -357,11 +550,10 @@ def _aggregate_hb_to_regnr(
     df_hb: pd.DataFrame,
     intervals: pd.DataFrame,
     *,
+    regnskapslinjer: Optional[pd.DataFrame] = None,
     account_overrides: Optional[dict[str, int]] = None,
 ) -> pd.DataFrame:
     """Fallback: bruk sum av HB Beløp som UB (ingen IB tilgjengelig)."""
-    from regnskap_mapping import apply_account_overrides, apply_interval_mapping
-
     if "Beløp" not in df_hb.columns:
         return pd.DataFrame(columns=["regnr", "IB", "UB"])
 
@@ -370,14 +562,20 @@ def _aggregate_hb_to_regnr(
     work["_bel"] = pd.to_numeric(work["Beløp"], errors="coerce").fillna(0.0)
     konto_agg = work.groupby("Konto", as_index=False)["_bel"].sum()
     konto_agg.rename(columns={"Konto": "konto"}, inplace=True)
+    konto_agg["konto"] = konto_agg["konto"].astype(str).str.strip()
 
     try:
-        mapped = apply_interval_mapping(konto_agg, intervals, konto_col="konto").mapped
-        mapped = apply_account_overrides(mapped, account_overrides, konto_col="konto")
+        regnr_lookup = _resolve_regnr_for_accounts(
+            konto_agg["konto"].tolist(),
+            intervals=intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
     except Exception as exc:
         log.warning("_aggregate_hb_to_regnr: mapping feilet: %s", exc)
         return pd.DataFrame(columns=["regnr", "IB", "UB"])
 
+    mapped = konto_agg.merge(regnr_lookup, on="konto", how="left")
     agg = (
         mapped.dropna(subset=["regnr"])
         .groupby("regnr", as_index=False)["_bel"]
@@ -390,33 +588,79 @@ def _aggregate_hb_to_regnr(
 
 
 def _empty_pivot() -> pd.DataFrame:
-    return pd.DataFrame(columns=["regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall"])
+    return pd.DataFrame(columns=["regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall", "Antall_bilag"])
+
+
+def _add_adjustment_columns(
+    pivot_df: pd.DataFrame,
+    *,
+    base_pivot_df: Optional[pd.DataFrame] = None,
+    adjusted_pivot_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Legg til sammenligningskolonner for tilleggsposteringer/ÅO."""
+    out = pivot_df.copy()
+    if out.empty:
+        out["AO_belop"] = pd.Series(dtype=float)
+        out["UB_for_ao"] = pd.Series(dtype=float)
+        out["UB_etter_ao"] = pd.Series(dtype=float)
+        return out
+
+    current_ub = pd.to_numeric(out.get("UB"), errors="coerce").fillna(0.0)
+    current_map = {
+        int(regnr): float(ub)
+        for regnr, ub in zip(out["regnr"], current_ub)
+    }
+
+    before_map: dict[int, float] = {}
+    if isinstance(base_pivot_df, pd.DataFrame) and not base_pivot_df.empty:
+        for _, row in base_pivot_df.iterrows():
+            try:
+                before_map[int(row["regnr"])] = float(row.get("UB", 0.0) or 0.0)
+            except Exception:
+                continue
+
+    after_map: dict[int, float] = {}
+    if isinstance(adjusted_pivot_df, pd.DataFrame) and not adjusted_pivot_df.empty:
+        for _, row in adjusted_pivot_df.iterrows():
+            try:
+                after_map[int(row["regnr"])] = float(row.get("UB", 0.0) or 0.0)
+            except Exception:
+                continue
+
+    out["UB_for_ao"] = out["regnr"].map(lambda value: before_map.get(int(value), current_map.get(int(value), 0.0)))
+    out["UB_etter_ao"] = out["regnr"].map(lambda value: after_map.get(int(value), current_map.get(int(value), 0.0)))
+    out["UB_for_ao"] = pd.to_numeric(out["UB_for_ao"], errors="coerce").fillna(current_ub)
+    out["UB_etter_ao"] = pd.to_numeric(out["UB_etter_ao"], errors="coerce").fillna(current_ub)
+    out["AO_belop"] = out["UB_etter_ao"] - out["UB_for_ao"]
+    return out
 
 
 def get_unmapped_rl_accounts(
     df_hb: Optional[pd.DataFrame],
     intervals: Optional[pd.DataFrame],
     *,
+    regnskapslinjer: Optional[pd.DataFrame] = None,
     account_overrides: Optional[dict[str, int]] = None,
 ) -> List[str]:
     """Returner kontoer i HB-scope som ikke treffer RL-intervall-mapping."""
-    from regnskap_mapping import apply_account_overrides, apply_interval_mapping
-
-    if df_hb is None or intervals is None or df_hb.empty or "Konto" not in df_hb.columns:
+    if df_hb is None or df_hb.empty or "Konto" not in df_hb.columns:
         return []
 
     kontos = df_hb["Konto"].dropna().astype(str).unique().tolist()
     if not kontos:
         return []
 
-    probe = pd.DataFrame({"konto": kontos})
     try:
-        mapped = apply_interval_mapping(probe, intervals, konto_col="konto").mapped
-        mapped = apply_account_overrides(mapped, account_overrides, konto_col="konto")
-        return mapped.loc[mapped["regnr"].isna(), "konto"].astype(str).unique().tolist()
+        regnr_lookup = _resolve_regnr_for_accounts(
+            kontos,
+            intervals=intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
     except Exception as exc:
         log.warning("get_unmapped_rl_accounts: mapping feilet: %s", exc)
         return []
+    return regnr_lookup.loc[regnr_lookup["regnr"].isna(), "konto"].astype(str).unique().tolist()
 
 
 def _format_mapping_warning(unmapped_accounts: List[str]) -> str:
@@ -495,7 +739,7 @@ def build_rl_account_drilldown(
     account_overrides: Optional[dict[str, int]] = None,
 ) -> pd.DataFrame:
     """Bygg kontooversikt under valgt(e) regnskapslinjer."""
-    from regnskap_mapping import apply_account_overrides, apply_interval_mapping, normalize_regnskapslinjer
+    from regnskap_mapping import normalize_regnskapslinjer
 
     if df_hb is None or df_hb.empty or "Konto" not in df_hb.columns:
         return pd.DataFrame(columns=["Nr", "Regnskapslinje", "Konto", "Kontonavn", "IB", "Endring", "UB", "Antall"])
@@ -518,8 +762,13 @@ def build_rl_account_drilldown(
     )
 
     try:
-        mapped = apply_interval_mapping(konto_agg, intervals, konto_col="konto").mapped
-        mapped = apply_account_overrides(mapped, account_overrides, konto_col="konto")
+        regnr_lookup = _resolve_regnr_for_accounts(
+            konto_agg["konto"].astype(str).tolist(),
+            intervals=intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
+        mapped = konto_agg.merge(regnr_lookup, on="konto", how="left")
         regn = normalize_regnskapslinjer(regnskapslinjer)
     except Exception as exc:
         log.warning("build_rl_account_drilldown: %s", exc)
@@ -586,10 +835,7 @@ def build_selected_rl_account_drilldown(*, page: Any) -> tuple[pd.DataFrame, Lis
     df_filtered = getattr(page, "_df_filtered", None)
     intervals = getattr(page, "_rl_intervals", None)
     regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
-    try:
-        sb_df = page._get_effective_sb_df()
-    except Exception:
-        sb_df = getattr(page, "_rl_sb_df", None)
+    _, _, sb_df = _resolve_analysis_sb_views(page=page)
     account_overrides = _load_current_client_account_overrides()
 
     if not isinstance(df_filtered, pd.DataFrame) or intervals is None or regnskapslinjer is None:
@@ -655,19 +901,95 @@ def build_selected_rl_detail_context(*, page: Any) -> dict[str, Any]:
 # Pivot-headings
 # ---------------------------------------------------------------------------
 
+def _resolve_active_year() -> Optional[int]:
+    """Les aktivt regnskaps\u00e5r fra session som heltall n\u00e5r mulig."""
+    try:
+        import session as _session
+        raw = getattr(_session, "year", None)
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _rl_headings_with_year(year: Optional[int]) -> tuple[str, ...]:
+    """Bygg RL-headings med \u00e5rstall injisert i UB-kolonnene der mulig."""
+    headings = list(RL_PIVOT_HEADINGS)
+    if year is None:
+        return tuple(headings)
+    # Index 5 = "Sum" (UB aktivt \u00e5r), index 10 = "UB_fjor" (UB i fjor)
+    headings[5] = f"UB {year}"
+    headings[10] = f"UB {year - 1}"
+    return tuple(headings)
+
+
+def _sb_konto_headings_with_year(year: Optional[int]) -> tuple[str, ...]:
+    """SB-konto headings: Konto/Kontonavn + UB <år>, UB <år-1>, Endring, Endring %."""
+    ub_label = f"UB {year}" if year is not None else "UB"
+    ub_fjor_label = f"UB {year - 1}" if year is not None else "UB i fjor"
+    return (
+        "Konto",
+        "Kontonavn",
+        "OK",               # OK-markering per konto
+        "",                 # IB
+        "Bevegelse i år",   # fallback-Endring (vises uten fjorsdata)
+        ub_label,           # Sum = UB aktivt år
+        "",                 # AO_belop
+        "",                 # UB_for_ao
+        "",                 # UB_etter_ao
+        "Antall",
+        ub_fjor_label,      # UB_fjor
+        "Endring",          # Endring_fjor
+        "Endring %",        # Endring_pct
+        "", "", "",         # BRREG, Avvik_brreg, Avvik_brreg_pct
+    )
+
+
 def update_pivot_headings(*, page: Any, mode: str) -> None:
     """Oppdater kolonneoverskrifter i pivot_tree basert på modus.
 
-    mode = "Regnskapslinje" → RL_PIVOT_HEADINGS
-    mode = "Konto"          → KONTO_PIVOT_HEADINGS
+    mode = "Regnskapslinje" → RL_PIVOT_HEADINGS (med årstall injisert)
+    mode = "SB-konto"       → komparativ konto-visning med årstall
+    mode = "HB-konto"       → ren HB-pivot ("HB-bevegelse")
+    mode = "Konto" (legacy) eller "Saldobalanse" (GUI-label) → behandles som SB-konto
     """
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
         return
 
-    headings = RL_PIVOT_HEADINGS if mode == "Regnskapslinje" else KONTO_PIVOT_HEADINGS
-    cols = ("Konto", "Kontonavn", "IB", "Endring", "Sum", "Antall",
-            "UB_fjor", "Endring_fjor", "Endring_pct")  # interne kolonne-IDer
+    if mode in ("Konto", "Saldobalanse"):
+        mode = "SB-konto"
+
+    if mode == "Regnskapslinje":
+        headings = _rl_headings_with_year(_resolve_active_year())
+    elif mode == "SB-konto":
+        headings = _sb_konto_headings_with_year(_resolve_active_year())
+    elif mode == "HB-konto":
+        headings = HB_KONTO_PIVOT_HEADINGS
+    else:
+        headings = KONTO_PIVOT_HEADINGS
+    cols = (
+        "Konto",
+        "Kontonavn",
+        "OK",
+        "IB",
+        "Endring",
+        "Sum",
+        "AO_belop",
+        "UB_for_ao",
+        "UB_etter_ao",
+        "Antall",
+        "UB_fjor",
+        "Endring_fjor",
+        "Endring_pct",
+        "BRREG",
+        "Avvik_brreg",
+        "Avvik_brreg_pct",
+    )  # interne kolonne-IDer
 
     for col_id, heading in zip(cols, headings):
         try:
@@ -677,6 +999,7 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
 
     # Sjekk om fjorårsdata er tilgjengelig
     has_prev = bool(getattr(page, "_rl_sb_prev_df", None) is not None)
+    has_brreg = bool(getattr(page, "_nk_brreg_data", None))
 
     # Juster bredder for RL-modus (defaults – auto-fit kjøres etter data er fylt)
     if mode == "Regnskapslinje":
@@ -688,6 +1011,9 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
             tree.column("IB",       width=110, minwidth=75,  stretch=False, anchor="e")
             tree.column("Endring",  width=110, minwidth=75,  stretch=False, anchor="e")
             tree.column("Sum",      width=115, minwidth=80,  stretch=False, anchor="e")
+            tree.column("AO_belop", width=125, minwidth=90,  stretch=False, anchor="e")
+            tree.column("UB_for_ao", width=120, minwidth=90, stretch=False, anchor="e")
+            tree.column("UB_etter_ao", width=120, minwidth=90, stretch=False, anchor="e")
             # Antall trenger ikke mye plass
             tree.column("Antall",   width=48,  minwidth=38,  stretch=False, anchor="e")
         except Exception:
@@ -707,17 +1033,72 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
                 tree.column("Endring_pct", width=0, minwidth=0, stretch=False)
             except Exception:
                 pass
+        # BRREG-kolonner: vis/skjul basert på om BRREG-data er hentet
+        if has_brreg:
+            try:
+                tree.column("BRREG", width=115, minwidth=80, anchor="e")
+                tree.column("Avvik_brreg", width=115, minwidth=80, anchor="e")
+                tree.column("Avvik_brreg_pct", width=90, minwidth=60, anchor="e")
+            except Exception:
+                pass
+        else:
+            try:
+                tree.column("BRREG", width=0, minwidth=0, stretch=False)
+                tree.column("Avvik_brreg", width=0, minwidth=0, stretch=False)
+                tree.column("Avvik_brreg_pct", width=0, minwidth=0, stretch=False)
+            except Exception:
+                pass
+    elif mode == "SB-konto":
+        try:
+            tree.column("Konto", width=80, minwidth=50, stretch=False, anchor="w")
+            tree.column("Kontonavn", width=220, minwidth=120, stretch=True, anchor="w")
+            tree.column("IB", width=0, minwidth=0, stretch=False, anchor="e")
+            tree.column("Endring", width=115 if not has_prev else 0, minwidth=75 if not has_prev else 0, stretch=False, anchor="e")
+            tree.column("Sum", width=115, minwidth=80, stretch=False, anchor="e")
+            tree.column("AO_belop", width=0, minwidth=0, stretch=False, anchor="e")
+            tree.column("UB_for_ao", width=0, minwidth=0, stretch=False, anchor="e")
+            tree.column("UB_etter_ao", width=0, minwidth=0, stretch=False, anchor="e")
+            tree.column("Antall", width=70, minwidth=50, stretch=False, anchor="e")
+        except Exception:
+            pass
+        if has_prev:
+            try:
+                tree.column("UB_fjor", width=115, minwidth=80, anchor="e")
+                tree.column("Endring_fjor", width=115, minwidth=80, anchor="e")
+                tree.column("Endring_pct", width=80, minwidth=60, anchor="e")
+            except Exception:
+                pass
+        else:
+            try:
+                tree.column("UB_fjor", width=0, minwidth=0, stretch=False)
+                tree.column("Endring_fjor", width=0, minwidth=0, stretch=False)
+                tree.column("Endring_pct", width=0, minwidth=0, stretch=False)
+            except Exception:
+                pass
+        try:
+            tree.column("BRREG", width=0, minwidth=0, stretch=False)
+            tree.column("Avvik_brreg", width=0, minwidth=0, stretch=False)
+            tree.column("Avvik_brreg_pct", width=0, minwidth=0, stretch=False)
+        except Exception:
+            pass
     else:
+        # HB-konto (og legacy fallback)
         try:
             tree.column("Konto", width=80, minwidth=50, stretch=False, anchor="w")
             tree.column("Kontonavn", width=220, minwidth=120, stretch=True, anchor="w")
             tree.column("IB", width=0, minwidth=0, stretch=False, anchor="e")
             tree.column("Endring", width=0, minwidth=0, stretch=False, anchor="e")
             tree.column("Sum", width=115, minwidth=80, stretch=False, anchor="e")
+            tree.column("AO_belop", width=0, minwidth=0, stretch=False, anchor="e")
+            tree.column("UB_for_ao", width=0, minwidth=0, stretch=False, anchor="e")
+            tree.column("UB_etter_ao", width=0, minwidth=0, stretch=False, anchor="e")
             tree.column("Antall", width=70, minwidth=50, stretch=False, anchor="e")
             tree.column("UB_fjor", width=0, minwidth=0, stretch=False)
             tree.column("Endring_fjor", width=0, minwidth=0, stretch=False)
             tree.column("Endring_pct", width=0, minwidth=0, stretch=False)
+            tree.column("BRREG", width=0, minwidth=0, stretch=False)
+            tree.column("Avvik_brreg", width=0, minwidth=0, stretch=False)
+            tree.column("Avvik_brreg_pct", width=0, minwidth=0, stretch=False)
         except Exception:
             pass
 
@@ -762,10 +1143,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         _show_rl_not_configured(tree)
         return
 
-    try:
-        sb_df = page._get_effective_sb_df()
-    except Exception:
-        sb_df = getattr(page, "_rl_sb_df", None)
+    base_sb_df, adjusted_sb_df, sb_df = _resolve_analysis_sb_views(page=page)
 
     account_overrides = _load_current_client_account_overrides()
     try:
@@ -780,10 +1158,38 @@ def refresh_rl_pivot(*, page: Any) -> None:
                     _sumnivaa_map[int(r["regnr"])] = int(r["sumnivaa"]) if r["sumnivaa"] is not None else 1
                 except Exception:
                     pass
+        # Resultat/balanse per regnr (brukt for Type-filter i UI)
+        _rb_map: dict[int, str] = {}
+        if "rb" in regn.columns:
+            for _, r in regn.iterrows():
+                v = r.get("rb")
+                if v in ("balanse", "resultat"):
+                    try:
+                        _rb_map[int(r["regnr"])] = str(v)
+                    except Exception:
+                        pass
     except Exception:
         sumline_regnr = set()
         _sumnivaa_map = {}
-    unmapped_accounts = get_unmapped_rl_accounts(df_filtered, intervals, account_overrides=account_overrides)
+        _rb_map = {}
+
+    _rb_filter = ""
+    try:
+        _rbv = getattr(page, "_var_rb", None)
+        if _rbv is not None:
+            _sel = str(_rbv.get()).strip().lower()
+            if _sel.startswith("balans"):
+                _rb_filter = "balanse"
+            elif _sel.startswith("resultat"):
+                _rb_filter = "resultat"
+    except Exception:
+        _rb_filter = ""
+    unmapped_accounts = get_unmapped_rl_accounts(
+        df_filtered,
+        intervals,
+        regnskapslinjer=regnskapslinjer,
+        account_overrides=account_overrides,
+    )
     try:
         page._rl_mapping_warning = _format_mapping_warning(unmapped_accounts)
     except Exception:
@@ -802,19 +1208,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         return
 
     # --- Fjorårsdata ---
-    sb_prev = getattr(page, "_rl_sb_prev_df", None)
-    if sb_prev is None:
-        try:
-            import previous_year_comparison
-            import session as _session
-            _client = getattr(_session, "client", None)
-            _year = getattr(_session, "year", None)
-            if _client and _year:
-                sb_prev = previous_year_comparison.load_previous_year_sb(_client, _year)
-                page._rl_sb_prev_df = sb_prev
-        except Exception:
-            sb_prev = None
-
+    sb_prev = ensure_sb_prev_loaded(page=page)
     has_prev = sb_prev is not None and not sb_prev.empty
     if has_prev:
         try:
@@ -834,6 +1228,43 @@ def refresh_rl_pivot(*, page: Any) -> None:
             has_prev = False
 
     try:
+        base_pivot_df = build_rl_pivot(
+            df_filtered,
+            intervals,
+            regnskapslinjer,
+            sb_df=base_sb_df,
+            account_overrides=account_overrides,
+        )
+        adjusted_pivot_df = build_rl_pivot(
+            df_filtered,
+            intervals,
+            regnskapslinjer,
+            sb_df=adjusted_sb_df,
+            account_overrides=account_overrides,
+        )
+        pivot_df = _add_adjustment_columns(
+            pivot_df,
+            base_pivot_df=base_pivot_df,
+            adjusted_pivot_df=adjusted_pivot_df,
+        )
+    except Exception as exc:
+        log.warning("refresh_rl_pivot: AO-sammenligning feilet: %s", exc)
+        pivot_df = _add_adjustment_columns(pivot_df)
+
+    # --- BRREG-sammenligning ---
+    brreg_data = getattr(page, "_nk_brreg_data", None)
+    has_brreg = bool(brreg_data)
+    if has_brreg:
+        try:
+            import brreg_rl_comparison
+            pivot_df = brreg_rl_comparison.add_brreg_columns(
+                pivot_df, regnskapslinjer, brreg_data,
+            )
+        except Exception as exc:
+            log.warning("refresh_rl_pivot: BRREG-sammenligning feilet: %s", exc)
+            has_brreg = False
+
+    try:
         page._pivot_df_last = pivot_df.copy()
     except Exception:
         pass
@@ -849,14 +1280,27 @@ def refresh_rl_pivot(*, page: Any) -> None:
     except Exception:
         pass
 
-    # Last RL-kommentarer
+    # Last RL-kommentarer + handlingskoblinger
     _rl_comments: dict[str, str] = {}
+    _rl_action_counts: dict[str, int] = {}
     try:
         import regnskap_client_overrides as _rco
         import session as _sess
         _cl = getattr(_sess, "client", None) or ""
+        _yr = getattr(_sess, "year", None) or ""
         if _cl:
             _rl_comments = _rco.load_comments(_cl).get("rl", {})
+        if _cl and _yr:
+            _rl_action_map = _rco.load_rl_action_links(_cl, _yr)
+            _rl_action_counts = {str(k): len(v) for k, v in _rl_action_map.items() if v}
+    except Exception:
+        pass
+
+    _dec = 2
+    try:
+        _var_dec = getattr(page, "_var_decimals", None)
+        if _var_dec is not None and not bool(_var_dec.get()):
+            _dec = 0
     except Exception:
         pass
 
@@ -864,30 +1308,42 @@ def refresh_rl_pivot(*, page: Any) -> None:
         regnr_int = int(row["regnr"])
         regnr = str(regnr_int)
         navn = str(row.get("regnskapslinje", "") or "")
+        if _rb_filter and _rb_map.get(regnr_int, "") != _rb_filter:
+            continue
         tags = ()
         if regnr_int in sumline_regnr:
             if _hide_sum:
                 continue
-            sumnivaa = _sumnivaa_map.get(regnr_int, 1)
-            if sumnivaa >= 2:
-                navn = f"Σ {navn}".strip()
+            sumnivaa = _sumnivaa_map.get(regnr_int, 2)
+            navn = f"Σ {navn}".strip()
+            if sumnivaa >= 4:
+                tags = ("sumline_total",)
+            elif sumnivaa == 3:
                 tags = ("sumline_major",)
             else:
-                navn = f"Σ {navn}".strip()
                 tags = ("sumline",)
         ib_val = float(row.get("IB", 0.0))
         endring_val = float(row.get("Endring", 0.0))
         ub_val = float(row.get("UB", 0.0))
+        ao_val = float(row.get("AO_belop", 0.0))
+        ub_for_ao_val = float(row.get("UB_for_ao", ub_val))
+        ub_etter_ao_val = float(row.get("UB_etter_ao", ub_val))
         cnt_val = int(row.get("Antall", 0))
 
         if has_sb:
-            ib_txt = formatting.fmt_amount(ib_val)
-            endring_txt = formatting.fmt_amount(endring_val)
-            ub_txt = formatting.fmt_amount(ub_val)
+            ib_txt = formatting.fmt_amount(ib_val, decimals=_dec)
+            endring_txt = formatting.fmt_amount(endring_val, decimals=_dec)
+            ub_txt = formatting.fmt_amount(ub_val, decimals=_dec)
+            ao_txt = formatting.fmt_amount(ao_val, decimals=_dec)
+            ub_for_ao_txt = formatting.fmt_amount(ub_for_ao_val, decimals=_dec)
+            ub_etter_ao_txt = formatting.fmt_amount(ub_etter_ao_val, decimals=_dec)
         else:
             ib_txt = ""
-            endring_txt = formatting.fmt_amount(endring_val) + " *"
-            ub_txt = formatting.fmt_amount(ub_val) + " *"
+            endring_txt = formatting.fmt_amount(endring_val, decimals=_dec) + " *"
+            ub_txt = formatting.fmt_amount(ub_val, decimals=_dec) + " *"
+            ao_txt = ""
+            ub_for_ao_txt = ""
+            ub_etter_ao_txt = ""
 
         cnt_txt = formatting.format_int_no(cnt_val)
 
@@ -896,13 +1352,26 @@ def refresh_rl_pivot(*, page: Any) -> None:
             ub_fjor_val = row.get("UB_fjor")
             endring_fjor_val = row.get("Endring_fjor")
             endring_pct_val = row.get("Endring_pct")
-            ub_fjor_txt = formatting.fmt_amount(float(ub_fjor_val)) if ub_fjor_val is not None and ub_fjor_val == ub_fjor_val else ""
-            endring_fjor_txt = formatting.fmt_amount(float(endring_fjor_val)) if endring_fjor_val is not None and endring_fjor_val == endring_fjor_val else ""
+            ub_fjor_txt = formatting.fmt_amount(float(ub_fjor_val), decimals=_dec) if ub_fjor_val is not None and ub_fjor_val == ub_fjor_val else ""
+            endring_fjor_txt = formatting.fmt_amount(float(endring_fjor_val), decimals=_dec) if endring_fjor_val is not None and endring_fjor_val == endring_fjor_val else ""
             endring_pct_txt = f"{float(endring_pct_val):.1f} %" if endring_pct_val is not None and endring_pct_val == endring_pct_val else ""
         else:
             ub_fjor_txt = ""
             endring_fjor_txt = ""
             endring_pct_txt = ""
+
+        # BRREG-kolonner
+        if has_brreg:
+            brreg_val = row.get("BRREG")
+            avvik_val = row.get("Avvik_brreg")
+            avvik_pct_val = row.get("Avvik_brreg_pct")
+            brreg_txt = formatting.fmt_amount(float(brreg_val), decimals=_dec) if brreg_val is not None and brreg_val == brreg_val else ""
+            avvik_txt = formatting.fmt_amount(float(avvik_val), decimals=_dec) if avvik_val is not None and avvik_val == avvik_val else ""
+            avvik_pct_txt = f"{float(avvik_pct_val):.1f} %" if avvik_pct_val is not None and avvik_pct_val == avvik_pct_val else ""
+        else:
+            brreg_txt = ""
+            avvik_txt = ""
+            avvik_pct_txt = ""
 
         # Legg til kommentar-markering
         _comment = _rl_comments.get(regnr, "")
@@ -910,9 +1379,36 @@ def refresh_rl_pivot(*, page: Any) -> None:
             navn = f"\u270e {navn}  \u2014 {_comment}"
             tags = tags + ("commented",) if tags else ("commented",)
 
+        # Handlingskobling-badge (f.eks. "Salgsinntekt  \u2022 3 handlinger")
+        _n_actions = _rl_action_counts.get(regnr, 0)
+        if _n_actions and regnr_int not in sumline_regnr:
+            badge = "1 handling" if _n_actions == 1 else f"{_n_actions} handlinger"
+            navn = f"{navn}  \u2022 {badge}"
+
         try:
-            tree.insert("", "end", values=(regnr, navn, ib_txt, endring_txt, ub_txt, cnt_txt,
-                                           ub_fjor_txt, endring_fjor_txt, endring_pct_txt), tags=tags)
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    regnr,
+                    navn,
+                    "",              # OK — ikke relevant i RL-modus
+                    ib_txt,
+                    endring_txt,
+                    ub_txt,
+                    ao_txt,
+                    ub_for_ao_txt,
+                    ub_etter_ao_txt,
+                    cnt_txt,
+                    ub_fjor_txt,
+                    endring_fjor_txt,
+                    endring_pct_txt,
+                    brreg_txt,
+                    avvik_txt,
+                    avvik_pct_txt,
+                ),
+                tags=tags,
+            )
         except Exception:
             continue
 
@@ -941,7 +1437,10 @@ def _show_rl_not_configured(tree: Any) -> None:
     try:
         tree.insert(
             "", "end",
-            values=("-", "Regnskapslinjer/mapping ikke konfigurert (Innstillinger)", "", "", "", ""),
+            values=(
+                "-", "Regnskapslinjer/mapping ikke konfigurert (Innstillinger)",
+                "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+            ),
         )
     except Exception:
         pass
@@ -993,14 +1492,16 @@ def get_selected_rl_accounts(*, page: Any) -> List[str]:
         return []
 
     try:
-        from regnskap_mapping import apply_account_overrides, apply_interval_mapping
         account_overrides = _load_current_client_account_overrides()
-        temp = pd.DataFrame({"konto": kontos_in_hb, "ub": [0.0] * len(kontos_in_hb)})
-        result = apply_interval_mapping(temp, intervals)
-        mapped = apply_account_overrides(result.mapped, account_overrides, konto_col="konto")
+        regnr_lookup = _resolve_regnr_for_accounts(
+            kontos_in_hb,
+            intervals=intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=account_overrides,
+        )
         matching = (
-            mapped
-            .loc[mapped["regnr"].isin(expanded_regnr), "konto"]
+            regnr_lookup
+            .loc[regnr_lookup["regnr"].isin(expanded_regnr), "konto"]
             .tolist()
         )
         deduped: List[str] = []

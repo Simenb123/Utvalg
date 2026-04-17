@@ -168,14 +168,33 @@ def draw_stratified_sample(studio: Any, remaining_bilag_df: pd.DataFrame, n: int
     return chosen[:n]
 
 
-def populate_tree(studio: Any, df: pd.DataFrame) -> None:
-    """Fill the sample Treeview."""
+def populate_tree(
+    studio: Any,
+    df: pd.DataFrame,
+    *,
+    dok_statuses: dict[str, str] | None = None,
+) -> None:
+    """Fill the sample Treeview.
+
+    Args:
+        studio: the SelectionStudio widget instance.
+        df: the sample DataFrame (one row per bilag).
+        dok_statuses: optional mapping from bilag key → document status string.
+            Values: "" (not linked), "Koblet", "OK", "Avvik".
+            When supplied the "Dok." column is populated and rows are colour-coded.
+    """
 
     for i in studio.tree.get_children():
         studio.tree.delete(i)
 
     if df is None or df.empty:
         return
+
+    _DOK_TAG_MAP = {
+        "OK": "dok_ok",
+        "Avvik": "dok_avvik",
+        "Koblet": "dok_koblet",
+    }
 
     for _, row in df.iterrows():
         bilag = row.get("Bilag", "")
@@ -193,9 +212,18 @@ def populate_tree(studio: Any, df: pd.DataFrame) -> None:
         if pd.isna(sum_val):
             sum_val = 0.0
 
-        tags: tuple[str, ...] = ()
+        # Document status
+        dok_status = ""
+        if dok_statuses is not None:
+            bilag_key = str(bilag or "").strip()
+            dok_status = dok_statuses.get(bilag_key, "")
+
+        tags: list[str] = []
         if sum_val < 0:
-            tags = ("neg",)
+            tags.append("neg")
+        dok_tag = _DOK_TAG_MAP.get(dok_status, "")
+        if dok_tag:
+            tags.append(dok_tag)
 
         studio.tree.insert(
             "",
@@ -207,6 +235,7 @@ def populate_tree(studio: Any, df: pd.DataFrame) -> None:
                 fmt_amount_no(sum_val),
                 gruppe,
                 intervall,
+                dok_status,
             ),
-            tags=tags,
+            tags=tuple(tags),
         )

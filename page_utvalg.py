@@ -45,6 +45,34 @@ from views_virtual_transactions import VirtualTransactionsPanel
 import preferences
 import session
 from bus import emit, set_utvalg_page
+from materiality_store import load_state as _load_materiality_state
+
+
+def _apply_materiality_to_studio(studio: object) -> None:
+    """Videresend aktiv materialitet + valgt terskel til en SelectionStudio.
+
+    Speiler mønsteret i ``page_utvalg_strata.StrataTab._apply_materiality_to_studio``
+    slik at Utvalg-fanen får samme toleranse-default som Strata-fanen.
+    Brukeren kan fortsatt overstyre lokalt via studioens toleranse-felt.
+    """
+    set_ctx = getattr(studio, "set_materiality_context", None)
+    if not callable(set_ctx):
+        return
+
+    client = str(getattr(session, "client", "") or "").strip()
+    year = str(getattr(session, "year", "") or "").strip()
+    if not client or not year:
+        set_ctx(None, None)
+        return
+
+    try:
+        state = _load_materiality_state(client, year)
+    except Exception:
+        state = {}
+    set_ctx(
+        state.get("active_materiality") if isinstance(state, dict) else None,
+        state.get("selection_threshold_key") if isinstance(state, dict) else None,
+    )
 
 
 def filter_utvalg_dataframe(
@@ -328,7 +356,8 @@ class UtvalgPage(ttk.Frame):
                 self._update_filter_summary()
 
         # Åpne SelectionStudio
-        SelectionStudio(self, self._df_show, on_commit, self._df_all)
+        studio = SelectionStudio(self, self._df_show, on_commit, self._df_all)
+        _apply_materiality_to_studio(studio)
 
     def _on_row_dblclick(self, row_data: dict) -> None:
         """
