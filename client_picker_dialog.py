@@ -21,6 +21,7 @@ def open_client_picker(
     initial_selection: str | None = None,
     title: str = "Velg klient",
     show_mine_filter: bool = True,
+    mine_by_default: bool = False,
 ) -> Optional[str]:
     """Åpne en søkbar dialog for å velge klient.
 
@@ -87,7 +88,12 @@ def open_client_picker(
     ent = ttk.Entry(search_row, textvariable=query_var)
     ent.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
-    mine_var = tk.BooleanVar(value=False)
+    # Default på "Mine klienter" kun hvis vi faktisk fant noen — ellers ville
+    # dialogen åpnet med tom liste.
+    mine_default = bool(
+        mine_by_default and show_mine_filter and my_clients_set
+    )
+    mine_var = tk.BooleanVar(value=mine_default)
     if show_mine_filter and my_clients_set is not None:
         ttk.Checkbutton(search_row, text="Mine klienter", variable=mine_var).pack(
             side="right", padx=(8, 0))
@@ -275,7 +281,10 @@ def open_client_picker(
     btn_cancel.pack(side="right")
 
     # --- Initial fyll ---
-    fill_tree(all_clients, select_value=initial_selection)
+    if mine_default:
+        apply_filter()
+    else:
+        fill_tree(all_clients, select_value=initial_selection)
 
     ent.focus_set()
     win.wait_window()

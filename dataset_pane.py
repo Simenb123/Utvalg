@@ -175,28 +175,67 @@ class DatasetPane(ttk.Frame):
         # In SB mode, readiness comes from session.tb_df, not from mapping combos
         if self._source_mode == "sb":
             self._set_readiness("Saldobalanse lastet — TB-only modus.", level="ready")
+            self._set_kolonnekart_collapsed(True)
             return
 
         path = self.path_var.get().strip()
         if not path:
             self._set_readiness("Velg fil eller versjon for å starte.", level="warning")
+            self._set_kolonnekart_collapsed(False)
             return
 
         if is_saft_path(path):
             self._set_readiness("Klar til å bygge SAF-T-datasett.", level="ready")
+            self._set_kolonnekart_collapsed(True)
             return
 
         if not self._headers:
             self._set_readiness("Kontroller ark og header-rad før du bygger datasettet.", level="warning")
+            self._set_kolonnekart_collapsed(False)
             return
 
         required = _REQUIRED_HB
         missing = [field for field in required if not self.combo_vars[field].get().strip()]
         if missing:
             self._set_readiness("Mangler påkrevde felt: " + ", ".join(missing), level="warning")
+            self._set_kolonnekart_collapsed(False)
             return
 
         self._set_readiness("Klar til å bygge datasett.", level="ready")
+        self._set_kolonnekart_collapsed(True)
+
+    def _set_kolonnekart_collapsed(self, collapsed: bool, *, user: bool = False) -> None:
+        """Vis/skjul Kolonnekart-seksjonen.
+
+        Når collapsed=True: skjul mapf og vis "Endre kolonnekart"-knapp.
+        Når collapsed=False: vis mapf og skjul knappen.
+        user=True når brukeren eksplisitt har trykket "Endre kolonnekart" —
+        overstyrer auto-kollaps frem til neste varsel om ufullstendig mapping.
+        """
+        mapf = getattr(self, "_mapf", None)
+        btn = getattr(self, "_btn_edit_map", None)
+        if mapf is None or btn is None:
+            return
+        if user and not collapsed:
+            self._user_expanded_kolonnekart = True
+        elif not collapsed:
+            self._user_expanded_kolonnekart = False
+        if collapsed and getattr(self, "_user_expanded_kolonnekart", False):
+            return
+        try:
+            if collapsed:
+                mapf.pack_forget()
+                btn.grid()
+            else:
+                if not mapf.winfo_ismapped():
+                    actions = getattr(self, "_actions_frame", None)
+                    if actions is not None:
+                        mapf.pack(fill="x", padx=8, pady=(0, 6), before=actions)
+                    else:
+                        mapf.pack(fill="x", padx=8, pady=(0, 6))
+                btn.grid_remove()
+        except Exception:
+            pass
 
     # ---- callbacks fra UI-builder ----
     def _choose_file(self) -> None:

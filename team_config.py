@@ -88,6 +88,20 @@ def current_full_name() -> str:
     return u.full_name if u else ""
 
 
+def resolve_initials_to_name(initials: str) -> str:
+    """Slå opp Visena-initialer → fullt navn i team.json.
+
+    Returnerer fullt navn hvis funnet, ellers tom streng. Case-insensitivt.
+    """
+    needle = str(initials or "").strip().lower()
+    if not needle:
+        return ""
+    for m in list_team_members():
+        if str(m.get("initials") or "").lower() == needle:
+            return str(m.get("full_name") or "")
+    return ""
+
+
 def list_team_members() -> list[dict]:
     """Returner alle teammedlemmer fra config/team.json.
 

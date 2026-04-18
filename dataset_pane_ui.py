@@ -29,21 +29,8 @@ def build_ui(
     common_optional = [f for f in canon_fields if f not in required_fields and f in _COMMON_OPTIONAL]
     advanced_optional = [f for f in canon_fields if f not in required_fields and f not in _COMMON_OPTIONAL]
 
-    intro = ttk.Label(
-        pane,
-        text=(
-            "Steg 1: velg fil eller versjon. "
-            "Steg 2: kontroller struktur. "
-            "Steg 3: sjekk de påkrevde feltene før du bygger datasettet."
-        ),
-        justify="left",
-        style="Muted.TLabel",
-        wraplength=980,
-    )
-    intro.pack(fill="x", padx=8, pady=(8, 4))
-
-    top = ttk.LabelFrame(pane, text="1. Fil og struktur", padding=10)
-    top.pack(fill="x", padx=8, pady=(0, 6))
+    top = ttk.LabelFrame(pane, text="Fil", padding=10)
+    top.pack(fill="x", padx=8, pady=(8, 6))
     top.columnconfigure(1, weight=1)
 
     ttk.Label(top, text=f"{title}:").grid(row=0, column=0, sticky="w")
@@ -76,40 +63,23 @@ def build_ui(
     )
     btn_find_header.grid(row=1, column=4, padx=2, pady=(8, 0))
 
-    structure_hint = ttk.Label(
-        top,
-        text="Tips: bruk forhåndsvisning hvis du er usikker på ark eller hvilken rad som faktisk er header.",
-        justify="left",
-        style="Muted.TLabel",
-        wraplength=980,
-    )
-    structure_hint.grid(row=2, column=0, columnspan=5, sticky="w", pady=(8, 0))
-
-    mapf = ttk.LabelFrame(pane, text="2. Kolonnekart", padding=10)
+    mapf = ttk.LabelFrame(pane, text="Kolonnekart", padding=10)
     mapf.pack(fill="x", padx=8, pady=(0, 6))
     mapf.columnconfigure(0, weight=1)
 
-    ttk.Label(
-        mapf,
-        text="Påkrevde felt må være satt før datasettet kan bygges. Valgfrie felt kan fylles inn ved behov.",
-        justify="left",
-        style="Muted.TLabel",
-        wraplength=980,
-    ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+    # Samlet grid for påkrevde + vanlige valgfrie felt — etikettene skiller
+    # kategoriene godt nok (Konto/Bilag/Beløp er åpenbart påkrevde).
+    fields_frame = ttk.Frame(mapf)
+    fields_frame.grid(row=0, column=0, sticky="ew")
+    fields_frame.columnconfigure(1, weight=1)
+    fields_frame.columnconfigure(3, weight=1)
 
-    required_frame = ttk.LabelFrame(mapf, text="Påkrevde felt", padding=10)
-    required_frame.grid(row=1, column=0, sticky="ew")
-    required_frame.columnconfigure(1, weight=1)
-
-    # --- Vanlige valgfrie felt (alltid synlige) ---
-    common_frame = ttk.LabelFrame(mapf, text="Valgfrie felt", padding=10)
-    common_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-    common_frame.columnconfigure(1, weight=1)
-    common_frame.columnconfigure(3, weight=1)
+    required_frame = fields_frame
+    common_frame = fields_frame
 
     # --- Avanserte valgfrie felt (skjult som standard) ---
     advanced_container = ttk.Frame(mapf)
-    advanced_container.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+    advanced_container.grid(row=1, column=0, sticky="ew", pady=(6, 0))
     advanced_container.columnconfigure(0, weight=1)
 
     _advanced_visible = tk.BooleanVar(value=False)
@@ -150,8 +120,10 @@ def build_ui(
         combo_vars[canon] = var
         combo_widgets[canon] = cb
 
+    # Vanlige valgfrie felt starter på raden etter siste påkrevde.
+    common_base_row = len(required_fields)
     for index, canon in enumerate(common_optional):
-        row_index = index // 2
+        row_index = common_base_row + index // 2
         column_offset = (index % 2) * 2
         ttk.Label(common_frame, text=f"{canon}:").grid(row=row_index, column=column_offset, sticky="w", pady=2)
         var = tk.StringVar(value="")
@@ -185,21 +157,30 @@ def build_ui(
 
     readiness_lbl = ttk.Label(
         actions,
-        text="Velg fil eller versjon for å starte.",
+        text="",
         style="Warning.TLabel",
         justify="left",
     )
     readiness_lbl.grid(row=0, column=0, sticky="w")
 
+    btn_edit_map = ttk.Button(
+        actions,
+        text="Endre kolonnekart",
+        style="Secondary.TButton",
+        command=lambda: pane._set_kolonnekart_collapsed(False, user=True),
+    )
+    btn_edit_map.grid(row=0, column=1, padx=(8, 0))
+    btn_edit_map.grid_remove()  # starter skjult
+
     btn_guess = ttk.Button(actions, text="Oppdater forslag", style="Secondary.TButton", command=pane._guess_mapping)
-    btn_guess.grid(row=0, column=1, padx=(8, 0))
+    btn_guess.grid(row=0, column=2, padx=(8, 0))
 
     btn_build = ttk.Button(actions, text="Bygg datasett", style="Primary.TButton", command=pane._build_dataset_clicked)
-    btn_build.grid(row=0, column=2, padx=(6, 0))
+    btn_build.grid(row=0, column=3, padx=(6, 0))
 
     status_lbl = ttk.Label(
         pane,
-        text="Klar. Velg fil eller versjon for å komme i gang.",
+        text="",
         justify="left",
         style="Status.TLabel",
         wraplength=980,
@@ -210,11 +191,14 @@ def build_ui(
     pane._header_label = header_label
     pane._header_entry = ent_hdr
     pane._header_button = btn_find_header
-    pane._structure_hint_label = structure_hint
-    pane._structure_hint_default_text = structure_hint.cget("text")
-    pane._structure_hint_saft_text = "SAF-T bruker fast struktur, så arkvalg og header-rad er skjult."
+    pane._structure_hint_label = None
+    pane._structure_hint_default_text = ""
+    pane._structure_hint_saft_text = ""
     pane._readiness_lbl = readiness_lbl
     pane._btn_guess = btn_guess
     pane._btn_build = btn_build
+    pane._mapf = mapf
+    pane._btn_edit_map = btn_edit_map
+    pane._actions_frame = actions
 
     return sheet_combo, status_lbl, combo_vars, combo_widgets

@@ -15,19 +15,29 @@ class _StoreWidgets:
     year_var: tk.StringVar
     hb_var: tk.StringVar
 
-    cb_client: ttk.Combobox
-    btn_pick_client: ttk.Button
-    btn_settings: ttk.Button
-    btn_my_clients: ttk.Button
-    my_clients_var: tk.BooleanVar
+    lbl_client: ttk.Label
+    btn_switch_client: ttk.Button
 
     cb_year: ttk.Combobox
 
-    cb_hb: ttk.Combobox
     btn_versions: ttk.Button
 
-    lbl_storage: ttk.Label
-    info_labels: dict[str, ttk.Label]
+    status_pills: dict[str, tk.Label]
+    company_labels: dict[str, ttk.Label]
+    company_key_labels: dict[str, ttk.Label]
+    role_labels: dict[str, ttk.Label]
+    team_labels: dict[str, ttk.Label]
+
+
+def _add_kv_row(parent: tk.Widget, row: int, label_text: str,
+                wraplength: int = 240) -> tuple[ttk.Label, ttk.Label]:
+    """Bygg en label-verdi-rad i en info-boks. Returnerer (value, key)."""
+    key_lbl = ttk.Label(parent, text=label_text, style="Muted.TLabel")
+    key_lbl.grid(row=row, column=0, sticky="nw", padx=(0, 6), pady=1)
+    val_lbl = ttk.Label(parent, text="\u2013", anchor="w", justify="left",
+                        wraplength=wraplength)
+    val_lbl.grid(row=row, column=1, sticky="ew", pady=1)
+    return val_lbl, key_lbl
 
 
 def build_client_store_widgets(parent: tk.Widget, *, init_client: str = "", init_year: str = "2025") -> _StoreWidgets:
@@ -38,70 +48,119 @@ def build_client_store_widgets(parent: tk.Widget, *, init_client: str = "", init
     year_var = tk.StringVar(value=str(init_year))
     hb_var = tk.StringVar(value="")
 
+    _client_font = ("Segoe UI", 11, "bold")
+    _year_font = ("Segoe UI", 12, "bold")
+    try:
+        _style = ttk.Style(frame)
+        _style.configure("Client.TLabel", font=_client_font)
+        _style.configure("Year.TCombobox", padding=(4, 2), font=_year_font)
+        frame.option_add("*TCombobox*Listbox.font", _year_font)
+    except Exception:
+        pass
+
     ttk.Label(frame, text="Klient:").grid(row=0, column=0, sticky="w", padx=6, pady=4)
-    cb_client = ttk.Combobox(frame, textvariable=client_var, state="readonly")
-    cb_client.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+    lbl_client = ttk.Label(frame, textvariable=client_var, style="Client.TLabel", anchor="w")
+    lbl_client.grid(row=0, column=1, sticky="ew", padx=6, pady=4)
 
-    btn_pick_client = ttk.Button(frame, text="Finn…", width=8, style="Secondary.TButton")
-    btn_pick_client.grid(row=0, column=2, sticky="w", padx=4, pady=4)
-
-    my_clients_var = tk.BooleanVar(value=False)
-    btn_my_clients = ttk.Checkbutton(
-        frame, text="Mine klienter", variable=my_clients_var,
-        style="Toolbutton.TCheckbutton",
-    )
-    btn_my_clients.grid(row=0, column=3, sticky="w", padx=4, pady=4)
-
-    btn_settings = ttk.Button(frame, text="Oppsett…", width=12, style="Secondary.TButton")
-    btn_settings.grid(row=0, column=4, sticky="w", padx=4, pady=4)
+    ttk.Label(frame, text="År:", font=_year_font).grid(row=0, column=2, sticky="e", padx=6, pady=4)
+    cb_year = ttk.Combobox(frame, textvariable=year_var, values=[], width=6,
+                           state="readonly", style="Year.TCombobox")
+    try:
+        cb_year.configure(font=_year_font)
+    except tk.TclError:
+        pass
 
     import datetime as _dt
     _current_year = _dt.date.today().year
-    _year_values = [str(y) for y in range(_current_year - 7, _current_year + 3)]
-    ttk.Label(frame, text="År:").grid(row=0, column=5, sticky="e", padx=6, pady=4)
-    cb_year = ttk.Combobox(frame, textvariable=year_var, values=_year_values, width=6, state="readonly")
-    cb_year.grid(row=0, column=6, sticky="w", padx=6, pady=4)
+    cb_year["values"] = [str(y) for y in range(_current_year - 7, _current_year + 3)]
+    cb_year.grid(row=0, column=3, sticky="w", padx=6, pady=4)
 
-    ttk.Label(frame, text="Kildeversjon:").grid(row=1, column=0, sticky="w", padx=6, pady=4)
-    cb_hb = ttk.Combobox(frame, textvariable=hb_var, state="readonly")
-    cb_hb.grid(row=1, column=1, columnspan=4, sticky="ew", padx=6, pady=4)
+    btn_switch_client = ttk.Button(frame, text="Bytt klient…", style="Secondary.TButton")
+    btn_switch_client.grid(row=0, column=4, sticky="e", padx=4, pady=4)
 
-    # Keep the Dataset pane clean: version management is handled in a dedicated dialog.
     btn_versions = ttk.Button(frame, text="Versjoner…", style="Secondary.TButton")
-    btn_versions.grid(row=1, column=5, columnspan=2, sticky="ew", padx=4, pady=4)
+    btn_versions.grid(row=0, column=5, sticky="e", padx=4, pady=4)
 
-    lbl_storage = ttk.Label(frame, text="Datamappe: (ukjent)", style="Muted.TLabel")
-    lbl_storage.grid(row=2, column=0, columnspan=7, sticky="w", padx=6, pady=(2, 2))
+    # --- Datakilde-status (rad 1): 4 pills for HB/SB/KR/LR ---
+    status_frame = ttk.Frame(frame)
+    status_frame.grid(row=1, column=0, columnspan=6, sticky="w", padx=6, pady=(4, 6))
+    status_pills: dict[str, tk.Label] = {}
+    _pill_font = ("Segoe UI", 9, "bold")
+    for i, (dtype, short) in enumerate([("hb", "HB"), ("sb", "SB"), ("kr", "KR"), ("lr", "LR")]):
+        pill = tk.Label(
+            status_frame, text=f"  {short}  ",
+            bg="#e0e0e0", fg="#9e9e9e",
+            font=_pill_font, padx=10, pady=3,
+            borderwidth=0, cursor="hand2",
+        )
+        pill.grid(row=0, column=i, padx=(0 if i == 0 else 6, 0))
+        status_pills[dtype] = pill
 
-    # --- Klient-infopanel (rad 3) ---
-    info_frame = ttk.Frame(frame)
-    info_frame.grid(row=3, column=0, columnspan=7, sticky="ew", padx=6, pady=(0, 6))
-    info_labels: dict[str, ttk.Label] = {}
-    for i, (key, label_text) in enumerate([
+    # --- Rad 2: 3 parallelle info-bokser (Selskap / Roller / Team) ---
+    info_container = ttk.Frame(frame)
+    info_container.grid(row=2, column=0, columnspan=6, sticky="ew", padx=6, pady=(0, 4))
+    for col in (0, 1, 2):
+        info_container.columnconfigure(col, weight=1, uniform="info")
+
+    # Selskap
+    company_frame = ttk.LabelFrame(info_container, text="Selskap", padding=8)
+    company_frame.grid(row=0, column=0, sticky="new", padx=(0, 4))
+    company_frame.columnconfigure(1, weight=1)
+    company_labels: dict[str, ttk.Label] = {}
+    company_key_labels: dict[str, ttk.Label] = {}
+    for row_idx, (key, text) in enumerate([
         ("orgnr", "Org.nr:"),
         ("knr", "Knr:"),
-        ("ansvarlig", "Ansvarlig:"),
-        ("manager", "Manager:"),
+        ("orgform", "Org.form:"),
+        ("naering", "N\u00e6ring:"),
+        ("mva", "MVA:"),
+        ("address", "Adresse:"),
+        ("status", "Status:"),  # skjules når ingen rødt flagg
     ]):
-        ttk.Label(info_frame, text=label_text, style="Muted.TLabel").grid(
-            row=0, column=i * 2, sticky="w", padx=(0 if i == 0 else 12, 2))
-        lbl = ttk.Label(info_frame, text="\u2013")
-        lbl.grid(row=0, column=i * 2 + 1, sticky="w")
-        info_labels[key] = lbl
+        v, k = _add_kv_row(company_frame, row_idx, text)
+        company_labels[key] = v
+        company_key_labels[key] = k
+
+    # Roller
+    roles_frame = ttk.LabelFrame(info_container, text="Roller", padding=8)
+    roles_frame.grid(row=0, column=1, sticky="new", padx=4)
+    roles_frame.columnconfigure(1, weight=1)
+    role_labels: dict[str, ttk.Label] = {}
+    for row_idx, (key, text) in enumerate([
+        ("daglig_leder", "Daglig leder:"),
+        ("styreleder", "Styreleder:"),
+        ("nestleder", "Nestleder:"),
+        ("styremedlemmer", "Styremedlem:"),
+        ("varamedlemmer", "Varamedlem:"),
+        ("revisor", "Revisor:"),
+        ("regnskapsforer", "Regnskapsf\u00f8rer:"),
+    ]):
+        role_labels[key], _ = _add_kv_row(roles_frame, row_idx, text)
+
+    # Team
+    team_frame = ttk.LabelFrame(info_container, text="Team", padding=8)
+    team_frame.grid(row=0, column=2, sticky="new", padx=(4, 0))
+    team_frame.columnconfigure(1, weight=1)
+    team_labels: dict[str, ttk.Label] = {}
+    for row_idx, (key, text) in enumerate([
+        ("partner", "Partner:"),
+        ("manager", "Manager:"),
+        ("medarbeidere", "Medarbeidere:"),
+    ]):
+        team_labels[key], _ = _add_kv_row(team_frame, row_idx, text)
 
     return _StoreWidgets(
         frame=frame,
         client_var=client_var,
         year_var=year_var,
         hb_var=hb_var,
-        cb_client=cb_client,
-        btn_pick_client=btn_pick_client,
-        btn_settings=btn_settings,
-        btn_my_clients=btn_my_clients,
-        my_clients_var=my_clients_var,
+        lbl_client=lbl_client,
+        btn_switch_client=btn_switch_client,
         cb_year=cb_year,
-        cb_hb=cb_hb,
         btn_versions=btn_versions,
-        lbl_storage=lbl_storage,
-        info_labels=info_labels,
+        status_pills=status_pills,
+        company_labels=company_labels,
+        company_key_labels=company_key_labels,
+        role_labels=role_labels,
+        team_labels=team_labels,
     )

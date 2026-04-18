@@ -395,19 +395,24 @@ def is_my_client(meta: dict, visena_initials: str, full_name: str) -> bool:
     initials_lower = visena_initials.lower()
     name_lower = full_name.lower()
 
+    # meta kan komme fra read_client_meta (visena_*-nøkler) eller
+    # client_meta_index (korte nøkler uten prefiks). Støtt begge.
+    def _get(key_short: str) -> str:
+        return str(
+            meta.get(f"visena_{key_short}") or meta.get(key_short) or ""
+        ).lower()
+
     # Prosjektansvarlig (initialer)
-    if initials_lower and (meta.get("visena_responsible") or "").lower() == initials_lower:
+    if initials_lower and _get("responsible") == initials_lower:
         return True
 
     # Manager (fullt navn)
     if name_lower:
-        manager = (meta.get("visena_manager") or "").lower()
-        if name_lower in manager:
+        if name_lower in _get("manager"):
             return True
 
         # Teammedlem (fullt navn, kan være flere med newline/komma)
-        members = (meta.get("visena_team_members") or "").lower()
-        if name_lower in members:
+        if name_lower in _get("team_members"):
             return True
 
     return False

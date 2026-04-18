@@ -19,6 +19,7 @@ from typing import Callable, List, Optional
 
 import logging
 import os
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -111,15 +112,13 @@ class ClientStoreSection:
     hb_var: tk.StringVar
     on_path_selected: Callable[[str], None]
     get_current_path: Callable[[], str]
-    lbl_storage: ttk.Label
-    cb_client: ttk.Combobox
-    cb_hb: ttk.Combobox
     dtype: str = "hb"
 
-    # Ikke en del av init-signaturen – brukes for søk/filtrering og prefs
-    _all_clients_unfiltered: List[str] = field(default_factory=list, init=False, repr=False)
-    _all_clients: List[str] = field(default_factory=list, init=False, repr=False)
-    _my_clients_var: Optional[tk.BooleanVar] = field(default=None, init=False, repr=False)
+    # Ikke en del av init-signaturen – brukes for prefs/status
+    _status_pills: dict = field(default_factory=dict, init=False, repr=False)
+    _brreg_cache: dict = field(default_factory=dict, init=False, repr=False)
+    _brreg_request_id: int = field(default=0, init=False, repr=False)
+    _brreg_current_orgnr: str = field(default="", init=False, repr=False)
     _last_persisted_client: str = field(default="", init=False, repr=False)
     _last_persisted_year: str = field(default="", init=False, repr=False)
     # Brukes for å kunne tvinge oppdatering av filsti når bruker faktisk bytter
@@ -164,29 +163,24 @@ class ClientStoreSection:
             hb_var=w.hb_var,
             on_path_selected=on_path_selected,
             get_current_path=get_current_path,
-            lbl_storage=w.lbl_storage,
-            cb_client=w.cb_client,
-            cb_hb=w.cb_hb,
         )
 
-        sec._my_clients_var = w.my_clients_var
-        sec._info_labels = w.info_labels
+        sec._status_pills = w.status_pills
+        sec._company_labels = w.company_labels
+        sec._company_key_labels = w.company_key_labels
+        sec._role_labels = w.role_labels
+        sec._team_labels = w.team_labels
+        # Skjul status-raden initielt (vises kun ved rødt flagg).
+        sec._set_status_row_visible(False)
 
         # Bindings
-        w.btn_pick_client.configure(command=sec._on_pick_client)
-        w.btn_settings.configure(command=sec._on_open_settings)
+        w.btn_switch_client.configure(command=sec._on_pick_client)
         w.btn_versions.configure(command=sec._on_open_versions_dialog)
 
-        # "Mine klienter"-toggle
-        w.my_clients_var.trace_add("write", lambda *_: sec._on_my_clients_toggle())
+        # Klikkhandler per status-pill — åpner Versjoner-dialogen for dtypen.
+        for _dtype, _pill in w.status_pills.items():
+            _pill.bind("<Button-1>", lambda _e, d=_dtype: sec._on_pill_clicked(d))
 
-        # NB: Full refresh kan være tregt hvis man blar fort i comboboxen.
-        # Vi debounce'er refresh for bedre UX.
-        w.cb_client.bind("<<ComboboxSelected>>", lambda _e: sec._debounced_refresh())
-        w.cb_client.bind("<KeyRelease>", sec._on_client_keyrelease)
-        w.cb_client.bind("<Return>", lambda _e: sec._debounced_refresh())
-        w.cb_client.bind("<FocusOut>", lambda _e: sec._debounced_refresh())
-        w.cb_hb.bind("<<ComboboxSelected>>", lambda _e: sec._on_select_hb())
         w.cb_year.bind("<<ComboboxSelected>>", lambda _e: sec._debounced_refresh())
         w.cb_year.bind("<Return>", lambda _e: sec._debounced_refresh())
 
@@ -245,60 +239,45 @@ class ClientStoreSection:
         self._refresh_after_id = None
         self.refresh()
 
-    def _on_client_keyrelease(self, event: tk.Event) -> None:  # type: ignore[name-defined]
-        """Type-ahead søk: filtrer klientlisten på substring."""
-
-        if not self._all_clients:
+    def _on_pill_clicked(self, dtype: str) -> None:
+        """Åpne Versjoner-dialogen for valgt dtype (HB/SB) eller vis info for KR/LR."""
+        if dtype in {"kr", "lr"}:
+            label = "Kundereskontro" if dtype == "kr" else "Leverandørreskontro"
+            messagebox.showinfo(
+                "Kommer",
+                f"{label} som egen datakilde kommer i en senere runde.",
+                parent=self.frame,
+            )
             return
+        # HB/SB: åpne Versjoner-dialog fokusert på valgt dtype.
+        prev_dtype = self.dtype
+        self.dtype = dtype
+        try:
+            self._on_open_versions_dialog()
+        finally:
+            self.dtype = prev_dtype
 
-        # Ikke trigge på navigasjonstaster
-        if getattr(event, "keysym", "") in {"Up", "Down", "Left", "Right", "Escape", "Tab"}:
+    def _update_status_pills(self) -> None:
+        """Fargelegg pill-knappene etter om aktiv versjon finnes for dtypen."""
+        if not self._status_pills:
             return
-
-        q = self._client().lower()
-        if not q:
-            vals = self._all_clients
-        else:
-            vals = [c for c in self._all_clients if q in c.lower()]
-
-        # Begrens for å unngå ekstremt store lister i GUI
-        self.cb_client["values"] = vals[:2000]
-
-    def _apply_my_filter(self, clients: List[str]) -> List[str]:
-        """Filtrer klientliste til 'mine klienter' hvis toggle er aktiv."""
-        if not self._my_clients_var or not self._my_clients_var.get():
-            return clients
-        try:
-            from client_meta_index import get_index
-            from client_store_enrich import is_my_client
-            import team_config
-            user = team_config.current_user()
-            if not user:
-                return clients
-            index = get_index()
-            return [c for c in clients
-                    if is_my_client(index.get(c, {}), user.visena_initials, user.full_name)]
-        except Exception:
-            return clients
-
-    def _on_my_clients_toggle(self) -> None:
-        """Håndter endring av 'Mine klienter'-toggle."""
-        self._all_clients = self._apply_my_filter(self._all_clients_unfiltered)
-        self.cb_client["values"] = self._all_clients
-        self._update_storage_label()
-
-    def _update_storage_label(self) -> None:
-        total = len(self._all_clients_unfiltered)
-        shown = len(self._all_clients)
-        try:
-            base = app_paths.data_dir()
-        except Exception:
-            base = None
-        if self._my_clients_var and self._my_clients_var.get():
-            extra = f" (mine: {shown} av {total})"
-        else:
-            extra = f" (klienter: {total})"
-        self.lbl_storage.configure(text=f"Datamappe: {base or '-'}{extra}")
+        client = self._client()
+        year = self._year()
+        short_map = {"hb": "HB", "sb": "SB", "kr": "KR", "lr": "LR"}
+        for dtype, pill in self._status_pills.items():
+            short = short_map.get(dtype, dtype.upper())
+            has_active = False
+            if client and _HAS_CLIENT_STORE and client_store is not None and dtype in {"hb", "sb"}:
+                try:
+                    has_active = bool(
+                        client_store.get_active_version_id(client, year=year, dtype=dtype)
+                    )
+                except Exception:
+                    has_active = False
+            if has_active:
+                pill.configure(text=f"  ✓ {short}  ", bg="#2e7d32", fg="white")
+            else:
+                pill.configure(text=f"  {short}  ", bg="#e0e0e0", fg="#9e9e9e")
 
     def refresh(self) -> None:
         """Oppdater klient- og versjonsdropdowns."""
@@ -311,52 +290,28 @@ class ClientStoreSection:
                 pass
             self._refresh_after_id = None
 
-        # Datamappe
-        try:
-            base = app_paths.data_dir()
-        except Exception:
-            base = None
-
         if not _HAS_CLIENT_STORE or client_store is None:
-            self.cb_client["values"] = []
-            self.cb_hb["values"] = []
-            self.lbl_storage.configure(text=f"Datamappe: {base or '-'}")
             return
 
-        # Klientliste
+        # Klientliste — brukes av "Bytt klient…"-dialogen og for å validere
+        # at lagret klient fortsatt finnes.
         try:
             clients = client_store.list_clients()
         except Exception as e:
             log.warning("Kunne ikke liste klienter: %s", e)
             clients = []
 
-        self._all_clients_unfiltered = list(clients)
-        self._all_clients = self._apply_my_filter(self._all_clients_unfiltered)
-
-        total = len(self._all_clients_unfiltered)
-        shown = len(self._all_clients)
-        if self._my_clients_var and self._my_clients_var.get():
-            extra = f" (mine: {shown} av {total})" if clients else ""
-        else:
-            extra = f" (klienter: {total})" if clients else ""
-        self.lbl_storage.configure(text=f"Datamappe: {base or '-'}{extra}")
-
-        # Bevar ev. søkestreng i inputfeltet, men vis alltid full liste når dropdown åpnes.
-        try:
-            if tuple(self.cb_client["values"]) != tuple(self._all_clients):
-                self.cb_client["values"] = self._all_clients
-        except Exception:
-            self.cb_client["values"] = self._all_clients
+        clients_set = set(clients)
 
         # Hvis lagret klient ikke finnes lenger (f.eks. slettet), nullstill.
         try:
             cur_client = str(self.client_var.get() or "").strip()
         except Exception:
             cur_client = ""
-        if self._all_clients and cur_client and (cur_client not in self._all_clients):
+        if clients and cur_client and (cur_client not in clients_set):
             self.client_var.set("")
 
-        # Versjoner
+        # Versjoner for valgt klient/år
         c = self._client()
         y = self._year()
         versions: List[str] = []
@@ -366,16 +321,16 @@ class ClientStoreSection:
             except Exception as e:
                 log.warning("Kunne ikke liste versjoner for %s/%s: %s", c, y, e)
 
-        try:
-            if tuple(self.cb_hb["values"]) != tuple(versions):
-                self.cb_hb["values"] = versions
-        except Exception:
-            self.cb_hb["values"] = versions
-
-        # Hvis valgt hb ikke finnes, sett aktiv
+        # Reset til aktiv versjon ved klient- eller år-bytte (selv om gammel
+        # verdi tilfeldigvis finnes i ny liste). Ellers: kun sett aktiv hvis
+        # nåværende valg er ugyldig.
+        client_or_year_changed = bool(
+            self._last_applied_client
+            and (c != self._last_applied_client or y != self._last_applied_year)
+        )
         if versions:
             cur = str(self.hb_var.get() or "").strip()
-            if cur not in versions:
+            if cur not in versions or client_or_year_changed:
                 try:
                     act = client_store.get_active_version_id(c, year=y, dtype=self.dtype)
                 except Exception:
@@ -390,7 +345,7 @@ class ClientStoreSection:
 
         # Force apply when user has switched to a *valid* client/year.
         force_apply = False
-        if c and (c in self._all_clients):
+        if c and (c in clients_set):
             if c != self._last_applied_client or y != self._last_applied_year:
                 force_apply = True
 
@@ -402,17 +357,49 @@ class ClientStoreSection:
 
         self._persist_prefs()
         self._update_client_info()
+        self._update_status_pills()
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        """Speile aktiv klient + år i hovedvinduets tittel."""
+        try:
+            root = self.frame.winfo_toplevel()
+        except Exception:
+            return
+        klient = self._client()
+        aar = self._year()
+        parts = ["Utvalg"]
+        if aar:
+            parts.append(aar)
+        parts.append(klient if klient else "revisjonsverktøy")
+        try:
+            root.title(" — ".join(parts))
+        except Exception:
+            pass
 
     def _update_client_info(self) -> None:
-        """Oppdater klient-infopanelet med metadata fra lokal indeks."""
-        labels = getattr(self, "_info_labels", None)
-        if not labels:
-            return
+        """Oppdater klient-infopanelet med metadata fra lokal indeks.
+
+        Fyller Selskap- (orgnr, knr), og Team-boksene (partner, manager,
+        medarbeidere) synkront. Resten (selskaps-status, adresse, morselskap
+        og selskapsroller) fylles asynkront via BRREG i `_update_brreg_fields`.
+        """
+        company = getattr(self, "_company_labels", None) or {}
+        team = getattr(self, "_team_labels", None) or {}
+        roles = getattr(self, "_role_labels", None) or {}
 
         client = self._client()
         if not client:
-            for lbl in labels.values():
-                lbl.configure(text="\u2013")
+            for lbl in company.values():
+                try: lbl.configure(text="\u2013", foreground="")
+                except Exception: pass
+            for lbl in team.values():
+                try: lbl.configure(text="\u2013")
+                except Exception: pass
+            for lbl in roles.values():
+                try: lbl.configure(text="\u2013")
+                except Exception: pass
+            self._update_brreg_fields({})
             return
 
         try:
@@ -421,10 +408,251 @@ class ClientStoreSection:
         except Exception:
             meta = {}
 
-        labels["orgnr"].configure(text=meta.get("org_number") or "\u2013")
-        labels["knr"].configure(text=meta.get("client_number") or "\u2013")
-        labels["ansvarlig"].configure(text=meta.get("responsible") or "\u2013")
-        labels["manager"].configure(text=meta.get("manager") or "\u2013")
+        # Selskap: orgnr + knr (resten fra BRREG)
+        if "orgnr" in company:
+            try: company["orgnr"].configure(text=meta.get("org_number") or "\u2013")
+            except Exception: pass
+        if "knr" in company:
+            try: company["knr"].configure(text=meta.get("client_number") or "\u2013")
+            except Exception: pass
+
+        # Team: Partner (initialer → fullt navn hvis mulig), Manager, Medarbeidere
+        self._update_team_labels(meta)
+
+        self._update_brreg_fields(meta)
+
+    def _update_team_labels(self, meta: dict) -> None:
+        """Fyll Team-boksen fra lokal klient-meta."""
+        team = getattr(self, "_team_labels", None) or {}
+        if not team:
+            return
+
+        responsible = str((meta or {}).get("responsible") or "").strip()
+        partner_text = "\u2013"
+        if responsible:
+            full = ""
+            try:
+                import team_config
+                full = team_config.resolve_initials_to_name(responsible)
+            except Exception:
+                full = ""
+            if full:
+                partner_text = f"{full} ({responsible.upper()})"
+            else:
+                partner_text = responsible.upper()
+
+        manager_text = str((meta or {}).get("manager") or "").strip() or "\u2013"
+
+        members_raw = str((meta or {}).get("team_members") or "").strip()
+        if members_raw:
+            # Visena-feltet kan være newline- eller komma-separert. Normaliser.
+            parts = [p.strip() for p in members_raw.replace("\n", ",").split(",")]
+            members_text = ", ".join(p for p in parts if p) or "\u2013"
+        else:
+            members_text = "\u2013"
+
+        for key, val in (("partner", partner_text), ("manager", manager_text),
+                         ("medarbeidere", members_text)):
+            lbl = team.get(key)
+            if lbl is None:
+                continue
+            try: lbl.configure(text=val)
+            except Exception: pass
+
+    def _set_status_row_visible(self, visible: bool) -> None:
+        """Vis/skjul Status-raden. Status vises kun ved rødt flagg."""
+        company = getattr(self, "_company_labels", None) or {}
+        keys = getattr(self, "_company_key_labels", None) or {}
+        vlbl = company.get("status")
+        klbl = keys.get("status")
+        if vlbl is None or klbl is None:
+            return
+        try:
+            if visible:
+                klbl.grid()
+                vlbl.grid()
+            else:
+                klbl.grid_remove()
+                vlbl.grid_remove()
+        except Exception:
+            pass
+
+    def _update_brreg_fields(self, meta: dict) -> None:
+        """Hent BRREG-anriket info (org.form, MVA, næring, adresse, roller) lazy.
+
+        Synkron render fra cache hvis tilgjengelig, ellers start bakgrunnstråd.
+        Blokkerer aldri refresh().
+        """
+        company = getattr(self, "_company_labels", None) or {}
+        role_labels = getattr(self, "_role_labels", None) or {}
+        if not company or not role_labels:
+            return
+
+        orgnr = str((meta or {}).get("org_number") or "").strip()
+        self._brreg_current_orgnr = orgnr
+
+        if not orgnr:
+            for key in ("orgform", "naering", "mva", "address"):
+                lbl = company.get(key)
+                if lbl is None:
+                    continue
+                try: lbl.configure(text="\u2013", foreground="")
+                except Exception: pass
+            # Tom status-rad + skjul
+            status_lbl = company.get("status")
+            if status_lbl is not None:
+                try: status_lbl.configure(text="", foreground="")
+                except Exception: pass
+            self._set_status_row_visible(False)
+            for lbl in role_labels.values():
+                try: lbl.configure(text="\u2013")
+                except Exception: pass
+            return
+
+        cached = self._brreg_cache.get(orgnr)
+        if cached is not None:
+            self._render_brreg_labels(cached.get("enhet") or {}, cached.get("roller") or [])
+            return
+
+        # "Laster…" i org.form mens vi venter på nettverk.
+        orgform_lbl = company.get("orgform")
+        if orgform_lbl is not None:
+            try: orgform_lbl.configure(text="Laster\u2026", foreground="")
+            except Exception: pass
+        for key in ("naering", "mva", "address"):
+            lbl = company.get(key)
+            if lbl is None:
+                continue
+            try: lbl.configure(text="\u2013")
+            except Exception: pass
+        self._set_status_row_visible(False)
+        for lbl in role_labels.values():
+            try: lbl.configure(text="\u2013")
+            except Exception: pass
+
+        self._brreg_request_id += 1
+        request_id = self._brreg_request_id
+        try:
+            threading.Thread(
+                target=self._brreg_worker,
+                args=(orgnr, request_id),
+                daemon=True,
+            ).start()
+        except Exception:
+            log.debug("Kunne ikke starte BRREG-tråd for %s", orgnr, exc_info=True)
+
+    def _brreg_worker(self, orgnr: str, request_id: int) -> None:
+        """Bakgrunnstråd: henter BRREG-data og planlegger apply på main-tråden."""
+        enhet = None
+        roller = None
+        try:
+            import brreg_client
+            enhet = brreg_client.fetch_enhet(orgnr)
+            roller = brreg_client.fetch_roller(orgnr)
+        except Exception:
+            log.debug("BRREG-henting feilet for %s", orgnr, exc_info=True)
+        try:
+            self.frame.after(0, self._brreg_apply_result, request_id, orgnr, enhet, roller)
+        except Exception:
+            pass
+
+    def _brreg_apply_result(self, request_id: int, orgnr: str, enhet, roller) -> None:
+        """Main-tråd: cache resultatet, drop stale, render."""
+        self._brreg_cache[orgnr] = {"enhet": enhet or {}, "roller": roller or []}
+        if request_id != self._brreg_request_id:
+            return
+        if orgnr != self._brreg_current_orgnr:
+            return
+        self._render_brreg_labels(enhet or {}, roller or [])
+
+    def _render_brreg_labels(self, enhet: dict, roller: list) -> None:
+        """Fyll Selskap-boksen (org.form, næring, MVA, adresse + valgfritt
+        status-flagg) + Roller-boksen."""
+        company = getattr(self, "_company_labels", None) or {}
+        role_labels = getattr(self, "_role_labels", None) or {}
+        if not company or not role_labels:
+            return
+
+        RED = "#c62828"
+        enhet = enhet or {}
+
+        org_form = str(enhet.get("organisasjonsform") or "").strip() or "\u2013"
+        naering = str(enhet.get("naeringsnavn") or "").strip() or "\u2013"
+        mva = "\u2713" if enhet.get("registrertIMvaregisteret") else "\u2013"
+        adresse = str(enhet.get("forretningsadresse") or "").strip() or "\u2013"
+
+        for key, text in (
+            ("orgform", org_form),
+            ("naering", naering),
+            ("mva", mva),
+            ("address", adresse),
+        ):
+            lbl = company.get(key)
+            if lbl is None:
+                continue
+            try: lbl.configure(text=text, foreground="")
+            except Exception: pass
+
+        # Status-rad: kun når det er noe bekymringsverdig å varsle om.
+        slettedato = enhet.get("slettedato")
+        if enhet.get("konkurs"):
+            flag_text = "Konkurs"
+        elif enhet.get("underTvangsavvikling"):
+            flag_text = "Under tvangsavvikling"
+        elif enhet.get("underAvvikling"):
+            flag_text = "Under avvikling"
+        elif slettedato:
+            flag_text = f"Slettet {slettedato}"
+        else:
+            flag_text = ""
+
+        status_lbl = company.get("status")
+        if status_lbl is not None:
+            if flag_text:
+                try: status_lbl.configure(text=flag_text, foreground=RED)
+                except Exception: pass
+                self._set_status_row_visible(True)
+            else:
+                try: status_lbl.configure(text="", foreground="")
+                except Exception: pass
+                self._set_status_row_visible(False)
+
+        # Roller: match på stabil rolle_kode (ikke beskrivelse — BRREG bruker
+        # f.eks. "Styrets leder" for LEDE, som ikke matcher "Styreleder").
+        single_code_map = {
+            "DAGL": "daglig_leder",
+            "LEDE": "styreleder",
+            "NEST": "nestleder",
+            "REVI": "revisor",
+            "REGN": "regnskapsforer",
+        }
+        single_vals: dict[str, str] = {v: "\u2013" for v in single_code_map.values()}
+        styremedlemmer: list[str] = []
+        varamedlemmer: list[str] = []
+
+        for r in roller or []:
+            kode = str((r or {}).get("rolle_kode") or "").strip().upper()
+            navn = str((r or {}).get("navn") or "").strip()
+            if not navn:
+                continue
+            key = single_code_map.get(kode)
+            if key and single_vals[key] == "\u2013":
+                single_vals[key] = navn
+            elif kode == "MEDL":
+                styremedlemmer.append(navn)
+            elif kode == "VARA":
+                varamedlemmer.append(navn)
+
+        all_vals = dict(single_vals)
+        all_vals["styremedlemmer"] = ", ".join(styremedlemmer) if styremedlemmer else "\u2013"
+        all_vals["varamedlemmer"] = ", ".join(varamedlemmer) if varamedlemmer else "\u2013"
+
+        for key, val in all_vals.items():
+            lbl = role_labels.get(key)
+            if lbl is None:
+                continue
+            try: lbl.configure(text=val)
+            except Exception: pass
 
     def _on_create_client(self) -> None:
         if not _HAS_CLIENT_STORE or client_store is None:
@@ -449,9 +677,8 @@ class ClientStoreSection:
             messagebox.showwarning("Klient", "Klientlager er ikke tilgjengelig.")
             return
 
-        # Bruk cached liste om mulig
         try:
-            clients = list(self._all_clients) if self._all_clients else list(client_store.list_clients())
+            clients = list(client_store.list_clients())
         except Exception:
             clients = []
 
@@ -485,16 +712,13 @@ class ClientStoreSection:
             initial_selection=current,
             title="Velg klient",
             show_mine_filter=True,
+            mine_by_default=True,
         )
 
         if chosen:
             self.client_var.set(chosen)
             # Direkte refresh: eksplisitt valgt av bruker.
             self.refresh()
-            try:
-                self.cb_client.focus_set()
-            except Exception:
-                pass
 
     def _on_select_hb(self) -> None:
         c = self._client()
@@ -657,31 +881,6 @@ class ClientStoreSection:
             on_use_sb_version=_use_sb_version,
             on_after_change=self.refresh,
         )
-
-    def _on_open_settings(self) -> None:
-        """Åpne innstillinger (datamappe, klientliste, eksportvalg)."""
-
-        try:
-            import settings_entry
-        except Exception as e:
-            messagebox.showerror("Innstillinger", f"Kunne ikke åpne innstillinger: {e}", parent=self.frame)
-            return
-
-        root = self.frame.winfo_toplevel()
-
-        def _on_data_dir_changed() -> None:
-            try:
-                self.refresh()
-            except Exception:
-                pass
-
-        def _on_clients_changed() -> None:
-            try:
-                self.refresh()
-            except Exception:
-                pass
-
-        settings_entry.open_settings(root, on_data_dir_changed=_on_data_dir_changed, on_clients_changed=_on_clients_changed)
 
     def _on_pick_storage(self) -> None:
         """Velg datamappe (felles lagring)."""
