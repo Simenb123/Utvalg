@@ -232,6 +232,36 @@ def test_prior_year_overrides(tmp_path, monkeypatch) -> None:
     assert prior_empty == {"1500": 610}
 
 
+def test_prior_year_overrides_fallback_to_current_year(tmp_path, monkeypatch) -> None:
+    """Kontoer uten eksplisitt fjor-override skal arve årets override."""
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides as rco
+
+    # Fjoråret (2024) har sine egne overrides for 1500, men ikke for 1300
+    rco.save_account_overrides("K", {"1500": 610}, year="2024")
+    # Gjeldende år (2025) legger til ny kobling for 1300
+    rco.save_account_overrides("K", {"1500": 610, "1300": 560}, year="2025")
+
+    # Fjor-pivot for 2025 skal nå se både 1500 (fra fjoråret) og 1300
+    # (arvet fra 2025 fordi fjoråret ikke har eksplisitt verdi).
+    prior = rco.load_prior_year_overrides("K", "2025")
+    assert prior == {"1500": 610, "1300": 560}
+
+
+def test_prior_year_overrides_explicit_prev_wins_over_current(tmp_path, monkeypatch) -> None:
+    """Hvis fjoråret har en eksplisitt annen verdi, vinner den over årets fallback."""
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides as rco
+
+    rco.save_account_overrides("K", {"1300": 585}, year="2024")   # fjor: aksjer
+    rco.save_account_overrides("K", {"1300": 560}, year="2025")   # år: datter
+
+    prior = rco.load_prior_year_overrides("K", "2025")
+    assert prior == {"1300": 585}
+
+
 def test_mva_code_mapping_cleans_input(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 

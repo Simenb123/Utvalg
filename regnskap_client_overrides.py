@@ -115,10 +115,16 @@ def _clean_overrides_dict(mapping: dict) -> Dict[str, int]:
 
 
 def load_prior_year_overrides(client: str | None, year: str | None) -> Dict[str, int]:
-    """Last overstyringer for forrige år.
+    """Last overstyringer for forrige år, med årets overrides som fallback.
 
-    Brukes for fjorårs-SB-aggregering. Returnerer forrige års
-    egne overrides dersom de finnes, ellers tom dict.
+    Brukes for fjorårs-SB-aggregering. Regelen er:
+
+    1. Fjorårets *eksplisitte* overrides (``account_overrides_by_year[year-1]``)
+       har alltid prioritet per konto.
+    2. For kontoer som mangler eksplisitt fjor-override, brukes årets
+       overstyring som fallback. Dette hindrer at en ny reklassifisering
+       i gjeldende år gir falsk "Endring" når saldoen i realiteten er
+       lik mellom årene.
     """
     if not client or not year:
         return {}
@@ -126,7 +132,13 @@ def load_prior_year_overrides(client: str | None, year: str | None) -> Dict[str,
         prev_year = str(int(year) - 1)
     except (ValueError, TypeError):
         return {}
-    return load_account_overrides(client, year=prev_year)
+
+    prev_overrides = load_account_overrides(client, year=prev_year)
+    current_overrides = load_account_overrides(client, year=str(year))
+
+    merged: Dict[str, int] = dict(current_overrides)
+    merged.update(prev_overrides)  # fjorårets eksplisitte overstyringer vinner
+    return merged
 
 
 def load_expected_regnskapslinjer(
