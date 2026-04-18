@@ -151,11 +151,20 @@ class _VersionsDialog:
 
         self._build_ui(self.top)
 
-        # Center
+        # Center over hovedvinduet (ikke parent-frame som kan være en
+        # liten LabelFrame oppe til venstre — det ga popup \u00f8verst p\u00e5
+        # skjermen, noen ganger utenfor synlig omr\u00e5de).
         try:
             self.top.update_idletasks()
-            x = self._parent.winfo_rootx() + (self._parent.winfo_width() // 2) - (self.top.winfo_width() // 2)
-            y = self._parent.winfo_rooty() + (self._parent.winfo_height() // 2) - (self.top.winfo_height() // 2)
+            root = self._parent.winfo_toplevel()
+            top_w, top_h = 980, 520  # match geometry-kallet over
+            root_w = max(root.winfo_width(), top_w)
+            root_h = max(root.winfo_height(), top_h)
+            x = root.winfo_rootx() + (root_w - top_w) // 2
+            y = root.winfo_rooty() + (root_h - top_h) // 2
+            # Klem inn p\u00e5 skjermen s\u00e5 popup ikke havner utenfor.
+            x = max(x, root.winfo_rootx() + 10)
+            y = max(y, root.winfo_rooty() + 10)
             self.top.geometry(f"+{x}+{y}")
         except Exception:
             pass

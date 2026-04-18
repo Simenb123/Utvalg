@@ -205,14 +205,23 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
             notebook.bind("<<NotebookTabChanged>>", self._on_admin_tab_changed, add="+")
         except Exception:
             pass
+        bottom = ttk.Frame(self)
+        bottom.grid(row=2, column=0, sticky="ew")
+        bottom.columnconfigure(0, weight=1)
         ttk.Label(
-            self,
+            bottom,
             textvariable=self._status_var,
             style="Muted.TLabel",
             padding=(8, 0, 8, 8),
             anchor="w",
             justify="left",
-        ).grid(row=2, column=0, sticky="ew")
+        ).grid(row=0, column=0, sticky="ew")
+        ttk.Button(
+            bottom,
+            text="Oppsett…",
+            style="Secondary.TButton",
+            command=self._on_open_settings,
+        ).grid(row=0, column=1, sticky="e", padx=(4, 8), pady=(0, 8))
 
     def set_analyse_page(self, page: Any) -> None:
         self._analyse_page = page
@@ -344,6 +353,29 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
                 self._status_var.set(
                     "Regelendringer lagret. Forslags-cache er nullstilt. Preview/Test oppdateres når fanen åpnes."
                 )
+
+    def _on_open_settings(self) -> None:
+        """Åpne globale innstillinger (datamappe, klientliste, eksportvalg)."""
+        try:
+            import settings_entry
+        except Exception as exc:
+            if messagebox is not None:
+                messagebox.showerror("Innstillinger", f"Kunne ikke åpne innstillinger: {exc}")
+            return
+
+        root = self.winfo_toplevel()
+
+        def _on_data_dir_changed() -> None:
+            self._notify_rule_change()
+
+        def _on_clients_changed() -> None:
+            self._notify_rule_change()
+
+        settings_entry.open_settings(
+            root,
+            on_data_dir_changed=_on_data_dir_changed,
+            on_clients_changed=_on_clients_changed,
+        )
 
     def _build_rl_control_ui(self) -> None:
         # RL-kontroll-fanen samler hele RL-mappingflyten; parkert i runtime.
