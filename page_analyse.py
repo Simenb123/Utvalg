@@ -1742,6 +1742,10 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         """Sammenlign gjeldende HB med en tidligere versjon og eksporter diff."""
         analyse_workpaper_export.export_hb_version_diff(self)
 
+    def _export_klientinfo_workpaper(self) -> None:
+        """Eksporter klientinfo/roller/eierskap-arbeidspapir (BRREG + aksjonærregister)."""
+        analyse_workpaper_export.export_klientinfo_workpaper(self)
+
     def _pick_hb_version(self, versions, active_id) -> Optional[str]:
         """Enkel dialog for å velge en HB-versjon å sammenligne med."""
         return analyse_workpaper_export.pick_hb_version(self, versions, active_id)

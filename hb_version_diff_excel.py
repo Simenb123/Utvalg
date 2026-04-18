@@ -16,6 +16,8 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+from workpaper_forside import build_forside_sheet
+
 _TITLE_FILL = PatternFill("solid", fgColor="DDEBF7")
 _HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")
 _ADDED_FILL = PatternFill("solid", fgColor="E2EFDA")     # Grønn - nye
@@ -46,6 +48,8 @@ def build_hb_diff_workpaper(
     _build_added_sheet(wb, diff_result.added, client=client, year=year)
     _build_removed_sheet(wb, diff_result.removed, client=client, year=year)
     _build_changed_sheet(wb, diff_result.changed, client=client, year=year)
+
+    build_forside_sheet(wb, workpaper_navn="HB versjonsdiff")
 
     if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
         del wb["Sheet"]

@@ -29,3 +29,6 @@ from workpaper_export_hb_diff import (  # noqa: F401
     load_hb_version_df,
     pick_hb_version,
 )
+from workpaper_export_klientinfo import (  # noqa: F401
+    export_klientinfo_workpaper,
+)
