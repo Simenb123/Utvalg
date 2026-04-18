@@ -202,18 +202,36 @@ def reconcile(
 # IB/UB-kontinuitetskontroll:  IB(i år) == UB(fjor)
 # ---------------------------------------------------------------------------
 
+
+# Norsk kontoplan: balanse = eiendeler (1xxx) + egenkapital/gjeld (2xxx).
+# Resultatkontoer (3xxx-8xxx) nullstilles ved årsskiftet og skal *ikke* med
+# i IB/UB-kontinuitetskontrollen.
+DEFAULT_BALANCE_PREFIXES: tuple[str, ...] = ("1", "2")
+
+
+def _is_balance_account(konto: str, prefixes: tuple[str, ...]) -> bool:
+    k = (konto or "").strip()
+    return bool(k) and k[0] in prefixes
+
 def build_continuity_check(
     sb_current: pd.DataFrame,
     sb_previous: pd.DataFrame,
     *,
     tolerance: float = 0.01,
+    balance_accounts_only: bool = True,
+    balance_prefixes: tuple[str, ...] = DEFAULT_BALANCE_PREFIXES,
 ) -> pd.DataFrame:
     """Sjekk at IB i inneværende år stemmer med UB fra forrige år, per konto.
 
     Begge DataFrames forventes med kolonner: konto, kontonavn, ib, ub.
 
+    Som default filtreres resultatkontoer (3xxx-8xxx) bort — de nullstilles
+    ved årsskiftet og har ikke meningsfull IB/UB-kontinuitet. Sett
+    `balance_accounts_only=False` for å inkludere alle kontoer, eller juster
+    `balance_prefixes` (default `("1", "2")`).
+
     Returnerer DataFrame med kolonner:
-        konto, kontonavn, ib_current, ub_previous, differanse, har_avvik
+        konto, kontonavn, kontotype, ib_current, ub_previous, differanse, har_avvik
     """
     cur = sb_current[["konto", "kontonavn", "ib"]].copy()
     cur["konto"] = cur["konto"].astype(str).str.strip()
@@ -232,6 +250,26 @@ def build_continuity_check(
     merged["differanse"] = merged["ib_current"] - merged["ub_previous"]
     merged["har_avvik"] = merged["differanse"].abs() > tolerance
 
+    # Kontotype: Eiendel (1xxx) / EK+Gjeld (2xxx) / Resultat (3xxx-8xxx) / Annet
+    def _classify(k: str) -> str:
+        k = (k or "").strip()
+        if not k:
+            return "Ukjent"
+        first = k[0]
+        if first == "1":
+            return "Eiendel"
+        if first == "2":
+            return "EK+Gjeld"
+        if first in {"3", "4", "5", "6", "7", "8"}:
+            return "Resultat"
+        return "Annet"
+
+    merged["kontotype"] = merged["konto"].map(_classify)
+
+    if balance_accounts_only:
+        mask = merged["konto"].map(lambda k: _is_balance_account(k, balance_prefixes))
+        merged = merged.loc[mask].copy()
+
     # Filtrer vekk kontoer der begge er null
     has_data = (merged["ib_current"].abs() > tolerance) | (merged["ub_previous"].abs() > tolerance)
     merged = merged.loc[has_data].copy()
@@ -239,7 +277,7 @@ def build_continuity_check(
     merged["_sort"] = pd.to_numeric(merged["konto"], errors="coerce").fillna(999999)
     merged = merged.sort_values("_sort").drop(columns=["_sort"]).reset_index(drop=True)
 
-    return merged[["konto", "kontonavn", "ib_current", "ub_previous", "differanse", "har_avvik"]]
+    return merged[["konto", "kontonavn", "kontotype", "ib_current", "ub_previous", "differanse", "har_avvik"]]
 
 
 def build_continuity_summary(df: pd.DataFrame) -> Dict[str, object]:
@@ -260,9 +298,20 @@ def check_continuity(
     sb_previous: pd.DataFrame,
     *,
     tolerance: float = 0.01,
+    balance_accounts_only: bool = True,
+    balance_prefixes: tuple[str, ...] = DEFAULT_BALANCE_PREFIXES,
 ) -> ContinuityResult:
-    """Komplett IB/UB-kontinuitetskontroll."""
-    account_level = build_continuity_check(sb_current, sb_previous, tolerance=tolerance)
+    """Komplett IB/UB-kontinuitetskontroll.
+
+    `balance_accounts_only=True` (default) filtrerer bort resultatkontoer som
+    nullstilles ved årsskiftet og derfor ville gitt falske avvik.
+    """
+    account_level = build_continuity_check(
+        sb_current, sb_previous,
+        tolerance=tolerance,
+        balance_accounts_only=balance_accounts_only,
+        balance_prefixes=balance_prefixes,
+    )
     summary = build_continuity_summary(account_level)
     discrepancies = account_level.loc[account_level["har_avvik"]].reset_index(drop=True)
     return ContinuityResult(

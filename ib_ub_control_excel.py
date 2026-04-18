@@ -22,6 +22,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 import formatting
+from workpaper_forside import build_forside_sheet
 
 _TITLE_FILL = PatternFill("solid", fgColor="DDEBF7")
 _HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")
@@ -48,6 +49,8 @@ def build_ib_ub_workpaper(
     if rl_recon is not None and not rl_recon.empty:
         _build_rl_sheet(wb, rl_recon, client=client, year=year)
     _build_discrepancy_sheet(wb, account_recon, client=client, year=year)
+
+    build_forside_sheet(wb, workpaper_navn="SB/HB Avstemming")
 
     # Slett standard-arket hvis det er tomt
     if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
@@ -299,6 +302,8 @@ def build_continuity_workpaper(
     _build_continuity_account_sheet(wb, account_df, client=client, year=year)
     _build_continuity_discrepancy_sheet(wb, account_df, client=client, year=year)
 
+    build_forside_sheet(wb, workpaper_navn="IB/UB Kontinuitetskontroll")
+
     if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
         del wb["Sheet"]
 
@@ -390,19 +395,34 @@ def _build_continuity_account_sheet(
     if year not in {None, ""}:
         title += f" {year}"
 
-    headers = ["Konto", "Kontonavn", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
-    cols = ["konto", "kontonavn", "ib_current", "ub_previous", "differanse"]
-    amount_cols = {2, 3, 4}
+    has_kontotype = "kontotype" in account_df.columns
+    if has_kontotype:
+        headers = ["Konto", "Kontonavn", "Type", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
+        cols = ["konto", "kontonavn", "kontotype", "ib_current", "ub_previous", "differanse"]
+        amount_cols = {3, 4, 5}
+        highlight = 5
+        last_col = "F"
+    else:
+        headers = ["Konto", "Kontonavn", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
+        cols = ["konto", "kontonavn", "ib_current", "ub_previous", "differanse"]
+        amount_cols = {2, 3, 4}
+        highlight = 4
+        last_col = "E"
 
     _write_title_and_header(ws, title, headers, span=len(headers))
-    _write_data_rows(ws, account_df, cols, amount_cols, highlight_col=4)
+    _write_data_rows(ws, account_df, cols, amount_cols, highlight_col=highlight)
 
     ws.column_dimensions["A"].width = 10
     ws.column_dimensions["B"].width = 36
-    for c in "CDE":
-        ws.column_dimensions[c].width = 18
+    if has_kontotype:
+        ws.column_dimensions["C"].width = 12
+        for c in "DEF":
+            ws.column_dimensions[c].width = 18
+    else:
+        for c in "CDE":
+            ws.column_dimensions[c].width = 18
     ws.freeze_panes = "A5"
-    ws.auto_filter.ref = f"A4:E{max(5, 4 + len(account_df))}"
+    ws.auto_filter.ref = f"A4:{last_col}{max(5, 4 + len(account_df))}"
     ws.sheet_properties.tabColor = "4472C4"
 
 
@@ -428,9 +448,17 @@ def _build_continuity_discrepancy_sheet(
     if year not in {None, ""}:
         title += f" {year}"
 
-    headers = ["Konto", "Kontonavn", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
-    cols = ["konto", "kontonavn", "ib_current", "ub_previous", "differanse"]
-    amount_cols = {2, 3, 4}
+    has_kontotype = "kontotype" in account_df.columns
+    if has_kontotype:
+        headers = ["Konto", "Kontonavn", "Type", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
+        cols = ["konto", "kontonavn", "kontotype", "ib_current", "ub_previous", "differanse"]
+        amount_cols = {3, 4, 5}
+        highlight = 5
+    else:
+        headers = ["Konto", "Kontonavn", f"IB {year or 'i år'}", f"UB {prev_year or 'fjor'}", "Differanse"]
+        cols = ["konto", "kontonavn", "ib_current", "ub_previous", "differanse"]
+        amount_cols = {2, 3, 4}
+        highlight = 4
 
     _write_title_and_header(ws, title, headers, span=len(headers))
 
@@ -438,11 +466,16 @@ def _build_continuity_discrepancy_sheet(
         ws.cell(row=5, column=1, value="Ingen avvik — IB stemmer med UB fjor ✓")
         ws["A5"].font = Font(color="006100")
     else:
-        _write_data_rows(ws, discrepancies, cols, amount_cols, highlight_col=4)
+        _write_data_rows(ws, discrepancies, cols, amount_cols, highlight_col=highlight)
 
     ws.column_dimensions["A"].width = 10
     ws.column_dimensions["B"].width = 36
-    for c in "CDE":
-        ws.column_dimensions[c].width = 18
+    if has_kontotype:
+        ws.column_dimensions["C"].width = 12
+        for c in "DEF":
+            ws.column_dimensions[c].width = 18
+    else:
+        for c in "CDE":
+            ws.column_dimensions[c].width = 18
     ws.freeze_panes = "A5"
     ws.sheet_properties.tabColor = "FF0000" if not discrepancies.empty else "70AD47"

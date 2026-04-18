@@ -110,3 +110,71 @@ class TestReconcile:
         hb = _make_hb()
         result = ib_ub_control.reconcile(sb, hb)
         assert len(result.discrepancies) == 0
+
+
+def _make_sb_current() -> pd.DataFrame:
+    return pd.DataFrame({
+        "konto": ["1920", "2400", "3000", "6000"],
+        "kontonavn": ["Bank", "Leverandørgjeld", "Salgsinntekt", "Lønn"],
+        "ib": [150_000.0, -80_000.0, 0.0, 0.0],
+        "ub": [200_000.0, -90_000.0, -500_000.0, 150_000.0],
+    })
+
+
+def _make_sb_previous() -> pd.DataFrame:
+    return pd.DataFrame({
+        "konto": ["1920", "2400", "3000", "6000"],
+        "kontonavn": ["Bank", "Leverandørgjeld", "Salgsinntekt", "Lønn"],
+        "ib": [100_000.0, -50_000.0, 0.0, 0.0],
+        "ub": [150_000.0, -80_000.0, -400_000.0, 140_000.0],
+    })
+
+
+class TestContinuityBalanceFilter:
+    def test_filters_out_resultatkontoer_by_default(self) -> None:
+        df = ib_ub_control.build_continuity_check(_make_sb_current(), _make_sb_previous())
+        kontoer = set(df["konto"].tolist())
+        assert "1920" in kontoer
+        assert "2400" in kontoer
+        assert "3000" not in kontoer
+        assert "6000" not in kontoer
+
+    def test_balance_only_false_includes_resultatkontoer(self) -> None:
+        df = ib_ub_control.build_continuity_check(
+            _make_sb_current(), _make_sb_previous(), balance_accounts_only=False,
+        )
+        kontoer = set(df["konto"].tolist())
+        assert {"1920", "2400", "6000"} <= kontoer
+
+    def test_kontotype_column_classifies_accounts(self) -> None:
+        df = ib_ub_control.build_continuity_check(
+            _make_sb_current(), _make_sb_previous(), balance_accounts_only=False,
+        )
+        by_konto = df.set_index("konto")["kontotype"].to_dict()
+        assert by_konto["1920"] == "Eiendel"
+        assert by_konto["2400"] == "EK+Gjeld"
+        assert by_konto["6000"] == "Resultat"
+
+    def test_resultatkontoer_do_not_produce_false_avvik(self) -> None:
+        cur = pd.DataFrame({
+            "konto": ["3000"],
+            "kontonavn": ["Salgsinntekt"],
+            "ib": [0.0],
+            "ub": [-500_000.0],
+        })
+        prev = pd.DataFrame({
+            "konto": ["3000"],
+            "kontonavn": ["Salgsinntekt"],
+            "ib": [0.0],
+            "ub": [-400_000.0],
+        })
+        result = ib_ub_control.check_continuity(cur, prev)
+        assert len(result.discrepancies) == 0
+        assert result.summary["antall_kontoer"] == 0
+
+    def test_custom_balance_prefixes(self) -> None:
+        df = ib_ub_control.build_continuity_check(
+            _make_sb_current(), _make_sb_previous(), balance_prefixes=("1",),
+        )
+        kontoer = set(df["konto"].tolist())
+        assert kontoer == {"1920"}
