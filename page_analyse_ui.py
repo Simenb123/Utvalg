@@ -1122,9 +1122,9 @@ def build_ui(
         _tx_mode_cb = ttk.Combobox(
             tx_header,
             textvariable=_var_tx_mode,
-            values=["Saldobalanse", "Hovedbok"],
+            values=["Saldobalanse", "Hovedbok", "Nøkkeltall", "Motposter", "Motposter (kontonivå)"],
             state="readonly",
-            width=20,
+            width=24,
         )
         _tx_mode_cb.grid(row=0, column=1, sticky="w")
         page._tx_view_combo = _tx_mode_cb

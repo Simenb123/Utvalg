@@ -1475,10 +1475,9 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     def _refresh_transactions_view(self) -> None:
         """Dispatcher for h\u00f8yre-panelet.
 
-        Brukerrettede moduser er kun ``Saldobalanse`` og ``Hovedbok``.
-        Legacy-moduser (N\u00f8kkeltall / Motposter / Motposter kontoniv\u00e5) er
-        ikke tilgjengelige fra GUI men beholdes som intern fallback for
-        eldre prefs og for eksterne `.set()`-kall.
+        St\u00f8ttede moduser i dropdown: ``Saldobalanse``, ``Hovedbok``,
+        ``N\u00f8kkeltall``, ``Motposter``, ``Motposter (kontoniv\u00e5)``.
+        Ukjente verdier faller tilbake til Saldobalanse.
         """
         from page_analyse_columns import normalize_view_mode
 
@@ -1487,19 +1486,21 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             raw_mode = str(self._var_tx_view_mode.get()) if self._var_tx_view_mode else ""
         except Exception:
             pass
+
+        # Sjekk N\u00f8kkeltall/Motposter f\u00f8rst — disse b\u00f8r ikke g\u00e5 via
+        # normalize_view_mode som kollapser alt til SB/Hovedbok.
+        if self._dispatch_legacy_tx_view(raw_mode=raw_mode):
+            return
+
         mode = normalize_view_mode(raw_mode)
 
-        # Primær brukerflate: Saldobalanse (SB-tree)
+        # Prim\u00e6r brukerflate: Saldobalanse (SB-tree)
         if mode == "Saldobalansekontoer":
             page_analyse_sb.show_sb_tree(page=self)
             page_analyse_sb.refresh_sb_view(page=self)
             return
 
-        # --- Legacy intern fallback (ikke tilgjengelig fra dropdown) ---
-        if self._dispatch_legacy_tx_view(raw_mode=raw_mode):
-            return
-
-        # Primær brukerflate: Hovedbok (TX-tree)
+        # Prim\u00e6r brukerflate: Hovedbok (TX-tree)
         page_analyse_sb.show_tx_tree(page=self)
         self._configure_tx_tree_columns()
         page_analyse_transactions.refresh_transactions_view(page=self)
