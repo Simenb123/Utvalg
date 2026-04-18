@@ -81,7 +81,9 @@ from page_admin_preview import (
 
 
 # Editor-dialoger er splittet per type (refaktor PR 5).
+from page_admin_actions import _ActionLibraryEditor
 from page_admin_alias import _AliasEditor
+from page_admin_workpapers import _WorkpaperLibraryEditor
 from page_admin_catalog import _CatalogEditor
 from page_admin_detail_class import _DetailClassEditor
 from page_admin_editor_base import _JsonEditor
@@ -192,6 +194,8 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         # lenger nede i filen, men bygges og refreshes IKKE ved oppstart eller
         # regelendring. Regnskapslinjer er den eneste synlige RL-adminflaten.
         self._rl_control_tab = ttk.Frame(self)
+        self._actions_editor = _ActionLibraryEditor(notebook, title="Handlinger")
+        self._workpapers_editor = _WorkpaperLibraryEditor(notebook, title="Arbeidspapir")
         self._preview_tab = ttk.Frame(notebook)
         notebook.add(self._aliases_editor, text="Konseptaliaser")
         notebook.add(self._detail_class_editor, text="Kontoklassifisering")
@@ -199,6 +203,8 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         notebook.add(self._catalog_editor, text="RF-1022 og flagg")
         notebook.add(self._regnskapslinje_editor, text="Regnskapslinjer")
         notebook.add(self._thresholds_editor, text="Terskler")
+        notebook.add(self._actions_editor, text="Handlinger")
+        notebook.add(self._workpapers_editor, text="Arbeidspapir")
         notebook.add(self._preview_tab, text="Preview/Test")
         self._build_preview_ui()
         try:

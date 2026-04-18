@@ -11,8 +11,12 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any
 
+import action_library
 import action_workpaper_store as workpaper_store
+import workpaper_library
+from action_library import LocalAction
 from action_workpaper_store import ActionWorkpaper
+from workpaper_library import Workpaper
 
 
 class RevisjonshandlingerPage(ttk.Frame):
@@ -24,18 +28,22 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._client: str | None = None
         self._year: str | None = None
         self._actions: list[Any] = []
+        self._local_lib: list[LocalAction] = []
+        self._workpaper_index: dict[str, Workpaper] = {}
         self._engagement: Any = None
         self._match_by_action_id: dict[int, Any] = {}  # action_id → ActionMatch
         self._local_assignments: dict[int, str] = {}  # action_id → "SB" / "SB, TN"
         self._local_link_counts: dict[int, int] = {}  # action_id → antall lokale koblinger
         self._workpapers: dict[int, ActionWorkpaper] = {}  # action_id → bekreftelse
         self._rl_list: list[Any] = []  # cache av RegnskapslinjeInfo for dropdown
+        self._analyse_page: Any = None  # settes av ui_main via set_analyse_page
 
         self.var_status = tk.StringVar(value="Last inn klient for å se revisjonshandlinger.")
         self.var_filter_type = tk.StringVar(value="Alle")
         self.var_filter_status = tk.StringVar(value="Alle")
         self.var_filter_area = tk.StringVar(value="Alle")
         self.var_filter_regnr = tk.StringVar(value="Alle")
+        self.var_filter_origin = tk.StringVar(value="Alle")
         self.var_search = tk.StringVar()
 
         self._build_ui()
@@ -66,11 +74,22 @@ class RevisjonshandlingerPage(ttk.Frame):
             command=self._on_clear_confirmation, state="disabled",
         )
         self._btn_clear.grid(row=0, column=10, sticky="e", padx=(6, 0))
-        ttk.Button(top, text="Oppdater", command=self._refresh).grid(row=0, column=11, sticky="e", padx=(6, 0))
+        self._btn_run_wp = ttk.Button(
+            top, text="Kjør arbeidspapir…",
+            command=self._on_run_workpaper, state="disabled",
+        )
+        self._btn_run_wp.grid(row=0, column=11, sticky="e", padx=(6, 0))
+        ttk.Button(top, text="Oppdater", command=self._refresh).grid(row=0, column=12, sticky="e", padx=(6, 0))
 
         # Filters
         filt = ttk.Frame(self)
         filt.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 0))
+
+        ttk.Label(filt, text="Opprinnelse:").pack(side="left")
+        cb_origin = ttk.Combobox(filt, textvariable=self.var_filter_origin, state="readonly",
+                                 values=["Alle", "CRM", "Lokal"], width=8)
+        cb_origin.pack(side="left", padx=(2, 12))
+        cb_origin.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
 
         ttk.Label(filt, text="Type:").pack(side="left")
         cb_type = ttk.Combobox(filt, textvariable=self.var_filter_type, state="readonly",
@@ -107,10 +126,11 @@ class RevisjonshandlingerPage(ttk.Frame):
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        cols = ("regnr", "regnskapslinje", "kilde", "omraade", "type", "handling", "timing",
+        cols = ("opprinnelse", "regnr", "regnskapslinje", "kilde", "omraade", "type", "handling", "timing",
                 "eier", "tilordnet", "status", "frist")
         self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse")
 
+        self._tree.heading("opprinnelse", text="Opprinnelse")
         self._tree.heading("regnr", text="Regnr")
         self._tree.heading("regnskapslinje", text="Regnskapslinje")
         self._tree.heading("kilde", text="Kilde")
@@ -123,6 +143,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._tree.heading("status", text="Status")
         self._tree.heading("frist", text="Frist")
 
+        self._tree.column("opprinnelse", width=80, minwidth=60, anchor="center")
         self._tree.column("regnr", width=50, minwidth=40)
         self._tree.column("regnskapslinje", width=180, minwidth=100)
         self._tree.column("kilde", width=90, minwidth=70, anchor="center")
@@ -138,6 +159,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._tree.tag_configure("wp_confirmed", background="#E6F4EA")
         self._tree.tag_configure("wp_auto", background="#FFFFFF")
         self._tree.tag_configure("wp_unmatched", background="#FFF4DD")
+        self._tree.tag_configure("wp_local", background="#EEF2FF")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=yscroll.set)
@@ -145,6 +167,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         yscroll.grid(row=0, column=1, sticky="ns")
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
+        self._tree.bind("<Double-1>", self._on_double_click)
 
         # ── Detail panel ──
         detail = ttk.LabelFrame(self, text="Detaljer", padding=6)
@@ -164,6 +187,11 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._year = year
         self._refresh()
 
+    def set_analyse_page(self, page: Any) -> None:
+        """Gjør AnalysePage tilgjengelig for innebygde arbeidspapir-generatorer."""
+        self._analyse_page = page
+        self._update_action_buttons()
+
     def filter_by_regnr(self, regnr: int | str | None) -> None:
         """Sett regnskapslinje-filteret til matchende verdi og kjør filter."""
         if regnr in (None, ""):
@@ -182,15 +210,32 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._apply_filter()
 
     def _refresh(self) -> None:
+        # Lokalt bibliotek lastes alltid (uavhengig av klient)
+        try:
+            self._local_lib = action_library.load_library()
+        except Exception:
+            self._local_lib = []
+        try:
+            self._workpaper_index = workpaper_library.by_id(workpaper_library.list_all())
+        except Exception:
+            self._workpaper_index = {}
+
         if not self._client or not self._year:
             self._actions = []
             self._engagement = None
             self._match_by_action_id = {}
             self._workpapers = {}
             self._rl_list = []
-            self._tree.delete(*self._tree.get_children())
-            self.var_status.set("Last inn klient for å se revisjonshandlinger.")
             self._detail_var.set("")
+            if self._local_lib:
+                self._cb_area.configure(values=["Alle"] + sorted({a.omraade for a in self._local_lib if a.omraade}))
+                self._cb_status.configure(values=["Alle"])
+                self._cb_regnr.configure(values=["Alle", "Uten match"])
+                self._apply_filter()
+                self.var_status.set(f"{len(self._local_lib)} lokale handling(er). Last inn klient for CRM-handlinger.")
+            else:
+                self._tree.delete(*self._tree.get_children())
+                self.var_status.set("Last inn klient for å se revisjonshandlinger.")
             self._update_action_buttons()
             return
 
@@ -229,7 +274,8 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._load_local_assignments()
 
         # Update filter dropdowns
-        areas = sorted({a.area_name for a in self._actions if a.area_name})
+        areas = sorted({a.area_name for a in self._actions if a.area_name} |
+                       {a.omraade for a in self._local_lib if a.omraade})
         statuses = sorted({a.status for a in self._actions if a.status})
         self._cb_area.configure(values=["Alle"] + areas)
         self._cb_status.configure(values=["Alle"] + statuses)
@@ -319,8 +365,25 @@ class RevisjonshandlingerPage(ttk.Frame):
         status_filter = self.var_filter_status.get()
         area_filter = self.var_filter_area.get()
         regnr_filter = self.var_filter_regnr.get()
+        origin_filter = self.var_filter_origin.get()
         search = self.var_search.get().strip().lower()
 
+        shown = 0
+        # CRM-handlinger
+        if origin_filter in ("Alle", "CRM"):
+            shown += self._render_crm_rows(type_filter, status_filter, area_filter, regnr_filter, search)
+        # Lokale handlinger
+        if origin_filter in ("Alle", "Lokal"):
+            shown += self._render_local_rows(type_filter, status_filter, area_filter, regnr_filter, search)
+
+        # Update status with filter count if different from total
+        total = len(self._actions) + len(self._local_lib)
+        if shown != total and self._engagement:
+            self.var_status.set(
+                f"{self._engagement.client_name} — viser {shown} av {total} handlinger"
+            )
+
+    def _render_crm_rows(self, type_filter, status_filter, area_filter, regnr_filter, search) -> int:
         shown = 0
         for a in self._actions:
             if type_filter != "Alle" and a.action_type != type_filter:
@@ -359,6 +422,7 @@ class RevisjonshandlingerPage(ttk.Frame):
                 "auto": "wp_auto",
             }.get(source, "wp_unmatched")
             self._tree.insert("", "end", iid=str(a.action_id), values=(
+                "CRM",
                 regnr,
                 rl_name,
                 kilde_label,
@@ -372,12 +436,41 @@ class RevisjonshandlingerPage(ttk.Frame):
                 a.due_date,
             ), tags=(tag,))
             shown += 1
+        return shown
 
-        # Update status with filter count if different from total
-        if shown != len(self._actions) and self._engagement:
-            self.var_status.set(
-                f"{self._engagement.client_name} — viser {shown} av {len(self._actions)} handlinger"
-            )
+    def _render_local_rows(self, type_filter, status_filter, area_filter, regnr_filter, search) -> int:
+        shown = 0
+        for item in self._local_lib:
+            if type_filter != "Alle" and item.type != type_filter:
+                continue
+            if status_filter != "Alle":
+                continue  # lokale har ingen CRM-status
+            if area_filter != "Alle" and item.omraade != area_filter:
+                continue
+            if regnr_filter == "Uten match" and item.default_regnr:
+                continue
+            if regnr_filter not in ("Alle", "Uten match"):
+                filter_nr = regnr_filter.split()[0] if regnr_filter else ""
+                if item.default_regnr != filter_nr:
+                    continue
+            if search and search not in item.navn.lower() and search not in item.omraade.lower():
+                continue
+            self._tree.insert("", "end", iid=f"L:{item.id}", values=(
+                "Lokal",
+                item.default_regnr,
+                "",
+                "",
+                item.omraade,
+                item.type,
+                item.navn,
+                "",
+                "",
+                "",
+                "",
+                "",
+            ), tags=("wp_local",))
+            shown += 1
+        return shown
 
     def _on_select(self, _event: tk.Event | None = None) -> None:
         sel = self._tree.selection()
@@ -386,7 +479,30 @@ class RevisjonshandlingerPage(ttk.Frame):
             self._update_action_buttons()
             return
 
-        action_id = int(sel[0])
+        iid = sel[0]
+        if iid.startswith("L:"):
+            item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+            if item is None:
+                self._detail_var.set("")
+            else:
+                lines = [f"[Lokal] {item.omraade or '\u2013'}  /  {item.navn}"]
+                lines.append(f"Type: {item.type}")
+                if item.default_regnr:
+                    lines.append(f"Default regnr: {item.default_regnr}")
+                if item.workpaper_ids:
+                    names = []
+                    for wid in item.workpaper_ids:
+                        wp = self._workpaper_index.get(wid)
+                        names.append(wp.navn if wp else f"[mangler {wid[:8]}\u2026]")
+                    lines.append(f"Arbeidspapir: {', '.join(names)}")
+                if item.beskrivelse:
+                    lines.append("")
+                    lines.append(item.beskrivelse)
+                self._detail_var.set("\n".join(lines))
+            self._update_action_buttons()
+            return
+
+        action_id = int(iid)
         action = next((a for a in self._actions if a.action_id == action_id), None)
         if not action:
             self._detail_var.set("")
@@ -446,25 +562,363 @@ class RevisjonshandlingerPage(ttk.Frame):
 
     def _update_action_buttons(self) -> None:
         sel = self._tree.selection()
-        action_id = int(sel[0]) if sel else 0
+        iid = sel[0] if sel else ""
+
+        def _state(enabled: bool) -> str:
+            return "normal" if enabled else "disabled"
+
+        if iid.startswith("L:"):
+            # Lokale handlinger støtter ikke bekreftelse/overstyring mot CRM workpaper-store
+            self._btn_confirm.configure(state="disabled")
+            self._btn_override.configure(state="disabled")
+            self._btn_clear.configure(state="disabled")
+            item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+            has_builtin = bool(item) and any(
+                workpaper_library.is_builtin(w) for w in (item.workpaper_ids if item else [])
+            )
+            self._btn_run_wp.configure(state=_state(has_builtin and self._analyse_page is not None))
+            return
+        action_id = int(iid) if iid else 0
         match = self._match_by_action_id.get(action_id) if action_id else None
         has_auto = bool(match and match.regnr)
         has_wp = action_id in self._workpapers
         client_ready = bool(self._client and self._year)
 
-        def _state(enabled: bool) -> str:
-            return "normal" if enabled else "disabled"
-
         self._btn_confirm.configure(state=_state(client_ready and action_id > 0 and has_auto))
         self._btn_override.configure(state=_state(client_ready and action_id > 0 and bool(self._rl_list)))
         self._btn_clear.configure(state=_state(client_ready and has_wp))
+        self._btn_run_wp.configure(state="disabled")
 
     def _selected_action(self):
         sel = self._tree.selection()
         if not sel:
             return None
-        action_id = int(sel[0])
+        iid = sel[0]
+        if iid.startswith("L:"):
+            return None
+        action_id = int(iid)
         return next((a for a in self._actions if a.action_id == action_id), None)
+
+    def _selected_local_action(self) -> LocalAction | None:
+        sel = self._tree.selection()
+        if not sel:
+            return None
+        iid = sel[0]
+        if not iid.startswith("L:"):
+            return None
+        return next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+
+    def _on_run_workpaper(self) -> None:
+        item = self._selected_local_action()
+        if item is None or self._analyse_page is None:
+            return
+        import workpaper_generators
+
+        builtins = [
+            workpaper_generators.find_builtin(wid)
+            for wid in item.workpaper_ids
+            if workpaper_library.is_builtin(wid)
+        ]
+        builtins = [g for g in builtins if g is not None]
+        if not builtins:
+            messagebox.showinfo(
+                "Ingen innebygde arbeidspapir",
+                "Denne handlingen har ingen innebygde arbeidspapir koblet.",
+                parent=self,
+            )
+            return
+        if len(builtins) == 1:
+            self._invoke_builtin(builtins[0])
+            return
+        self._open_run_picker(builtins)
+
+    def _open_run_picker(self, builtins: list[Any]) -> None:
+        dlg = tk.Toplevel(self)
+        dlg.title("Kjør arbeidspapir")
+        dlg.transient(self.winfo_toplevel())
+        dlg.grab_set()
+        dlg.columnconfigure(0, weight=1)
+        dlg.rowconfigure(0, weight=1)
+
+        frm = ttk.Frame(dlg, padding=10)
+        frm.grid(row=0, column=0, sticky="nsew")
+        frm.columnconfigure(0, weight=1)
+        frm.rowconfigure(0, weight=1)
+
+        lb = tk.Listbox(frm, height=min(10, len(builtins)), exportselection=False)
+        lb.grid(row=0, column=0, sticky="nsew")
+        for g in builtins:
+            lb.insert("end", g.navn)
+        lb.selection_set(0)
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=1, column=0, sticky="e", pady=(8, 0))
+
+        def _run() -> None:
+            sel = lb.curselection()
+            if not sel:
+                return
+            g = builtins[sel[0]]
+            dlg.destroy()
+            self._invoke_builtin(g)
+
+        ttk.Button(btns, text="Avbryt", command=dlg.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(btns, text="Kjør", command=_run).pack(side="right")
+
+    def _invoke_builtin(self, generator: Any) -> None:
+        if self._analyse_page is None:
+            messagebox.showwarning(
+                "Analyse ikke klar",
+                "Analyse-fanen er ikke initialisert. Prøv igjen etter at Analyse er lastet.",
+                parent=self,
+            )
+            return
+        method = getattr(self._analyse_page, generator.method_name, None)
+        if not callable(method):
+            messagebox.showerror(
+                "Generator mangler",
+                f"Metoden {generator.method_name} finnes ikke på Analyse-siden.",
+                parent=self,
+            )
+            return
+
+        action_key = self._current_action_key()
+        before = self._snapshot_exports_dir()
+        ctx = self._build_action_context(action_key=action_key, generator=generator)
+        try:
+            if ctx is not None:
+                import action_context as _ctx
+                with _ctx.push(ctx):
+                    method()
+            else:
+                method()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror(
+                "Feil ved kjøring",
+                f"Kjøring av «{generator.navn}» feilet: {exc}",
+                parent=self,
+            )
+            return
+        if action_key and self._client and self._year:
+            self._register_new_artifacts(
+                action_key=action_key,
+                generator=generator,
+                before=before,
+            )
+
+    def _build_action_context(self, *, action_key: str, generator: Any) -> Any:
+        if not action_key:
+            return None
+        import action_context as _ctx
+        import getpass
+
+        try:
+            user = getpass.getuser()
+        except Exception:
+            user = ""
+
+        handling_navn = ""
+        handling_type = ""
+        omraade = ""
+        regnr = ""
+        beskrivelse = ""
+
+        if action_key.startswith("L:"):
+            item = self._selected_local_action()
+            if item is not None:
+                handling_navn = item.navn
+                handling_type = getattr(item, "type", "") or ""
+                omraade = getattr(item, "omraade", "") or ""
+                regnr = getattr(item, "default_regnr", "") or ""
+                beskrivelse = getattr(item, "beskrivelse", "") or ""
+        else:
+            try:
+                action_id = int(action_key)
+            except ValueError:
+                action_id = None
+            if action_id is not None:
+                act = self._find_action(action_id)
+                if act is not None:
+                    handling_navn = getattr(act, "navn", "") or getattr(act, "name", "")
+                    handling_type = getattr(act, "type", "") or ""
+                    omraade = getattr(act, "omraade", "") or ""
+                    regnr = str(getattr(act, "regnr", "") or "")
+                    beskrivelse = getattr(act, "beskrivelse", "") or ""
+
+        if not beskrivelse:
+            beskrivelse = self._lookup_workpaper_beskrivelse(generator)
+
+        kommentar = ""
+        if self._client and self._year:
+            try:
+                import action_artifact_store as _store
+                kommentar = _store.get_comment(self._client, self._year, action_key).text
+            except Exception:
+                kommentar = ""
+
+        return _ctx.ActionContext(
+            action_key=action_key,
+            handling_navn=handling_navn or "Handling",
+            handling_type=handling_type,
+            omraade=omraade,
+            regnr=regnr,
+            beskrivelse=beskrivelse,
+            kommentar=kommentar,
+            kjort_av=user,
+            client=self._client or "",
+            year=self._year or "",
+            workpaper_navn=getattr(generator, "navn", "") or "",
+        )
+
+    def _lookup_workpaper_beskrivelse(self, generator: Any) -> str:
+        gen_id = getattr(generator, "id", "") or ""
+        if not gen_id:
+            return ""
+        try:
+            for wp in workpaper_library.list_all():
+                if wp.id == gen_id and (wp.beskrivelse or "").strip():
+                    return wp.beskrivelse.strip()
+        except Exception:
+            pass
+        return ""
+
+    def _current_action_key(self) -> str:
+        sel = self._tree.selection()
+        if not sel:
+            return ""
+        iid = sel[0]
+        return iid if iid.startswith("L:") else iid
+
+    def _snapshot_exports_dir(self) -> dict[str, float]:
+        """Returnerer {fil_sti: mtime} for alle filer i exports_dir."""
+        if not (self._client and self._year):
+            return {}
+        try:
+            import client_store
+            exports = client_store.exports_dir(self._client, year=self._year)
+        except Exception:
+            return {}
+        snap: dict[str, float] = {}
+        try:
+            for p in exports.iterdir():
+                if p.is_file():
+                    try:
+                        snap[str(p)] = p.stat().st_mtime
+                    except Exception:
+                        continue
+        except Exception:
+            return {}
+        return snap
+
+    def _register_new_artifacts(
+        self,
+        *,
+        action_key: str,
+        generator: Any,
+        before: dict[str, float],
+    ) -> None:
+        try:
+            import client_store
+            exports = client_store.exports_dir(self._client, year=self._year)  # type: ignore[arg-type]
+        except Exception:
+            return
+        new_paths: list[Any] = []
+        try:
+            for p in exports.iterdir():
+                if not p.is_file():
+                    continue
+                key = str(p)
+                mtime = 0.0
+                try:
+                    mtime = p.stat().st_mtime
+                except Exception:
+                    continue
+                if key not in before or mtime > before[key]:
+                    new_paths.append(p)
+        except Exception:
+            return
+        if not new_paths:
+            return
+        import getpass
+        import action_artifact_store as _store
+        try:
+            user = getpass.getuser()
+        except Exception:
+            user = ""
+        for p in new_paths:
+            artifact = _store.Artifact.from_path(
+                action_key=action_key,
+                workpaper_id=generator.id,
+                workpaper_navn=generator.navn,
+                path=p,
+                kjort_av=user,
+            )
+            _store.register_artifact(self._client, self._year, artifact)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
+    # Detalj-popup
+
+    def _on_double_click(self, _evt: Any = None) -> None:
+        sel = self._tree.selection()
+        if not sel:
+            return
+        self._open_detail_dialog(sel[0])
+
+    def _open_detail_dialog(self, iid: str) -> None:
+        from page_revisjonshandlinger_detail import ActionDetailDialog
+
+        if iid.startswith("L:"):
+            item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+            if item is None:
+                return
+            header = [
+                f"{item.navn}",
+                f"[Lokal]  {item.omraade or '–'}  ·  Type: {item.type}",
+            ]
+            if item.default_regnr:
+                header.append(f"Default regnr: {item.default_regnr}")
+            workpaper_ids = list(item.workpaper_ids)
+            description = item.beskrivelse
+            action_key = iid
+        else:
+            try:
+                action_id = int(iid)
+            except ValueError:
+                return
+            action = next((a for a in self._actions if a.action_id == action_id), None)
+            if action is None:
+                return
+            header = [
+                f"{action.procedure_name}",
+                f"[CRM]  {action.area_name}  ·  Type: {getattr(action, 'procedure_type', '–') or '–'}",
+            ]
+            workpaper_ids = []
+            description = getattr(action, "description", "") or ""
+            action_key = str(action_id)
+
+        run_cb = None
+        has_builtin = any(workpaper_library.is_builtin(w) for w in workpaper_ids)
+        if has_builtin and self._analyse_page is not None:
+            run_cb = self._on_run_workpaper
+
+        import getpass
+        try:
+            user = getpass.getuser()
+        except Exception:
+            user = ""
+
+        ActionDetailDialog(
+            self,
+            client=self._client or "",
+            year=self._year or "",
+            action_key=action_key,
+            header_lines=header,
+            description=description,
+            workpaper_ids=workpaper_ids,
+            workpaper_index=self._workpaper_index,
+            on_run=run_cb,
+            user_name=user,
+        )
 
     def _persist_confirmation(self, action_id: int, regnr: str, regnskapslinje: str) -> None:
         if not self._client or not self._year:

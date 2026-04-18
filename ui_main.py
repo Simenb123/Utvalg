@@ -231,6 +231,8 @@ class App(tk.Tk):
         if self.page_oversikt is not None:
             self.nb.add(self.page_oversikt, text="Oversikt")
         self.nb.add(self.page_dataset, text="Dataset")
+        if self.page_revisjonshandlinger is not None:
+            self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         self.nb.add(self.page_analyse, text="Analyse")
         self.nb.add(self.page_saldobalanse, text="Saldobalanse")
         self.nb.add(self.page_admin, text="Admin")
@@ -252,8 +254,6 @@ class App(tk.Tk):
         self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
         self.nb.add(self.page_resultat, text="Resultat")
-        if self.page_revisjonshandlinger is not None:
-            self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         if self.page_fagchat is not None:
             self.nb.add(self.page_fagchat, text="Fagchat")
         if self.page_documents is not None:
@@ -284,6 +284,8 @@ class App(tk.Tk):
             self.page_driftsmidler.set_analyse_page(self.page_analyse)
         if self.page_driftsmidler is not None and hasattr(self.page_regnskap, "set_driftsmidler_page"):
             self.page_regnskap.set_driftsmidler_page(self.page_driftsmidler)
+        if self.page_revisjonshandlinger is not None and hasattr(self.page_revisjonshandlinger, "set_analyse_page"):
+            self.page_revisjonshandlinger.set_analyse_page(self.page_analyse)
 
         # Gi AnalysePage callback for "Til utvalg"
         if hasattr(self.page_analyse, "set_utvalg_callback"):
