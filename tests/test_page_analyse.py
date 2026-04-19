@@ -323,6 +323,7 @@ def test_account_pivot_refresh_restores_selected_account(monkeypatch) -> None:
 
 def test_tx_header_drag_reorders_columns(monkeypatch) -> None:
     import page_analyse_columns
+    import page_analyse_columns_widths
 
     page = SimpleNamespace(
         _tx_tree=_FakeHeaderTree(),
@@ -336,7 +337,7 @@ def test_tx_header_drag_reorders_columns(monkeypatch) -> None:
     captured = {}
 
     monkeypatch.setattr(
-        page_analyse_columns,
+        page_analyse_columns_widths,
         "column_id_from_event",
         lambda _tree, event: event.col,
     )

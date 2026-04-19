@@ -1,0 +1,329 @@
+"""page_analyse_columns_presets.py
+
+TX- og SB-kolonnepresets for Analyse-fanen (last/lagre/velg/reset/chooser).
+
+Utskilt fra page_analyse_columns.py. Re-eksportert via page_analyse_columns
+som fasade for bakoverkompatibilitet.
+"""
+
+from __future__ import annotations
+
+from typing import Any, List, Optional
+
+import analyse_columns
+import preferences
+
+from page_analyse_columns_widths import configure_tx_tree_columns
+
+
+# =====================================================================
+# TX-kolonnepreferanser
+# =====================================================================
+
+def load_tx_columns_from_preferences(*, page: Any) -> None:
+    """Last inn kolonneoppsett for transaksjonslisten fra preferences."""
+    try:
+        stored_order = preferences.get("analyse.tx_cols.order", None)
+        stored_visible = preferences.get("analyse.tx_cols.visible", None)
+    except Exception:
+        stored_order = None
+        stored_visible = None
+
+    order = stored_order if isinstance(stored_order, list) else list(page.TX_COLS_DEFAULT)
+    visible = stored_visible if isinstance(stored_visible, list) else list(page.TX_COLS_DEFAULT)
+
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=order,
+        visible=visible,
+        all_cols=None,
+        pinned=page.PINNED_TX_COLS,
+        required=page.REQUIRED_TX_COLS,
+    )
+
+    page._tx_cols_order = list(order_clean)
+    page._tx_cols_visible = list(visible_order)
+    page.TX_COLS = tuple(visible_order)
+
+
+def persist_tx_columns_to_preferences(*, page: Any) -> None:
+    try:
+        preferences.set("analyse.tx_cols.order", list(page._tx_cols_order))
+        preferences.set("analyse.tx_cols.visible", list(page.TX_COLS))
+    except Exception:
+        pass
+
+
+def get_all_tx_columns_for_chooser(*, page: Any) -> List[str]:
+    import pandas as pd
+    cols: List[str] = []
+    cols.extend(getattr(page, "_tx_cols_order", []))
+    cols.extend(list(page.TX_COLS_DEFAULT))
+
+    df = page._df_filtered if isinstance(page._df_filtered, pd.DataFrame) else page.dataset
+    if isinstance(df, pd.DataFrame):
+        for c in df.columns:
+            try:
+                name = str(c)
+            except Exception:
+                continue
+            if not name or name.startswith("_"):
+                continue
+            cols.append(name)
+
+    return analyse_columns.unique_preserve(cols, canonicalize=True)
+
+
+def apply_tx_column_config(*, page: Any, order: List[str], visible: List[str],
+                           all_cols: Optional[List[str]] = None) -> None:
+    all_cols = all_cols or get_all_tx_columns_for_chooser(page=page)
+
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=order,
+        visible=visible,
+        all_cols=all_cols,
+        pinned=page.PINNED_TX_COLS,
+        required=page.REQUIRED_TX_COLS,
+    )
+
+    page._tx_cols_order = list(order_clean)
+    page._tx_cols_visible = list(visible_order)
+    page.TX_COLS = tuple(visible_order)
+
+    persist_tx_columns_to_preferences(page=page)
+
+    configure_tx_tree_columns(page=page)
+    page._refresh_transactions_view()
+
+
+def open_tx_column_chooser(*, page: Any) -> None:
+    if not getattr(page, "_tk_ok", False):
+        return
+
+    try:
+        from views_column_chooser import open_column_chooser
+    except Exception:
+        return
+
+    all_cols = get_all_tx_columns_for_chooser(page=page)
+    current_visible = list(getattr(page, "TX_COLS", page.TX_COLS_DEFAULT))
+    initial_order = list(getattr(page, "_tx_cols_order", all_cols))
+
+    res = open_column_chooser(
+        page,
+        all_cols=all_cols,
+        visible_cols=current_visible,
+        initial_order=initial_order,
+        default_visible_cols=list(page.TX_COLS_DEFAULT),
+        default_order=list(page.TX_COLS_DEFAULT),
+    )
+    if not res:
+        return
+
+    order, visible = res
+    if not isinstance(order, list) or not isinstance(visible, list):
+        return
+
+    apply_tx_column_config(page=page, order=order, visible=visible, all_cols=all_cols)
+
+
+def reset_tx_columns_to_default(*, page: Any) -> None:
+    apply_tx_column_config(
+        page=page,
+        order=list(page.TX_COLS_DEFAULT),
+        visible=list(page.TX_COLS_DEFAULT),
+    )
+
+
+# =====================================================================
+# SB-kolonnepreferanser (Saldobalansekontoer-visning)
+# =====================================================================
+
+# SB-pinned kolonner (kan ikke skjules eller flyttes fra starten)
+SB_PINNED_COLS = ("Konto", "Kontonavn")
+
+# Dynamiske kolonner som skjules midlertidig når fjorårsdata mangler,
+# men der brukerens preferanse ikke slettes.
+SB_DYNAMIC_COLS = ("UB_fjor", "Endring_fjor", "Endring_pct")
+
+
+def _sb_defaults(page: Any) -> tuple[list[str], list[str]]:
+    """Returner (alle SB-kolonner, kanonisk standard synlig-sett)."""
+    try:
+        import page_analyse_sb as _sb
+        all_cols = list(_sb.SB_COLS)
+        default_visible = list(getattr(_sb, "SB_DEFAULT_VISIBLE", _sb.SB_COLS))
+    except Exception:
+        all_cols = list(SB_PINNED_COLS)
+        default_visible = list(SB_PINNED_COLS)
+    # Sørg for at pinned alltid ligger først i default_visible
+    for p in reversed(SB_PINNED_COLS):
+        if p not in default_visible:
+            default_visible.insert(0, p)
+    return all_cols, default_visible
+
+
+def _sb_ub_fjor_available(page: Any) -> bool:
+    """Har SB-visningen fjorårsdata tilgjengelig for UB_fjor-kolonnen?"""
+    import pandas as pd
+    sb_prev = getattr(page, "_rl_sb_prev_df", None)
+    if isinstance(sb_prev, pd.DataFrame) and not sb_prev.empty:
+        return True
+    return False
+
+
+def load_sb_columns_from_preferences(*, page: Any) -> None:
+    """Last inn SB-kolonneoppsett fra preferences og normaliser."""
+    try:
+        stored_order = preferences.get("analyse.sb_cols.order", None)
+        stored_visible = preferences.get("analyse.sb_cols.visible", None)
+    except Exception:
+        stored_order = None
+        stored_visible = None
+
+    default_order, default_visible = _sb_defaults(page)
+
+    # Migrer gamle preferanser til ny kanonisk standard (UB <år> + UB <år-1>
+    # + Endring + Endring %) når stored_visible mangler de nye komparative
+    # kolonnene men inneholder legacy-kolonner (IB/Endring intern).
+    if isinstance(stored_visible, list) and stored_visible:
+        has_new_canonical = any(
+            c in stored_visible for c in ("Endring_fjor", "Endring_pct")
+        )
+        has_legacy_intern = any(c in stored_visible for c in ("IB", "Endring"))
+        if has_legacy_intern and not has_new_canonical:
+            stored_visible = None
+
+    order = stored_order if isinstance(stored_order, list) else list(default_order)
+    visible = stored_visible if isinstance(stored_visible, list) else list(default_visible)
+
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=order,
+        visible=visible,
+        all_cols=default_order,
+        pinned=SB_PINNED_COLS,
+        required=SB_PINNED_COLS,
+    )
+
+    page._sb_cols_order = list(order_clean)
+    page._sb_cols_visible = list(visible_order)
+
+
+def persist_sb_columns_to_preferences(*, page: Any) -> None:
+    try:
+        preferences.set("analyse.sb_cols.order", list(getattr(page, "_sb_cols_order", [])))
+        preferences.set("analyse.sb_cols.visible", list(getattr(page, "_sb_cols_visible", [])))
+    except Exception:
+        pass
+
+
+def apply_sb_column_config(*, page: Any, order: List[str], visible: List[str]) -> None:
+    default_order, _ = _sb_defaults(page)
+
+    order_clean, visible_order = analyse_columns.normalize_tx_column_config(
+        order=order,
+        visible=visible,
+        all_cols=default_order,
+        pinned=SB_PINNED_COLS,
+        required=SB_PINNED_COLS,
+    )
+
+    page._sb_cols_order = list(order_clean)
+    page._sb_cols_visible = list(visible_order)
+
+    persist_sb_columns_to_preferences(page=page)
+    configure_sb_tree_columns(page=page)
+
+
+def open_sb_column_chooser(*, page: Any) -> None:
+    if not getattr(page, "_tk_ok", False):
+        return
+    try:
+        from views_column_chooser import open_column_chooser
+    except Exception:
+        return
+
+    default_order, default_visible = _sb_defaults(page)
+    current_visible = list(getattr(page, "_sb_cols_visible", default_visible))
+    initial_order = list(getattr(page, "_sb_cols_order", default_order))
+
+    res = open_column_chooser(
+        page,
+        all_cols=list(default_order),
+        visible_cols=current_visible,
+        initial_order=initial_order,
+        default_visible_cols=list(default_visible),
+        default_order=list(default_order),
+    )
+    if not res:
+        return
+    order, visible = res
+    if not isinstance(order, list) or not isinstance(visible, list):
+        return
+    apply_sb_column_config(page=page, order=order, visible=visible)
+
+
+def reset_sb_columns_to_default(*, page: Any) -> None:
+    default_order, default_visible = _sb_defaults(page)
+    apply_sb_column_config(page=page, order=default_order, visible=default_visible)
+
+
+def configure_sb_tree_columns(*, page: Any) -> None:
+    """Sett displaycolumns + bredder på SB-treet basert på preferanser.
+
+    UB_fjor skjules dynamisk når fjorårsdata mangler, men brukerens
+    preferanse beholdes.
+    """
+    if not getattr(page, "_tk_ok", False):
+        return
+    tree = getattr(page, "_sb_tree", None)
+    if tree is None:
+        return
+
+    try:
+        import page_analyse_sb as _sb
+    except Exception:
+        return
+
+    # Lazy import for å unngå sirkularitet med page_analyse_columns-fasaden.
+    from page_analyse_columns import _active_year, analysis_heading
+
+    default_order, _ = _sb_defaults(page)
+    order = list(getattr(page, "_sb_cols_order", default_order))
+    visible_pref = list(getattr(page, "_sb_cols_visible", default_order))
+
+    has_prev = _sb_ub_fjor_available(page)
+    effective_visible = [
+        c for c in visible_pref
+        if not (c in SB_DYNAMIC_COLS and not has_prev)
+    ]
+
+    try:
+        tree.configure(columns=tuple(default_order))
+        tree["displaycolumns"] = tuple(effective_visible)
+    except Exception:
+        return
+
+    widths_pref = getattr(page, "_sb_col_widths", None) or {}
+    year = _active_year()
+
+    for c in default_order:
+        heading = analysis_heading(c, year=year)
+        try:
+            tree.heading(c, text=heading)
+        except Exception:
+            pass
+
+        if c in _sb._SB_NUMERIC_COLS:
+            anchor = "e"
+        elif c in _sb._SB_CENTER_COLS:
+            anchor = "center"
+        else:
+            anchor = "w"
+        stretch = (c == "Kontonavn")
+
+        default_width = _sb._SB_COL_WIDTHS.get(c, 100)
+        width = int(widths_pref.get(c, default_width))
+        try:
+            tree.column(c, width=width, minwidth=40, anchor=anchor, stretch=stretch)
+        except Exception:
+            pass
