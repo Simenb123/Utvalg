@@ -245,7 +245,7 @@ def test_brreg_header_empty_state_when_no_selection() -> None:
 
 def test_load_brreg_for_row_without_orgnr_shows_empty_state_and_skips_fetch() -> None:
     page = _make_brreg_page()
-    with patch("page_ar.threading.Thread") as mock_thread, \
+    with patch("page_ar_brreg.threading.Thread") as mock_thread, \
          patch("reskontro_brreg_panel.update_brreg_panel") as mock_update:
         page._load_brreg_for_selected_row({"company_orgnr": "", "company_name": "Ukjent AS"})
 
@@ -258,7 +258,7 @@ def test_load_brreg_for_row_without_orgnr_shows_empty_state_and_skips_fetch() ->
 
 def test_load_brreg_starts_lazy_fetch_on_first_selection() -> None:
     page = _make_brreg_page()
-    with patch("page_ar.threading.Thread") as mock_thread:
+    with patch("page_ar_brreg.threading.Thread") as mock_thread:
         page._load_brreg_for_selected_row({
             "company_orgnr": "914305195", "company_name": "Air Cargo Logistics AS",
         })
@@ -273,7 +273,7 @@ def test_load_brreg_starts_lazy_fetch_on_first_selection() -> None:
 def test_load_brreg_uses_cache_when_already_fetched_and_no_force() -> None:
     page = _make_brreg_page()
     page._brreg_data["914305195"] = {"enhet": {"orgnr": "914305195"}, "regnskap": {}}
-    with patch("page_ar.threading.Thread") as mock_thread, \
+    with patch("page_ar_brreg.threading.Thread") as mock_thread, \
          patch("reskontro_brreg_panel.update_brreg_panel") as mock_update:
         page._load_brreg_for_selected_row({
             "company_orgnr": "914305195", "company_name": "Air Cargo Logistics AS",
@@ -318,7 +318,7 @@ def test_brreg_refresh_button_forces_new_fetch_bypassing_cache() -> None:
     page._selected_owned_row = MagicMock(return_value={
         "company_orgnr": "914305195", "company_name": "Air Cargo Logistics AS",
     })
-    with patch("page_ar.threading.Thread") as mock_thread:
+    with patch("page_ar_brreg.threading.Thread") as mock_thread:
         page._on_brreg_refresh_clicked()
 
     assert "914305195" not in page._brreg_data  # cachen ble tømt

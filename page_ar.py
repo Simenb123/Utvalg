@@ -20,216 +20,28 @@ from ar_store import (
     upsert_manual_owned_change,
 )
 
+import page_ar_brreg
+import page_ar_chart
+import page_ar_compare
 
-def _fmt_pct(value: object) -> str:
-    try:
-        pct = float(value or 0.0)
-    except Exception:
-        pct = 0.0
-    return f"{pct:.2f}".replace(".", ",")
+from page_ar_formatters import (  # noqa: E402,F401
+    _ar_sheet_respecting_displaycolumns,
+    _build_owned_help_text,
+    _change_type_label,
+    _compare_change_label,
+    _fmt_currency,
+    _fmt_optional_pct,
+    _fmt_pct,
+    _fmt_signed_thousand,
+    _fmt_thousand,
+    _parse_float,
+    _relation_accent,
+    _relation_fill,
+    _relation_label,
+    _safe_text,
+    _source_label,
+)
 
-
-def _fmt_optional_pct(value: object) -> str:
-    if value in (None, ""):
-        return "-"
-    return _fmt_pct(value)
-
-
-def _parse_float(value: object) -> float:
-    text = str(value or "").strip().replace(" ", "").replace("\u00a0", "")
-    if not text:
-        return 0.0
-    if "," in text and "." in text:
-        text = text.replace(".", "").replace(",", ".")
-    else:
-        text = text.replace(",", ".")
-    return float(text)
-
-
-def _safe_text(value: object) -> str:
-    return str(value or "").strip()
-
-
-def _relation_label(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text == "datter":
-        return "Datter"
-    if text == "tilknyttet":
-        return "Tilknyttet"
-    if text == "investering":
-        return "Investering"
-    if text == "vurder":
-        return "Vurder"
-    return text or "-"
-
-
-def _source_label(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text == "register":
-        return "Register"
-    if text == "accepted_register":
-        return "Godkjent register"
-    if text == "carry_forward":
-        return "Videreført"
-    if text == "manual":
-        return "Manuell"
-    if text == "manual_override":
-        return "Register + manuell"
-    return text or "-"
-
-
-def _fmt_thousand(n: object) -> str:
-    try:
-        value = int(n or 0)
-    except Exception:
-        return str(n or "")
-    return f"{value:,}".replace(",", "\u00a0")
-
-
-def _fmt_signed_thousand(n: object) -> str:
-    try:
-        value = int(n or 0)
-    except Exception:
-        return str(n or "")
-    if value > 0:
-        return f"+{_fmt_thousand(value)}"
-    if value < 0:
-        return f"\u2212{_fmt_thousand(-value)}"
-    return "0"
-
-
-def _fmt_currency(v: object) -> str:
-    try:
-        value = float(v or 0.0)
-    except Exception:
-        return str(v or "")
-    if value == 0:
-        return ""
-    sign = "-" if value < 0 else ""
-    abs_val = abs(value)
-    whole, frac = divmod(round(abs_val * 100), 100)
-    whole_str = f"{int(whole):,}".replace(",", "\u00a0")
-    return f"{sign}{whole_str},{int(frac):02d}"
-
-
-def _compare_change_label(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text == "new":
-        return "Ny"
-    if text == "removed":
-        return "Borte"
-    if text == "changed":
-        return "Endret"
-    if text == "unchanged":
-        return "Uendret"
-    return text or "-"
-
-
-def _change_type_label(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text == "added":
-        return "Ny i register"
-    if text == "removed":
-        return "Mangler i register"
-    if text == "changed":
-        return "Endret"
-    return text or "-"
-
-
-def _relation_fill(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text == "datter":
-        return "#DBF5E8"
-    if text == "tilknyttet":
-        return "#FFF2D6"
-    if text == "investering":
-        return "#E7EEFF"
-    if text == "vurder":
-        return "#F2F4F7"
-    return "#F8FAFC"
-
-
-def _relation_accent(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text == "datter":
-        return "#1F7A4D"
-    if text == "tilknyttet":
-        return "#B26B00"
-    if text == "investering":
-        return "#2952A3"
-    if text == "vurder":
-        return "#667085"
-    return "#98A2B3"
-
-
-def _build_owned_help_text(row: dict[str, Any] | None, *, year: str, accepted_meta: dict[str, Any] | None) -> str:
-    if not row:
-        return (
-            "Velg en rad for Ã¥ se hva eierskapet betyr, hvilken kilde som brukes, "
-            "og om raden kan sendes videre til konsolidering."
-        )
-
-    company_name = _safe_text(row.get("company_name")) or "ukjent selskap"
-    pct_text = _fmt_pct(row.get("ownership_pct"))
-    relation = _relation_label(row.get("relation_type"))
-    source = _safe_text(row.get("source"))
-    accepted_meta = accepted_meta or {}
-
-    parts = [f"Klienten eier {pct_text} % av {company_name}. Klassifisering: {relation}."]
-
-    if source == "carry_forward":
-        source_year = _safe_text(accepted_meta.get("source_year"))
-        if source_year:
-            parts.append(f"Raden er viderefÃ¸rt fra akseptert eierstatus {source_year}.")
-        else:
-            parts.append("Raden er viderefÃ¸rt fra tidligere akseptert eierstatus.")
-    elif source == "accepted_register":
-        source_year = _safe_text(accepted_meta.get("register_year")) or year
-        parts.append(f"Raden bygger pÃ¥ godkjent aksjonÃ¦rregister {source_year}.")
-    elif source == "manual_override":
-        parts.append("Raden er manuelt overstyrt og brukes foran registeret til nye endringer eventuelt godkjennes.")
-    elif source == "manual":
-        parts.append("Raden er lagt inn manuelt fordi eierskapet ikke finnes i registergrunnlaget ennÃ¥.")
-
-    matched_client = _safe_text(row.get("matched_client"))
-    if matched_client:
-        if row.get("has_active_sb"):
-            parts.append(f"Klientmatch funnet: {matched_client}, og aktiv SB finnes for {year}.")
-        else:
-            parts.append(f"Klientmatch funnet: {matched_client}, men aktiv SB mangler for {year}.")
-    else:
-        parts.append("Ingen klientmatch pÃ¥ org.nr ennÃ¥.")
-
-    return " ".join(parts)
-
-
-def _ar_sheet_respecting_displaycolumns(_xls, tree, *, title: str, heading: str) -> dict:
-    """Build sheet dict from a Treeview, filtering to its current displaycolumns."""
-    sheet = _xls.treeview_to_sheet(tree, title=title, heading=heading)
-    try:
-        all_cols = list(tree["columns"])
-        dc = tree.cget("displaycolumns")
-        if isinstance(dc, str):
-            dc_list = [dc]
-        else:
-            dc_list = list(dc or [])
-        if not dc_list or dc_list == ["#all"]:
-            return sheet
-        keep_idx = [all_cols.index(c) for c in dc_list if c in all_cols]
-        if not keep_idx:
-            return sheet
-        cols = sheet.get("columns") or []
-        sheet["columns"] = [cols[i] for i in keep_idx if i < len(cols)]
-        new_rows = []
-        for row in sheet.get("rows") or []:
-            vals = row.get("values") or []
-            row = dict(row)
-            row["values"] = [vals[i] for i in keep_idx if i < len(vals)]
-            new_rows.append(row)
-        sheet["rows"] = new_rows
-    except Exception:
-        pass
-    return sheet
 
 
 class ARPage(ttk.Frame):
@@ -521,186 +333,16 @@ class ARPage(ttk.Frame):
             ).grid(row=0, column=0, sticky="w")
 
     def _build_changes_tab(self, parent: ttk.Frame) -> None:
-        # ── 1. Aksjonærendringer i klienten (read-only, built from owners_compare) ──
-        sh_frame = ttk.LabelFrame(parent, text="Aksjonærendringer i klienten", padding=4)
-        sh_frame.grid(row=0, column=0, sticky="nsew")
-        sh_frame.columnconfigure(0, weight=1)
-        sh_frame.rowconfigure(1, weight=1)
-
-        self.var_sh_changes_empty = tk.StringVar(value="")
-        self._lbl_sh_changes_empty = ttk.Label(
-            sh_frame,
-            textvariable=self.var_sh_changes_empty,
-            foreground="#98A2B3",
-            wraplength=700,
-            justify="left",
-        )
-
-        sh_cols = ("owner", "change", "shares_base", "shares_current", "delta", "pct_current", "has_trace")
-        sh_tree = ttk.Treeview(sh_frame, columns=sh_cols, show="headings", selectmode="browse")
-        sh_tree.heading("owner", text="Aksjonær")
-        sh_tree.heading("change", text="Endring")
-        sh_tree.heading("shares_base", text="Aksjer (base)")
-        sh_tree.heading("shares_current", text="Aksjer (nå)")
-        sh_tree.heading("delta", text="\u0394 aksjer")
-        sh_tree.heading("pct_current", text="Eierandel (nå)")
-        sh_tree.heading("has_trace", text="RF-1086")
-        sh_tree.column("owner", width=240, stretch=True)
-        sh_tree.column("change", width=100)
-        sh_tree.column("shares_base", width=110, anchor="e")
-        sh_tree.column("shares_current", width=110, anchor="e")
-        sh_tree.column("delta", width=90, anchor="e")
-        sh_tree.column("pct_current", width=110, anchor="e")
-        sh_tree.column("has_trace", width=110, anchor="center")
-        sh_ysb = ttk.Scrollbar(sh_frame, orient="vertical", command=sh_tree.yview)
-        sh_tree.configure(yscrollcommand=sh_ysb.set)
-        sh_tree.grid(row=1, column=0, sticky="nsew")
-        sh_ysb.grid(row=1, column=1, sticky="ns")
-        sh_tree.bind("<Double-1>", self._on_shareholder_change_open)
-        sh_tree.bind("<Return>", self._on_shareholder_change_open)
-        self._tree_shareholder_changes = sh_tree
-        self._shareholder_change_rows_by_iid: dict[str, dict] = {}
-
-        # ── 2. Ventende registerendringer i eide selskaper (operative queue) ──
-        pending_frame = ttk.LabelFrame(
-            parent, text="Ventende registerendringer i eide selskaper", padding=4,
-        )
-        pending_frame.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
-        pending_frame.columnconfigure(0, weight=1)
-        pending_frame.rowconfigure(2, weight=1)
-        self._pending_frame = pending_frame
-
-        bar = ttk.Frame(pending_frame)
-        bar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
-        self._btn_accept_selected = ttk.Button(
-            bar, text="Godta valgte", command=self._on_accept_selected_changes, state="disabled",
-        )
-        self._btn_accept_selected.pack(side="left")
-        self._btn_accept_all = ttk.Button(
-            bar, text="Godta alle", command=self._on_accept_all_changes, state="disabled",
-        )
-        self._btn_accept_all.pack(side="left", padx=(4, 0))
-
-        self.var_changes_empty = tk.StringVar(value="")
-        self._lbl_changes_empty = ttk.Label(
-            pending_frame,
-            textvariable=self.var_changes_empty,
-            foreground="#98A2B3",
-            wraplength=700,
-            justify="left",
-        )
-
-        tree = ttk.Treeview(
-            pending_frame,
-            columns=("company", "orgnr", "change", "current", "candidate", "source"),
-            show="headings",
-            selectmode="extended",
-        )
-        tree.heading("company", text="Selskap")
-        tree.heading("orgnr", text="Org.nr")
-        tree.heading("change", text="Endring")
-        tree.heading("current", text="Gjeldende")
-        tree.heading("candidate", text="Nytt register")
-        tree.heading("source", text="Kilde")
-        tree.column("company", width=260, stretch=True)
-        tree.column("orgnr", width=95)
-        tree.column("change", width=110)
-        tree.column("current", width=180, stretch=True)
-        tree.column("candidate", width=180, stretch=True)
-        tree.column("source", width=130)
-        tree.grid(row=2, column=0, sticky="nsew")
-        tree.bind("<<TreeviewSelect>>", self._on_changes_selection_changed)
-        self._tree_changes = tree
-
-        # ── 3. Importhistorikk ──
-        hist_frame = ttk.LabelFrame(parent, text="Importhistorikk", padding=4)
-        hist_frame.grid(row=2, column=0, sticky="nsew", pady=(6, 0))
-        hist_frame.columnconfigure(0, weight=1)
-        hist_frame.rowconfigure(1, weight=1)
-
-        self.var_history_empty = tk.StringVar(value="")
-        self._lbl_history_empty = ttk.Label(
-            hist_frame,
-            textvariable=self.var_history_empty,
-            foreground="#98A2B3",
-            wraplength=700,
-            justify="left",
-        )
-
-        hist_cols = ("register_year", "imported_at", "source_file", "shareholders", "status")
-        hist_tree = ttk.Treeview(hist_frame, columns=hist_cols, show="headings", selectmode="browse")
-        for cid, text, width, anchor in [
-            ("register_year", "Registerår", 90, "center"),
-            ("imported_at", "Importert", 150, "w"),
-            ("source_file", "Kildefil", 340, "w"),
-            ("shareholders", "Aksjonærer", 110, "e"),
-            ("status", "Status", 120, "w"),
-        ]:
-            hist_tree.heading(cid, text=text)
-            hist_tree.column(cid, width=width, anchor=anchor, stretch=(cid == "source_file"))
-
-        hist_ysb = ttk.Scrollbar(hist_frame, orient="vertical", command=hist_tree.yview)
-        hist_tree.configure(yscrollcommand=hist_ysb.set)
-        hist_tree.grid(row=1, column=0, sticky="nsew")
-        hist_ysb.grid(row=1, column=1, sticky="ns")
-
-        hist_tree.bind("<Double-1>", self._on_history_open_detail)
-        hist_tree.bind("<Return>", self._on_history_open_detail)
-
-        self._tree_history = hist_tree
-        self._history_rows_by_iid: dict[str, dict] = {}
+        page_ar_compare.build_changes_tab(self, parent)
 
     def _on_changes_selection_changed(self, _event=None) -> None:
-        try:
-            sel = self._tree_changes.selection()
-            self._btn_accept_selected.configure(state="normal" if sel else "disabled")
-        except Exception:
-            pass
+        page_ar_compare.on_changes_selection_changed(self, _event)
 
     def _on_shareholder_change_open(self, _event=None) -> None:
-        tree = getattr(self, "_tree_shareholder_changes", None)
-        if tree is None:
-            return
-        sel = tree.selection()
-        if not sel:
-            return
-        row = self._shareholder_change_rows_by_iid.get(sel[0]) or {}
-        orgnr = _safe_text(row.get("shareholder_orgnr"))
-        name = _safe_text(row.get("shareholder_name"))
-        target_iid = None
-        for iid, cmp_row in self._compare_rows_by_iid.items():
-            if orgnr and _safe_text(cmp_row.get("shareholder_orgnr")) == orgnr:
-                target_iid = iid
-                break
-            if not orgnr and name and _safe_text(cmp_row.get("shareholder_name")) == name:
-                target_iid = iid
-                break
-        try:
-            self._nb.select(self._frm_owners)
-        except Exception:
-            pass
-        if target_iid is None:
-            return
-        try:
-            self._tree_owners.selection_set((target_iid,))
-            self._tree_owners.focus(target_iid)
-            self._tree_owners.see(target_iid)
-            self._on_compare_selected()
-        except Exception:
-            pass
+        page_ar_compare.on_shareholder_change_open(self, _event)
 
     def _on_history_open_detail(self, _event=None) -> None:
-        tree = getattr(self, "_tree_history", None)
-        if tree is None:
-            return
-        sel = tree.selection()
-        if not sel:
-            return
-        row = self._history_rows_by_iid.get(sel[0]) or {}
-        import_id = _safe_text(row.get("import_id"))
-        if not import_id:
-            return
-        self._show_persisted_import_detail(import_id)
+        page_ar_compare.on_history_open_detail(self, _event)
 
     def _build_chart_tab(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(1, weight=1)
@@ -825,65 +467,10 @@ class ARPage(ttk.Frame):
         self._refresh_trees()
 
     def _load_brreg_for_selected_row(self, row: dict[str, Any], *, force_refresh: bool = False) -> None:
-        orgnr = normalize_orgnr(_safe_text(row.get("company_orgnr")))
-        name = _safe_text(row.get("company_name"))
-        self._brreg_current_orgnr = orgnr
-        self._selected_nr = orgnr
-        self._update_brreg_header(orgnr, name)
-        try:
-            if orgnr and not (force_refresh and orgnr in self._brreg_data):
-                pass
-            self._btn_brreg_refresh.configure(state="normal" if orgnr else "disabled")
-        except Exception:
-            pass
-
-        if not orgnr:
-            self.var_brreg_status.set("Ingen gyldig org.nr for denne raden — BRREG kan ikke hentes.")
-            try:
-                import reskontro_brreg_panel
-                reskontro_brreg_panel.update_brreg_panel(self, "")
-            except Exception:
-                pass
-            return
-
-        if not force_refresh and orgnr in self._brreg_data:
-            self.var_brreg_status.set("Vist fra cache.")
-            try:
-                import reskontro_brreg_panel
-                reskontro_brreg_panel.update_brreg_panel(self, orgnr)
-            except Exception:
-                pass
-            return
-
-        if orgnr in self._brreg_loading and not force_refresh:
-            self.var_brreg_status.set("Henter BRREG-data…")
-            return
-
-        self._brreg_request_id += 1
-        request_id = self._brreg_request_id
-        self._brreg_loading.add(orgnr)
-        self.var_brreg_status.set("Henter BRREG-data…")
-        use_cache = not force_refresh
-        threading.Thread(
-            target=self._brreg_worker,
-            args=(orgnr, request_id, use_cache),
-            daemon=True,
-        ).start()
+        page_ar_brreg.load_brreg_for_selected_row(self, row, force_refresh=force_refresh)
 
     def _brreg_worker(self, orgnr: str, request_id: int, use_cache: bool) -> None:
-        enhet = None
-        regnskap = None
-        error: str | None = None
-        try:
-            import brreg_client
-            enhet = brreg_client.fetch_enhet(orgnr, use_cache=use_cache)
-            regnskap = brreg_client.fetch_regnskap(orgnr, use_cache=use_cache)
-        except Exception as exc:
-            error = str(exc)
-        try:
-            self.after(0, self._brreg_apply_result, request_id, orgnr, enhet, regnskap, error)
-        except Exception:
-            pass
+        page_ar_brreg.brreg_worker(self, orgnr, request_id, use_cache)
 
     def _brreg_apply_result(
         self,
@@ -893,42 +480,13 @@ class ARPage(ttk.Frame):
         regnskap: dict[str, Any] | None,
         error: str | None,
     ) -> None:
-        self._brreg_loading.discard(orgnr)
-        if error:
-            if orgnr == self._brreg_current_orgnr:
-                self.var_brreg_status.set(f"Feil ved henting: {error}")
-            return
-        self._brreg_data[orgnr] = {"enhet": enhet or {}, "regnskap": regnskap or {}}
-        if orgnr != self._brreg_current_orgnr:
-            return
-        if request_id != self._brreg_request_id:
-            return
-        self.var_brreg_status.set("Hentet fra BRREG.")
-        try:
-            import reskontro_brreg_panel
-            reskontro_brreg_panel.update_brreg_panel(self, orgnr)
-        except Exception as exc:
-            self.var_brreg_status.set(f"Panel-feil: {exc}")
+        page_ar_brreg.brreg_apply_result(self, request_id, orgnr, enhet, regnskap, error)
 
     def _on_brreg_refresh_clicked(self) -> None:
-        row = self._selected_owned_row()
-        if row is None:
-            return
-        orgnr = normalize_orgnr(_safe_text(row.get("company_orgnr")))
-        if orgnr and orgnr in self._brreg_data:
-            self._brreg_data.pop(orgnr, None)
-        self._load_brreg_for_selected_row(row, force_refresh=True)
+        page_ar_brreg.on_brreg_refresh_clicked(self)
 
     def _update_brreg_header(self, orgnr: str, name: str) -> None:
-        if not orgnr and not name:
-            self.var_brreg_header.set("— velg et eid selskap —")
-            return
-        if orgnr and name:
-            self.var_brreg_header.set(f"{name} ({orgnr})")
-        elif name:
-            self.var_brreg_header.set(name)
-        else:
-            self.var_brreg_header.set(orgnr)
+        page_ar_brreg.update_brreg_header(self, orgnr, name)
 
     def _on_new_manual_change(self) -> None:
         self._current_manual_change_id = None
@@ -1657,298 +1215,31 @@ class ARPage(ttk.Frame):
         self._on_new_manual_change()
 
     def _populate_compare_tree(self) -> None:
-        """Refill owners_compare tree and update year-aware column headings."""
-        tree = self._tree_owners
-        self._compare_rows_by_iid = {}
-        self._owners_rows_by_iid = {}
-        tree.delete(*tree.get_children())
-
-        ov = self._overview or {}
-        compare_rows = ov.get("owners_compare") or []
-        base_year = _safe_text(ov.get("owners_base_year_used")) or "base"
-        cur_year = _safe_text(ov.get("owners_current_year_used")) or _safe_text(ov.get("year")) or "nå"
-        has_import = self._has_current_import()
-        try:
-            tree.heading("shares_base", text=f"Aksjer {base_year}")
-            tree.heading("shares_current", text=f"Aksjer {cur_year}")
-            tree.heading("pct_current", text=f"Eierandel {cur_year}")
-        except Exception:
-            pass
-
-        # Show transaction columns only when current RF-1086 backs the values.
-        try:
-            if has_import:
-                tree.configure(displaycolumns="#all")
-            else:
-                tree.configure(displaycolumns=(
-                    "owner", "orgnr", "kind",
-                    "shares_base", "shares_current", "shares_delta",
-                    "pct_current",
-                ))
-        except Exception:
-            pass
-
-        if not compare_rows:
-            self.var_owners_caption.set(
-                "Ingen aksjonærdata importert ennå — bruk «Importer RF-1086 (PDF)» for å fylle oversikten.",
-            )
-        elif has_import:
-            self.var_owners_caption.set(
-                f"Aksjonærer i klienten — {base_year} → {cur_year} (RF-1086)",
-            )
-        else:
-            self.var_owners_caption.set(
-                f"Aksjonærer i klienten — {base_year} → {cur_year}",
-            )
-
-        for idx, row in enumerate(compare_rows, start=1):
-            iid = f"compare-{idx}"
-            self._compare_rows_by_iid[iid] = dict(row)
-            change_type = _safe_text(row.get("change_type"))
-            tag = (change_type,) if change_type in {"new", "removed", "changed"} else ()
-            shares_base = int(row.get("shares_base") or 0)
-            shares_current = int(row.get("shares_current") or 0)
-            delta = int(row.get("shares_delta") or 0)
-            bought = int(row.get("shares_bought") or 0)
-            sold = int(row.get("shares_sold") or 0)
-            tx_val = float(row.get("transaction_value_total") or 0.0)
-            tree.insert(
-                "", "end", iid=iid,
-                values=(
-                    _safe_text(row.get("shareholder_name")),
-                    _safe_text(row.get("shareholder_orgnr")),
-                    _safe_text(row.get("shareholder_kind")) or "unknown",
-                    _fmt_thousand(shares_base),
-                    _fmt_thousand(shares_current),
-                    _fmt_signed_thousand(delta),
-                    _fmt_thousand(bought) if bought else "",
-                    _fmt_thousand(sold) if sold else "",
-                    _fmt_currency(tx_val) if tx_val else "",
-                    _fmt_pct(row.get("ownership_pct_current")),
-                ),
-                tags=tag,
-            )
-
-        # Clear detail panel
-        self._clear_compare_detail()
+        page_ar_compare.populate_compare_tree(self)
 
     def _clear_compare_detail(self) -> None:
-        self.var_compare_header.set("")
-        self.var_detail_shares_base.set("–")
-        self.var_detail_shares_current.set("–")
-        self.var_detail_shares_delta.set("–")
-        self.var_detail_pct_base.set("–")
-        self.var_detail_pct_current.set("–")
-        self.var_detail_change_type.set("–")
-        self.var_compare_imported_at.set("–")
-        self.var_compare_source_file.set("–")
-        self.var_compare_source_year.set("–")
-        has_import = self._has_current_import()
-        accepted = (self._overview or {}).get("accepted_meta") or {}
-        basis_kind = _safe_text(accepted.get("source_kind"))
-        basis_label = {
-            "carry_forward": "Videreført",
-            "register_baseline": "Register",
-            "accepted_update": "Godkjent",
-        }.get(basis_kind, "Videreført")
-        self.var_compare_data_basis.set(basis_label if not has_import else "RF-1086")
-        self.var_compare_rf_status.set("importert" if has_import else "ikke importert")
-        self.var_compare_tx_empty.set("")
-        self.var_compare_no_import.set("")
-        try:
-            self._lbl_compare_tx_empty.grid_remove()
-            self._lbl_compare_no_import.grid_remove()
-            self._tree_compare_tx.delete(*self._tree_compare_tx.get_children())
-            self._btn_compare_open_pdf.grid_remove()
-            self._btn_compare_import_detail.grid_remove()
-        except Exception:
-            pass
+        page_ar_compare.clear_compare_detail(self)
 
     def _on_compare_selected(self, _event=None) -> None:
-        sel = self._tree_owners.selection()
-        if not sel:
-            self._clear_compare_detail()
-            return
-        row = self._compare_rows_by_iid.get(sel[0])
-        if not row:
-            self._clear_compare_detail()
-            return
-
-        name = _safe_text(row.get("shareholder_name"))
-        orgnr = _safe_text(row.get("shareholder_orgnr"))
-        header = f"{name}" + (f"  ({orgnr})" if orgnr else "")
-        self.var_compare_header.set(header)
-
-        base_year = _safe_text(row.get("base_year")) or "base"
-        cur_year = _safe_text(row.get("current_year")) or "nå"
-        sb = int(row.get("shares_base") or 0)
-        sc = int(row.get("shares_current") or 0)
-        pb = float(row.get("ownership_pct_base") or 0.0)
-        pc = float(row.get("ownership_pct_current") or 0.0)
-        change = _compare_change_label(row.get("change_type"))
-        self._lbl_detail_shares_base_title.configure(text=f"Aksjer {base_year}:")
-        self._lbl_detail_shares_current_title.configure(text=f"Aksjer {cur_year}:")
-        self._lbl_detail_pct_base_title.configure(text=f"Eierandel {base_year}:")
-        self._lbl_detail_pct_current_title.configure(text=f"Eierandel {cur_year}:")
-        self.var_detail_shares_base.set(_fmt_thousand(sb))
-        self.var_detail_shares_current.set(_fmt_thousand(sc))
-        self.var_detail_shares_delta.set(_fmt_signed_thousand(sc - sb))
-        self.var_detail_pct_base.set(f"{_fmt_pct(pb)} %")
-        self.var_detail_pct_current.set(f"{_fmt_pct(pc)} %")
-        self.var_detail_change_type.set(change)
-
-        # Transactions from trace detail
-        key = ""
-        if orgnr:
-            key = f"org:{orgnr}"
-        elif name:
-            key = f"name:{name.casefold()}"
-
-        trace = {}
-        try:
-            from ar_store import get_shareholder_trace_detail
-            trace = get_shareholder_trace_detail(self._client, self._year, key) or {}
-        except Exception:
-            trace = {}
-
-        has_import = self._has_current_import()
-        year_for_msg = _safe_text(self._year) or "valgt år"
-
-        self._tree_compare_tx.delete(*self._tree_compare_tx.get_children())
-        if not has_import:
-            # No RF-1086 for current year: replace tx grid with compact info block
-            self.var_compare_no_import.set(
-                f"RF-1086 for {year_for_msg} er ikke importert."
-            )
-            try:
-                self._lbl_compare_no_import.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-                self._lbl_compare_tx_empty.grid_remove()
-                self._tree_compare_tx.grid_remove()
-            except Exception:
-                pass
-        else:
-            self.var_compare_no_import.set("")
-            try:
-                self._lbl_compare_no_import.grid_remove()
-                self._tree_compare_tx.grid(row=1, column=0, sticky="nsew")
-            except Exception:
-                pass
-            tx_rows = trace.get("transactions") or []
-            for tx in tx_rows:
-                direction = _safe_text(tx.get("direction"))
-                retning = "Tilgang" if direction == "tilgang" else "Avgang" if direction == "avgang" else direction
-                self._tree_compare_tx.insert(
-                    "", "end",
-                    values=(
-                        _safe_text(tx.get("date")),
-                        retning,
-                        _safe_text(tx.get("trans_type")),
-                        _fmt_thousand(int(tx.get("shares") or 0)),
-                        _fmt_currency(float(tx.get("amount") or 0.0)),
-                    ),
-                )
-            if tx_rows:
-                self.var_compare_tx_empty.set("")
-                try:
-                    self._lbl_compare_tx_empty.grid_remove()
-                except Exception:
-                    pass
-            else:
-                self.var_compare_tx_empty.set("Ingen registrerte kjøp/salg.")
-                try:
-                    self._lbl_compare_tx_empty.grid(row=0, column=0, sticky="w", pady=(0, 4))
-                except Exception:
-                    pass
-
-        current_import = trace.get("current_import") or {}
-        accepted = (self._overview or {}).get("accepted_meta") or {}
-        basis_kind = _safe_text(accepted.get("source_kind"))
-        basis_label = {
-            "carry_forward": "Videreført",
-            "register_baseline": "Register",
-            "accepted_update": "Godkjent",
-        }.get(basis_kind, "Videreført")
-        if has_import:
-            self.var_compare_data_basis.set("RF-1086")
-            self.var_compare_rf_status.set("importert")
-            self.var_compare_source_year.set(
-                _safe_text(current_import.get("register_year"))
-                or _safe_text(current_import.get("target_year")) or "–"
-            )
-            self.var_compare_imported_at.set(
-                _safe_text(current_import.get("imported_at_utc"))[:16] or "–"
-            )
-            self.var_compare_source_file.set(
-                _safe_text(current_import.get("source_file")) or "–"
-            )
-        else:
-            self.var_compare_data_basis.set(basis_label)
-            self.var_compare_rf_status.set("ikke importert")
-            self.var_compare_source_year.set("–")
-            self.var_compare_imported_at.set("–")
-            self.var_compare_source_file.set("–")
-
-        stored = _safe_text(trace.get("stored_file_path"))
-        self._current_compare_pdf = stored
-        self._current_compare_import_id = _safe_text(current_import.get("import_id"))
-        try:
-            if has_import:
-                pdf_state = "normal" if stored and Path(stored).exists() else "disabled"
-                self._btn_compare_open_pdf.configure(state=pdf_state)
-                self._btn_compare_open_pdf.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 2))
-                detail_state = "normal" if self._current_compare_import_id else "disabled"
-                self._btn_compare_import_detail.configure(state=detail_state)
-                self._btn_compare_import_detail.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(2, 2))
-            else:
-                self._btn_compare_open_pdf.grid_remove()
-                self._btn_compare_import_detail.grid_remove()
-        except Exception:
-            pass
+        page_ar_compare.on_compare_selected(self, _event)
 
     def _on_compare_open_pdf(self) -> None:
-        self._open_pdf_path(getattr(self, "_current_compare_pdf", ""))
+        page_ar_compare.on_compare_open_pdf(self)
 
     def _on_compare_show_import_detail(self) -> None:
-        import_id = getattr(self, "_current_compare_import_id", "")
-        if not import_id:
-            messagebox.showinfo("AR", "Ingen import knyttet til denne aksjonæren.")
-            return
-        self._show_persisted_import_detail(import_id)
+        page_ar_compare.on_compare_show_import_detail(self)
 
     def _show_persisted_import_detail(self, import_id: str) -> None:
-        try:
-            from ar_store import _load_import_detail
-        except Exception as exc:
-            messagebox.showerror("AR", f"Kunne ikke laste importdetaljer:\n{exc}")
-            return
-        detail = _load_import_detail(import_id) or {}
-        if not detail:
-            messagebox.showinfo("AR", "Fant ingen lagrede importdetaljer.")
-            return
-        _ImportDetailDialog(self, detail=detail).show()
+        page_ar_compare.show_persisted_import_detail(self, import_id)
 
     def _is_chart_tab_selected(self) -> bool:
-        try:
-            return str(self._nb.select()) == str(self._frm_chart)
-        except Exception:
-            return False
+        return page_ar_chart.is_chart_tab_selected(self)
 
     def _on_tab_changed(self, event=None) -> None:
-        if event is not None and getattr(event, "widget", None) is not self._nb:
-            return
-        if self._chart_dirty and not self._overview_loading and self._is_chart_tab_selected():
-            self._refresh_org_chart()
+        page_ar_chart.on_tab_changed(self, event)
 
     def _selected_change_keys(self) -> list[str]:
-        keys: list[str] = []
-        for iid in self._tree_changes.selection():
-            row = self._change_rows_by_iid.get(iid)
-            if row is None:
-                continue
-            key = _safe_text(row.get("change_key"))
-            if key:
-                keys.append(key)
-        return keys
+        return page_ar_compare.selected_change_keys(self)
 
     def _draw_box(
         self,
@@ -1964,432 +1255,74 @@ class ARPage(ttk.Frame):
         accent: str = "#98A2B3",
         action_key: str | None = None,
     ) -> None:
-        left = x - width / 2
-        top = y - height / 2
-        right = x + width / 2
-        bottom = y + height / 2
-        tags = ("chart-node",)
-        if action_key:
-            tags = ("chart-node", action_key)
-        canvas.create_rectangle(left + 2, top + 3, right + 2, bottom + 3, fill="#E4E7EC", outline="", tags=tags)
-        canvas.create_rectangle(left, top, right, bottom, fill=fill, outline="#D0D5DD", width=1, tags=tags)
-        canvas.create_rectangle(left, top, right, top + 4, fill=accent, outline=accent, tags=tags)
-        canvas.create_text(x, y - 6, text=title, font=("Segoe UI", 9, "bold"), width=width - 16, tags=tags)
-        canvas.create_text(x, y + 12, text=subtitle, font=("Segoe UI", 8), width=width - 16, fill="#475467", tags=tags)
-
-    def _chart_action_key_from_current(self) -> str:
-        canvas = self._org_canvas
-        for tag in canvas.gettags("current"):
-            if tag.startswith("node:"):
-                return tag
-        return ""
-
-    def _on_chart_press(self, event) -> None:
-        self._chart_dragging = False
-        self._chart_drag_node = None
-        self._chart_press_xy = (int(event.x), int(event.y))
-        action_key = self._chart_action_key_from_current()
-        self._chart_pending_action = self._chart_node_actions.get(action_key)
-        if action_key:
-            self._chart_drag_node = action_key
-        else:
-            self._org_canvas.scan_mark(event.x, event.y)
-
-    def _on_chart_drag(self, event) -> None:
-        dx = abs(int(event.x) - self._chart_press_xy[0])
-        dy = abs(int(event.y) - self._chart_press_xy[1])
-        if dx > 4 or dy > 4:
-            self._chart_dragging = True
-        if self._chart_drag_node and self._chart_dragging:
-            canvas = self._org_canvas
-            # Convert to canvas coords
-            cx = canvas.canvasx(event.x)
-            cy = canvas.canvasy(event.y)
-            # Move all items with this action_key tag
-            ak = self._chart_drag_node
-            pos_key = self._chart_node_keys.get(ak, "")
-            if not pos_key:
-                return
-            old_x, old_y = self._chart_node_centers.get(pos_key, (cx, cy))
-            move_dx = cx - old_x
-            move_dy = cy - old_y
-            for item_id in canvas.find_withtag(ak):
-                canvas.move(item_id, move_dx, move_dy)
-            self._chart_node_centers[pos_key] = (cx, cy)
-            self._redraw_edges_for_node(pos_key)
-        elif not self._chart_drag_node:
-            self._org_canvas.scan_dragto(event.x, event.y, gain=1)
-
-    def _on_chart_release(self, _event) -> None:
-        if self._chart_dragging and self._chart_drag_node:
-            self._save_chart_positions()
-            self._update_chart_scrollregion()
-            self._chart_drag_node = None
-            self._chart_pending_action = None
-            return
-        action = self._chart_pending_action
-        self._chart_pending_action = None
-        self._chart_drag_node = None
-        if self._chart_dragging or not action:
-            return
-        self._execute_chart_action(action)
-
-    def _on_chart_mousewheel(self, event) -> None:
-        if event.delta == 0:
-            return
-        factor = 1.1 if event.delta > 0 else 1 / 1.1
-        self._chart_apply_zoom(factor, event.x, event.y)
-
-    def _update_chart_zoom_label(self) -> None:
-        self.var_chart_zoom.set(f"{int(round(self._chart_zoom * 100))} %")
-
-    def _chart_apply_zoom(self, factor: float, x: float | None = None, y: float | None = None) -> None:
-        canvas = self._org_canvas
-        new_zoom = max(0.6, min(2.5, self._chart_zoom * factor))
-        factor = new_zoom / self._chart_zoom
-        if abs(factor - 1.0) < 0.001:
-            return
-        cx = canvas.canvasx(x if x is not None else canvas.winfo_width() / 2)
-        cy = canvas.canvasy(y if y is not None else canvas.winfo_height() / 2)
-        self._chart_zoom = new_zoom
-        self._update_chart_zoom_label()
-        canvas.scale("all", cx, cy, factor, factor)
-        bbox = canvas.bbox("all")
-        if bbox:
-            canvas.configure(scrollregion=(bbox[0] - 40, bbox[1] - 40, bbox[2] + 40, bbox[3] + 40))
-
-    def _chart_reset_view(self) -> None:
-        if self._overview_loading:
-            return
-        self._clear_chart_positions()
-        self._refresh_org_chart()
-
-    def _chart_fit_view(self) -> None:
-        if self._overview_loading:
-            return
-        canvas = self._org_canvas
-        canvas.update_idletasks()
-        bbox = canvas.bbox("all")
-        if not bbox:
-            return
-        content_w = max(1, bbox[2] - bbox[0])
-        content_h = max(1, bbox[3] - bbox[1])
-        viewport_w = max(1, canvas.winfo_width() - 40)
-        viewport_h = max(1, canvas.winfo_height() - 40)
-        factor = min(viewport_w / content_w, viewport_h / content_h, 1.5)
-        factor = max(0.5, min(2.0, factor))
-        self._chart_zoom = 1.0
-        self._refresh_org_chart()
-        if abs(factor - 1.0) > 0.01:
-            self._chart_apply_zoom(factor)
-
-    # ── Chart position persistence ──────────────────────────────────
-
-    def _chart_positions_path(self) -> Path | None:
-        if not self._client or not self._year:
-            return None
-        import client_store
-        d = client_store.years_dir(self._client, year=self._year) / "aksjonaerregister"
-        d.mkdir(parents=True, exist_ok=True)
-        return d / "chart_positions.json"
-
-    def _load_chart_positions(self) -> dict[str, list[float]]:
-        p = self._chart_positions_path()
-        if not p or not p.exists():
-            return {}
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-
-    def _save_chart_positions(self) -> None:
-        p = self._chart_positions_path()
-        if not p:
-            return
-        data = {k: list(v) for k, v in self._chart_node_centers.items()}
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
-    def _clear_chart_positions(self) -> None:
-        p = self._chart_positions_path()
-        if p and p.exists():
-            try:
-                p.unlink()
-            except Exception:
-                pass
-
-    # ── Edge redrawing ──────────────────────────────────────────────
-
-    def _redraw_edges_for_node(self, pos_key: str) -> None:
-        canvas = self._org_canvas
-        bw, bh = self._chart_box_size
-        for from_key, to_key, line_tag, lbl_tag in self._chart_edges:
-            if from_key != pos_key and to_key != pos_key:
-                continue
-            fx, fy = self._chart_node_centers.get(from_key, (0, 0))
-            tx, ty = self._chart_node_centers.get(to_key, (0, 0))
-            # Line: from bottom of upper node to top of lower node
-            if fy < ty:
-                y1, y2 = fy + bh / 2, ty - bh / 2
-            else:
-                y1, y2 = fy - bh / 2, ty + bh / 2
-            for item in canvas.find_withtag(line_tag):
-                canvas.coords(item, fx, y1, tx, y2)
-            for item in canvas.find_withtag(lbl_tag):
-                canvas.coords(item, (fx + tx) / 2, (y1 + y2) / 2)
-
-    def _update_chart_scrollregion(self) -> None:
-        canvas = self._org_canvas
-        bbox = canvas.bbox("all")
-        if bbox:
-            pad = 30
-            canvas.configure(scrollregion=(bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad))
-
-    def _select_owned_row(self, *, company_orgnr: str = "", company_name: str = "") -> None:
-        self._nb.select(0)
-        target_orgnr = _safe_text(company_orgnr)
-        target_name = _safe_text(company_name).casefold()
-        for iid, row in self._owned_rows_by_iid.items():
-            if target_orgnr and _safe_text(row.get("company_orgnr")) == target_orgnr:
-                self._tree_owned.selection_set((iid,))
-                self._tree_owned.focus(iid)
-                self._tree_owned.see(iid)
-                self._on_owned_selected()
-                return
-            if target_name and _safe_text(row.get("company_name")).casefold() == target_name:
-                self._tree_owned.selection_set((iid,))
-                self._tree_owned.focus(iid)
-                self._tree_owned.see(iid)
-                self._on_owned_selected()
-                return
-
-    def _select_owner_row(self, *, owner_orgnr: str = "", owner_name: str = "") -> None:
-        self._nb.select(1)
-        target_orgnr = _safe_text(owner_orgnr)
-        target_name = _safe_text(owner_name).casefold()
-        for iid, row in self._owners_rows_by_iid.items():
-            if target_orgnr and _safe_text(row.get("shareholder_orgnr")) == target_orgnr:
-                self._tree_owners.selection_set((iid,))
-                self._tree_owners.focus(iid)
-                self._tree_owners.see(iid)
-                return
-            if target_name and _safe_text(row.get("shareholder_name")).casefold() == target_name:
-                self._tree_owners.selection_set((iid,))
-                self._tree_owners.focus(iid)
-                self._tree_owners.see(iid)
-                return
-
-    def _execute_chart_action(self, action: dict[str, Any]) -> None:
-        kind = _safe_text(action.get("kind"))
-        if kind == "owned":
-            self._select_owned_row(
-                company_orgnr=_safe_text(action.get("company_orgnr")),
-                company_name=_safe_text(action.get("company_name")),
-            )
-            return
-        if kind == "owner":
-            self._select_owner_row(
-                owner_orgnr=_safe_text(action.get("shareholder_orgnr")),
-                owner_name=_safe_text(action.get("shareholder_name")),
-            )
-            return
-        if kind == "root":
-            self._nb.select(0)
-
-    def _refresh_org_chart(self) -> None:
-        canvas = self._org_canvas
-        canvas.delete("all")
-        canvas.configure(background="#FAFAF8")
-        self._chart_node_actions = {}
-        self._chart_node_keys = {}
-        self._chart_node_centers = {}
-        self._chart_edges = []
-        self._chart_zoom = 1.0
-        self._update_chart_zoom_label()
-
-        root_name = self._client or "Klient"
-        root_orgnr = _safe_text(self._overview.get("client_orgnr"))
-        owners = self._overview.get("owners") or []
-        children = self._overview.get("owned_companies") or []
-
-        if not root_name or (not root_orgnr and not owners and not children):
-            canvas.create_text(320, 120, text="Ingen eierdata tilgjengelig ennå.", font=("Segoe UI", 10), fill="#667085")
-            canvas.configure(scrollregion=(0, 0, 640, 240))
-            self._chart_dirty = False
-            return
-
-        box_w, box_h = 172, 56
-        self._chart_box_size = (box_w, box_h)
-
-        # Load saved positions
-        saved = self._load_chart_positions()
-
-        # Compute default positions
-        node_count = max(len(owners), len(children), 1)
-        total_w = max(800, node_count * 200)
-        center_x = total_w / 2
-        owner_y_default = 60
-        root_y_default = 200
-        child_y_default = 340
-
-        # ── Root node ───────────────────────────────────────────────
-        root_pos_key = f"root:{root_orgnr or root_name}"
-        root_action_key = "node:root"
-        rx, ry = saved.get(root_pos_key, [center_x, root_y_default])
-        self._chart_node_keys[root_action_key] = root_pos_key
-        self._chart_node_centers[root_pos_key] = (rx, ry)
-        self._chart_node_actions[root_action_key] = {"kind": "root"}
-        self._draw_box(
-            canvas, rx, ry, box_w + 16, box_h + 4,
-            title=root_name,
-            subtitle=root_orgnr or self._year,
-            fill="#E6F0FF", accent="#2952A3",
-            action_key=root_action_key,
+        page_ar_chart.draw_box(
+            self, canvas, x, y, width, height,
+            title=title, subtitle=subtitle, fill=fill,
+            accent=accent, action_key=action_key,
         )
 
-        # Self-ownership note (attached to root)
-        self_ownership = self._overview.get("self_ownership") or {}
-        if self_ownership:
-            note = f"Egne aksjer: {_fmt_pct(self_ownership.get('ownership_pct'))}%"
-            shares = int(self_ownership.get("shares") or 0)
-            total = int(self_ownership.get("total_shares") or 0)
-            if shares and total:
-                note = f"{note} ({shares} av {total})"
-            canvas.create_text(
-                rx, ry + 46, text=note,
-                font=("Segoe UI", 8, "italic"), fill="#8A5A00",
-                tags=("chart-node", root_action_key),
-            )
+    def _chart_action_key_from_current(self) -> str:
+        return page_ar_chart.chart_action_key_from_current(self)
 
-        # ── Owner nodes ─────────────────────────────────────────────
-        if owners:
-            owner_gap = total_w / (len(owners) + 1)
-            for idx, row in enumerate(owners, start=1):
-                orgnr = _safe_text(row.get("shareholder_orgnr"))
-                name = _safe_text(row.get("shareholder_name"))
-                pos_key = f"owner:{orgnr or name}"
-                action_key = f"node:owner:{idx}"
-                default_x = owner_gap * idx
-                ox, oy = saved.get(pos_key, [default_x, owner_y_default])
-                self._chart_node_keys[action_key] = pos_key
-                self._chart_node_centers[pos_key] = (ox, oy)
-                self._chart_node_actions[action_key] = {
-                    "kind": "owner",
-                    "shareholder_name": name,
-                    "shareholder_orgnr": orgnr,
-                }
-                self._draw_box(
-                    canvas, ox, oy, box_w, box_h,
-                    title=name or "Ukjent eier",
-                    subtitle=orgnr or _safe_text(row.get("shareholder_kind")) or "-",
-                    fill="#F8FAFC", accent="#667085",
-                    action_key=action_key,
-                )
-                # Edge: owner → root
-                line_tag = f"edge:line:{pos_key}"
-                lbl_tag = f"edge:lbl:{pos_key}"
-                y1 = oy + box_h / 2
-                y2 = ry - (box_h + 4) / 2
-                canvas.create_line(ox, y1, rx, y2, fill="#B0B8C8", width=1, tags=(line_tag,))
-                canvas.create_text(
-                    (ox + rx) / 2, (y1 + y2) / 2,
-                    text=f"{_fmt_pct(row.get('ownership_pct'))}%",
-                    font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
-                )
-                self._chart_edges.append((pos_key, root_pos_key, line_tag, lbl_tag))
+    def _on_chart_press(self, event) -> None:
+        page_ar_chart.on_chart_press(self, event)
 
-        # ── Child nodes ─────────────────────────────────────────────
-        if children:
-            child_gap = total_w / (len(children) + 1)
-            for idx, row in enumerate(children, start=1):
-                orgnr = _safe_text(row.get("company_orgnr"))
-                name = _safe_text(row.get("company_name"))
-                pos_key = f"child:{orgnr or name}"
-                action_key = f"node:owned:{idx}"
-                default_x = child_gap * idx
-                cx, cy = saved.get(pos_key, [default_x, child_y_default])
-                self._chart_node_keys[action_key] = pos_key
-                self._chart_node_centers[pos_key] = (cx, cy)
-                self._chart_node_actions[action_key] = {
-                    "kind": "owned",
-                    "company_name": name,
-                    "company_orgnr": orgnr,
-                }
-                self._draw_box(
-                    canvas, cx, cy, box_w, box_h,
-                    title=name or "Ukjent selskap",
-                    subtitle=f"{orgnr or '-'} | {_relation_label(row.get('relation_type'))}",
-                    fill=_relation_fill(row.get("relation_type")),
-                    accent=_relation_accent(row.get("relation_type")),
-                    action_key=action_key,
-                )
-                # Edge: root → child
-                line_tag = f"edge:line:{pos_key}"
-                lbl_tag = f"edge:lbl:{pos_key}"
-                y1 = ry + (box_h + 4) / 2
-                y2 = cy - box_h / 2
-                canvas.create_line(rx, y1, cx, y2, fill="#B0B8C8", width=1, tags=(line_tag,))
-                canvas.create_text(
-                    (rx + cx) / 2, (y1 + y2) / 2,
-                    text=f"{_fmt_pct(row.get('ownership_pct'))}%",
-                    font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
-                )
-                self._chart_edges.append((root_pos_key, pos_key, line_tag, lbl_tag))
+    def _on_chart_drag(self, event) -> None:
+        page_ar_chart.on_chart_drag(self, event)
 
-        # Circular ownership warning
-        if self._year:
-            try:
-                from ar_store import detect_circular_ownership
-                cycles = detect_circular_ownership(self._year)
-                if cycles:
-                    cycle_text = "Sirkulært eierskap: " + "; ".join(
-                        " \u2192 ".join(c) + " \u2192 " + c[0] for c in cycles[:3]
-                    )
-                    all_ys = [v[1] for v in self._chart_node_centers.values()]
-                    warn_y = max(all_ys) + box_h / 2 + 30 if all_ys else 400
-                    canvas.create_text(
-                        center_x, warn_y, text=f"\u26a0 {cycle_text}",
-                        font=("Segoe UI", 9), fill="#856404",
-                    )
-            except Exception:
-                pass
+    def _on_chart_release(self, _event) -> None:
+        page_ar_chart.on_chart_release(self, _event)
 
-        # Set scrollregion and auto-fit
-        self._update_chart_scrollregion()
-        canvas.update_idletasks()
-        self._chart_dirty = False
+    def _on_chart_mousewheel(self, event) -> None:
+        page_ar_chart.on_chart_mousewheel(self, event)
 
-        # Auto-fit to viewport on first draw
-        if not saved:
-            self.after(50, self._chart_fit_view)
+    def _update_chart_zoom_label(self) -> None:
+        page_ar_chart.update_chart_zoom_label(self)
+
+    def _chart_apply_zoom(self, factor: float, x: float | None = None, y: float | None = None) -> None:
+        page_ar_chart.chart_apply_zoom(self, factor, x, y)
+
+    def _chart_reset_view(self) -> None:
+        page_ar_chart.chart_reset_view(self)
+
+    def _chart_fit_view(self) -> None:
+        page_ar_chart.chart_fit_view(self)
+
+    def _chart_positions_path(self) -> Path | None:
+        return page_ar_chart.chart_positions_path(self)
+
+    def _load_chart_positions(self) -> dict[str, list[float]]:
+        return page_ar_chart.load_chart_positions(self)
+
+    def _save_chart_positions(self) -> None:
+        page_ar_chart.save_chart_positions(self)
+
+    def _clear_chart_positions(self) -> None:
+        page_ar_chart.clear_chart_positions(self)
+
+    def _redraw_edges_for_node(self, pos_key: str) -> None:
+        page_ar_chart.redraw_edges_for_node(self, pos_key)
+
+    def _update_chart_scrollregion(self) -> None:
+        page_ar_chart.update_chart_scrollregion(self)
+
+    def _select_owned_row(self, *, company_orgnr: str = "", company_name: str = "") -> None:
+        page_ar_chart.select_owned_row(self, company_orgnr=company_orgnr, company_name=company_name)
+
+    def _select_owner_row(self, *, owner_orgnr: str = "", owner_name: str = "") -> None:
+        page_ar_chart.select_owner_row(self, owner_orgnr=owner_orgnr, owner_name=owner_name)
+
+    def _execute_chart_action(self, action: dict[str, Any]) -> None:
+        page_ar_chart.execute_chart_action(self, action)
+
+    def _refresh_org_chart(self) -> None:
+        page_ar_chart.refresh_org_chart(self)
 
     def _on_accept_selected_changes(self) -> None:
-        if not self._client or not self._year:
-            return
-        keys = self._selected_change_keys()
-        if not keys:
-            messagebox.showinfo("AR", "Velg minst Ã©n registerendring Ã¥ godta.")
-            return
-        accept_pending_ownership_changes(self._client, self._year, keys)
-        self._refresh_current_overview()
-        self.var_status.set(f"Godkjente {len(keys)} registerendringer.")
+        page_ar_compare.on_accept_selected_changes(self)
 
     def _on_accept_all_changes(self) -> None:
-        if not self._client or not self._year:
-            return
-        pending = self._overview.get("pending_changes") or []
-        if not pending:
-            messagebox.showinfo("AR", "Det finnes ingen ventende registerendringer.")
-            return
-        if not messagebox.askyesno("AR", f"Godta alle {len(pending)} registerendringer for {self._year}?"):
-            return
-        accept_pending_ownership_changes(self._client, self._year)
-        self._refresh_current_overview()
-        self.var_status.set(f"Godkjente alle registerendringer for {self._year}.")
+        page_ar_compare.on_accept_all_changes(self)
 
     def _on_import_pdf(self) -> None:
         path = filedialog.askopenfilename(
@@ -2466,13 +1399,7 @@ class ARPage(ttk.Frame):
         self.var_status.set(f"RF-1086 importert ({meta.get('rows_read', 0)} rader)")
 
     def _select_changes_tab_if_pending(self) -> None:
-        pending = self._overview.get("pending_changes") or []
-        if not pending:
-            return
-        try:
-            self._nb.select(self._frm_changes)
-        except Exception:
-            return
+        page_ar_compare.select_changes_tab_if_pending(self)
 
     def _export_excel(self) -> None:
         """Eksporter AR-data til Excel."""
@@ -2530,185 +1457,4 @@ class ARPage(ttk.Frame):
             messagebox.showerror("Eksport", f"Feil ved eksport:\n{exc}")
 
 
-class _ImportDetailDialog(tk.Toplevel):
-    """Read-only view of a persisted RF-1086 import (stored in ar_store)."""
-
-    def __init__(self, master: tk.Misc, *, detail: dict) -> None:
-        super().__init__(master)
-        self._detail = detail or {}
-        header = self._detail.get("header") or {}
-        reg_year = _safe_text(header.get("register_year")) or _safe_text(header.get("target_year"))
-        company = _safe_text(header.get("company_name")) or _safe_text(header.get("company_orgnr"))
-        self.title(f"Importdetaljer — {company} ({reg_year})")
-        self.geometry("1100x720")
-        self.minsize(900, 560)
-        self.resizable(True, True)
-
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=2)
-        self.rowconfigure(2, weight=1)
-
-        self._build_header(header)
-        self._build_shareholders()
-        self._build_transactions()
-        self._build_buttons(header)
-
-        self.grab_set()
-        self.focus_set()
-
-    def _build_header(self, header: dict) -> None:
-        info = ttk.LabelFrame(self, text="Importinfo", padding=6)
-        info.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 0))
-        info.columnconfigure(1, weight=1)
-
-        company = _safe_text(header.get("company_name"))
-        orgnr = _safe_text(header.get("company_orgnr"))
-        reg_year = _safe_text(header.get("register_year"))
-        target_year = _safe_text(header.get("target_year"))
-        source = _safe_text(header.get("source_file"))
-        imported_at = _safe_text(header.get("imported_at_utc"))[:19]
-        sh_count = int(header.get("shareholders_count") or 0)
-
-        rows = [
-            ("Selskap:", f"{company}  ({orgnr})" if orgnr else company),
-            ("Registerår:", reg_year + (f"  (klientår {target_year})" if target_year and target_year != reg_year else "")),
-            ("Importert:", imported_at or "-"),
-            ("Kildefil:", source or "-"),
-            ("Aksjonærer:", _fmt_thousand(sh_count)),
-        ]
-        for r, (lbl, val) in enumerate(rows):
-            ttk.Label(info, text=lbl, font=("Segoe UI", 9, "bold")).grid(row=r, column=0, sticky="w", padx=(0, 8))
-            ttk.Label(info, text=val, wraplength=900, justify="left").grid(row=r, column=1, sticky="w")
-
-    def _build_shareholders(self) -> None:
-        frame = ttk.LabelFrame(self, text="Aksjonærer", padding=4)
-        frame.grid(row=1, column=0, sticky="nsew", padx=6, pady=(6, 0))
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
-
-        cols = ("id", "navn", "type", "start", "slutt", "pct_start", "pct_end", "side")
-        tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="browse")
-        headings = [
-            ("id", "ID", 110),
-            ("navn", "Navn", 220),
-            ("type", "Type", 70),
-            ("start", "Aksjer start", 100),
-            ("slutt", "Aksjer slutt", 100),
-            ("pct_start", "% start", 80),
-            ("pct_end", "% slutt", 80),
-            ("side", "Side", 50),
-        ]
-        for cid, text, width in headings:
-            tree.heading(cid, text=text)
-            anchor = "e" if cid in {"start", "slutt", "pct_start", "pct_end"} else ("center" if cid == "side" else "w")
-            tree.column(cid, width=width, anchor=anchor)
-
-        ysb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=ysb.set)
-        tree.grid(row=0, column=0, sticky="nsew")
-        ysb.grid(row=0, column=1, sticky="ns")
-
-        self._tree_sh = tree
-        self._sh_by_iid: dict[str, dict] = {}
-
-        for idx, sh in enumerate(self._detail.get("shareholders") or [], start=1):
-            iid = f"sh-{idx}"
-            self._sh_by_iid[iid] = sh
-            kind = _safe_text(sh.get("shareholder_kind")) or "-"
-            kind_label = "Person" if kind == "person" else ("Selskap" if kind == "company" else kind)
-            tree.insert("", "end", iid=iid, values=(
-                _safe_text(sh.get("shareholder_id")),
-                _safe_text(sh.get("shareholder_name")),
-                kind_label,
-                _fmt_thousand(int(sh.get("shares_start") or 0)),
-                _fmt_thousand(int(sh.get("shares_end") or 0)),
-                _fmt_pct(sh.get("ownership_pct_start") or 0.0),
-                _fmt_pct(sh.get("ownership_pct_end") or 0.0),
-                int(sh.get("page_number") or 0) or "",
-            ))
-
-        tree.bind("<<TreeviewSelect>>", self._on_sh_select)
-
-    def _build_transactions(self) -> None:
-        frame = ttk.LabelFrame(self, text="Transaksjoner", padding=4)
-        frame.grid(row=2, column=0, sticky="nsew", padx=6, pady=(6, 0))
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(1, weight=1)
-
-        self._tx_header = ttk.Label(frame, text="Velg en aksjonær for å se transaksjoner.", foreground="#667085")
-        self._tx_header.grid(row=0, column=0, sticky="w", pady=(0, 4))
-
-        cols = ("retning", "type", "aksjer", "dato", "beloep")
-        tree = ttk.Treeview(frame, columns=cols, show="headings", selectmode="none", height=6)
-        for cid, text, width, anchor in [
-            ("retning", "Retning", 80, "w"),
-            ("type", "Type", 110, "w"),
-            ("aksjer", "Aksjer", 80, "e"),
-            ("dato", "Dato", 100, "w"),
-            ("beloep", "Beløp", 120, "e"),
-        ]:
-            tree.heading(cid, text=text)
-            tree.column(cid, width=width, anchor=anchor)
-
-        ysb = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=ysb.set)
-        tree.grid(row=1, column=0, sticky="nsew")
-        ysb.grid(row=1, column=1, sticky="ns")
-
-        self._tree_tx = tree
-
-    def _build_buttons(self, header: dict) -> None:
-        btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=3, column=0, sticky="ew", padx=6, pady=8)
-        btn_frame.columnconfigure(0, weight=1)
-
-        stored = _safe_text(header.get("stored_file_path"))
-        self._stored_path = stored
-        state = "normal" if stored and Path(stored).exists() else "disabled"
-        ttk.Button(
-            btn_frame, text="Åpne kilde-PDF", command=self._open_source,
-            state=state,
-        ).grid(row=0, column=1, padx=(0, 6))
-        ttk.Button(btn_frame, text="Lukk", command=self.destroy).grid(row=0, column=2)
-
-    def _on_sh_select(self, _event=None) -> None:
-        sel = self._tree_sh.selection()
-        self._tree_tx.delete(*self._tree_tx.get_children())
-        if not sel:
-            self._tx_header.config(text="Velg en aksjonær for å se transaksjoner.")
-            return
-        sh = self._sh_by_iid.get(sel[0]) or {}
-        name = _safe_text(sh.get("shareholder_name"))
-        sh_id = _safe_text(sh.get("shareholder_id"))
-        self._tx_header.config(text=f"{name}  ({sh_id})" if sh_id else name)
-
-        by_ref = self._detail.get("by_ref") or {}
-        ref = ""
-        if sh_id:
-            ref = f"id:{sh_id}"
-        elif name:
-            ref = f"name:{name.casefold()}"
-        entry = by_ref.get(ref) or {}
-        for tx in entry.get("transactions") or []:
-            direction = _safe_text(tx.get("direction"))
-            retning = "Tilgang" if direction == "tilgang" else ("Avgang" if direction == "avgang" else direction)
-            self._tree_tx.insert("", "end", values=(
-                retning,
-                _safe_text(tx.get("trans_type")),
-                _fmt_thousand(int(tx.get("shares") or 0)),
-                _safe_text(tx.get("date")),
-                _fmt_currency(float(tx.get("amount") or 0.0)),
-            ))
-
-    def _open_source(self) -> None:
-        path = self._stored_path
-        if not path:
-            return
-        try:
-            import os
-            os.startfile(path)
-        except Exception as exc:
-            messagebox.showerror("AR", f"Kunne ikke åpne PDF:\n{exc}")
-
-    def show(self) -> None:
-        self.wait_window(self)
+from page_ar_import_detail_dialog import _ImportDetailDialog  # noqa: F401
