@@ -52,6 +52,7 @@ import page_analyse_detail_panel
 import page_analyse_export
 import page_analyse_filters_live
 import page_analyse_pivot
+import page_analyse_refresh
 import page_analyse_sb
 import page_analyse_transactions
 import page_analyse_ui
@@ -108,283 +109,17 @@ _MVA_FILTER_OPTIONS: List[str] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Nøkkeltall inline rendering helpers
-# ---------------------------------------------------------------------------
 
-def _nk_write(widget, msg: str) -> None:
-    """Skriv enkel tekstmelding til nk_text-widgeten."""
-    try:
-        widget.configure(state="normal")
-        widget.delete("1.0", "end")
-        widget.insert("end", msg)
-        widget.configure(state="disabled")
-    except Exception:
-        pass
+from page_analyse_nokkeltall_render import (  # noqa: E402,F401
+    _BS_BRREG_MAP,
+    _PL_BRREG_MAP,
+    _fmt_amount,
+    _nk_insert_brreg_bs_comparison,
+    _nk_insert_brreg_pl_comparison,
+    _nk_render,
+    _nk_write,
+)
 
-
-def _nk_render(widget, result, *, brreg_data: dict | None = None) -> None:  # noqa: ANN001
-    """Rendrer NokkeltallResult til nk_text-widgeten med formattering."""
-    try:
-        widget.configure(state="normal")
-        widget.delete("1.0", "end")
-
-        # Tema-farger (synkronisert med theme.py)
-        _FG      = "#1F2430"
-        _ACCENT  = "#2F6D62"
-        _MUTED   = "#667085"
-        _BORDER  = "#D7D1C7"
-        _VAL_FG  = "#1A4D44"
-        _PREV_FG = "#8B8680"
-        _POS     = "#2E7D32"
-        _NEG     = "#C62828"
-        _NA      = "#B0A99A"
-        _KPI_BG  = "#F0FAF7"
-        _BRREG_FG = "#6B4C8A"  # lilla for BRREG-tall
-
-        # Sett opp tags
-        widget.tag_configure("title",
-            font=("Segoe UI Semibold", 13), foreground=_FG, spacing3=1)
-        widget.tag_configure("subtitle",
-            font=("Segoe UI", 9), foreground=_MUTED, spacing3=6)
-        widget.tag_configure("section",
-            font=("Segoe UI Semibold", 10), foreground=_ACCENT,
-            spacing1=10, spacing3=2)
-        widget.tag_configure("sep", foreground=_BORDER)
-        widget.tag_configure("col_header",
-            font=("Segoe UI Semibold", 9), foreground=_MUTED)
-        widget.tag_configure("label",
-            font=("Segoe UI", 10), foreground=_FG)
-        widget.tag_configure("val",
-            font=("Consolas", 10), foreground=_VAL_FG)
-        widget.tag_configure("val_prev",
-            font=("Consolas", 10), foreground=_PREV_FG)
-        widget.tag_configure("val_brreg",
-            font=("Consolas", 10), foreground=_BRREG_FG)
-        widget.tag_configure("bold_label",
-            font=("Segoe UI Semibold", 10), foreground=_FG)
-        widget.tag_configure("bold_val",
-            font=("Consolas", 10, "bold"), foreground=_VAL_FG)
-        widget.tag_configure("pos_chg",
-            font=("Consolas", 9), foreground=_POS)
-        widget.tag_configure("neg_chg",
-            font=("Consolas", 9), foreground=_NEG)
-        widget.tag_configure("na",
-            font=("Segoe UI", 10), foreground=_NA)
-        widget.tag_configure("kpi_label",
-            font=("Segoe UI", 10), foreground=_MUTED)
-        widget.tag_configure("kpi_val",
-            font=("Segoe UI Semibold", 12), foreground=_VAL_FG,
-            spacing1=1, spacing3=0)
-        widget.tag_configure("kpi_chg",
-            font=("Segoe UI", 9), spacing3=4)
-        widget.tag_configure("brreg_label",
-            font=("Segoe UI", 8), foreground=_BRREG_FG)
-
-        # Tittel
-        title = "Nøkkeltall"
-        widget.insert("end", title + "\n", "title")
-        sub_parts = []
-        if result.client:
-            sub_parts.append(result.client)
-        if result.year:
-            sub_parts.append(f"Regnskapsår {result.year}")
-        if sub_parts:
-            widget.insert("end", "  ".join(sub_parts) + "\n", "subtitle")
-        widget.insert("end", "─" * 70 + "\n", "sep")
-
-        # --- KPI-kort (visuelt fremhevede) ---
-        widget.insert("end", "Sentrale nøkkeltall\n", "section")
-        has_kpi = False
-        for card in result.kpi_cards:
-            has_kpi = True
-            label = str(card.get("label", ""))
-            formatted = str(card.get("formatted", "–"))
-            chg = card.get("change_pct")
-            widget.insert("end", f"  {label}\n", "kpi_label")
-            widget.insert("end", f"  {formatted}", "kpi_val")
-            if chg is not None:
-                arrow = "▲" if chg >= 0 else "▼"
-                chg_str = f"  {arrow} {abs(chg):.1f} %"
-                tag = "pos_chg" if chg >= 0 else "neg_chg"
-                widget.insert("end", chg_str, tag)
-            widget.insert("end", "\n", "kpi_chg")
-        if not has_kpi:
-            widget.insert("end", "  Ingen data tilgjengelig\n", "na")
-        widget.insert("end", "\n")
-
-        # --- Nøkkeltall-tabell (Lønnsomhet, Likviditet, Soliditet, Effektivitet) ---
-        categories = {}
-        for m in result.metrics:
-            categories.setdefault(m.category, []).append(m)
-
-        for cat, items in categories.items():
-            any_data = any(m.value is not None for m in items)
-            if not any_data:
-                continue
-            widget.insert("end", f"{cat}\n", "section")
-            widget.insert("end", "─" * 50 + "\n", "sep")
-            for m in items:
-                if m.value is None:
-                    continue
-                widget.insert("end", f"  {m.label:<38}", "label")
-                widget.insert("end", f"{m.formatted:>12}", "val")
-                if result.has_prev_year and m.prev_value is not None:
-                    widget.insert("end", f"  {m.formatted_prev:>10}", "val_prev")
-                    chg = m.change_pct
-                    if chg is not None:
-                        arrow = "▲" if chg >= 0 else "▼"
-                        tag = "pos_chg" if chg >= 0 else "neg_chg"
-                        widget.insert("end", f"  {arrow}{abs(chg):.1f}%", tag)
-                widget.insert("end", "\n")
-            widget.insert("end", "\n")
-
-        # --- Resultatregnskap ---
-        has_brreg = brreg_data is not None
-        if result.pl_summary:
-            widget.insert("end", "Resultatregnskap\n", "section")
-            widget.insert("end", "─" * 70 + "\n", "sep")
-            header = f"  {'':38}{'I år':>14}"
-            if result.has_prev_year:
-                header += f"{'Fjor':>14}{'Endring':>12}"
-            elif has_brreg:
-                header += f"{'BRREG':>14}{'Endring':>12}"
-            widget.insert("end", header + "\n", "col_header")
-            for row in result.pl_summary:
-                is_sum = row.get("is_sum", False)
-                label_tag = "bold_label" if is_sum else "label"
-                val_tag = "bold_val" if is_sum else "val"
-                name = str(row.get("name", ""))
-                formatted = str(row.get("formatted", "–"))
-                widget.insert("end", f"  {name:<38}", label_tag)
-                widget.insert("end", f"{formatted:>14}", val_tag)
-                if result.has_prev_year:
-                    prev_fmt = row.get("prev_formatted") or "–"
-                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
-                    chg_amt = row.get("change_amount_formatted")
-                    if chg_amt:
-                        chg = row.get("change_amount", 0) or 0
-                        tag = "pos_chg" if chg >= 0 else "neg_chg"
-                        widget.insert("end", f"{chg_amt:>12}", tag)
-                elif has_brreg:
-                    _nk_insert_brreg_pl_comparison(widget, row, brreg_data)
-                widget.insert("end", "\n")
-
-        # --- Balanse ---
-        if result.bs_summary:
-            widget.insert("end", "\nBalanse\n", "section")
-            widget.insert("end", "─" * 70 + "\n", "sep")
-            header = f"  {'':38}{'I år':>14}"
-            if result.has_prev_year:
-                header += f"{'Fjor':>14}{'Endring':>12}"
-            elif has_brreg:
-                header += f"{'BRREG':>14}{'Endring':>12}"
-            widget.insert("end", header + "\n", "col_header")
-            for row in result.bs_summary:
-                is_sum = row.get("is_sum", False)
-                label_tag = "bold_label" if is_sum else "label"
-                val_tag = "bold_val" if is_sum else "val"
-                name = str(row.get("name", ""))
-                formatted = str(row.get("formatted", "–"))
-                widget.insert("end", f"  {name:<38}", label_tag)
-                widget.insert("end", f"{formatted:>14}", val_tag)
-                if result.has_prev_year:
-                    prev_fmt = row.get("prev_formatted") or "–"
-                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
-                    chg_amt = row.get("change_amount_formatted")
-                    if chg_amt:
-                        chg = row.get("change_amount", 0) or 0
-                        tag = "pos_chg" if chg >= 0 else "neg_chg"
-                        widget.insert("end", f"{chg_amt:>12}", tag)
-                elif has_brreg:
-                    _nk_insert_brreg_bs_comparison(widget, row, brreg_data)
-                widget.insert("end", "\n")
-
-        # BRREG-merknad
-        if has_brreg:
-            brreg_year = brreg_data.get("regnskapsaar", "")
-            widget.insert("end", f"\n  BRREG-tall fra regnskapsåret {brreg_year}\n", "brreg_label")
-
-        widget.configure(state="disabled")
-    except Exception as exc:
-        try:
-            widget.configure(state="disabled")
-        except Exception:
-            pass
-        log.warning("_nk_render error: %s", exc)
-
-
-# Mapping fra pl_summary-radnavn → BRREG-nøkkel
-_PL_BRREG_MAP: dict[str, str] = {
-    "Driftsinntekter": "driftsinntekter",
-    "Sum driftsinntekter": "driftsinntekter",
-    "Driftskostnader": "driftskostnader",
-    "Sum driftskostnader": "driftskostnader",
-    "Driftsresultat": "driftsresultat",
-    "Finansinntekter": "finansinntekter",
-    "Finanskostnader": "finanskostnader",
-    "Netto finans": "netto_finans",
-    "Resultat før skatt": "resultat_for_skatt",
-    "Årsresultat": "aarsresultat",
-}
-
-_BS_BRREG_MAP: dict[str, str] = {
-    "Sum anleggsmidler": "sum_anleggsmidler",
-    "Anleggsmidler": "sum_anleggsmidler",
-    "Sum omløpsmidler": "sum_omloepsmidler",
-    "Omløpsmidler": "sum_omloepsmidler",
-    "Sum eiendeler": "sum_eiendeler",
-    "Eiendeler": "sum_eiendeler",
-    "Sum egenkapital": "sum_egenkapital",
-    "Egenkapital": "sum_egenkapital",
-    "Langsiktig gjeld": "langsiktig_gjeld",
-    "Kortsiktig gjeld": "kortsiktig_gjeld",
-    "Sum gjeld": "sum_gjeld",
-}
-
-
-def _fmt_amount(v: float | None) -> str:
-    if v is None:
-        return "–"
-    if abs(v) >= 1e6:
-        return f"{v / 1e6:,.1f} M".replace(",", " ")
-    if abs(v) >= 1e3:
-        return f"{v / 1e3:,.0f} k".replace(",", " ")
-    return f"{v:,.0f}".replace(",", " ")
-
-
-def _nk_insert_brreg_pl_comparison(widget, row: dict, brreg: dict) -> None:
-    name = str(row.get("name", ""))
-    brreg_key = _PL_BRREG_MAP.get(name)
-    if not brreg_key:
-        return
-    brreg_val = brreg.get(brreg_key)
-    if brreg_val is None:
-        return
-    widget.insert("end", f"{_fmt_amount(brreg_val):>14}", "val_brreg")
-    current = row.get("value")
-    if current is not None and abs(brreg_val) > 1e-9:
-        chg_pct = ((current - brreg_val) / abs(brreg_val)) * 100
-        arrow = "▲" if chg_pct >= 0 else "▼"
-        tag = "pos_chg" if chg_pct >= 0 else "neg_chg"
-        widget.insert("end", f"  {arrow}{abs(chg_pct):.1f}%", tag)
-
-
-def _nk_insert_brreg_bs_comparison(widget, row: dict, brreg: dict) -> None:
-    name = str(row.get("name", ""))
-    brreg_key = _BS_BRREG_MAP.get(name)
-    if not brreg_key:
-        return
-    brreg_val = brreg.get(brreg_key)
-    if brreg_val is None:
-        return
-    widget.insert("end", f"{_fmt_amount(brreg_val):>14}", "val_brreg")
-    current = row.get("value")
-    if current is not None and abs(brreg_val) > 1e-9:
-        chg_pct = ((current - brreg_val) / abs(brreg_val)) * 100
-        arrow = "▲" if chg_pct >= 0 else "▼"
-        tag = "pos_chg" if chg_pct >= 0 else "neg_chg"
-        widget.insert("end", f"  {arrow}{abs(chg_pct):.1f}%", tag)
 
 
 class AnalysePage(ttk.Frame):  # type: ignore[misc]
@@ -585,138 +320,18 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._utvalg_callback = callback
 
     def refresh_from_session(self, sess: object = session, *, defer_heavy: bool = False) -> None:
-        """Reload data from session and refresh UI.
-
-        Viktig: Vi beholder råverdien i self.dataset (ikke bare DataFrame),
-        slik at headless-tester kan sette dummy-verdier og verifisere at
-        metoden faktisk oppdaterer feltet.
-        """
-        df = getattr(sess, "dataset", None)
-        self.dataset = df  # type: ignore[assignment]
-        # Tøm klient-bundne caches når klient/år endres (fjor-SB og BRREG)
-        try:
-            cur_key = (getattr(sess, "client", None), getattr(sess, "year", None))
-        except Exception:
-            cur_key = (None, None)
-        prev_key = getattr(self, "_session_cache_key", None)
-        if prev_key != cur_key:
-            self._rl_sb_prev_df = None
-            try:
-                setattr(self, "_nk_brreg_data", None)
-            except Exception:
-                pass
-            try:
-                import page_analyse_columns as _pac
-                _pac.clear_pivot_columns_for_brreg(page=self)
-            except Exception:
-                pass
-            self._session_cache_key = cur_key
-        self._refresh_mva_code_choices()
-        self._update_data_level()
-        if defer_heavy:
-            self._schedule_heavy_refresh()
-            return
-        self._run_full_refresh()
+        page_analyse_refresh.refresh_from_session(self, sess, defer_heavy=defer_heavy)
 
     def _run_full_refresh(self) -> None:
-        self._reload_rl_config()
-        self._apply_filters_and_refresh()
-        self._adapt_pivot_columns_for_mode()
-        self._update_data_level()
+        page_analyse_refresh.run_full_refresh(self)
 
     def _schedule_heavy_refresh(self) -> None:
-        """Planlegg én tung refresh etter at GUI har fått tilbake kontroll."""
-        self._heavy_refresh_generation += 1
-        generation = self._heavy_refresh_generation
-
-        pending = getattr(self, "_heavy_refresh_after_id", None)
-        if pending:
-            try:
-                self.after_cancel(pending)
-            except Exception:
-                pass
-            self._heavy_refresh_after_id = None
-
-        if not getattr(self, "_tk_ok", False):
-            self._run_full_refresh()
-            return
-
-        def _start() -> None:
-            if generation != self._heavy_refresh_generation:
-                return
-            self._heavy_refresh_after_id = None
-            self._run_heavy_refresh_staged(generation)
-
-        try:
-            self._heavy_refresh_after_id = self.after_idle(_start)
-        except Exception:
-            self._heavy_refresh_after_id = None
-            self._run_full_refresh()
+        page_analyse_refresh.schedule_heavy_refresh(self)
 
     def _run_heavy_refresh_staged(self, generation: int | None = None) -> None:
-        """Kjør første Analyse-render i små steg for å unngå GUI-heng."""
-        token = self._heavy_refresh_generation if generation is None else generation
-
-        def _is_stale() -> bool:
-            return token != self._heavy_refresh_generation
-
-        def _run_next(step_index: int = 0) -> None:
-            if _is_stale():
-                return
-
-            if step_index == 0:
-                try:
-                    self._reload_rl_config()
-                except Exception:
-                    log.exception("Analyse staged refresh: reload RL config failed")
-            elif step_index == 1:
-                try:
-                    df_filtered = page_analyse_filters_live.build_filtered_df(page=self, dir_options=_DIR_OPTIONS)
-                    self._df_filtered = df_filtered
-                    if df_filtered is None:
-                        page_analyse_filters_live._clear_views_for_missing_dataset(page=self)
-                except Exception:
-                    log.exception("Analyse staged refresh: build filtered df failed")
-                    self._df_filtered = None
-                    try:
-                        page_analyse_filters_live._clear_views_for_missing_dataset(page=self)
-                    except Exception:
-                        pass
-            elif step_index == 2:
-                if self._df_filtered is not None:
-                    try:
-                        self._refresh_pivot()
-                    except Exception:
-                        log.exception("Analyse staged refresh: pivot refresh failed")
-            elif step_index == 3:
-                if self._df_filtered is not None:
-                    try:
-                        self._refresh_transactions_view()
-                    except Exception:
-                        log.exception("Analyse staged refresh: transactions refresh failed")
-            elif step_index == 4:
-                if self._df_filtered is not None:
-                    try:
-                        self._refresh_detail_panel()
-                    except Exception:
-                        log.exception("Analyse staged refresh: detail refresh failed")
-            elif step_index == 5:
-                try:
-                    self._adapt_pivot_columns_for_mode()
-                except Exception:
-                    log.exception("Analyse staged refresh: adapt pivot columns failed")
-                try:
-                    self._update_data_level()
-                except Exception:
-                    log.exception("Analyse staged refresh: update data level failed")
-                return
-
-            try:
-                self.after(10, lambda: _run_next(step_index + 1))
-            except Exception:
-                _run_next(step_index + 1)
-
-        _run_next()
+        page_analyse_refresh.run_heavy_refresh_staged(
+            self, generation, dir_options=_DIR_OPTIONS,
+        )
 
     def _reload_rl_config(self) -> None:
         """Last intervall-mapping, regnskapslinjer og aktiv SB on-demand (best-effort)."""
