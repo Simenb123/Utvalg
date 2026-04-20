@@ -27,7 +27,32 @@ _ROLLER_URL   = "https://data.brreg.no/enhetsregisteret/api/enheter/{orgnr}/roll
 _REGNSKAP_URL = "https://data.brreg.no/regnskapsregisteret/regnskap/{orgnr}"
 _CACHE_TTL    = 86_400   # 24 timer
 _TIMEOUT      = 10       # sekunder per request
-_REGNSKAP_SCHEMA_VERSION = "3"   # bump når felt-mappingen endres
+_REGNSKAP_SCHEMA_VERSION = "6"   # bump når felt-mappingen endres
+_MAX_YEARS    = 5        # maks antall innleverte år å ta med fra BRREG-respons
+
+# Kanoniske RL-nøkler som utgjør `linjer`-dictet (brukt av RL-mapping).
+_LINJE_KEYS: frozenset[str] = frozenset({
+    # Resultat — aggregat
+    "driftsinntekter", "driftskostnader", "driftsresultat",
+    "finansinntekter", "finanskostnader", "netto_finans",
+    "resultat_for_skatt", "aarsresultat",
+    "skattekostnad", "ekstraordinaere_poster", "totalresultat",
+    # Resultat — detalj (innenfor driftsinntekter / driftskostnad)
+    "salgsinntekt", "annen_driftsinntekt",
+    "varekostnad", "loennskostnad",
+    "avskrivning", "nedskrivning", "annen_driftskostnad",
+    # Finanskostnad — detalj
+    "rentekostnad_samme_konsern", "annen_rentekostnad",
+    # Balanse — aggregat
+    "sum_anleggsmidler", "sum_omloepsmidler", "sum_eiendeler",
+    "sum_egenkapital", "sum_innskutt_egenkapital",
+    "sum_opptjent_egenkapital",
+    "langsiktig_gjeld", "kortsiktig_gjeld", "sum_gjeld",
+    "sum_egenkapital_og_gjeld",
+    # Balanse — detalj (optional fra oppstillingsplan)
+    "goodwill", "sum_varer", "sum_fordringer",
+    "sum_investeringer", "sum_bankinnskudd_og_kontanter",
+})
 
 # NACE-toppkoder som typisk er unntatt eller utenfor MVA-loven.
 # Kilde: mval. §§ 3-2 til 3-20 og Merverdiavgiftshåndboken.
@@ -290,17 +315,141 @@ def fetch_roller(orgnr: str, *, use_cache: bool = True) -> list[dict[str, str]] 
 # Regnskapsregisteret
 # ---------------------------------------------------------------------------
 
-def fetch_regnskap(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
-    """Hent nøkkeltall fra siste innleverte årsregnskap.
+def _extract_entry_fields(rec: dict) -> dict[str, Any]:
+    """Parser én BRREG-regnskapspost til kanonisk struktur.
 
-    Returnerte nøkler:
-      fra_dato, til_dato, regnskapsaar, valuta, regnskapstype
-      Resultatregnskap: driftsinntekter, driftskostnader, driftsresultat,
-        finansinntekter, finanskostnader, netto_finans,
-        resultat_for_skatt, aarsresultat
-      Balanse: sum_anleggsmidler, sum_omloepsmidler, sum_eiendeler,
-        sum_egenkapital, langsiktig_gjeld, kortsiktig_gjeld, sum_gjeld
-      Revisjon: ikke_revidert, fravalg_revisjon, revisorberetning
+    Returnerer dict med toppnøkler (fra_dato, driftsinntekter, ...) og et
+    `linjer`-subdict som inneholder RL-nøklene for mapping-formål.
+    """
+    rs       = rec.get("regnskapsperiode") or {}
+    res      = rec.get("resultatregnskapResultat") or {}
+    drift    = res.get("driftsresultat") or {}
+    drifts_inn = drift.get("driftsinntekter") or {}
+    drifts_kost = drift.get("driftskostnad") or {}
+    finans   = res.get("finansresultat") or {}
+    finans_kost = finans.get("finanskostnad") or {}
+    eiend    = rec.get("eiendeler") or {}
+    ek_gjeld = rec.get("egenkapitalGjeld") or {}
+    gjeld_ov = ek_gjeld.get("gjeldOversikt") or {}
+    revisjon = rec.get("revisjon") or {}
+
+    ikke_rev = bool(revisjon.get("ikkeRevidertAarsregnskap"))
+    fravalg  = bool(revisjon.get("fravalgRevisjon"))
+    if ikke_rev:
+        rev_txt = "Ikke revidert"
+    elif fravalg:
+        rev_txt = "Fravalgt revisjon"
+    else:
+        rev_txt = "Revidert"
+
+    ek = ek_gjeld.get("egenkapital") or {}
+    innskutt = ek.get("innskuttEgenkapital") or {}
+    opptjent = ek.get("opptjentEgenkapital") or {}
+
+    # BRREG har inkonsistent stavemåte for "innskutt" — sumInnskuttEgenkaptial
+    # observert i live data. Fall tilbake til korrekt staving hvis endret.
+    _sum_innskutt = (
+        innskutt.get("sumInnskuttEgenkaptial")
+        or innskutt.get("sumInnskuttEgenkapital")
+    )
+    _sum_opptjent = opptjent.get("sumOpptjentEgenkapital")
+
+    # Detaljposter innenfor driftsinntekter / driftskostnad — BRREG returnerer
+    # disse når innleverende foretak har rapportert etter full regnskapsplikt.
+    # For små foretak med forenklet oppstilling kan kun sum-nivået finnes.
+    _avskrivning = (
+        drifts_kost.get("avskrivningVarigeDriftsmidlerImmatrielleEiendeler")
+        or drifts_kost.get("avskrivning")
+    )
+    _nedskrivning = (
+        drifts_kost.get("nedskrivningVarigeDriftsmidlerImmatrielleEiendeler")
+        or drifts_kost.get("nedskrivning")
+    )
+
+    fields: dict[str, Any] = {
+        "fra_dato":           rs.get("fraDato", ""),
+        "til_dato":           rs.get("tilDato", ""),
+        "regnskapsaar":       (rs.get("fraDato") or "")[:4],
+        # Resultatregnskap — aggregat
+        "driftsinntekter":    _num(drifts_inn.get("sumDriftsinntekter")),
+        "driftskostnader":    _num(drifts_kost.get("sumDriftskostnad")),
+        "driftsresultat":     _num(drift.get("driftsresultat")),
+        "finansinntekter":    _num((finans.get("finansinntekt") or {}).get("sumFinansinntekter")),
+        "finanskostnader":    _num((finans.get("finanskostnad") or {}).get("sumFinanskostnad")),
+        "netto_finans":       _num(finans.get("nettoFinans")),
+        "resultat_for_skatt": _num(res.get("ordinaertResultatFoerSkattekostnad")),
+        "aarsresultat":       _num(res.get("aarsresultat")),
+        # Resultatregnskap — detaljposter
+        "salgsinntekt":       _num(drifts_inn.get("salgsinntekt")),
+        "annen_driftsinntekt": _num(drifts_inn.get("annenDriftsinntekt")),
+        "varekostnad":        _num(drifts_kost.get("varekostnad")),
+        "loennskostnad":      _num(drifts_kost.get("loennskostnad")),
+        "avskrivning":        _num(_avskrivning),
+        "nedskrivning":       _num(_nedskrivning),
+        "annen_driftskostnad": _num(drifts_kost.get("annenDriftskostnad")),
+        # Finanskostnad — detalj (optional fra oppstillingsplan)
+        "rentekostnad_samme_konsern": _num(finans_kost.get("rentekostnadSammeKonsern")),
+        "annen_rentekostnad":        _num(finans_kost.get("annenRentekostnad")),
+        # Resultat — skatt / ekstraordinært / total (optional)
+        "skattekostnad":             _num(res.get("ordinaertResultatSkattekostnad")),
+        "ekstraordinaere_poster":    _num(res.get("ekstraordinaerePoster")),
+        "totalresultat":             _num(res.get("totalresultat")),
+        # Balanse — aggregat
+        "sum_anleggsmidler":  _num((eiend.get("anleggsmidler") or {}).get("sumAnleggsmidler")),
+        "sum_omloepsmidler":  _num((eiend.get("omloepsmidler") or {}).get("sumOmloepsmidler")),
+        "sum_eiendeler":      _num(eiend.get("sumEiendeler")),
+        "sum_egenkapital":    _num(ek.get("sumEgenkapital")),
+        "sum_innskutt_egenkapital": _num(_sum_innskutt),
+        "sum_opptjent_egenkapital": _num(_sum_opptjent),
+        "langsiktig_gjeld":   _num((gjeld_ov.get("langsiktigGjeld") or {}).get("sumLangsiktigGjeld")),
+        "kortsiktig_gjeld":   _num((gjeld_ov.get("kortsiktigGjeld") or {}).get("sumKortsiktigGjeld")),
+        "sum_gjeld":          _num(gjeld_ov.get("sumGjeld")),
+        "sum_egenkapital_og_gjeld": _num(ek_gjeld.get("sumEgenkapitalGjeld")),
+        # Balanse — detalj (optional fra oppstillingsplan)
+        "goodwill":                    _num(eiend.get("goodwill")),
+        "sum_varer":                   _num(eiend.get("sumVarer")),
+        "sum_fordringer":              _num(eiend.get("sumFordringer")),
+        "sum_investeringer":           _num(eiend.get("sumInvesteringer")),
+        "sum_bankinnskudd_og_kontanter": _num(eiend.get("sumBankinnskuddOgKontanter")),
+        # Meta
+        "valuta":             rec.get("valuta", "NOK"),
+        "regnskapstype":      rec.get("regnskapstype", ""),
+        "ikke_revidert":      ikke_rev,
+        "fravalg_revisjon":   fravalg,
+        "revisorberetning":   rev_txt,
+    }
+    fields["linjer"] = {
+        k: v for k, v in fields.items()
+        if k in _LINJE_KEYS and v is not None
+    }
+    return fields
+
+
+def _normalize_years_keys(data: Any) -> Any:
+    """Konverter years-dict-nøkler tilbake til int etter JSON-cache-load.
+
+    JSON støtter kun string-nøkler, så int-nøkler i `years` serialiseres
+    som strings og må konverteres tilbake ved load for konsistens.
+    """
+    if not isinstance(data, dict):
+        return data
+    years = data.get("years")
+    if isinstance(years, dict):
+        data["years"] = {
+            (int(k) if isinstance(k, str) and k.isdigit() else k): v
+            for k, v in years.items()
+        }
+    return data
+
+
+def fetch_regnskap(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
+    """Hent innleverte årsregnskap fra Regnskapsregisteret.
+
+    Returnerer dict for nyeste år med bakoverkompatible toppnøkler
+    (regnskapsaar, linjer, driftsinntekter, ...) pluss flerårsfelter:
+      - years: {år (int): {fra_dato, ..., linjer}, ...} opptil _MAX_YEARS
+      - available_years: [år] sortert synkende
+
     Returnerer None hvis ingen regnskap er tilgjengelig.
     """
     orgnr = orgnr.strip().replace(" ", "")
@@ -311,93 +460,29 @@ def fetch_regnskap(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | No
     cache_key = f"regnskap_v{_REGNSKAP_SCHEMA_VERSION}:{orgnr}"
     entry = cache.get(cache_key)
     if entry and time.time() - entry.get("_ts", 0) < _CACHE_TTL:
-        return entry.get("data")
+        return _normalize_years_keys(entry.get("data"))
 
     data = _get_json(_REGNSKAP_URL.format(orgnr=orgnr))
     result: dict[str, Any] | None = None
 
     if isinstance(data, list) and data:
-        # Første element er siste innleverte regnskap
-        rec      = data[0]
-        rs       = rec.get("regnskapsperiode") or {}
-        res      = rec.get("resultatregnskapResultat") or {}
-        drift    = res.get("driftsresultat") or {}
-        finans   = res.get("finansresultat") or {}
-        eiend    = rec.get("eiendeler") or {}
-        ek_gjeld = rec.get("egenkapitalGjeld") or {}
-        gjeld_ov = ek_gjeld.get("gjeldOversikt") or {}
-        revisjon = rec.get("revisjon") or {}
+        years: dict[int, dict[str, Any]] = {}
+        for rec in data[:_MAX_YEARS]:
+            fields = _extract_entry_fields(rec)
+            aar_str = fields.get("regnskapsaar") or ""
+            try:
+                aar_int = int(aar_str)
+            except (ValueError, TypeError):
+                continue
+            years[aar_int] = fields
 
-        ikke_rev = bool(revisjon.get("ikkeRevidertAarsregnskap"))
-        fravalg  = bool(revisjon.get("fravalgRevisjon"))
-        if ikke_rev:
-            rev_txt = "Ikke revidert"
-        elif fravalg:
-            rev_txt = "Fravalgt revisjon"
-        else:
-            rev_txt = "Revidert"
-
-        ek = ek_gjeld.get("egenkapital") or {}
-        innskutt = ek.get("innskuttEgenkapital") or {}
-        opptjent = ek.get("opptjentEgenkapital") or {}
-
-        # BRREG har inkonsistent stavemåte for "innskutt" — sumInnskuttEgenkaptial
-        # observert i live data. Fall tilbake til korrekt staving hvis endret.
-        _sum_innskutt = (
-            innskutt.get("sumInnskuttEgenkaptial")
-            or innskutt.get("sumInnskuttEgenkapital")
-        )
-        _sum_opptjent = opptjent.get("sumOpptjentEgenkapital")
-
-        result = {
-            "fra_dato":           rs.get("fraDato", ""),
-            "til_dato":           rs.get("tilDato", ""),
-            "regnskapsaar":       (rs.get("fraDato") or "")[:4],
-            # Resultatregnskap
-            "driftsinntekter":    _num((drift.get("driftsinntekter") or {}).get("sumDriftsinntekter")),
-            "driftskostnader":    _num((drift.get("driftskostnad") or {}).get("sumDriftskostnad")),
-            "driftsresultat":     _num(drift.get("driftsresultat")),
-            "finansinntekter":    _num((finans.get("finansinntekt") or {}).get("sumFinansinntekter")),
-            "finanskostnader":    _num((finans.get("finanskostnad") or {}).get("sumFinanskostnad")),
-            "netto_finans":       _num(finans.get("nettoFinans")),
-            "resultat_for_skatt": _num(res.get("ordinaertResultatFoerSkattekostnad")),
-            "aarsresultat":       _num(res.get("aarsresultat")),
-            # Balanse
-            "sum_anleggsmidler":  _num((eiend.get("anleggsmidler") or {}).get("sumAnleggsmidler")),
-            "sum_omloepsmidler":  _num((eiend.get("omloepsmidler") or {}).get("sumOmloepsmidler")),
-            "sum_eiendeler":      _num(eiend.get("sumEiendeler")),
-            "sum_egenkapital":    _num(ek.get("sumEgenkapital")),
-            "sum_innskutt_egenkapital": _num(_sum_innskutt),
-            "sum_opptjent_egenkapital": _num(_sum_opptjent),
-            "langsiktig_gjeld":   _num((gjeld_ov.get("langsiktigGjeld") or {}).get("sumLangsiktigGjeld")),
-            "kortsiktig_gjeld":   _num((gjeld_ov.get("kortsiktigGjeld") or {}).get("sumKortsiktigGjeld")),
-            "sum_gjeld":          _num(gjeld_ov.get("sumGjeld")),
-            "sum_egenkapital_og_gjeld": _num(ek_gjeld.get("sumEgenkapitalGjeld")),
-            # Meta
-            "valuta":             rec.get("valuta", "NOK"),
-            "regnskapstype":      rec.get("regnskapstype", ""),
-            "ikke_revidert":      ikke_rev,
-            "fravalg_revisjon":   fravalg,
-            "revisorberetning":   rev_txt,
-        }
-        # Kanonisk linjesett (summary view). Bakoverkompatibelt: eksisterende
-        # toppnøkler er uendret — `linjer` er et tillegg for RL-mapping.
-        result["linjer"] = {
-            k: v
-            for k, v in result.items()
-            if k
-            in {
-                "driftsinntekter", "driftskostnader", "driftsresultat",
-                "finansinntekter", "finanskostnader", "netto_finans",
-                "resultat_for_skatt", "aarsresultat",
-                "sum_anleggsmidler", "sum_omloepsmidler", "sum_eiendeler",
-                "sum_egenkapital", "sum_innskutt_egenkapital",
-                "sum_opptjent_egenkapital",
-                "langsiktig_gjeld", "kortsiktig_gjeld", "sum_gjeld",
-                "sum_egenkapital_og_gjeld",
-            }
-            and v is not None
-        }
+        if years:
+            available_years = sorted(years.keys(), reverse=True)
+            newest = available_years[0]
+            # Bakoverkompat: toppnivå = nyeste år (alle eksisterende nøkler)
+            result = dict(years[newest])
+            result["years"] = years
+            result["available_years"] = available_years
 
     cache[cache_key] = {"_ts": time.time(), "data": result}
     _save_cache(cache)

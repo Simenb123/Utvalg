@@ -79,14 +79,47 @@ def _resolve_active_year() -> Optional[int]:
         return None
 
 
-def _rl_headings_with_year(year: Optional[int]) -> tuple[str, ...]:
-    """Bygg RL-headings med årstall injisert i UB-kolonnene der mulig."""
+def _resolve_brreg_year(brreg_data: Any) -> Optional[int]:
+    """Hent nyeste BRREG-regnskapsår som int fra _nk_brreg_data."""
+    if not isinstance(brreg_data, dict) or not brreg_data:
+        return None
+    available = brreg_data.get("available_years")
+    if isinstance(available, list) and available:
+        try:
+            return int(available[0])
+        except (TypeError, ValueError):
+            pass
+    raw = brreg_data.get("regnskapsaar")
+    if raw is None:
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _rl_headings_with_year(
+    year: Optional[int],
+    *,
+    brreg_year: Optional[int] = None,
+    fjor_source: Optional[str] = None,
+) -> tuple[str, ...]:
+    """Bygg RL-headings med årstall injisert i UB- og BRREG-kolonnene.
+
+    Når ``fjor_source == "brreg"`` får UB-fjor-kolonnen suffikset
+    ``(BRREG)`` som diskret kildeindikasjon.
+    """
     headings = list(RL_PIVOT_HEADINGS)
-    if year is None:
-        return tuple(headings)
-    # Index 5 = "Sum" (UB aktivt år), index 10 = "UB_fjor" (UB i fjor)
-    headings[5] = f"UB {year}"
-    headings[10] = f"UB {year - 1}"
+    if year is not None:
+        # Index 5 = "Sum" (UB aktivt år), index 10 = "UB_fjor" (UB i fjor)
+        headings[5] = f"UB {year}"
+        fjor_label = f"UB {year - 1}"
+        if fjor_source == "brreg":
+            fjor_label = f"{fjor_label} (BRREG)"
+        headings[10] = fjor_label
+    if brreg_year is not None:
+        # Index 13 = BRREG-kolonnen
+        headings[13] = f"BRREG {brreg_year}"
     return tuple(headings)
 
 
@@ -127,8 +160,15 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
     if mode in ("Konto", "Saldobalanse"):
         mode = "SB-konto"
 
+    brreg_year = _resolve_brreg_year(getattr(page, "_nk_brreg_data", None))
+    fjor_source = getattr(page, "_rl_fjor_source", None)
+
     if mode == "Regnskapslinje":
-        headings = _rl_headings_with_year(_resolve_active_year())
+        headings = _rl_headings_with_year(
+            _resolve_active_year(),
+            brreg_year=brreg_year,
+            fjor_source=fjor_source,
+        )
     elif mode == "SB-konto":
         headings = _sb_konto_headings_with_year(_resolve_active_year())
     elif mode == "HB-konto":
@@ -160,8 +200,11 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
         except Exception:
             pass
 
-    # Sjekk om fjorårsdata er tilgjengelig
-    has_prev = bool(getattr(page, "_rl_sb_prev_df", None) is not None)
+    # Sjekk om fjorårsdata er tilgjengelig (egen SB ELLER BRREG-fallback)
+    has_prev = bool(
+        getattr(page, "_rl_sb_prev_df", None) is not None
+        or getattr(page, "_rl_fjor_source", None) == "brreg"
+    )
     has_brreg = bool(getattr(page, "_nk_brreg_data", None))
 
     # Juster bredder for RL-modus (defaults – auto-fit kjøres etter data er fylt)
@@ -369,6 +412,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
     # --- Fjorårsdata ---
     sb_prev = ensure_sb_prev_loaded(page=page)
     has_prev = sb_prev is not None and not sb_prev.empty
+    fjor_source: Optional[str] = None
     if has_prev:
         try:
             import previous_year_comparison
@@ -382,9 +426,34 @@ def refresh_rl_pivot(*, page: Any) -> None:
                 account_overrides=account_overrides,
                 prior_year_overrides=prior_overrides,
             )
+            fjor_source = "sb"
         except Exception as exc:
             log.warning("refresh_rl_pivot: fjorårskolonner feilet: %s", exc)
             has_prev = False
+
+    # BRREG-fallback når egne fjorårstall mangler og BRREG dekker år N-1
+    if not has_prev:
+        active_year = _resolve_active_year()
+        brreg_data_try = getattr(page, "_nk_brreg_data", None)
+        if active_year is not None:
+            fjor_year = active_year - 1
+            try:
+                import brreg_fjor_fallback
+                if brreg_fjor_fallback.has_brreg_for_year(brreg_data_try, fjor_year):
+                    pivot_df = brreg_fjor_fallback.build_brreg_fjor_pivot_columns(
+                        pivot_df, regnskapslinjer, brreg_data_try, fjor_year,
+                    )
+                    has_prev = True
+                    fjor_source = "brreg"
+            except Exception as exc:
+                log.warning("refresh_rl_pivot: BRREG-fjor-fallback feilet: %s", exc)
+
+    try:
+        page._rl_fjor_source = fjor_source
+    except Exception:
+        pass
+    # Oppdater headings på nytt: fjor_source og has_prev er nå kjent
+    update_pivot_headings(page=page, mode="Regnskapslinje")
 
     try:
         base_pivot_df = build_rl_pivot(

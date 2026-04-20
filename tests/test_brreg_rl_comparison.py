@@ -196,6 +196,75 @@ def test_sum_gjeld_derives_from_lang_and_kortsiktig() -> None:
     assert out[820] == pytest.approx(-350_000.0)
 
 
+def test_detail_lines_match_directly() -> None:
+    """Salgsinntekt, varekostnad, lønnskostnad etc. skal matche BRREG-detaljposter."""
+    regn = pd.DataFrame(
+        {
+            "nr": [10, 20, 30, 40, 50, 60],
+            "regnskapslinje": [
+                "Salgsinntekt",
+                "Varekostnad",
+                "Lønnskostnad",
+                "Avskrivning",
+                "Nedskrivning",
+                "Annen driftskostnad",
+            ],
+            "sumpost": ["nei"] * 6,
+        }
+    )
+    brreg = {
+        "salgsinntekt": 950_000.0,
+        "varekostnad": 400_000.0,
+        "loennskostnad": 250_000.0,
+        "avskrivning": 80_000.0,
+        "nedskrivning": 10_000.0,
+        "annen_driftskostnad": 70_000.0,
+    }
+    out = _brc.build_brreg_by_regnr(regn, brreg)
+    # Inntekter → negativt (RL-konvensjon)
+    assert out[10] == pytest.approx(-950_000.0)
+    # Kostnader → positivt
+    assert out[20] == pytest.approx(400_000.0)
+    assert out[30] == pytest.approx(250_000.0)
+    assert out[40] == pytest.approx(80_000.0)
+    assert out[50] == pytest.approx(10_000.0)
+    assert out[60] == pytest.approx(70_000.0)
+
+
+def test_detail_lines_missing_stays_blank() -> None:
+    """Detaljposter uten BRREG-verdi skal utelates (blank i GUI)."""
+    regn = pd.DataFrame(
+        {
+            "nr": [10, 20],
+            "regnskapslinje": ["Salgsinntekt", "Varekostnad"],
+            "sumpost": ["nei", "nei"],
+        }
+    )
+    # Kun aggregat, ingen detaljer
+    brreg = {"driftsinntekter": 950_000.0, "driftskostnader": 800_000.0}
+    out = _brc.build_brreg_by_regnr(regn, brreg)
+    assert 10 not in out
+    assert 20 not in out
+
+
+def test_sum_driftsinntekter_still_matches_with_detail_present() -> None:
+    """Direkte-match av aggregat bevares selv om detaljposter også finnes."""
+    regn = pd.DataFrame(
+        {
+            "nr": [10, 19],
+            "regnskapslinje": ["Salgsinntekt", "Sum driftsinntekter"],
+            "sumpost": ["nei", "ja"],
+        }
+    )
+    brreg = {
+        "driftsinntekter": 1_000_000.0,
+        "salgsinntekt": 950_000.0,
+    }
+    out = _brc.build_brreg_by_regnr(regn, brreg)
+    assert out[10] == pytest.approx(-950_000.0)
+    assert out[19] == pytest.approx(-1_000_000.0)
+
+
 def test_norske_diakritika_matches() -> None:
     """Etiketter med æ/ø/å skal matche aliaser uten å kreve ASCII-varianter."""
     regn = pd.DataFrame(

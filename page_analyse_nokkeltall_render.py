@@ -144,79 +144,83 @@ def _nk_render(widget, result, *, brreg_data: dict | None = None) -> None:  # no
                 widget.insert("end", "\n")
             widget.insert("end", "\n")
 
-        # --- Resultatregnskap ---
+        # --- Resultatregnskap / Balanse ---
         has_brreg = brreg_data is not None
+        brreg_year_label = _nk_brreg_year_label(brreg_data)
+        brreg_header = f"BRREG {brreg_year_label}" if brreg_year_label else "BRREG"
+
+        def _render_summary(rows, map_fn, brreg_insert_fn) -> None:
+            header = f"  {'':38}{'I år':>14}"
+            if result.has_prev_year:
+                header += f"{'Fjor':>14}{'Endring':>12}"
+                if has_brreg:
+                    header += f"{brreg_header:>14}"
+            elif has_brreg:
+                header += f"{brreg_header:>14}{'Endring':>12}"
+            widget.insert("end", header + "\n", "col_header")
+            for row in rows:
+                is_sum = row.get("is_sum", False)
+                label_tag = "bold_label" if is_sum else "label"
+                val_tag = "bold_val" if is_sum else "val"
+                name = str(row.get("name", ""))
+                formatted = str(row.get("formatted", "–"))
+                widget.insert("end", f"  {name:<38}", label_tag)
+                widget.insert("end", f"{formatted:>14}", val_tag)
+                if result.has_prev_year:
+                    prev_fmt = row.get("prev_formatted") or "–"
+                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
+                    chg_amt = row.get("change_amount_formatted")
+                    if chg_amt:
+                        chg = row.get("change_amount", 0) or 0
+                        tag = "pos_chg" if chg >= 0 else "neg_chg"
+                        widget.insert("end", f"{chg_amt:>12}", tag)
+                    else:
+                        widget.insert("end", f"{'':>12}")
+                    if has_brreg:
+                        brreg_key = map_fn(str(row.get("name", "")))
+                        brreg_val = brreg_data.get(brreg_key) if brreg_key else None
+                        brreg_fmt = _fmt_amount(brreg_val) if brreg_val is not None else "–"
+                        widget.insert("end", f"{brreg_fmt:>14}", "val_brreg")
+                elif has_brreg:
+                    brreg_insert_fn(widget, row, brreg_data)
+                widget.insert("end", "\n")
+
         if result.pl_summary:
             widget.insert("end", "Resultatregnskap\n", "section")
             widget.insert("end", "─" * 70 + "\n", "sep")
-            header = f"  {'':38}{'I år':>14}"
-            if result.has_prev_year:
-                header += f"{'Fjor':>14}{'Endring':>12}"
-            elif has_brreg:
-                header += f"{'BRREG':>14}{'Endring':>12}"
-            widget.insert("end", header + "\n", "col_header")
-            for row in result.pl_summary:
-                is_sum = row.get("is_sum", False)
-                label_tag = "bold_label" if is_sum else "label"
-                val_tag = "bold_val" if is_sum else "val"
-                name = str(row.get("name", ""))
-                formatted = str(row.get("formatted", "–"))
-                widget.insert("end", f"  {name:<38}", label_tag)
-                widget.insert("end", f"{formatted:>14}", val_tag)
-                if result.has_prev_year:
-                    prev_fmt = row.get("prev_formatted") or "–"
-                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
-                    chg_amt = row.get("change_amount_formatted")
-                    if chg_amt:
-                        chg = row.get("change_amount", 0) or 0
-                        tag = "pos_chg" if chg >= 0 else "neg_chg"
-                        widget.insert("end", f"{chg_amt:>12}", tag)
-                elif has_brreg:
-                    _nk_insert_brreg_pl_comparison(widget, row, brreg_data)
-                widget.insert("end", "\n")
+            _render_summary(
+                result.pl_summary,
+                _PL_BRREG_MAP.get,
+                _nk_insert_brreg_pl_comparison,
+            )
 
-        # --- Balanse ---
         if result.bs_summary:
             widget.insert("end", "\nBalanse\n", "section")
             widget.insert("end", "─" * 70 + "\n", "sep")
-            header = f"  {'':38}{'I år':>14}"
-            if result.has_prev_year:
-                header += f"{'Fjor':>14}{'Endring':>12}"
-            elif has_brreg:
-                header += f"{'BRREG':>14}{'Endring':>12}"
-            widget.insert("end", header + "\n", "col_header")
-            for row in result.bs_summary:
-                is_sum = row.get("is_sum", False)
-                label_tag = "bold_label" if is_sum else "label"
-                val_tag = "bold_val" if is_sum else "val"
-                name = str(row.get("name", ""))
-                formatted = str(row.get("formatted", "–"))
-                widget.insert("end", f"  {name:<38}", label_tag)
-                widget.insert("end", f"{formatted:>14}", val_tag)
-                if result.has_prev_year:
-                    prev_fmt = row.get("prev_formatted") or "–"
-                    widget.insert("end", f"{prev_fmt:>14}", "val_prev")
-                    chg_amt = row.get("change_amount_formatted")
-                    if chg_amt:
-                        chg = row.get("change_amount", 0) or 0
-                        tag = "pos_chg" if chg >= 0 else "neg_chg"
-                        widget.insert("end", f"{chg_amt:>12}", tag)
-                elif has_brreg:
-                    _nk_insert_brreg_bs_comparison(widget, row, brreg_data)
-                widget.insert("end", "\n")
+            _render_summary(
+                result.bs_summary,
+                _BS_BRREG_MAP.get,
+                _nk_insert_brreg_bs_comparison,
+            )
 
         # BRREG-merknad
         if has_brreg:
-            brreg_year = brreg_data.get("regnskapsaar", "")
-            widget.insert("end", f"\n  BRREG-tall fra regnskapsåret {brreg_year}\n", "brreg_label")
+            years_text = _nk_brreg_years_text(brreg_data)
+            widget.insert(
+                "end",
+                f"\n  BRREG-tall fra {years_text}\n",
+                "brreg_label",
+            )
 
         widget.configure(state="disabled")
     except Exception as exc:
+        log.warning("_nk_render error: %s", exc, exc_info=True)
         try:
+            widget.configure(state="normal")
+            widget.insert("end", f"\n[Feil ved nøkkeltall-rendering: {exc}]\n")
             widget.configure(state="disabled")
         except Exception:
             pass
-        log.warning("_nk_render error: %s", exc)
 
 
 # Mapping fra pl_summary-radnavn → BRREG-nøkkel
@@ -246,6 +250,40 @@ _BS_BRREG_MAP: dict[str, str] = {
     "Kortsiktig gjeld": "kortsiktig_gjeld",
     "Sum gjeld": "sum_gjeld",
 }
+
+
+def _nk_brreg_year_label(brreg: dict | None) -> str:
+    """Returner nyeste BRREG-år som string, eller tom streng."""
+    if not isinstance(brreg, dict):
+        return ""
+    avail = brreg.get("available_years")
+    if isinstance(avail, list) and avail:
+        try:
+            return str(int(avail[0]))
+        except (TypeError, ValueError):
+            pass
+    raw = brreg.get("regnskapsaar") or ""
+    return str(raw).strip()
+
+
+def _nk_brreg_years_text(brreg: dict | None) -> str:
+    """Bunntekst: 'regnskapsåret 2024' eller 'regnskapsårene 2024, 2023, 2022'."""
+    if not isinstance(brreg, dict):
+        return "regnskapsåret"
+    avail = brreg.get("available_years")
+    ys: list[str] = []
+    if isinstance(avail, list):
+        for y in avail:
+            try:
+                ys.append(str(int(y)))
+            except (TypeError, ValueError):
+                continue
+    if len(ys) == 1:
+        return f"regnskapsåret {ys[0]}"
+    if len(ys) > 1:
+        return f"regnskapsårene {', '.join(ys)}"
+    raw = brreg.get("regnskapsaar") or ""
+    return f"regnskapsåret {raw}" if raw else "regnskapsåret"
 
 
 def _fmt_amount(v: float | None) -> str:

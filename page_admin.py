@@ -196,6 +196,13 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         self._rl_control_tab = ttk.Frame(self)
         self._actions_editor = _ActionLibraryEditor(notebook, title="Handlinger")
         self._workpapers_editor = _WorkpaperLibraryEditor(notebook, title="Arbeidspapir")
+        try:
+            from page_admin_brreg_mapping import _BrregMappingEditor
+            self._brreg_mapping_editor = _BrregMappingEditor(
+                notebook, title="BRREG-mapping",
+            )
+        except Exception:
+            self._brreg_mapping_editor = None  # type: ignore[assignment]
         self._preview_tab = ttk.Frame(notebook)
         notebook.add(self._aliases_editor, text="Konseptaliaser")
         notebook.add(self._detail_class_editor, text="Kontoklassifisering")
@@ -205,6 +212,8 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         notebook.add(self._thresholds_editor, text="Terskler")
         notebook.add(self._actions_editor, text="Handlinger")
         notebook.add(self._workpapers_editor, text="Arbeidspapir")
+        if self._brreg_mapping_editor is not None:
+            notebook.add(self._brreg_mapping_editor, text="BRREG-mapping")
         notebook.add(self._preview_tab, text="Preview/Test")
         self._build_preview_ui()
         try:

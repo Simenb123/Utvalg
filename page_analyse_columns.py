@@ -99,7 +99,12 @@ _ANALYSIS_HEADINGS_STATIC = {
 }
 
 
-def analysis_heading(col_id: str, *, year: Optional[int] = None) -> str:
+def analysis_heading(
+    col_id: str,
+    *,
+    year: Optional[int] = None,
+    brreg_year: Optional[int] = None,
+) -> str:
     """Returner kanonisk brukerrettet overskrift for en Analyse-kolonne-ID.
 
     Brukes av både venstre pivot og høyre SB-tree slik at samme kolonne
@@ -107,12 +112,15 @@ def analysis_heading(col_id: str, *, year: Optional[int] = None) -> str:
 
     - ``Sum`` / ``UB``   → ``UB <år>`` når år er kjent, ellers ``UB``.
     - ``UB_fjor``        → ``UB <år-1>`` når år er kjent, ellers ``UB i fjor``.
+    - ``BRREG``          → ``BRREG <år>`` når brreg_year er kjent, ellers ``BRREG``.
     - Øvrige kolonner    → fra ``_ANALYSIS_HEADINGS_STATIC``, fallback til ID.
     """
     if col_id in ("Sum", "UB"):
         return f"UB {year}" if year is not None else "UB"
     if col_id == "UB_fjor":
         return f"UB {year - 1}" if year is not None else "UB i fjor"
+    if col_id == "BRREG":
+        return f"BRREG {brreg_year}" if brreg_year is not None else "BRREG"
     return _ANALYSIS_HEADINGS_STATIC.get(col_id, col_id)
 
 

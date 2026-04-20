@@ -274,3 +274,72 @@ def _nk_fetch_brreg(page: Any) -> None:
             pass
 
     threading.Thread(target=_worker, daemon=True).start()
+
+
+def _nk_auto_fetch_brreg(page: Any) -> None:
+    """Silent auto-fetch av BRREG når klient åpnes.
+
+    Ulikt _nk_fetch_brreg: ingen prompt ved manglende orgnr, ingen
+    popups ved feil. Bruker eksisterende 24t disk-cache fra brreg_client,
+    så det er ofte cache-hit og raskt.
+    """
+    import threading
+
+    orgnr = ""
+    try:
+        import session as _sess
+        meta = getattr(_sess, "meta", None)
+        if isinstance(meta, dict):
+            orgnr = (meta.get("org_number") or "").strip().replace(" ", "")
+    except Exception:
+        _sess = None
+
+    if not orgnr or len(orgnr) != 9:
+        try:
+            import client_store as _cs
+            client_name = getattr(_sess, "client", "") if _sess is not None else ""
+            if client_name:
+                cmeta = _cs.read_client_meta(client_name)
+                if isinstance(cmeta, dict):
+                    orgnr = (cmeta.get("org_number") or "").strip().replace(" ", "")
+        except Exception:
+            pass
+
+    if not orgnr or len(orgnr) != 9 or not orgnr.isdigit():
+        return
+
+    def _worker():
+        try:
+            import brreg_client
+            data = brreg_client.fetch_regnskap(orgnr)
+        except Exception:
+            return
+        if data is None:
+            return
+        page.after(0, lambda: _on_done(data))
+
+    def _on_done(data):
+        page._nk_brreg_data = data
+        label = getattr(page, "_nk_brreg_label", None)
+        brreg_year = data.get("regnskapsaar", "?")
+        if label:
+            try:
+                label.configure(text=f"BRREG {brreg_year} hentet")
+            except Exception:
+                pass
+        try:
+            page._refresh_nokkeltall_view()
+        except Exception:
+            pass
+        try:
+            import page_analyse_columns as _pac
+            _pac.update_pivot_columns_for_brreg(page=page)
+        except Exception:
+            pass
+        try:
+            import page_analyse_rl as _prl
+            _prl.refresh_rl_pivot(page=page)
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()

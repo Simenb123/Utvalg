@@ -42,7 +42,7 @@ log = logging.getLogger("app")
 #   formula:  (valgfri) liste av andre kanoniske nøkler som summeres til
 #             denne når direkte BRREG-verdi mangler
 _BRREG_KEYS: dict[str, dict] = {
-    # --- Resultat ---
+    # --- Resultat — aggregat ---
     "driftsinntekter": {
         "sign": -1,
         "aliases": [
@@ -56,6 +56,67 @@ _BRREG_KEYS: dict[str, dict] = {
         "aliases": [
             "driftskostnader",
             "sum driftskostnader",
+        ],
+    },
+    # --- Resultat — detaljposter ---
+    "salgsinntekt": {
+        "sign": -1,
+        "aliases": [
+            "salgsinntekt",
+            "salgsinntekter",
+            "driftsinntekt",
+        ],
+    },
+    "annen_driftsinntekt": {
+        "sign": -1,
+        "aliases": [
+            "annen driftsinntekt",
+            "annen driftsinntekter",
+            "andre driftsinntekter",
+            "ovrig driftsinntekt",
+        ],
+    },
+    "varekostnad": {
+        "sign": +1,
+        "aliases": [
+            "varekostnad",
+            "varekostnader",
+            "kostnad solgte varer",
+        ],
+    },
+    "loennskostnad": {
+        "sign": +1,
+        "aliases": [
+            "lonnskostnad",
+            "lonnskostnader",
+            "personalkostnad",
+            "personalkostnader",
+        ],
+    },
+    "avskrivning": {
+        "sign": +1,
+        "aliases": [
+            "avskrivning",
+            "avskrivninger",
+            "avskrivning pa varige driftsmidler og immaterielle eiendeler",
+            "avskrivninger pa varige driftsmidler og immaterielle eiendeler",
+        ],
+    },
+    "nedskrivning": {
+        "sign": +1,
+        "aliases": [
+            "nedskrivning",
+            "nedskrivninger",
+            "nedskrivning av varige driftsmidler og immaterielle eiendeler",
+        ],
+    },
+    "annen_driftskostnad": {
+        "sign": +1,
+        "aliases": [
+            "annen driftskostnad",
+            "annen driftskostnader",
+            "andre driftskostnader",
+            "ovrig driftskostnad",
         ],
     },
     "driftsresultat": {
@@ -101,6 +162,50 @@ _BRREG_KEYS: dict[str, dict] = {
     "aarsresultat": {
         "sign": -1,
         "aliases": ["arsresultat", "arets resultat"],
+    },
+    # --- Resultat — ekstra / skatt / total (optional fra oppstillingsplan) ---
+    "skattekostnad": {
+        "sign": +1,
+        "aliases": [
+            "skattekostnad",
+            "skatt",
+            "sum skattekostnad",
+            "arets skattekostnad",
+            "ordinart resultat skattekostnad",
+            "skattekostnad pa ordinart resultat",
+        ],
+    },
+    "ekstraordinaere_poster": {
+        "sign": -1,
+        "aliases": [
+            "ekstraordinaere poster",
+            "ekstraordinare poster",
+            "sum ekstraordinaere poster",
+            "ekstraordinart resultat",
+        ],
+    },
+    "totalresultat": {
+        "sign": -1,
+        "aliases": ["totalresultat", "sum totalresultat"],
+    },
+    # --- Finanskostnad — detalj (optional) ---
+    "rentekostnad_samme_konsern": {
+        "sign": +1,
+        "aliases": [
+            "rentekostnad til foretak i samme konsern",
+            "rentekostnader til foretak i samme konsern",
+            "rentekostnad samme konsern",
+            "rentekostnader konsern",
+        ],
+    },
+    "annen_rentekostnad": {
+        "sign": +1,
+        "aliases": [
+            "annen rentekostnad",
+            "andre rentekostnader",
+            "annen rente",
+            "rentekostnader",
+        ],
     },
     # --- Balanse — eiendeler ---
     "sum_anleggsmidler": {
@@ -165,7 +270,71 @@ _BRREG_KEYS: dict[str, dict] = {
         ],
         "formula": ["sum_egenkapital", "sum_gjeld"],
     },
+    # --- Balanse — detalj-poster (optional fra BRREG oppstillingsplan) ---
+    "goodwill": {
+        "sign": +1,
+        "aliases": ["goodwill"],
+    },
+    "sum_varer": {
+        "sign": +1,
+        "aliases": [
+            "sum varer",
+            "varelager",
+            "sum varelager",
+            "varer",
+            "lager",
+        ],
+    },
+    "sum_fordringer": {
+        "sign": +1,
+        "aliases": [
+            "sum fordringer",
+            "fordringer",
+        ],
+    },
+    "sum_investeringer": {
+        "sign": +1,
+        "aliases": [
+            "sum investeringer",
+            "investeringer",
+            "kortsiktige investeringer",
+            "sum kortsiktige investeringer",
+        ],
+    },
+    "sum_bankinnskudd_og_kontanter": {
+        "sign": +1,
+        "aliases": [
+            "sum bankinnskudd og kontanter",
+            "bankinnskudd og kontanter",
+            "bankinnskudd kontanter o l",
+            "bankinnskudd kontanter og lignende",
+            "bankinnskudd",
+            "kontanter og bankinnskudd",
+            "kontanter",
+        ],
+    },
 }
+
+
+# Tilgjengelighet i BRREG's åpne API (data.brreg.no/regnskapsregisteret/regnskap).
+# - "sum": garantert populert når selskapet har levert årsregnskap
+# - "detail": optional fra oppstillingsplan. Sjelden populert i gratis-API —
+#   for de fleste AS er disse tomme selv ved oppstillingsplan "store".
+#   Detalj-tall finnes i selskapets XBRL-innlevering (ikke offentlig REST).
+_DETAIL_KEYS: frozenset[str] = frozenset({
+    "salgsinntekt", "annen_driftsinntekt",
+    "varekostnad", "loennskostnad",
+    "avskrivning", "nedskrivning", "annen_driftskostnad",
+    "skattekostnad", "ekstraordinaere_poster", "totalresultat",
+    "rentekostnad_samme_konsern", "annen_rentekostnad",
+    "goodwill", "sum_varer", "sum_fordringer",
+    "sum_investeringer", "sum_bankinnskudd_og_kontanter",
+})
+
+
+def availability(key: str) -> str:
+    """Returner "sum" eller "detail" for en BRREG-nøkkel."""
+    return "detail" if key in _DETAIL_KEYS else "sum"
 
 
 # Alias → kanonisk nøkkel (bygges én gang ved import)
@@ -258,6 +427,8 @@ def _direct_match(label: str) -> Optional[str]:
 def build_brreg_by_regnr(
     regnskapslinjer: pd.DataFrame,
     brreg_data: dict,
+    *,
+    rl_mapping: Optional[dict[str, int]] = None,
 ) -> dict[int, float]:
     """Returner mapping fra regnr → normalisert BRREG-beløp.
 
@@ -265,6 +436,11 @@ def build_brreg_by_regnr(
     propagerer deretter direkte BRREG-verdier oppover i det aktive
     hierarkiet via ``compute_sumlinjer``. Rader uten direkte match og
     uten sumformel blir utelatt (blanke i GUI).
+
+    ``rl_mapping`` (valgfri): eksplisitt overstyring fra admin-GUI, på
+    formen ``{brreg_key: regnr}``. Vinner over alias-matching. Hvis
+    ``None`` brukes ingen overstyring (anropere som vil laste fra
+    konfig, må gjøre det selv før kallet).
     """
     if regnskapslinjer is None or regnskapslinjer.empty or not isinstance(brreg_data, dict):
         return {}
@@ -281,17 +457,50 @@ def build_brreg_by_regnr(
         return {}
 
     direct: dict[int, float] = {}
-    for _, row in regn.iterrows():
-        label = _norm_label(row.get("regnskapslinje"))
-        key = _direct_match(label)
-        if not key:
+    overridden_regnrs: set[int] = set()
+    mapped_brreg_keys: set[str] = set()
+
+    # Eksplisitt GUI-mapping vinner: fyll disse først og ikke la alias
+    # overskrive dem.
+    for brreg_key, regnr in (rl_mapping or {}).items():
+        if not isinstance(brreg_key, str) or brreg_key not in _BRREG_KEYS:
             continue
-        val = _resolve_brreg_value(key, brreg_data)
+        try:
+            regnr_int = int(regnr)
+        except (TypeError, ValueError):
+            continue
+        # BRREG-nøkkelen er "brukt opp" av mapping selv om verdien mangler
+        # i brreg_data — vi vil ikke la alias omplassere den.
+        mapped_brreg_keys.add(brreg_key)
+        val = _resolve_brreg_value(brreg_key, brreg_data)
         if val is None:
+            # Detalj-nøkler leveres sjelden av BRREG's åpne API — gjør det
+            # sporbart hvorfor en mappet linje er blank i Analyse.
+            log.debug(
+                "BRREG-mapping %s→regnr %d: verdi mangler i API-svar "
+                "(%s-nivå, ikke rapportert av selskapet)",
+                brreg_key, regnr_int, availability(brreg_key),
+            )
             continue
+        direct[regnr_int] = val
+        overridden_regnrs.add(regnr_int)
+
+    # Alias-matching (fall-back) — overskriver ikke rader som mapping
+    # allerede har dekket, og ignorerer BRREG-nøkler som er brukt av
+    # mapping (så én BRREG-verdi ikke dukker opp to steder).
+    for _, row in regn.iterrows():
         try:
             regnr = int(row["regnr"])
         except (TypeError, ValueError, KeyError):
+            continue
+        if regnr in overridden_regnrs:
+            continue
+        label = _norm_label(row.get("regnskapslinje"))
+        key = _direct_match(label)
+        if not key or key in mapped_brreg_keys:
+            continue
+        val = _resolve_brreg_value(key, brreg_data)
+        if val is None:
             continue
         direct[regnr] = val
 
@@ -335,16 +544,51 @@ def build_brreg_by_regnr(
     return out
 
 
+def _select_year_payload(brreg_data: Optional[dict], year: Optional[int]) -> dict:
+    """Velg riktig års-dict fra brreg_data.
+
+    - Uten `year`: eksisterende oppførsel (toppnivå = nyeste år).
+    - Med `year`: bruk `brreg_data["years"][year]` hvis tilgjengelig.
+
+    Returnerer tom dict når ingen data matcher, slik at anropssiden kan
+    forenkle fallback-logikk.
+    """
+    if not isinstance(brreg_data, dict):
+        return {}
+    if year is None:
+        return brreg_data
+    years = brreg_data.get("years")
+    if isinstance(years, dict):
+        year_data = years.get(year) or years.get(str(year))
+        if isinstance(year_data, dict):
+            return year_data
+    return {}
+
+
+_UNSET: Any = object()
+
+
 def add_brreg_columns(
     pivot_df: pd.DataFrame,
     regnskapslinjer: pd.DataFrame,
     brreg_data: Optional[dict],
+    *,
+    year: Optional[int] = None,
+    rl_mapping: Any = _UNSET,
 ) -> pd.DataFrame:
     """Legg til BRREG-sammenligning på en eksisterende RL-pivot.
 
     Legger til kolonnene ``BRREG``, ``Avvik_brreg``, ``Avvik_brreg_pct``.
     Når ``brreg_data`` er None eller ingen regnskapslinjer matcher, blir
     kolonnene lagt til som tomme (None).
+
+    ``year`` (valgfri): plukker et spesifikt år fra `brreg_data["years"]`.
+    Uten år brukes toppnivået (nyeste — bakoverkompatibelt).
+
+    ``rl_mapping`` (valgfri): eksplisitt ``{brreg_key: regnr}``-mapping.
+    Hvis ikke angitt, lastes brukerens mapping via
+    ``brreg_mapping_config.load_brreg_rl_mapping()``. Send ``{}`` for å
+    eksplisitt deaktivere.
     """
     result = pivot_df.copy() if pivot_df is not None else pd.DataFrame()
 
@@ -354,7 +598,18 @@ def add_brreg_columns(
         result["Avvik_brreg_pct"] = None
         return result
 
-    brreg_by_regnr = build_brreg_by_regnr(regnskapslinjer, brreg_data or {})
+    if rl_mapping is _UNSET:
+        try:
+            import brreg_mapping_config
+            rl_mapping = brreg_mapping_config.load_brreg_rl_mapping()
+        except Exception as exc:
+            log.debug("brreg_mapping_config ikke tilgjengelig: %s", exc)
+            rl_mapping = {}
+
+    payload = _select_year_payload(brreg_data, year)
+    brreg_by_regnr = build_brreg_by_regnr(
+        regnskapslinjer, payload, rl_mapping=rl_mapping or None,
+    )
     if not brreg_by_regnr:
         result["BRREG"] = None
         result["Avvik_brreg"] = None

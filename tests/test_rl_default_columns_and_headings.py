@@ -315,6 +315,52 @@ def test_rl_headings_with_year_none_returns_static() -> None:
     assert _rl_headings_with_year(None) == RL_PIVOT_HEADINGS
 
 
+def test_rl_headings_injects_brreg_year_at_index_13() -> None:
+    from page_analyse_rl import _rl_headings_with_year
+
+    headings = _rl_headings_with_year(2025, brreg_year=2024)
+    assert headings[13] == "BRREG 2024"
+    # Uendrede indekser
+    assert headings[5] == "UB 2025"
+    assert headings[10] == "UB 2024"
+    assert headings[14] == "Avvik mot BRREG"
+
+
+def test_rl_headings_without_brreg_year_keeps_static() -> None:
+    from page_analyse_rl import _rl_headings_with_year
+
+    headings = _rl_headings_with_year(2025)
+    assert headings[13] == "BRREG"
+
+
+def test_update_pivot_headings_reads_brreg_year_from_data(monkeypatch) -> None:
+    import session as _session
+    monkeypatch.setattr(_session, "year", "2025", raising=False)
+
+    from page_analyse_rl import update_pivot_headings
+
+    page = _make_heading_page()
+    page._nk_brreg_data = {
+        "regnskapsaar": "2023",
+        "available_years": [2023, 2022],
+        "linjer": {"driftsinntekter": 100.0},
+        "years": {
+            2023: {"linjer": {"driftsinntekter": 100.0}, "regnskapsaar": "2023"},
+            2022: {"linjer": {"driftsinntekter": 90.0}, "regnskapsaar": "2022"},
+        },
+    }
+    update_pivot_headings(page=page, mode="Regnskapslinje")
+
+    assert page._pivot_tree.headings["BRREG"] == "BRREG 2023"
+
+
+def test_analysis_heading_brreg_year() -> None:
+    import page_analyse_columns as _cols
+
+    assert _cols.analysis_heading("BRREG") == "BRREG"
+    assert _cols.analysis_heading("BRREG", brreg_year=2024) == "BRREG 2024"
+
+
 # ---------------------------------------------------------------------------
 # update_pivot_columns_for_prev_year — lazy-loaded fjorårsdata
 # ---------------------------------------------------------------------------
