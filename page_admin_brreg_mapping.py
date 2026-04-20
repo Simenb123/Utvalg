@@ -7,8 +7,11 @@ Split-view UI:
 Workflow:
 1. Marker en BRREG-linje i høyre tabell.
 2. Søk/scroll i venstre liste, dobbeltklikk en RL → mapping settes.
-3. Marker BRREG-linje → "Tøm mapping" eller Delete for å fjerne.
-4. "Foreslå fra alias" pre-fyller umappede rader basert på alias-matching.
+3. Marker BRREG-linje → "Tøm mapping" eller Delete for å fjerne (alias-
+   fallback reaktiveres da).
+4. "Deaktiver alias" setter nøkkelen til ``null`` i JSON → BRREG-verdien blir
+   ikke plassert noe sted. Brukes når RL-strukturen mangler naturlig målrad.
+5. "Foreslå fra alias" pre-fyller umappede rader basert på alias-matching.
 
 Mappingen persisteres via ``brreg_mapping_config``. BRREG-tall fyller så raden
 for det regnr brukeren har valgt i Analyse-fanen, uavhengig av alias-matching
@@ -89,7 +92,7 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
     def __init__(self, master: Any, *, title: str = _TITLE) -> None:
         super().__init__(master)
         self._title = title
-        self._mapping: dict[str, int] = {}
+        self._mapping: dict[str, int | None] = {}
         self._brreg_keys: list[tuple[str, str]] = []
         self._regnskapslinjer: list[tuple[int, str]] = []
         self._regnskapslinjer_df: pd.DataFrame | None = None
@@ -242,8 +245,11 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
                 text="Vis detalj-nøkler",
                 variable=self._show_detail_var,
             ).grid(row=0, column=1, sticky="e", padx=(0, 8))
+        ttk.Button(toolbar, text="Deaktiver alias", command=self._disable_selected).grid(
+            row=0, column=2, sticky="e", padx=(0, 6)
+        )
         ttk.Button(toolbar, text="Tøm mapping", command=self._clear_selected).grid(
-            row=0, column=2, sticky="e"
+            row=0, column=3, sticky="e"
         )
 
         brreg_tree_frame = ttk.Frame(right, padding=(6, 0, 6, 6))
@@ -266,6 +272,7 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             tree.column(col, width=_BRREG_WIDTHS[col], anchor="w")
         try:
             tree.tag_configure("mapped", background="#e8f5e9")
+            tree.tag_configure("disabled", background="#f5f5f5", foreground="#909090")
             # Diskret grå for detalj-rader — signaliserer at BRREG's åpne API
             # sjelden har verdi her uten å skrike i UI.
             tree.tag_configure("detail", foreground="#808080")
@@ -343,26 +350,37 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             if self._show_detail_var is not None else False
         )
         mapped_count = 0
+        disabled_count = 0
         visible_total = 0
         hidden_mapped_detail = 0
         rows: list[tuple[str, str, str, str, str, int | None, tuple[str, ...]]] = []
         for key, description in self._brreg_keys:
             avail = brreg_rl_comparison.availability(key)
+            in_mapping = key in self._mapping
             regnr = self._mapping.get(key)
+            is_disabled = in_mapping and regnr is None
             if avail == "detail" and not show_detail:
-                # Tell skjulte detalj-mappinger så brukeren ikke "mister" dem
-                # fra bevisstheten — mapping lagres fortsatt ved save().
-                if regnr is not None:
+                if in_mapping:
                     hidden_mapped_detail += 1
                 continue
             visible_total += 1
-            regnr_txt = str(regnr) if regnr is not None else ""
-            rl_name = self._regnr_to_navn.get(regnr, "") if regnr is not None else ""
+            if is_disabled:
+                regnr_txt = "— deaktivert"
+                rl_name = ""
+                disabled_count += 1
+            elif regnr is not None:
+                regnr_txt = str(regnr)
+                rl_name = self._regnr_to_navn.get(regnr, "")
+                mapped_count += 1
+            else:
+                regnr_txt = ""
+                rl_name = ""
             avail_txt = _AVAILABILITY_TEXT.get(avail, avail)
             tags: tuple[str, ...] = ()
-            if regnr is not None:
+            if is_disabled:
+                tags = tags + ("disabled",)
+            elif regnr is not None:
                 tags = tags + ("mapped",)
-                mapped_count += 1
             if avail == "detail":
                 tags = tags + ("detail",)
             rows.append((key, description, avail_txt, regnr_txt, rl_name, regnr, tags))
@@ -399,6 +417,8 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
                 text = f"{mapped_count} av {visible_total} sum-nøkler mappet"
                 if hidden_mapped_detail:
                     text += f" (+{hidden_mapped_detail} skjult detalj)"
+            if disabled_count:
+                text += f" · {disabled_count} deaktivert"
             self._count_var.set(text)
         self._update_brreg_heading_arrows()
         if selected and tree.exists(selected):
@@ -428,9 +448,15 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             # counter slik at bulk-endringer vises riktig.
             self._refresh_counter()
             return
+        in_mapping = brreg_key in self._mapping
         regnr = self._mapping.get(brreg_key)
-        regnr_txt = str(regnr) if regnr is not None else ""
-        rl_name = self._regnr_to_navn.get(regnr, "") if regnr is not None else ""
+        is_disabled = in_mapping and regnr is None
+        if is_disabled:
+            regnr_txt = "— deaktivert"
+            rl_name = ""
+        else:
+            regnr_txt = str(regnr) if regnr is not None else ""
+            rl_name = self._regnr_to_navn.get(regnr, "") if regnr is not None else ""
         description = next(
             (desc for key, desc in self._brreg_keys if key == brreg_key),
             "",
@@ -438,7 +464,9 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
         avail = brreg_rl_comparison.availability(brreg_key)
         avail_txt = _AVAILABILITY_TEXT.get(avail, avail)
         tags: tuple[str, ...] = ()
-        if regnr is not None:
+        if is_disabled:
+            tags = tags + ("disabled",)
+        elif regnr is not None:
             tags = tags + ("mapped",)
         if avail == "detail":
             tags = tags + ("detail",)
@@ -461,16 +489,21 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
         )
         visible_total = 0
         mapped_count = 0
+        disabled_count = 0
         hidden_mapped_detail = 0
         for key, _ in self._brreg_keys:
             avail = brreg_rl_comparison.availability(key)
-            is_mapped = key in self._mapping
+            in_mapping = key in self._mapping
+            regnr = self._mapping.get(key)
+            is_disabled = in_mapping and regnr is None
             if avail == "detail" and not show_detail:
-                if is_mapped:
+                if in_mapping:
                     hidden_mapped_detail += 1
                 continue
             visible_total += 1
-            if is_mapped:
+            if is_disabled:
+                disabled_count += 1
+            elif regnr is not None:
                 mapped_count += 1
         if show_detail:
             text = f"{mapped_count} av {visible_total} mappet"
@@ -478,6 +511,8 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             text = f"{mapped_count} av {visible_total} sum-nøkler mappet"
             if hidden_mapped_detail:
                 text += f" (+{hidden_mapped_detail} skjult detalj)"
+        if disabled_count:
+            text += f" · {disabled_count} deaktivert"
         self._count_var.set(text)
 
     def _update_rl_heading_arrows(self) -> None:
@@ -605,6 +640,21 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
                 f"Fjernet mapping for {self._selected_brreg_key} (ikke lagret)"
             )
 
+    def _disable_selected(self) -> None:
+        """Marker valgt BRREG-nøkkel som deaktivert (skipper alias-fallback)."""
+        if not self._selected_brreg_key:
+            if self._status_var is not None:
+                self._status_var.set("Marker en BRREG-linje først.")
+            return
+        key = self._selected_brreg_key
+        self._mapping[key] = None
+        self._update_brreg_row(key)
+        if self._status_var is not None:
+            self._status_var.set(
+                f"Deaktivert alias for {key} — BRREG-verdi vises ikke på noen rad "
+                f"(ikke lagret)"
+            )
+
     def _suggest_from_aliases(self) -> None:
         if self._regnskapslinjer_df is None:
             if self._status_var is not None:
@@ -678,7 +728,19 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
                 self._regnr_to_navn.get(self._mapping[key], ""),
             )
             for key, desc in self._brreg_keys
-            if key in self._mapping
+            if key in self._mapping and self._mapping.get(key) is not None
+        ]
+        disabled = [
+            (
+                key,
+                desc,
+                _AVAILABILITY_TEXT.get(
+                    brreg_rl_comparison.availability(key),
+                    brreg_rl_comparison.availability(key),
+                ),
+            )
+            for key, desc in self._brreg_keys
+            if key in self._mapping and self._mapping.get(key) is None
         ]
         unmapped = [
             (
@@ -703,7 +765,10 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
 
         ttk.Label(
             container,
-            text=f"{len(mapped)} mappet · {len(unmapped)} uten mapping",
+            text=(
+                f"{len(mapped)} mappet · {len(disabled)} deaktivert · "
+                f"{len(unmapped)} uten mapping (alias-fallback aktiv)"
+            ),
             style="Muted.TLabel",
         ).pack(anchor="w", pady=(0, 6))
 
@@ -711,8 +776,10 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
         notebook.pack(fill="both", expand=True)
 
         tab_mapped = ttk.Frame(notebook, padding=4)
+        tab_disabled = ttk.Frame(notebook, padding=4)
         tab_unmapped = ttk.Frame(notebook, padding=4)
         notebook.add(tab_mapped, text=f"Mappet ({len(mapped)})")
+        notebook.add(tab_disabled, text=f"Deaktivert ({len(disabled)})")
         notebook.add(tab_unmapped, text=f"Uten mapping ({len(unmapped)})")
 
         for target, cols, rows in (
@@ -720,6 +787,11 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
                 tab_mapped,
                 ("BRREG-nøkkel", "Beskrivelse", "Kilde", "Regnr", "RL-navn"),
                 [(k, d, a, str(r), n) for k, d, a, r, n in mapped],
+            ),
+            (
+                tab_disabled,
+                ("BRREG-nøkkel", "Beskrivelse", "Kilde"),
+                [(k, d, a) for k, d, a in disabled],
             ),
             (
                 tab_unmapped,

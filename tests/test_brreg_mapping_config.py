@@ -50,6 +50,14 @@ def test_load_returns_empty_when_mappings_key_missing(tmp_path: Path) -> None:
     assert bmc.load_brreg_rl_mapping() == {}
 
 
+def test_null_value_preserved_as_disabled(tmp_path: Path) -> None:
+    """``null`` i JSON = deaktiver alias-fallback for denne BRREG-nøkkelen."""
+    mapping = {"salgsinntekt": 10, "finansinntekter": None}
+    bmc.save_brreg_rl_mapping(mapping)
+    loaded = bmc.load_brreg_rl_mapping()
+    assert loaded == {"salgsinntekt": 10, "finansinntekter": None}
+
+
 def test_list_brreg_keys_matches_brreg_keys_module() -> None:
     import brreg_rl_comparison as brc
 

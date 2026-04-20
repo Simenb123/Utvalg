@@ -115,6 +115,21 @@ def test_add_brreg_columns_loads_mapping_from_config() -> None:
     assert row["Avvik_brreg"] == pytest.approx(0.0)
 
 
+def test_mapping_none_disables_alias_fallback() -> None:
+    """``None`` som regnr skal skrus av alias-fallback for denne nøkkelen."""
+    brreg = {"driftsinntekter": 950_000.0}
+    # Uten mapping: regnr 19 fylles via alias "Sum driftsinntekter"
+    baseline = _brc.build_brreg_by_regnr(_regn_df_alias_hits(), brreg)
+    assert baseline[19] == pytest.approx(-950_000.0)
+
+    # Med None-mapping: alias skal ikke plassere verdien noe sted
+    out = _brc.build_brreg_by_regnr(
+        _regn_df_alias_hits(), brreg,
+        rl_mapping={"driftsinntekter": None},
+    )
+    assert 19 not in out
+
+
 def test_add_brreg_columns_explicit_empty_disables_mapping() -> None:
     """rl_mapping={} skal ikke laste fra JSON."""
     brreg_mapping_config.save_brreg_rl_mapping({"sum_eiendeler": 615})

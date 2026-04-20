@@ -10,9 +10,14 @@ Lagringsformat:
       "version": 1,
       "mappings": {
         "salgsinntekt": 10,
-        "sum_eiendeler": 665
+        "sum_eiendeler": 665,
+        "finansinntekter": null
       }
     }
+
+``null`` betyr "deaktiver alias-fallback for denne BRREG-nøkkelen" — nyttig
+når RL-strukturen ikke har en naturlig målrad og vi ikke vil at alias skal
+plassere verdien et semantisk feil sted.
 """
 
 from __future__ import annotations
@@ -32,13 +37,16 @@ def resolve_brreg_mapping_path() -> Path:
     return classification_config.repo_dir() / _FILENAME
 
 
-def _coerce_mapping(raw: Any) -> dict[str, int]:
-    """Valider og normaliser lagrede mappinger."""
+def _coerce_mapping(raw: Any) -> dict[str, int | None]:
+    """Valider og normaliser lagrede mappinger. ``None`` = deaktivert alias."""
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, int] = {}
+    out: dict[str, int | None] = {}
     for key, value in raw.items():
         if not isinstance(key, str) or not key.strip():
+            continue
+        if value is None:
+            out[key.strip()] = None
             continue
         try:
             regnr = int(value)
@@ -48,7 +56,7 @@ def _coerce_mapping(raw: Any) -> dict[str, int]:
     return out
 
 
-def load_brreg_rl_mapping() -> dict[str, int]:
+def load_brreg_rl_mapping() -> dict[str, int | None]:
     """Les mapping fra JSON. Returnerer tom dict hvis fil mangler/er korrupt."""
     document = classification_config.load_json(
         resolve_brreg_mapping_path(), fallback={}
@@ -58,7 +66,7 @@ def load_brreg_rl_mapping() -> dict[str, int]:
     return _coerce_mapping(document.get("mappings"))
 
 
-def save_brreg_rl_mapping(mapping: dict[str, int]) -> Path:
+def save_brreg_rl_mapping(mapping: dict[str, int | None]) -> Path:
     """Skriv mapping til JSON. Returnerer lagringsstien."""
     cleaned = _coerce_mapping(mapping)
     document = {"version": _SCHEMA_VERSION, "mappings": cleaned}

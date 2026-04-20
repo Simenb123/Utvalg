@@ -461,21 +461,21 @@ def build_brreg_by_regnr(
     mapped_brreg_keys: set[str] = set()
 
     # Eksplisitt GUI-mapping vinner: fyll disse først og ikke la alias
-    # overskrive dem.
+    # overskrive dem. ``None`` som regnr = "deaktiver alias for denne
+    # nøkkelen helt" (brukes når RL-strukturen ikke har en naturlig målrad).
     for brreg_key, regnr in (rl_mapping or {}).items():
         if not isinstance(brreg_key, str) or brreg_key not in _BRREG_KEYS:
+            continue
+        if regnr is None:
+            mapped_brreg_keys.add(brreg_key)
             continue
         try:
             regnr_int = int(regnr)
         except (TypeError, ValueError):
             continue
-        # BRREG-nøkkelen er "brukt opp" av mapping selv om verdien mangler
-        # i brreg_data — vi vil ikke la alias omplassere den.
         mapped_brreg_keys.add(brreg_key)
         val = _resolve_brreg_value(brreg_key, brreg_data)
         if val is None:
-            # Detalj-nøkler leveres sjelden av BRREG's åpne API — gjør det
-            # sporbart hvorfor en mappet linje er blank i Analyse.
             log.debug(
                 "BRREG-mapping %s→regnr %d: verdi mangler i API-svar "
                 "(%s-nivå, ikke rapportert av selskapet)",
