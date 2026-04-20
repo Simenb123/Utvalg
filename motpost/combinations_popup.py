@@ -19,17 +19,21 @@ from motpost.expected_rules import (
     ExpectedRuleSet,
     empty_rule_set,
     load_rule_set,
+    save_rule_set,
 )
-from motpost.expected_rules_dialog import format_rule_summary
+from motpost.expected_rules_dialog import choose_expected_rules, format_rule_summary
 
 from motpost.combo_workflow import (
     STATUS_EXPECTED,
     STATUS_NEUTRAL,
     STATUS_OUTLIER,
+    DIAG_EXPECTED,
+    DIAG_NO_RULES,
     account_display_name_for_mode,
     apply_combo_status,
     combo_display_name,
     combo_display_name_for_mode,
+    diagnose_combos_against_rule_set,
     find_expected_combos_by_rule_set,
     normalize_combo_status,
     normalize_direction,
@@ -141,6 +145,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         self._drilldown_cache: dict[tuple[str, str], dict[str, object]] = {}
         self._regnskapslinje_label_map = self._build_regnskapslinje_label_map()
         self._auto_expected_combos: set[str] = set()
+        self._combo_diagnosis_map: dict[str, str] = {}
         self._rule_set: ExpectedRuleSet = self._load_initial_rule_set()
 
         # UI vars
@@ -207,6 +212,15 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             cmb_display.pack(side=tk.LEFT, padx=(4, 8))
             cmb_display.bind("<<ComboboxSelected>>", lambda _e=None: self._refresh_display_mode())
 
+        can_edit_rules = self._single_source_regnr() is not None
+        self._btn_edit_rules = ttk.Button(
+            rules_bar,
+            text="Rediger regler…",
+            command=self._edit_rules,
+            state=(tk.NORMAL if can_edit_rules else tk.DISABLED),
+        )
+        self._btn_edit_rules.pack(side=tk.LEFT, padx=(0, 8))
+
         # Fargede knapper (bruk tk.Button for å sikre bakgrunnsfarge i Windows TTK-tema)
         btn_expected = tk.Button(
             top_bar,
@@ -248,20 +262,26 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         btn_export = ttk.Button(top_bar, text="Eksporter Excel", command=self._export_excel)
         btn_export.pack(side=tk.RIGHT, padx=(0, 6))
 
+        self._tree_all_columns_all = (
+            "Kombinasjon #",
+            "Kombinasjon",
+            "Kombinasjon (navn)",
+            "Antall bilag",
+            "Sum valgte kontoer",
+            "Netto valgte kontoer",
+            "% andel bilag",
+            "Outlier",
+            "Status",
+            "Forventet-grunn",
+            "Kommentar",
+        )
+        self._tree_all_columns_default = tuple(
+            c for c in self._tree_all_columns_all if c != "Forventet-grunn"
+        )
         self._tree_all = ttk.Treeview(
             frame_all,
-            columns=(
-                "Kombinasjon #",
-                "Kombinasjon",
-                "Kombinasjon (navn)",
-                "Antall bilag",
-                "Sum valgte kontoer",
-                "Netto valgte kontoer",
-                "% andel bilag",
-                "Outlier",
-                "Status",
-                "Kommentar",
-            ),
+            columns=self._tree_all_columns_all,
+            displaycolumns=self._tree_all_columns_default,
             show="headings",
             selectmode="extended",
         )
@@ -274,6 +294,8 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
                 w, anchor = 420, tk.W
             elif c == "Status":
                 w, anchor = 110, tk.W
+            elif c == "Forventet-grunn":
+                w, anchor = 220, tk.W
             else:
                 w, anchor = 120, tk.W
             self._tree_all.column(c, width=w, anchor=anchor)
@@ -809,6 +831,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
     def _apply_expected_regnskapslinjer(self) -> None:
         previous_auto_expected = set(self._auto_expected_combos)
         self._auto_expected_combos = set()
+        self._combo_diagnosis_map = {}
         if previous_auto_expected:
             clearable = [
                 combo
@@ -821,14 +844,8 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         rule_set = self._rule_set
         has_rules = rule_set is not None and not rule_set.is_empty()
         if not has_rules or self._df_combos_raw is None or self._df_combos_raw.empty:
-            for item in self._tree_all.get_children(""):
-                try:
-                    combo = str(self._tree_all.set(item, "Kombinasjon") or "").strip()
-                except Exception:
-                    combo = ""
-                if combo:
-                    self._apply_status_to_tree_item(item, combo)
-            self._update_combo_selection_summary()
+            self._update_diagnosis_column_visibility()
+            self._populate_all_tree()
             return
 
         try:
@@ -840,7 +857,7 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
         except Exception:
             combo_values = []
 
-        expected_combos = find_expected_combos_by_rule_set(
+        diagnosis = diagnose_combos_against_rule_set(
             combo_values,
             rule_set=rule_set,
             df_scope=self._df_scope,
@@ -848,6 +865,17 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             konto_regnskapslinje_map=self._konto_regnskapslinje_map,
             selected_direction=self._selected_direction,
         )
+
+        expected_combos = [
+            combo
+            for combo in combo_values
+            if diagnosis.get(combo) is not None and diagnosis[combo].status == DIAG_EXPECTED
+        ]
+        self._combo_diagnosis_map = {
+            combo: diag.reason
+            for combo, diag in diagnosis.items()
+            if diag.status not in (DIAG_EXPECTED, DIAG_NO_RULES) and diag.reason
+        }
 
         combos_to_mark = [
             combo
@@ -858,14 +886,51 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             apply_combo_status(self._combo_status_map, combos_to_mark, STATUS_EXPECTED)
             self._auto_expected_combos = set(combos_to_mark)
 
-        for item in self._tree_all.get_children(""):
+        self._update_diagnosis_column_visibility()
+        self._populate_all_tree()
+
+    def _update_diagnosis_column_visibility(self) -> None:
+        """Vis ``Forventet-grunn``-kolonnen kun når minst én rad har en grunn."""
+        has_any = bool(self._combo_diagnosis_map)
+        try:
+            if has_any:
+                self._tree_all.configure(displaycolumns=self._tree_all_columns_all)
+            else:
+                self._tree_all.configure(displaycolumns=self._tree_all_columns_default)
+        except Exception:
+            pass
+
+    def _edit_rules(self) -> None:
+        regnr = self._single_source_regnr()
+        if regnr is None:
+            return
+        client = self._current_client()
+        source_label = self._source_regnr_label(regnr)
+        try:
+            updated = choose_expected_rules(
+                self,
+                client=client,
+                source_regnr=int(regnr),
+                source_label=source_label,
+                selected_direction=self._selected_direction,
+                konto_regnskapslinje_map=self._konto_regnskapslinje_map,
+                konto_navn_map=self._konto_navn_map,
+                initial_rule_set=self._rule_set,
+                motpost_konto_set=set(self._konto_regnskapslinje_map.keys()) or None,
+            )
+        except Exception:
+            logger.exception("Klarte ikke å åpne forventningsregel-dialogen")
+            return
+        if updated is None:
+            return
+        self._rule_set = updated
+        if client:
             try:
-                combo = str(self._tree_all.set(item, "Kombinasjon") or "").strip()
+                save_rule_set(client, updated)
             except Exception:
-                combo = ""
-            if combo:
-                self._apply_status_to_tree_item(item, combo)
-        self._update_combo_selection_summary()
+                logger.exception("Klarte ikke å lagre forventningsregler")
+        self._update_expected_regnskapslinjer_label()
+        self._apply_expected_regnskapslinjer()
 
     def _populate_all_tree(self) -> None:
         self._clear_tree(self._tree_all)
@@ -876,9 +941,11 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             status_txt = status_label(status_code)
             comment_full = str(self._combo_comment_map.get(combo, "") or "").strip()
             comment_disp = truncate_text(comment_full, max_len=80) if comment_full else ""
+            reason = self._combo_diagnosis_map.get(combo, "") if status_code != STATUS_EXPECTED else ""
             row_dict = {
                 **r,
                 "Status": status_txt,
+                "Forventet-grunn": reason,
                 "Kommentar": comment_disp,
             }
             vals = [row_dict.get(c, "") for c in self._tree_all["columns"]]
@@ -1395,7 +1462,13 @@ def _popup_populate_all_tree(self: _MotkontoCombinationsPopup) -> None:
         status_txt = status_label(status_code)
         comment_full = str(self._combo_comment_map.get(combo, "") or "").strip()
         comment_disp = truncate_text(comment_full, max_len=80) if comment_full else ""
-        values = {**row, "Status": status_txt, "Kommentar": comment_disp}
+        reason = self._combo_diagnosis_map.get(combo, "") if status_code != STATUS_EXPECTED else ""
+        values = {
+            **row,
+            "Status": status_txt,
+            "Forventet-grunn": reason,
+            "Kommentar": comment_disp,
+        }
         tags = ()
         if status_code == STATUS_EXPECTED:
             tags = ("expected",)

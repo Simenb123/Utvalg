@@ -402,7 +402,8 @@ def choose_expected_rules(
     right = ttk.LabelFrame(body, text="Detaljer for valgt regel")
     right.grid(row=0, column=1, sticky="nsew")
     right.columnconfigure(1, weight=1)
-    right.rowconfigure(4, weight=1)
+    # Accounts-listen ligger på rad 5 etter omorganisering (netting-boksen til topp)
+    right.rowconfigure(5, weight=1)
 
     # Placeholder (vises når ingen regel er valgt)
     placeholder_var = tk.StringVar(value="Velg en regel til venstre eller legg til en ny.")
@@ -429,7 +430,7 @@ def choose_expected_rules(
     scope_only_var = tk.BooleanVar(value=False)
     chk_scope_only = ttk.Checkbutton(
         right,
-        text="Vis kun RL som er motpost til kilde i dette utvalget",
+        text="Begrens target til observerte motpost-RL",
         variable=scope_only_var,
     )
     if not motpost_rl_options:
@@ -437,7 +438,7 @@ def choose_expected_rules(
     motpost_only_var = tk.BooleanVar(value=False)
     chk_motpost_only = ttk.Checkbutton(
         right,
-        text="Vis kun kontoer med motpostføringer i dette utvalget",
+        text="Skjul kontoer uten motpostføringer i utvalget",
         variable=motpost_only_var,
     )
     if not motpost_kontos:
@@ -513,8 +514,16 @@ def choose_expected_rules(
     )
     chk_netting.grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 0))
     ttk.Label(netting_box, text="Terskel:").grid(row=1, column=0, sticky="w", padx=6, pady=(2, 6))
-    entry_tol = ttk.Entry(netting_box, textvariable=tol_var, width=10)
-    entry_tol.grid(row=1, column=1, sticky="w", pady=(2, 6))
+    tol_frame = ttk.Frame(netting_box)
+    tol_frame.grid(row=1, column=1, sticky="w", pady=(2, 6))
+    entry_tol = ttk.Entry(tol_frame, textvariable=tol_var, width=10)
+    entry_tol.pack(side=tk.LEFT)
+    ttk.Label(tol_frame, text="kr").pack(side=tk.LEFT, padx=(4, 0))
+    tol_error_var = tk.StringVar(value="")
+    tol_error_label = ttk.Label(
+        tol_frame, textvariable=tol_error_var, foreground="#B00000"
+    )
+    tol_error_label.pack(side=tk.LEFT, padx=(10, 0))
     detail_widgets.append(netting_box)
 
     # Bottom buttons
@@ -557,12 +566,12 @@ def choose_expected_rules(
 
         lbl_target.grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
         combo_target.grid(row=0, column=1, sticky="ew", padx=6, pady=(6, 2))
-        chk_scope_only.grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
-        chk_motpost_only.grid(row=2, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
-        instruction_label.grid(row=3, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 4))
-        list_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=6, pady=(0, 6))
-        btn_row.grid(row=5, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
-        netting_box.grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
+        netting_box.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 6))
+        chk_scope_only.grid(row=2, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
+        chk_motpost_only.grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
+        instruction_label.grid(row=4, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 4))
+        list_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=6, pady=(0, 6))
+        btn_row.grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
 
     def _layout_left_panel() -> None:
         try:
@@ -637,6 +646,14 @@ def choose_expected_rules(
         pass
 
     def _rebuild_accounts_tree(edit: _RuleEdit) -> None:
+        prior_selected_kontos: set[str] = set()
+        try:
+            for iid in accounts_tree.selection():
+                konto = item_to_konto.get(iid, "")
+                if konto:
+                    prior_selected_kontos.add(konto)
+        except Exception:
+            prior_selected_kontos = set()
         accounts_tree.delete(*accounts_tree.get_children(""))
         item_to_konto.clear()
         konto_to_item.clear()
@@ -667,7 +684,16 @@ def choose_expected_rules(
             )
             item_to_konto[item_id] = konto
             konto_to_item[konto] = item_id
-        accounts_tree.selection_remove(accounts_tree.selection())
+        # Bevar seleksjon for kontoer som fortsatt er synlige (f.eks. etter
+        # filter-toggle). Ved bytte av regel vil prior_selected_kontos
+        # typisk ikke overlappe det nye kontosettet.
+        restore_iids = [
+            konto_to_item[k] for k in prior_selected_kontos if k in konto_to_item
+        ]
+        if restore_iids:
+            accounts_tree.selection_set(restore_iids)
+        else:
+            accounts_tree.selection_remove(accounts_tree.selection())
         _update_selection_status(edit)
         _update_action_buttons()
 
@@ -735,6 +761,7 @@ def choose_expected_rules(
             target_var.set(regnr_to_label.get(int(edit.target_regnr), ""))
             netting_var.set(bool(edit.requires_netting))
             tol_var.set(f"{float(edit.netting_tolerance):g}")
+            tol_error_var.set("")
         finally:
             _suppress_trace["value"] = False
         _rebuild_accounts_tree(edit)
@@ -826,11 +853,23 @@ def choose_expected_rules(
         edit = _current_edit()
         if edit is None:
             return
+        raw = tol_var.get().strip()
+        if not raw:
+            tol_error_var.set("")
+            edit.netting_tolerance = 1.0
+            tol_var.set("1")
+            _refresh_rule_label_only()
+            return
         try:
-            value = float(tol_var.get().replace(",", "."))
+            value = float(raw.replace(",", "."))
         except Exception:
-            value = 1.0
-        edit.netting_tolerance = max(value, 0.0)
+            tol_error_var.set("Må være tall ≥ 0")
+            return
+        if value < 0:
+            tol_error_var.set("Må være tall ≥ 0")
+            return
+        tol_error_var.set("")
+        edit.netting_tolerance = value
         _refresh_rule_label_only()
 
     entry_tol.bind("<FocusOut>", _on_tolerance_edited)
@@ -919,6 +958,17 @@ def choose_expected_rules(
     def _on_save() -> None:
         # Commit ev. ventet toleranse-redigering
         _on_tolerance_edited(None)
+        if tol_error_var.get():
+            messagebox.showwarning(
+                "Ugyldig terskel",
+                "Terskelen må være et tall ≥ 0 før du kan lagre.",
+                parent=win,
+            )
+            try:
+                entry_tol.focus_set()
+            except Exception:
+                pass
+            return
         result["value"] = ExpectedRuleSet(
             source_regnr=int(source_regnr),
             selected_direction=direction,
@@ -927,6 +977,38 @@ def choose_expected_rules(
         win.destroy()
 
     btn_ok.configure(command=_on_save)
+
+    def _has_unsaved_changes() -> bool:
+        _on_tolerance_edited(None)
+        try:
+            current = tuple(edit.to_rule() for edit in rules)
+        except Exception:
+            return True
+        initial = tuple(rule_set.rules)
+        return current != initial
+
+    def _on_cancel() -> None:
+        if not _has_unsaved_changes():
+            win.destroy()
+            return
+        answer = messagebox.askyesnocancel(
+            "Lagre endringer?",
+            "Du har ulagrede endringer i forventningsreglene. "
+            "Vil du lagre før du lukker?",
+            parent=win,
+        )
+        if answer is None:
+            return
+        if answer:
+            _on_save()
+        else:
+            win.destroy()
+
+    btn_cancel.configure(command=_on_cancel)
+    try:
+        win.protocol("WM_DELETE_WINDOW", _on_cancel)
+    except Exception:
+        pass
 
     _refresh_rules_list(select_idx=0 if rules else None)
 

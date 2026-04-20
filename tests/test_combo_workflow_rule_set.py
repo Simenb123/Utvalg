@@ -159,13 +159,13 @@ def test_empty_rule_set_returns_empty() -> None:
     assert result == []
 
 
-def test_per_rule_netting_requires_each_rules_kontos_to_balance_alone() -> None:
-    """Per-regel netting: kontoene EN regel tillater må alene balansere kilden.
+def test_combined_netting_accepts_multi_rule_balanced_combo() -> None:
+    """Kombinert netting: hele bilaget balanseres mot unionen av netting-regler.
 
-    Kombo '1500': rule 610 matcher 1500. Bilag 2 har 3000=-500 + 1500=500 → 0. OK.
-    Kombo '1500, 2700': rule 610 matcher 1500 og rule 790 matcher 2700 (hver regel
-    kjøres separat). For rule 610 alene på bilag 1: 3000=-1000 + 1500=750 → residual
-    -250, bryter toleranse 1.0. Kombo blokkeres.
+    Bilag 1 (3000=-1000, 2700=+250, 1500=+750) balanserer til 0. Begge reglene
+    (610 for 1500, 790 for 2700) krever netting. Med kombinert semantikk
+    vurderes SelectedNet + sum(alle linjer i RL 610 ∪ RL 790) = 0 → godkjent.
+    Bilag 2 (3000=-500, 1500=+500) balanserer også → godkjent.
     """
     df = _sample_df()
     rule_set = ExpectedRuleSet(
@@ -194,7 +194,93 @@ def test_per_rule_netting_requires_each_rules_kontos_to_balance_alone() -> None:
         konto_regnskapslinje_map=_label_map(),
         selected_direction="Kredit",
     )
-    assert result == ["1500"]
+    assert set(result) == {"1500, 2700", "1500"}
+
+
+def test_combined_netting_rejects_unbalanced_multi_rule_combo() -> None:
+    """Kombinert netting skal fortsatt avvise kombinasjoner som ikke balanserer."""
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1],
+            "Dato": ["2025-01-01"] * 3,
+            "Konto": ["3000", "1500", "2700"],
+            "Kontonavn": ["Salg", "Kundefordr.", "MVA"],
+            "Tekst": ["", "", ""],
+            # Selected = -1000, Expected sum (1500 + 2700) = 600 + 300 = 900.
+            # Residual = -1000 + 900 = -100 → utenfor toleranse 1.0.
+            "Beløp": [-1000.0, 600.0, 300.0],
+        }
+    )
+    rule_set = ExpectedRuleSet(
+        source_regnr=10,
+        selected_direction="kredit",
+        rules=(
+            ExpectedRule(
+                target_regnr=610,
+                account_mode="all",
+                requires_netting=True,
+                netting_tolerance=1.0,
+            ),
+            ExpectedRule(
+                target_regnr=790,
+                account_mode="all",
+                requires_netting=True,
+                netting_tolerance=1.0,
+            ),
+        ),
+    )
+    result = find_expected_combos_by_rule_set(
+        ["1500, 2700"],
+        rule_set=rule_set,
+        df_scope=df,
+        selected_accounts=["3000"],
+        konto_regnskapslinje_map=_label_map(),
+        selected_direction="Kredit",
+    )
+    assert result == []
+
+
+def test_combined_netting_uses_max_tolerance_across_rules() -> None:
+    """Toleransen som brukes er max(tolerance for rule in netting_rules)."""
+    df = pd.DataFrame(
+        {
+            "Bilag": [1, 1, 1],
+            "Dato": ["2025-01-01"] * 3,
+            "Konto": ["3000", "1500", "2700"],
+            "Kontonavn": ["Salg", "Kundefordr.", "MVA"],
+            "Tekst": ["", "", ""],
+            # Residual = -1000 + 750 + 245 = -5. Avvises ved tol=1, godkjent ved tol=10.
+            "Beløp": [-1000.0, 750.0, 245.0],
+        }
+    )
+    # Én regel har tol=1, én har tol=10 → effektiv tol er 10 → godkjent.
+    rule_set = ExpectedRuleSet(
+        source_regnr=10,
+        selected_direction="kredit",
+        rules=(
+            ExpectedRule(
+                target_regnr=610,
+                account_mode="all",
+                requires_netting=True,
+                netting_tolerance=1.0,
+            ),
+            ExpectedRule(
+                target_regnr=790,
+                account_mode="all",
+                requires_netting=True,
+                netting_tolerance=10.0,
+            ),
+        ),
+    )
+    result = find_expected_combos_by_rule_set(
+        ["1500, 2700"],
+        rule_set=rule_set,
+        df_scope=df,
+        selected_accounts=["3000"],
+        konto_regnskapslinje_map=_label_map(),
+        selected_direction="Kredit",
+    )
+    assert result == ["1500, 2700"]
 
 
 def test_rule_without_netting_allows_combo_even_if_unbalanced() -> None:
