@@ -102,6 +102,9 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
         self._path_var = tk.StringVar(value="") if tk is not None else None
         self._status_var = tk.StringVar(value="") if tk is not None else None
         self._rl_search_var = tk.StringVar(value="") if tk is not None else None
+        # Detalj-nøkler er sjelden populert i BRREG's åpne API — skjul som
+        # standard slik at editoren matcher hva revisor faktisk får ut.
+        self._show_detail_var = tk.BooleanVar(value=False) if tk is not None else None
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
@@ -113,6 +116,11 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
         if self._rl_search_var is not None:
             try:
                 self._rl_search_var.trace_add("write", lambda *_a: self._refresh_rl_tree())
+            except Exception:
+                pass
+        if self._show_detail_var is not None:
+            try:
+                self._show_detail_var.trace_add("write", lambda *_a: self._refresh_brreg_tree())
             except Exception:
                 pass
 
@@ -228,8 +236,14 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             ttk.Label(toolbar, textvariable=self._count_var, style="Muted.TLabel").grid(
                 row=0, column=0, sticky="w"
             )
+        if self._show_detail_var is not None:
+            ttk.Checkbutton(
+                toolbar,
+                text="Vis detalj-nøkler",
+                variable=self._show_detail_var,
+            ).grid(row=0, column=1, sticky="e", padx=(0, 8))
         ttk.Button(toolbar, text="Tøm mapping", command=self._clear_selected).grid(
-            row=0, column=1, sticky="e"
+            row=0, column=2, sticky="e"
         )
 
         brreg_tree_frame = ttk.Frame(right, padding=(6, 0, 6, 6))
@@ -324,13 +338,26 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
                 tree.delete(item)
         except Exception:
             pass
+        show_detail = (
+            bool(self._show_detail_var.get())
+            if self._show_detail_var is not None else False
+        )
         mapped_count = 0
+        visible_total = 0
+        hidden_mapped_detail = 0
         rows: list[tuple[str, str, str, str, str, int | None, tuple[str, ...]]] = []
         for key, description in self._brreg_keys:
+            avail = brreg_rl_comparison.availability(key)
             regnr = self._mapping.get(key)
+            if avail == "detail" and not show_detail:
+                # Tell skjulte detalj-mappinger så brukeren ikke "mister" dem
+                # fra bevisstheten — mapping lagres fortsatt ved save().
+                if regnr is not None:
+                    hidden_mapped_detail += 1
+                continue
+            visible_total += 1
             regnr_txt = str(regnr) if regnr is not None else ""
             rl_name = self._regnr_to_navn.get(regnr, "") if regnr is not None else ""
-            avail = brreg_rl_comparison.availability(key)
             avail_txt = _AVAILABILITY_TEXT.get(avail, avail)
             tags: tuple[str, ...] = ()
             if regnr is not None:
@@ -366,8 +393,13 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             except Exception:
                 continue
         if self._count_var is not None:
-            total = len(self._brreg_keys)
-            self._count_var.set(f"{mapped_count} av {total} mappet")
+            if show_detail:
+                text = f"{mapped_count} av {visible_total} mappet"
+            else:
+                text = f"{mapped_count} av {visible_total} sum-nøkler mappet"
+                if hidden_mapped_detail:
+                    text += f" (+{hidden_mapped_detail} skjult detalj)"
+            self._count_var.set(text)
         self._update_brreg_heading_arrows()
         if selected and tree.exists(selected):
             try:
@@ -389,7 +421,12 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
 
     def _update_brreg_row(self, brreg_key: str) -> None:
         tree = getattr(self, "_tree", None)
-        if tree is None or not tree.exists(brreg_key):
+        if tree is None:
+            return
+        if not tree.exists(brreg_key):
+            # Raden er skjult (detalj-nøkkel, detaljer av); oppdater likevel
+            # counter slik at bulk-endringer vises riktig.
+            self._refresh_counter()
             return
         regnr = self._mapping.get(brreg_key)
         regnr_txt = str(regnr) if regnr is not None else ""
@@ -413,10 +450,35 @@ class _BrregMappingEditor(ttk.Frame):  # type: ignore[misc]
             )
         except Exception:
             pass
-        if self._count_var is not None:
-            mapped_count = sum(1 for k, _ in self._brreg_keys if k in self._mapping)
-            total = len(self._brreg_keys)
-            self._count_var.set(f"{mapped_count} av {total} mappet")
+        self._refresh_counter()
+
+    def _refresh_counter(self) -> None:
+        if self._count_var is None:
+            return
+        show_detail = (
+            bool(self._show_detail_var.get())
+            if self._show_detail_var is not None else False
+        )
+        visible_total = 0
+        mapped_count = 0
+        hidden_mapped_detail = 0
+        for key, _ in self._brreg_keys:
+            avail = brreg_rl_comparison.availability(key)
+            is_mapped = key in self._mapping
+            if avail == "detail" and not show_detail:
+                if is_mapped:
+                    hidden_mapped_detail += 1
+                continue
+            visible_total += 1
+            if is_mapped:
+                mapped_count += 1
+        if show_detail:
+            text = f"{mapped_count} av {visible_total} mappet"
+        else:
+            text = f"{mapped_count} av {visible_total} sum-nøkler mappet"
+            if hidden_mapped_detail:
+                text += f" (+{hidden_mapped_detail} skjult detalj)"
+        self._count_var.set(text)
 
     def _update_rl_heading_arrows(self) -> None:
         tree = getattr(self, "_rl_tree", None)
