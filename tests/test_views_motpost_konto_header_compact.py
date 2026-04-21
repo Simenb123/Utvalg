@@ -69,8 +69,6 @@ def test_build_motpost_rule_set_summary_text_uses_rule_list() -> None:
                 target_regnr=790,
                 account_mode="selected",
                 allowed_accounts=("2740", "2770"),
-                requires_netting=True,
-                netting_tolerance=1.0,
             ),
         ),
     )
@@ -80,7 +78,6 @@ def test_build_motpost_rule_set_summary_text_uses_rule_list() -> None:
     assert "Forventningsregler (2)" in text
     assert "610 Kundefordringer" in text
     assert "790 Skyldig off.avg." in text
-    assert "utligning" in text
 
 
 class DummyEntry:

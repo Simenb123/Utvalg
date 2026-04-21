@@ -21,6 +21,7 @@ import logging
 import pandas as pd
 
 from .combinations import build_bilag_to_motkonto_combo
+from .expected_rules import DEFAULT_BALANCE_TOLERANCE
 from .utils import _bilag_str, _konto_str, _safe_float
 
 logger = logging.getLogger(__name__)
@@ -387,100 +388,6 @@ def _build_rule_set_allowed(
     return allowed_kontos, source_label, rule_entries
 
 
-def find_expected_combos_by_combined_netting(
-    combos: Sequence[str],
-    *,
-    df_scope: pd.DataFrame,
-    selected_accounts: Sequence[str],
-    netting_allowed_kontos: Iterable[str],
-    tolerance: float = 1.0,
-    selected_direction: str | None = None,
-    empty_label: str = "(ingen motkonto)",
-) -> list[str]:
-    """Netting-sjekk mot unionen av kontoer fra alle netting-aktive regler.
-
-    Én samlet pass i stedet for per-regel-isolering. For hvert bilag:
-
-    - ``SelectedNet`` = sum av valgte kontoer (med retning-filter)
-    - ``ExpectedNet`` = sum av *alle* linjer der kontoen er i
-      ``netting_allowed_kontos`` (unionen)
-    - ``OtherNetAbs`` = abs(net av linjer som verken er valgt eller i unionen)
-
-    Match hvis ``|SelectedNet + ExpectedNet| ≤ tolerance`` og
-    ``OtherNetAbs ≤ tolerance``. Kombinasjonen godkjennes hvis minst ett
-    relevant bilag finnes og alle relevante bilag matcher.
-    """
-    allowed_set = {_konto_str(k) for k in netting_allowed_kontos if _konto_str(k)}
-    if not allowed_set:
-        return []
-    if df_scope is None or df_scope.empty:
-        return []
-
-    df = _ensure_scope_columns(df_scope)
-    sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
-    if not sel_set:
-        return []
-
-    try:
-        tolerance_value = max(float(tolerance or 0.0), 0.0)
-    except Exception:
-        tolerance_value = 1.0
-
-    bilag_to_combo = build_bilag_to_motkonto_combo(df, list(sel_set), empty_label=empty_label)
-
-    sel_mask = df["Konto_str"].isin(sel_set)
-    expected_mask = (~sel_mask) & df["Konto_str"].isin(allowed_set)
-    other_mask = ~(sel_mask | expected_mask)
-
-    selected_by_bilag = df.loc[sel_mask].groupby("Bilag_str")["Beløp"].sum()
-    dir_norm = normalize_direction(selected_direction)
-    if dir_norm == "kredit":
-        selected_by_bilag = selected_by_bilag.where(selected_by_bilag < 0, 0.0)
-    elif dir_norm == "debet":
-        selected_by_bilag = selected_by_bilag.where(selected_by_bilag > 0, 0.0)
-
-    expected_by_bilag = df.loc[expected_mask].groupby("Bilag_str")["Beløp"].sum()
-    other_net_by_bilag = df.loc[other_mask].groupby("Bilag_str")["Beløp"].sum()
-    expected_presence = df.loc[expected_mask].groupby("Bilag_str").size()
-    selected_presence = df.loc[sel_mask].groupby("Bilag_str").size()
-
-    bilag_values = sorted({str(v) for v in df["Bilag_str"].dropna().astype(str).tolist() if str(v).strip()})
-    if not bilag_values:
-        return []
-
-    bilag_eval = pd.DataFrame(index=pd.Index(bilag_values, name="Bilag_str"))
-    bilag_eval["Kombinasjon"] = [
-        str(bilag_to_combo.get(_bilag_str(v), empty_label) or "").strip() for v in bilag_values
-    ]
-    bilag_eval["SelectedNet"] = selected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
-    bilag_eval["ExpectedNet"] = expected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
-    bilag_eval["OtherNetAbs"] = other_net_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).abs().values
-    bilag_eval["HasExpected"] = expected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
-    bilag_eval["HasSelected"] = selected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
-    bilag_eval["Residual"] = bilag_eval["SelectedNet"] + bilag_eval["ExpectedNet"]
-    bilag_eval["Relevant"] = bilag_eval["HasSelected"] | bilag_eval["HasExpected"]
-    bilag_eval["Matches"] = (
-        bilag_eval["HasSelected"]
-        & bilag_eval["HasExpected"]
-        & bilag_eval["Residual"].abs().le(tolerance_value)
-        & bilag_eval["OtherNetAbs"].le(tolerance_value)
-    )
-
-    matched_set: set[str] = set()
-    for combo_key, group in bilag_eval.groupby("Kombinasjon", dropna=False):
-        combo_text = str(combo_key or "").strip()
-        if not combo_text:
-            continue
-        relevant_group = group[group["Relevant"]]
-        if not relevant_group.empty and bool(relevant_group["Matches"].all()):
-            matched_set.add(combo_text)
-
-    matched: list[str] = []
-    for combo in combos:
-        combo_key = str(combo or "").strip()
-        if combo_key and combo_key in matched_set:
-            matched.append(combo_key)
-    return matched
 
 
 def _label_regnr_prefix(label: str) -> int | None:
@@ -494,114 +401,173 @@ def _label_regnr_prefix(label: str) -> int | None:
         return None
 
 
-def _netting_summary_per_combo(
+def _rl_name(label: str) -> str:
+    """"30 Varekostnad" -> "Varekostnad". Faller tilbake til hele label-en."""
+    text = str(label or "").strip()
+    parts = text.split(" ", 1)
+    if len(parts) > 1 and parts[1].strip():
+        return parts[1].strip()
+    return text
+
+
+def _effective_non_selected_kontos_per_combo(
     combos: Sequence[str],
     *,
     df_scope: pd.DataFrame,
     selected_accounts: Sequence[str],
-    netting_allowed_kontos: Iterable[str],
-    tolerance: float,
-    selected_direction: str | None,
+    threshold: float,
     empty_label: str,
-) -> dict[str, dict[str, Any]]:
-    """Netting-statistikk per kombinasjon (til diagnostikk).
+) -> dict[str, set[str]]:
+    """Pr. kombinasjon: kontoer (ikke-valgte) som har material beløp på minst ett bilag.
 
-    Returnerer for hver relevante kombinasjon:
-      - ``matches``: bool — samtlige relevante bilag balanserer innenfor tol
-      - ``residual_max``: max(|SelectedNet + ExpectedNet|) over bilag
-      - ``other_net_max``: max(|OtherNetAbs|) over bilag
-      - ``has_selected`` / ``has_expected`` / ``has_relevant``
-      - ``tolerance``: benyttet toleranse
+    En konto regnes som effektivt fraværende hvis ``|sum(Beløp)| ≤ threshold`` på
+    hvert bilag der den forekommer i kombinasjonen. Dette fanger øre-avrunding
+    (f.eks. 7771) og småposter som ikke er revisjonsmessig interessante — slik at
+    de ikke utløser «Ikke i regelsett» / «Umappet konto» / «Skopet ut» på ellers
+    forventede kombinasjoner.
+
+    Returnerer ``{}`` dersom oppslag ikke er mulig (tomt df_scope eller ingen
+    valgte kontoer) — kaller må da falle tilbake til uendret oppførsel.
     """
-    allowed_set = {_konto_str(k) for k in netting_allowed_kontos if _konto_str(k)}
-    if not allowed_set or df_scope is None or df_scope.empty:
+    if df_scope is None or df_scope.empty:
         return {}
-
     df = _ensure_scope_columns(df_scope)
     sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
     if not sel_set:
         return {}
-
-    try:
-        tol = max(float(tolerance or 0.0), 0.0)
-    except Exception:
-        tol = 1.0
+    wanted = {str(c).strip() for c in combos if str(c).strip()}
+    if not wanted:
+        return {}
 
     bilag_to_combo = build_bilag_to_motkonto_combo(df, list(sel_set), empty_label=empty_label)
 
-    sel_mask = df["Konto_str"].isin(sel_set)
-    expected_mask = (~sel_mask) & df["Konto_str"].isin(allowed_set)
-    other_mask = ~(sel_mask | expected_mask)
+    # Sett av kombinasjoner som faktisk eksisterer i df_scope. Bare disse får en
+    # entry i resultatet — slik at kaller kan skille «combo finnes ikke i data»
+    # (ingen filter) fra «combo finnes men alt er smått» (filter aktivt).
+    scope_combos: set[str] = set()
+    for combo_val in bilag_to_combo.values():
+        ck = str(combo_val).strip()
+        if ck:
+            scope_combos.add(ck)
 
-    selected_by_bilag = df.loc[sel_mask].groupby("Bilag_str")["Beløp"].sum()
-    dir_norm = normalize_direction(selected_direction)
-    if dir_norm == "kredit":
-        selected_by_bilag = selected_by_bilag.where(selected_by_bilag < 0, 0.0)
-    elif dir_norm == "debet":
-        selected_by_bilag = selected_by_bilag.where(selected_by_bilag > 0, 0.0)
+    result: dict[str, set[str]] = {c: set() for c in wanted if c in scope_combos}
+    if not result:
+        return result
 
-    expected_by_bilag = df.loc[expected_mask].groupby("Bilag_str")["Beløp"].sum()
-    other_net_by_bilag = df.loc[other_mask].groupby("Bilag_str")["Beløp"].sum()
-    expected_presence = df.loc[expected_mask].groupby("Bilag_str").size()
-    selected_presence = df.loc[sel_mask].groupby("Bilag_str").size()
+    df2 = df[~df["Konto_str"].isin(sel_set)].copy()
+    df2["__combo"] = df2["Bilag_str"].map(
+        lambda b: str(bilag_to_combo.get(_bilag_str(b), empty_label) or "").strip()
+    )
+    df2 = df2[df2["__combo"].isin(result.keys())]
+    if df2.empty:
+        return result
 
-    bilag_values = sorted({str(v) for v in df["Bilag_str"].dropna().astype(str).tolist() if str(v).strip()})
-    if not bilag_values:
+    thr = max(float(threshold or 0.0), 0.0)
+    grouped = (
+        df2.groupby(["__combo", "Bilag_str", "Konto_str"])["Beløp"]
+        .sum()
+        .abs()
+    )
+    effective = grouped[grouped > thr]
+    if effective.empty:
+        return result
+    effective_df = effective.reset_index()
+    for _, row in effective_df.iterrows():
+        result[str(row["__combo"])].add(str(row["Konto_str"]))
+    return result
+
+
+def _balance_pairs_summary_per_combo(
+    combos: Sequence[str],
+    *,
+    df_scope: pd.DataFrame,
+    selected_accounts: Sequence[str],
+    balance_pairs: Sequence[Any],
+    konto_regnskapslinje_map: Mapping[str, str],
+    empty_label: str,
+) -> dict[str, dict[str, Any]]:
+    """Sjekk parvis utligning per kombinasjon.
+
+    For hvert bilag i kombinasjonen, for hvert par (rl_a, rl_b):
+      - Hvis minst én av pair-RL-ene har linjer på bilaget, kreves utligning.
+      - Orphan: bare én side til stede → fail.
+      - Skjev: begge til stede, men |sum_a + sum_b| > tolerance → fail.
+      - Ellers OK.
+
+    Returnerer per combo ``{"matches": bool, "failures": list[dict]}``.
+    Hver failure har ``type`` ("orphan"/"skew"), ``pair`` (BalancePair),
+    og relevante tall.
+    """
+    if not balance_pairs or df_scope is None or df_scope.empty:
+        return {}
+    df = _ensure_scope_columns(df_scope).copy()
+    sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
+    if not sel_set:
         return {}
 
-    bilag_eval = pd.DataFrame(index=pd.Index(bilag_values, name="Bilag_str"))
-    bilag_eval["Kombinasjon"] = [
-        str(bilag_to_combo.get(_bilag_str(v), empty_label) or "").strip() for v in bilag_values
-    ]
-    bilag_eval["SelectedNet"] = selected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
-    bilag_eval["ExpectedNet"] = expected_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).values
-    bilag_eval["OtherNetAbs"] = other_net_by_bilag.reindex(bilag_values).fillna(0.0).astype(float).abs().values
-    bilag_eval["HasExpected"] = expected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
-    bilag_eval["HasSelected"] = selected_presence.reindex(bilag_values).fillna(0).astype(int).values > 0
-    bilag_eval["ResidualAbs"] = (bilag_eval["SelectedNet"] + bilag_eval["ExpectedNet"]).abs()
-    bilag_eval["Relevant"] = bilag_eval["HasSelected"] | bilag_eval["HasExpected"]
+    konto_to_regnr: dict[str, int] = {}
+    for konto, label in (konto_regnskapslinje_map or {}).items():
+        rn = _label_regnr_prefix(str(label or ""))
+        if rn is not None:
+            k = _konto_str(konto)
+            if k:
+                konto_to_regnr[k] = rn
+
+    bilag_to_combo = build_bilag_to_motkonto_combo(df, list(sel_set), empty_label=empty_label)
+    df["__regnr"] = df["Konto_str"].map(lambda k: konto_to_regnr.get(_konto_str(k)))
+    df["__combo"] = df["Bilag_str"].map(
+        lambda b: str(bilag_to_combo.get(_bilag_str(b), empty_label) or "").strip()
+    )
 
     wanted = {str(c).strip() for c in combos if str(c).strip()}
     summary: dict[str, dict[str, Any]] = {}
-    for combo_key, group in bilag_eval.groupby("Kombinasjon", dropna=False):
-        ck = str(combo_key or "").strip()
-        if not ck or (wanted and ck not in wanted):
+
+    for combo_key in wanted:
+        sub = df[df["__combo"] == combo_key]
+        if sub.empty:
             continue
-        rel = group[group["Relevant"]]
-        if rel.empty:
-            summary[ck] = {
-                "has_relevant": False,
-                "has_selected": False,
-                "has_expected": False,
-                "residual_max": 0.0,
-                "other_net_max": 0.0,
-                "tolerance": tol,
-                "matches": False,
-            }
-            continue
-        has_sel = bool(rel["HasSelected"].any())
-        has_exp = bool(rel["HasExpected"].any())
-        res_max = float(rel["ResidualAbs"].max())
-        other_max = float(rel["OtherNetAbs"].max())
-        matches = bool(
-            has_sel
-            and has_exp
-            and (
-                rel["HasSelected"]
-                & rel["HasExpected"]
-                & rel["ResidualAbs"].le(tol)
-                & rel["OtherNetAbs"].le(tol)
-            ).all()
+        sums = (
+            sub.groupby(["Bilag_str", "__regnr"], dropna=True)["Beløp"]
+            .sum()
+            .unstack(fill_value=0.0)
         )
-        summary[ck] = {
-            "has_relevant": True,
-            "has_selected": has_sel,
-            "has_expected": has_exp,
-            "residual_max": res_max,
-            "other_net_max": other_max,
-            "tolerance": tol,
-            "matches": matches,
-        }
+        failures: list[dict[str, Any]] = []
+        matches = True
+        for pair in balance_pairs:
+            rl_a = int(getattr(pair, "rl_a"))
+            rl_b = int(getattr(pair, "rl_b"))
+            tol = max(float(getattr(pair, "tolerance", 0.0) or 0.0), 0.0)
+            has_a_col = rl_a in sums.columns
+            has_b_col = rl_b in sums.columns
+            if not has_a_col and not has_b_col:
+                continue
+            for bilag in sums.index:
+                sa = float(sums.get(rl_a, pd.Series(0.0, index=sums.index)).get(bilag, 0.0))
+                sb = float(sums.get(rl_b, pd.Series(0.0, index=sums.index)).get(bilag, 0.0))
+                # Småposter (|sum| ≤ tol) behandles som effektivt fraværende — fanger
+                # øre-avrundinger og småbeløp som ikke er revisjonsmessig interessante.
+                eff_a = abs(sa) > tol
+                eff_b = abs(sb) > tol
+                if not (eff_a or eff_b):
+                    continue
+                if eff_a and not eff_b:
+                    matches = False
+                    failures.append({"type": "orphan", "pair": pair, "present": rl_a, "missing": rl_b, "amount": sa})
+                elif eff_b and not eff_a:
+                    matches = False
+                    failures.append({"type": "orphan", "pair": pair, "present": rl_b, "missing": rl_a, "amount": sb})
+                else:
+                    residual = sa + sb
+                    if abs(residual) > tol:
+                        matches = False
+                        failures.append({
+                            "type": "skew",
+                            "pair": pair,
+                            "residual": residual,
+                            "sum_a": sa,
+                            "sum_b": sb,
+                        })
+        summary[combo_key] = {"matches": matches, "failures": failures}
     return summary
 
 
@@ -662,10 +628,23 @@ def diagnose_combos_against_rule_set(
     approved_non_selected: dict[str, list[str]] = {}
     sel_set = {str(_konto_str(k)) for k in selected_accounts if str(_konto_str(k))}
 
+    # Filtrer småposter (f.eks. øre-avrunding) — kontoer som har |sum| ≤ tol på
+    # hvert bilag i kombinasjonen behandles som effektivt fraværende for
+    # regelsett-membership. Uten dette ville en enslig øre-linje på en uventet
+    # konto (7771 Øreavrunding) avvise hele kombinasjonen.
+    effective_map = _effective_non_selected_kontos_per_combo(
+        combos,
+        df_scope=df_scope,
+        selected_accounts=selected_accounts,
+        threshold=DEFAULT_BALANCE_TOLERANCE,
+        empty_label=empty_label,
+    )
+
     for combo in combos:
         combo_key = str(combo or "").strip()
         if not combo_key:
             continue
+        effective_for_combo = effective_map.get(combo_key) if effective_map else None
         non_selected: list[str] = []
         reason: str | None = None
         for raw in combo_key.split(","):
@@ -673,6 +652,8 @@ def diagnose_combos_against_rule_set(
             if not k:
                 continue
             if k in sel_set:
+                continue
+            if effective_for_combo is not None and k not in effective_for_combo:
                 continue
             label = str(label_map.get(k, "") or "").strip()
             if not label:
@@ -698,70 +679,70 @@ def diagnose_combos_against_rule_set(
         else:
             approved_non_selected[combo_key] = non_selected
 
-    netting_rules = [
-        (rule, rule_kontos)
-        for rule, rule_kontos, rule_label in rule_entries
-        if bool(getattr(rule, "requires_netting", False)) and rule_label
-    ]
-
-    if not netting_rules:
+    balance_pairs = tuple(getattr(rule_set, "balance_pairs", ()) or ())
+    if not balance_pairs:
         for combo_key in approved_non_selected:
             result[combo_key] = ComboDiagnosis(status=DIAG_EXPECTED)
         return result
 
-    netting_union: set[str] = set()
-    tolerances: list[float] = []
-    for rule, rule_kontos in netting_rules:
-        netting_union.update(rule_kontos)
-        try:
-            tol = float(getattr(rule, "netting_tolerance", 1.0) or 0.0)
-        except Exception:
-            tol = 1.0
-        tolerances.append(max(tol, 0.0))
-    tol_max = max(tolerances) if tolerances else 1.0
+    regnr_to_label: dict[int, str] = {}
+    for _konto, lbl in (label_map or {}).items():
+        rn = _label_regnr_prefix(str(lbl or ""))
+        if rn is not None and rn not in regnr_to_label:
+            regnr_to_label[rn] = str(lbl or "").strip()
 
-    netting_summary = _netting_summary_per_combo(
+    pairs_summary = _balance_pairs_summary_per_combo(
         list(approved_non_selected.keys()),
         df_scope=df_scope,
         selected_accounts=selected_accounts,
-        netting_allowed_kontos=netting_union,
-        tolerance=tol_max,
-        selected_direction=selected_direction,
+        balance_pairs=balance_pairs,
+        konto_regnskapslinje_map=label_map,
         empty_label=empty_label,
     )
 
     for combo_key in approved_non_selected:
-        summary = netting_summary.get(combo_key)
-        if summary is None or not summary.get("has_relevant", False):
+        info = pairs_summary.get(combo_key)
+        if info is None or info.get("matches", True):
             result[combo_key] = ComboDiagnosis(status=DIAG_EXPECTED)
             continue
-        if summary["matches"]:
+        failures = info.get("failures") or []
+        if not failures:
             result[combo_key] = ComboDiagnosis(status=DIAG_EXPECTED)
             continue
-        tol = float(summary["tolerance"])
-        res_max = float(summary["residual_max"])
-        other_max = float(summary["other_net_max"])
-        if not summary["has_selected"] or not summary["has_expected"]:
-            reason = "Mangler parlinje for netting"
-        elif res_max > tol and other_max > tol:
-            reason = (
-                f"Netting feilet: residual {_format_nok(res_max)} kr, "
-                f"utenfor {_format_nok(other_max)} kr"
-            )
-        elif res_max > tol:
-            reason = f"Netting feilet: residual {_format_nok(res_max)} kr"
-        elif other_max > tol:
-            reason = f"Utenfor netting: {_format_nok(other_max)} kr (other_net)"
+        first = failures[0]
+        pair = first.get("pair")
+        tol = max(float(getattr(pair, "tolerance", 0.0) or 0.0), 0.0)
+        if first["type"] == "orphan":
+            present_rl = int(first["present"])
+            missing_rl = int(first["missing"])
+            present_name = _rl_name(regnr_to_label.get(present_rl, str(present_rl)))
+            missing_name = _rl_name(regnr_to_label.get(missing_rl, str(missing_rl)))
+            reason = f"Utligning mangler motpart: {present_name} uten {missing_name}"
+            details = {
+                "present_regnr": present_rl,
+                "missing_regnr": missing_rl,
+                "amount": float(first.get("amount", 0.0)),
+            }
         else:
-            reason = "Netting feilet"
+            rl_a = int(getattr(pair, "rl_a"))
+            rl_b = int(getattr(pair, "rl_b"))
+            a_name = _rl_name(regnr_to_label.get(rl_a, str(rl_a)))
+            b_name = _rl_name(regnr_to_label.get(rl_b, str(rl_b)))
+            residual = float(first.get("residual", 0.0))
+            reason = (
+                f"Utligning skjev: {a_name} + {b_name} = "
+                f"{_format_nok(abs(residual))} kr (tol {_format_nok(tol)} kr)"
+            )
+            details = {
+                "rl_a": rl_a,
+                "rl_b": rl_b,
+                "residual": residual,
+                "tolerance": tol,
+            }
         result[combo_key] = ComboDiagnosis(
             status=DIAG_REJECTED,
             reason=reason,
-            details={
-                "residual_max": res_max,
-                "other_net_max": other_max,
-                "tolerance": tol,
-            },
+            details=details,
         )
 
     return result

@@ -14,6 +14,8 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from .expected_rules import (
+    DEFAULT_BALANCE_TOLERANCE,
+    BalancePair,
     ExpectedRule,
     ExpectedRuleSet,
     empty_rule_set,
@@ -185,8 +187,6 @@ def format_rule_summary(
             )
         else:
             body = f"{label}  (alle kontoer)"
-    if rule.requires_netting:
-        body += f"  · utligning ≤ {rule.netting_tolerance:g}"
     return body
 
 
@@ -204,12 +204,10 @@ class _RuleEdit:
     ``account_mode="selected"`` konverteres til eksklusjon ved åpning via
     :meth:`from_rule` (scope_kontos gis som parameter).
     """
-    target_regnr: int
+    target_regnr: int | None
     account_mode: str = "all"
     allowed_accounts: list[str] = field(default_factory=list)
     excluded_accounts: list[str] = field(default_factory=list)
-    requires_netting: bool = False
-    netting_tolerance: float = 1.0
 
     @classmethod
     def from_rule(
@@ -230,18 +228,16 @@ class _RuleEdit:
             account_mode="all",
             allowed_accounts=[],
             excluded_accounts=excluded,
-            requires_netting=bool(rule.requires_netting),
-            netting_tolerance=max(float(rule.netting_tolerance), 0.0),
         )
 
     def to_rule(self) -> ExpectedRule:
+        if self.target_regnr is None:
+            raise ValueError("target_regnr må være satt før regelen lagres")
         return ExpectedRule(
             target_regnr=int(self.target_regnr),
             account_mode="all",
             allowed_accounts=(),
             excluded_accounts=tuple(self.excluded_accounts),
-            requires_netting=bool(self.requires_netting),
-            netting_tolerance=max(float(self.netting_tolerance), 0.0),
         )
 
 
@@ -273,6 +269,9 @@ def choose_expected_rules(
         )
         for r in rule_set.rules
     ]
+    balance_pairs_state: list[BalancePair] = list(
+        getattr(rule_set, "balance_pairs", ()) or ()
+    )
     scope_rl_options = build_rl_options(konto_regnskapslinje_map, exclude_regnr=int(source_regnr))
     # RL-er som faktisk observeres som motpost til kilden i aktuelt utvalg.
     motpost_rl_map: dict[str, str] = {}
@@ -295,6 +294,8 @@ def choose_expected_rules(
     scope_regnrs = {r for r, _ in scope_rl_options}
     known_regnrs = {r for r, _ in all_rl_options}
     for edit in rules:
+        if edit.target_regnr is None:
+            continue
         if edit.target_regnr not in known_regnrs:
             all_rl_options.append((edit.target_regnr, f"{edit.target_regnr}"))
             known_regnrs.add(edit.target_regnr)
@@ -367,9 +368,15 @@ def choose_expected_rules(
     body.columnconfigure(1, weight=2, minsize=480)
     body.rowconfigure(0, weight=1)
 
-    # --- Left: rules list ---------------------------------------------------
-    left = ttk.LabelFrame(body, text="Forventede motposter")
-    left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+    # --- Left: rules list + balance pairs ----------------------------------
+    left_wrap = ttk.Frame(body)
+    left_wrap.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+    left_wrap.columnconfigure(0, weight=1)
+    left_wrap.rowconfigure(0, weight=2)
+    left_wrap.rowconfigure(1, weight=1)
+
+    left = ttk.LabelFrame(left_wrap, text="Forventede motposter")
+    left.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
     left.rowconfigure(1, weight=1)
     left.columnconfigure(0, weight=1)
 
@@ -383,11 +390,28 @@ def choose_expected_rules(
     rules_list = tk.Listbox(left, exportselection=False, activestyle="dotbox")
     rules_list.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
 
+    pair_frame = ttk.LabelFrame(left_wrap, text="Utligningspar")
+    pair_frame.grid(row=1, column=0, sticky="nsew")
+    pair_frame.rowconfigure(1, weight=1)
+    pair_frame.columnconfigure(0, weight=1)
+
+    pair_bar = ttk.Frame(pair_frame)
+    pair_bar.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+    btn_pair_add = ttk.Button(pair_bar, text="+ Legg til par")
+    btn_pair_add.pack(side=tk.LEFT)
+    btn_pair_delete = ttk.Button(pair_bar, text="Slett par", state="disabled")
+    btn_pair_delete.pack(side=tk.LEFT, padx=(6, 0))
+
+    pairs_list = tk.Listbox(
+        pair_frame, exportselection=False, activestyle="dotbox", height=4
+    )
+    pairs_list.grid(row=1, column=0, sticky="nsew", padx=6, pady=(0, 6))
+
     # Empty-state hint (vises kun når ingen regler finnes)
     hint_var = tk.StringVar(
         value=(
             "Ingen regler ennå.\n\n"
-            "Klikk \"+ Legg til regel\" for å velge en target-RL."
+            "Klikk \"+ Legg til regel\" for å velge en motpost-RL."
         )
     )
     hint_label = ttk.Label(
@@ -402,8 +426,7 @@ def choose_expected_rules(
     right = ttk.LabelFrame(body, text="Detaljer for valgt regel")
     right.grid(row=0, column=1, sticky="nsew")
     right.columnconfigure(1, weight=1)
-    # Accounts-listen ligger på rad 5 etter omorganisering (netting-boksen til topp)
-    right.rowconfigure(5, weight=1)
+    right.rowconfigure(4, weight=1)
 
     # Placeholder (vises når ingen regel er valgt)
     placeholder_var = tk.StringVar(value="Velg en regel til venstre eller legg til en ny.")
@@ -418,7 +441,7 @@ def choose_expected_rules(
     # Ekte kontroller (pakkes kun når en regel er valgt)
     detail_widgets: list[tk.Misc] = []
 
-    lbl_target = ttk.Label(right, text="Target-regnskapslinje:")
+    lbl_target = ttk.Label(right, text="Motpost-regnskapslinje:")
     target_var = tk.StringVar()
     combo_target = ttk.Combobox(
         right,
@@ -430,7 +453,7 @@ def choose_expected_rules(
     scope_only_var = tk.BooleanVar(value=False)
     chk_scope_only = ttk.Checkbutton(
         right,
-        text="Begrens target til observerte motpost-RL",
+        text="Vis bare RL-er som har motposter i utvalget",
         variable=scope_only_var,
     )
     if not motpost_rl_options:
@@ -438,7 +461,7 @@ def choose_expected_rules(
     motpost_only_var = tk.BooleanVar(value=False)
     chk_motpost_only = ttk.Checkbutton(
         right,
-        text="Skjul kontoer uten motpostføringer i utvalget",
+        text="Skjul kontoer uten bokføringer",
         variable=motpost_only_var,
     )
     if not motpost_kontos:
@@ -447,11 +470,7 @@ def choose_expected_rules(
 
     instruction_label = ttk.Label(
         right,
-        text=(
-            "Alle kontoer i regnskapslinjen regnes som forventet. "
-            "Marker eventuelle kontoer du ikke vil ha med (Ctrl/Shift for flere) "
-            "og klikk \"Scope ut markerte\" for å ekskludere dem."
-        ),
+        text="Markér kontoer du vil ekskludere fra regelen.",
         foreground="#555555",
         wraplength=700,
         justify="left",
@@ -488,9 +507,9 @@ def choose_expected_rules(
     accounts_tree.configure(yscrollcommand=scroll.set)
 
     btn_row = ttk.Frame(right)
-    btn_scope_out = ttk.Button(btn_row, text="Scope ut markerte", state="disabled")
+    btn_scope_out = ttk.Button(btn_row, text="Ekskluder valgte", state="disabled")
     btn_scope_out.pack(side=tk.LEFT)
-    btn_include = ttk.Button(btn_row, text="Inkluder markerte igjen", state="disabled")
+    btn_include = ttk.Button(btn_row, text="Inkluder valgte", state="disabled")
     btn_include.pack(side=tk.LEFT, padx=(6, 0))
     selection_status_var = tk.StringVar(value="")
     selection_status_label = ttk.Label(
@@ -501,30 +520,6 @@ def choose_expected_rules(
     )
     selection_status_label.pack(side=tk.RIGHT)
     detail_widgets.append(btn_row)
-
-    # Per-regel netting
-    netting_box = ttk.LabelFrame(right, text="Utligning mot kilde (valgfritt)")
-    netting_box.columnconfigure(1, weight=1)
-    netting_var = tk.BooleanVar(value=False)
-    tol_var = tk.StringVar(value="1")
-    chk_netting = ttk.Checkbutton(
-        netting_box,
-        text="Krev at kombinasjoner som treffer denne regelen balanserer mot kilde",
-        variable=netting_var,
-    )
-    chk_netting.grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=(6, 0))
-    ttk.Label(netting_box, text="Terskel:").grid(row=1, column=0, sticky="w", padx=6, pady=(2, 6))
-    tol_frame = ttk.Frame(netting_box)
-    tol_frame.grid(row=1, column=1, sticky="w", pady=(2, 6))
-    entry_tol = ttk.Entry(tol_frame, textvariable=tol_var, width=10)
-    entry_tol.pack(side=tk.LEFT)
-    ttk.Label(tol_frame, text="kr").pack(side=tk.LEFT, padx=(4, 0))
-    tol_error_var = tk.StringVar(value="")
-    tol_error_label = ttk.Label(
-        tol_frame, textvariable=tol_error_var, foreground="#B00000"
-    )
-    tol_error_label.pack(side=tk.LEFT, padx=(10, 0))
-    detail_widgets.append(netting_box)
 
     # Bottom buttons
     bottom = ttk.Frame(outer)
@@ -538,11 +533,6 @@ def choose_expected_rules(
     btn_ok.pack(side=tk.RIGHT)
     btn_cancel = ttk.Button(bottom, text="Avbryt", command=win.destroy)
     btn_cancel.pack(side=tk.RIGHT, padx=(0, 6))
-    ttk.Label(
-        bottom,
-        text="Klikk \"Lagre regler\" for å lagre alle reglene og de markerte kontoene.",
-        foreground="#555555",
-    ).pack(side=tk.LEFT)
 
     # item_id -> konto (seleksjonen i treet fungerer som "avkrysning")
     item_to_konto: dict[str, str] = {}
@@ -566,12 +556,11 @@ def choose_expected_rules(
 
         lbl_target.grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
         combo_target.grid(row=0, column=1, sticky="ew", padx=6, pady=(6, 2))
-        netting_box.grid(row=1, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 6))
-        chk_scope_only.grid(row=2, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
-        chk_motpost_only.grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
-        instruction_label.grid(row=4, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 4))
-        list_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=6, pady=(0, 6))
-        btn_row.grid(row=6, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
+        chk_scope_only.grid(row=1, column=0, columnspan=2, sticky="w", padx=6, pady=(2, 2))
+        chk_motpost_only.grid(row=2, column=0, columnspan=2, sticky="w", padx=6, pady=(0, 2))
+        instruction_label.grid(row=3, column=0, columnspan=2, sticky="ew", padx=6, pady=(2, 4))
+        list_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=6, pady=(0, 6))
+        btn_row.grid(row=5, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 6))
 
     def _layout_left_panel() -> None:
         try:
@@ -582,11 +571,15 @@ def choose_expected_rules(
             return
         hint_label.grid(row=1, column=0, sticky="nsew", padx=6, pady=20)
 
+    def _format_edit_summary(edit: _RuleEdit) -> str:
+        if edit.target_regnr is None:
+            return "(velg motpost…)"
+        return format_rule_summary(edit.to_rule(), regnr_to_label=regnr_to_label)
+
     def _refresh_rules_list(select_idx: int | None = None) -> None:
         rules_list.delete(0, tk.END)
         for edit in rules:
-            rule = edit.to_rule()
-            rules_list.insert(tk.END, format_rule_summary(rule, regnr_to_label=regnr_to_label))
+            rules_list.insert(tk.END, _format_edit_summary(edit))
         _layout_left_panel()
         if select_idx is not None and 0 <= select_idx < len(rules):
             rules_list.selection_clear(0, tk.END)
@@ -657,6 +650,10 @@ def choose_expected_rules(
         accounts_tree.delete(*accounts_tree.get_children(""))
         item_to_konto.clear()
         konto_to_item.clear()
+        if edit.target_regnr is None:
+            _update_selection_status(edit)
+            _update_action_buttons()
+            return
         target_accounts = accounts_in_target_rl(konto_regnskapslinje_map, edit.target_regnr)
         excluded_set = {_konto_str(k) for k in edit.excluded_accounts if _konto_str(k)}
         if motpost_only_var.get() and motpost_kontos:
@@ -704,7 +701,7 @@ def choose_expected_rules(
         idx = int(sel[0])
         if 0 <= idx < len(rules):
             rules_list.delete(idx)
-            rules_list.insert(idx, format_rule_summary(rules[idx].to_rule(), regnr_to_label=regnr_to_label))
+            rules_list.insert(idx, _format_edit_summary(rules[idx]))
             rules_list.selection_set(idx)
             rules_list.activate(idx)
 
@@ -728,23 +725,19 @@ def choose_expected_rules(
     accounts_tree.bind("<<TreeviewSelect>>", _on_selection_changed)
 
     def _update_selection_status(edit: _RuleEdit | None) -> None:
-        if edit is None:
+        if edit is None or edit.target_regnr is None:
             selection_status_var.set("")
             return
-        total = len(accounts_in_target_rl(konto_regnskapslinje_map, edit.target_regnr))
+        target_accounts = accounts_in_target_rl(konto_regnskapslinje_map, edit.target_regnr)
+        total = len(target_accounts)
         excluded_set = {_konto_str(k) for k in edit.excluded_accounts if _konto_str(k)}
-        excluded_count = sum(
-            1 for k in accounts_in_target_rl(konto_regnskapslinje_map, edit.target_regnr)
-            if k in excluded_set
-        )
-        expected = total - excluded_count
+        excluded_count = sum(1 for k in target_accounts if k in excluded_set)
+        included = total - excluded_count
         if excluded_count == 0:
-            selection_status_var.set(
-                f"Alle {total} kontoer regnes som forventet."
-            )
+            selection_status_var.set(f"{total} kontoer inkludert")
         else:
             selection_status_var.set(
-                f"{expected} av {total} forventet · {excluded_count} skopet ut"
+                f"{included} av {total} inkludert · {excluded_count} ekskludert"
             )
 
     _suppress_trace = {"value": False}
@@ -758,10 +751,10 @@ def choose_expected_rules(
         _layout_detail_panel(show=True)
         _suppress_trace["value"] = True
         try:
-            target_var.set(regnr_to_label.get(int(edit.target_regnr), ""))
-            netting_var.set(bool(edit.requires_netting))
-            tol_var.set(f"{float(edit.netting_tolerance):g}")
-            tol_error_var.set("")
+            if edit.target_regnr is None:
+                target_var.set("")
+            else:
+                target_var.set(regnr_to_label.get(int(edit.target_regnr), ""))
         finally:
             _suppress_trace["value"] = False
         _rebuild_accounts_tree(edit)
@@ -821,7 +814,10 @@ def choose_expected_rules(
         if edit is not None:
             _suppress_trace["value"] = True
             try:
-                target_var.set(regnr_to_label.get(int(edit.target_regnr), ""))
+                if edit.target_regnr is None:
+                    target_var.set("")
+                else:
+                    target_var.set(regnr_to_label.get(int(edit.target_regnr), ""))
             finally:
                 _suppress_trace["value"] = False
 
@@ -838,82 +834,167 @@ def choose_expected_rules(
 
     motpost_only_var.trace_add("write", _on_motpost_only_toggle)
 
-    def _on_netting_toggled(*_args) -> None:
-        if _suppress_trace["value"]:
-            return
-        edit = _current_edit()
-        if edit is None:
-            return
-        edit.requires_netting = bool(netting_var.get())
-        _refresh_rule_label_only()
-
-    netting_var.trace_add("write", _on_netting_toggled)
-
-    def _on_tolerance_edited(_e: tk.Event | None = None) -> None:
-        edit = _current_edit()
-        if edit is None:
-            return
-        raw = tol_var.get().strip()
-        if not raw:
-            tol_error_var.set("")
-            edit.netting_tolerance = 1.0
-            tol_var.set("1")
-            _refresh_rule_label_only()
-            return
-        try:
-            value = float(raw.replace(",", "."))
-        except Exception:
-            tol_error_var.set("Må være tall ≥ 0")
-            return
-        if value < 0:
-            tol_error_var.set("Må være tall ≥ 0")
-            return
-        tol_error_var.set("")
-        edit.netting_tolerance = value
-        _refresh_rule_label_only()
-
-    entry_tol.bind("<FocusOut>", _on_tolerance_edited)
-    entry_tol.bind("<Return>", _on_tolerance_edited)
-
     def _on_add_rule() -> None:
         if not all_rl_options:
             messagebox.showinfo(
                 "Ingen RL tilgjengelig",
-                "Det finnes ingen regnskapslinjer å velge som target.",
+                "Det finnes ingen regnskapslinjer å velge som motpost.",
                 parent=win,
             )
             return
-        used_regnrs = {int(e.target_regnr) for e in rules}
-        # Foretrekk observerte motpost-RL, deretter full liste; hopp over
-        # regnrs som allerede har en regel.
-        candidates: list[tuple[int, str]] = []
-        seen: set[int] = set()
-        for regnr, label in list(motpost_rl_options) + list(all_rl_options):
-            if regnr in seen:
-                continue
-            seen.add(regnr)
-            candidates.append((regnr, label))
-        first_free = next(
-            ((r, lbl) for r, lbl in candidates if r not in used_regnrs), None
-        )
-        if first_free is None:
-            messagebox.showinfo(
-                "Alle RL-er er i bruk",
-                "Alle tilgjengelige regnskapslinjer har allerede en regel. "
-                "Slett en eksisterende regel for å legge til en ny.",
-                parent=win,
-            )
-            return
-        first_regnr, _ = first_free
         rules.append(
             _RuleEdit(
-                target_regnr=first_regnr,
+                target_regnr=None,
                 account_mode="all",
                 allowed_accounts=[],
                 excluded_accounts=[],
             )
         )
         _refresh_rules_list(select_idx=len(rules) - 1)
+
+    def _format_pair(pair: BalancePair) -> str:
+        a = regnr_to_label.get(int(pair.rl_a), str(pair.rl_a))
+        b = regnr_to_label.get(int(pair.rl_b), str(pair.rl_b))
+        tol = max(float(pair.tolerance), 0.0)
+        return f"{a}  ↔  {b}  (±{tol:g} kr)"
+
+    def _refresh_pairs_list(select_idx: int | None = None) -> None:
+        pairs_list.delete(0, tk.END)
+        for pair in balance_pairs_state:
+            pairs_list.insert(tk.END, _format_pair(pair))
+        if select_idx is not None and 0 <= select_idx < len(balance_pairs_state):
+            pairs_list.selection_clear(0, tk.END)
+            pairs_list.selection_set(select_idx)
+            pairs_list.activate(select_idx)
+        _update_pair_delete_button()
+
+    def _update_pair_delete_button() -> None:
+        try:
+            if pairs_list.curselection():
+                btn_pair_delete.state(("!disabled",))
+            else:
+                btn_pair_delete.state(("disabled",))
+        except Exception:
+            pass
+
+    def _on_pair_selected(_event: tk.Event | None = None) -> None:
+        _update_pair_delete_button()
+
+    pairs_list.bind("<<ListboxSelect>>", _on_pair_selected)
+
+    def _available_pair_options() -> list[tuple[int, str]]:
+        options: list[tuple[int, str]] = []
+        seen: set[int] = set()
+        for edit in rules:
+            if edit.target_regnr is None or edit.target_regnr in seen:
+                continue
+            seen.add(int(edit.target_regnr))
+            options.append(
+                (int(edit.target_regnr), regnr_to_label.get(int(edit.target_regnr), str(edit.target_regnr)))
+            )
+        options.sort(key=lambda kv: kv[0])
+        return options
+
+    def _on_pair_add() -> None:
+        options = _available_pair_options()
+        if len(options) < 2:
+            messagebox.showinfo(
+                "For få regler",
+                "Du må ha minst to regler med valgt motpost før du kan lage et par.",
+                parent=win,
+            )
+            return
+        modal = tk.Toplevel(win)
+        modal.title("Legg til utligningspar")
+        modal.transient(win)
+        modal.grab_set()
+        frm = ttk.Frame(modal, padding=12)
+        frm.pack(fill=tk.BOTH, expand=True)
+        frm.columnconfigure(1, weight=1)
+
+        ttk.Label(frm, text="RL A:").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        var_a = tk.StringVar(value=options[0][1])
+        combo_a = ttk.Combobox(
+            frm,
+            textvariable=var_a,
+            values=[lbl for _, lbl in options],
+            state="readonly",
+            width=32,
+        )
+        combo_a.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+
+        ttk.Label(frm, text="RL B:").grid(row=1, column=0, sticky="w", pady=(0, 4))
+        var_b = tk.StringVar(value=options[1][1])
+        combo_b = ttk.Combobox(
+            frm,
+            textvariable=var_b,
+            values=[lbl for _, lbl in options],
+            state="readonly",
+            width=32,
+        )
+        combo_b.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+
+        ttk.Label(frm, text="Toleranse (kr):").grid(row=2, column=0, sticky="w", pady=(0, 4))
+        tol_var_pair = tk.StringVar(value=f"{DEFAULT_BALANCE_TOLERANCE:g}")
+        entry_tol_pair = ttk.Entry(frm, textvariable=tol_var_pair, width=10)
+        entry_tol_pair.grid(row=2, column=1, sticky="w", padx=(6, 0), pady=(0, 4))
+
+        err_var = tk.StringVar(value="")
+        ttk.Label(frm, textvariable=err_var, foreground="#B00000").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(2, 6)
+        )
+
+        label_to_regnr = {lbl: regnr for regnr, lbl in options}
+
+        def _commit_pair() -> None:
+            rl_a = label_to_regnr.get(var_a.get())
+            rl_b = label_to_regnr.get(var_b.get())
+            if rl_a is None or rl_b is None:
+                err_var.set("Velg begge RL-er.")
+                return
+            if rl_a == rl_b:
+                err_var.set("Par må bestå av to forskjellige RL-er.")
+                return
+            try:
+                tol = float(tol_var_pair.get().replace(",", "."))
+            except Exception:
+                err_var.set("Toleransen må være et tall ≥ 0.")
+                return
+            if tol < 0:
+                err_var.set("Toleransen må være et tall ≥ 0.")
+                return
+            existing = {
+                tuple(sorted((p.rl_a, p.rl_b))) for p in balance_pairs_state
+            }
+            if tuple(sorted((rl_a, rl_b))) in existing:
+                err_var.set("Dette paret finnes allerede.")
+                return
+            balance_pairs_state.append(
+                BalancePair(rl_a=int(rl_a), rl_b=int(rl_b), tolerance=max(tol, 0.0))
+            )
+            modal.destroy()
+            _refresh_pairs_list(select_idx=len(balance_pairs_state) - 1)
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(6, 0))
+        ttk.Button(btns, text="Avbryt", command=modal.destroy).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(btns, text="Lagre", command=_commit_pair).pack(side=tk.RIGHT)
+        combo_a.focus_set()
+        modal.wait_window()
+
+    btn_pair_add.configure(command=_on_pair_add)
+
+    def _on_pair_delete() -> None:
+        sel = pairs_list.curselection()
+        if not sel:
+            return
+        idx = int(sel[0])
+        if 0 <= idx < len(balance_pairs_state):
+            balance_pairs_state.pop(idx)
+            new_idx = min(idx, len(balance_pairs_state) - 1) if balance_pairs_state else None
+            _refresh_pairs_list(select_idx=new_idx)
+
+    btn_pair_delete.configure(command=_on_pair_delete)
 
     btn_add.configure(command=_on_add_rule)
 
@@ -956,36 +1037,66 @@ def choose_expected_rules(
     btn_include.configure(command=_on_include)
 
     def _on_save() -> None:
-        # Commit ev. ventet toleranse-redigering
-        _on_tolerance_edited(None)
-        if tol_error_var.get():
+        unset = [idx for idx, edit in enumerate(rules) if edit.target_regnr is None]
+        if unset:
             messagebox.showwarning(
-                "Ugyldig terskel",
-                "Terskelen må være et tall ≥ 0 før du kan lagre.",
+                "Uvalgt motpost",
+                "Én eller flere regler mangler motpost-regnskapslinje. "
+                "Velg motpost for alle regler, eller slett de ubrukte.",
                 parent=win,
             )
             try:
-                entry_tol.focus_set()
+                rules_list.selection_clear(0, tk.END)
+                rules_list.selection_set(unset[0])
+                _on_rule_selected()
             except Exception:
                 pass
+            return
+        rule_regnrs = {int(edit.target_regnr) for edit in rules}
+        orphan_pair = next(
+            (p for p in balance_pairs_state if p.rl_a not in rule_regnrs or p.rl_b not in rule_regnrs),
+            None,
+        )
+        if orphan_pair is not None:
+            missing = [
+                regnr_to_label.get(r, str(r))
+                for r in (orphan_pair.rl_a, orphan_pair.rl_b)
+                if r not in rule_regnrs
+            ]
+            messagebox.showwarning(
+                "Utligningspar mangler regel",
+                "Et utligningspar peker på en RL som ikke har en regel: "
+                + ", ".join(missing)
+                + ". Legg til regelen eller slett paret.",
+                parent=win,
+            )
             return
         result["value"] = ExpectedRuleSet(
             source_regnr=int(source_regnr),
             selected_direction=direction,
             rules=tuple(edit.to_rule() for edit in rules),
+            balance_pairs=tuple(balance_pairs_state),
         )
         win.destroy()
 
     btn_ok.configure(command=_on_save)
 
     def _has_unsaved_changes() -> bool:
-        _on_tolerance_edited(None)
         try:
-            current = tuple(edit.to_rule() for edit in rules)
+            current = tuple(
+                edit.to_rule() for edit in rules if edit.target_regnr is not None
+            )
         except Exception:
             return True
-        initial = tuple(rule_set.rules)
-        return current != initial
+        has_unset = any(edit.target_regnr is None for edit in rules)
+        initial_rules = tuple(rule_set.rules)
+        initial_pairs = tuple(getattr(rule_set, "balance_pairs", ()) or ())
+        current_pairs = tuple(balance_pairs_state)
+        return (
+            has_unset
+            or current != initial_rules
+            or current_pairs != initial_pairs
+        )
 
     def _on_cancel() -> None:
         if not _has_unsaved_changes():
@@ -1011,6 +1122,7 @@ def choose_expected_rules(
         pass
 
     _refresh_rules_list(select_idx=0 if rules else None)
+    _refresh_pairs_list()
 
     win.wait_window()
     return result["value"]

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 """Strukturerte forventningsregler for motpost-kombinasjoner.
 
-Hver regel peker mot én target-regnskapslinje. Arbeidsflyten er
-eksklusjonsbasert: alle kontoer i RL regnes som forventet, og
-`excluded_accounts` ramser opp eventuelle kontoer som skal skopes ut.
-`account_mode="selected"` + `allowed_accounts` beholdes bak kulissene
-for bakoverkompatibilitet med eldre lagrede regler.
+Modellen har to lag:
+
+* ``ExpectedRule`` — én regel peker mot én motpost-regnskapslinje.
+  Arbeidsflyten er eksklusjonsbasert: alle kontoer i RL regnes som forventet,
+  og ``excluded_accounts`` ramser opp eventuelle kontoer som skal skopes ut.
+  ``account_mode="selected"`` + ``allowed_accounts`` beholdes bak kulissene
+  for bakoverkompatibilitet med eldre lagrede regler.
+* ``BalancePair`` — to motpost-RL-er som må utligne hverandre 1:1 per bilag,
+  innenfor en liten toleranse (default 100 kr). Uavhengig av kilde-RL.
 
 Regelsettet tilhører én kilde-RL + retningsvalg og persisteres via
 ``regnskap_client_overrides``.
@@ -21,6 +25,8 @@ import regnskap_client_overrides
 
 AccountMode = Literal["all", "selected"]
 
+DEFAULT_BALANCE_TOLERANCE = 100.0
+
 
 @dataclass(frozen=True)
 class ExpectedRule:
@@ -28,8 +34,13 @@ class ExpectedRule:
     account_mode: AccountMode = "all"
     allowed_accounts: tuple[str, ...] = ()
     excluded_accounts: tuple[str, ...] = ()
-    requires_netting: bool = False
-    netting_tolerance: float = 1.0
+
+
+@dataclass(frozen=True)
+class BalancePair:
+    rl_a: int
+    rl_b: int
+    tolerance: float = DEFAULT_BALANCE_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -37,9 +48,10 @@ class ExpectedRuleSet:
     source_regnr: int
     selected_direction: str
     rules: tuple[ExpectedRule, ...] = ()
+    balance_pairs: tuple[BalancePair, ...] = ()
 
     def is_empty(self) -> bool:
-        return not self.rules
+        return not self.rules and not self.balance_pairs
 
 
 def normalize_direction(value: str | None) -> str:
@@ -75,17 +87,11 @@ def _rule_from_dict(raw: dict) -> ExpectedRule | None:
         text = str(value or "").strip()
         if text and text not in excluded:
             excluded.append(text)
-    try:
-        tolerance = float(raw.get("netting_tolerance", 1.0) or 0.0)
-    except Exception:
-        tolerance = 1.0
     return ExpectedRule(
         target_regnr=regnr,
         account_mode=mode,  # type: ignore[arg-type]
         allowed_accounts=tuple(allowed),
         excluded_accounts=tuple(excluded),
-        requires_netting=bool(raw.get("requires_netting", False)),
-        netting_tolerance=max(tolerance, 0.0),
     )
 
 
@@ -95,8 +101,29 @@ def _rule_to_dict(rule: ExpectedRule) -> dict:
         "account_mode": rule.account_mode,
         "allowed_accounts": list(rule.allowed_accounts),
         "excluded_accounts": list(rule.excluded_accounts),
-        "requires_netting": bool(rule.requires_netting),
-        "netting_tolerance": max(float(rule.netting_tolerance), 0.0),
+    }
+
+
+def _pair_from_dict(raw: dict) -> BalancePair | None:
+    try:
+        rl_a = int(raw.get("rl_a"))
+        rl_b = int(raw.get("rl_b"))
+    except Exception:
+        return None
+    if rl_a == rl_b:
+        return None
+    try:
+        tol = float(raw.get("tolerance", DEFAULT_BALANCE_TOLERANCE) or 0.0)
+    except Exception:
+        tol = DEFAULT_BALANCE_TOLERANCE
+    return BalancePair(rl_a=rl_a, rl_b=rl_b, tolerance=max(tol, 0.0))
+
+
+def _pair_to_dict(pair: BalancePair) -> dict:
+    return {
+        "rl_a": int(pair.rl_a),
+        "rl_b": int(pair.rl_b),
+        "tolerance": max(float(pair.tolerance), 0.0),
     }
 
 
@@ -130,18 +157,27 @@ def load_rule_set(
         rule = _rule_from_dict(raw)
         if rule is not None:
             rules.append(rule)
+    pairs: list[BalancePair] = []
+    for raw in payload.get("balance_pairs", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        pair = _pair_from_dict(raw)
+        if pair is not None:
+            pairs.append(pair)
     return ExpectedRuleSet(
         source_regnr=int(source_regnr),
         selected_direction=direction,
         rules=tuple(rules),
+        balance_pairs=tuple(pairs),
     )
 
 
 def save_rule_set(client: str, rule_set: ExpectedRuleSet) -> Path:
     """Lagre regelsett som JSON. Regelløse sett lagres også (tom rules-liste)."""
     payload = {
-        "version": 3,
+        "version": 4,
         "rules": [_rule_to_dict(r) for r in rule_set.rules],
+        "balance_pairs": [_pair_to_dict(p) for p in rule_set.balance_pairs],
     }
     return regnskap_client_overrides.save_expected_motpost_rules(
         client,

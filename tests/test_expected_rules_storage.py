@@ -20,8 +20,6 @@ def test_roundtrip_mixed_account_modes(tmp_path, monkeypatch) -> None:
                 target_regnr=790,
                 account_mode="selected",
                 allowed_accounts=("2740", "2770"),
-                requires_netting=True,
-                netting_tolerance=2.5,
             ),
         ),
     )
@@ -38,8 +36,6 @@ def test_roundtrip_mixed_account_modes(tmp_path, monkeypatch) -> None:
         target_regnr=790,
         account_mode="selected",
         allowed_accounts=("2740", "2770"),
-        requires_netting=True,
-        netting_tolerance=2.5,
     )
 
 
@@ -187,3 +183,56 @@ def test_account_overrides_and_motpost_rules_preserve_each_other(
     )
     assert len(loaded.rules) == 1
     assert loaded.rules[0].target_regnr == 610
+
+
+def test_balance_pairs_roundtrip(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    from motpost.expected_rules import (
+        BalancePair,
+        ExpectedRule,
+        ExpectedRuleSet,
+        load_rule_set,
+        save_rule_set,
+    )
+
+    rule_set = ExpectedRuleSet(
+        source_regnr=10,
+        selected_direction="kredit",
+        rules=(
+            ExpectedRule(target_regnr=30),
+            ExpectedRule(target_regnr=110),
+        ),
+        balance_pairs=(BalancePair(rl_a=30, rl_b=110, tolerance=100.0),),
+    )
+    save_rule_set("Testklient", rule_set)
+
+    loaded = load_rule_set("Testklient", source_regnr=10, selected_direction="kredit")
+    assert loaded.balance_pairs == (BalancePair(rl_a=30, rl_b=110, tolerance=100.0),)
+
+
+def test_legacy_requires_netting_field_is_ignored(tmp_path, monkeypatch) -> None:
+    """Gamle lagrede regler med requires_netting skal laste uten feil."""
+    monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
+
+    import regnskap_client_overrides
+    from motpost.expected_rules import ExpectedRule, load_rule_set
+
+    regnskap_client_overrides.save_expected_motpost_rules(
+        "Testklient",
+        source_regnr=10,
+        selected_direction="alle",
+        payload={
+            "version": 3,
+            "rules": [
+                {
+                    "target_regnr": 610,
+                    "account_mode": "all",
+                    "requires_netting": True,
+                    "netting_tolerance": 2.5,
+                },
+            ],
+        },
+    )
+    loaded = load_rule_set("Testklient", source_regnr=10, selected_direction="alle")
+    assert loaded.rules == (ExpectedRule(target_regnr=610, account_mode="all"),)
