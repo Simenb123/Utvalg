@@ -527,6 +527,7 @@ def refresh_hb_konto_pivot(*, page: Any) -> None:
         pass
     try:
         import page_analyse_rl
+        page_analyse_rl.ensure_sb_prev_loaded(page=page)
         page_analyse_rl.update_pivot_headings(page=page, mode="HB-konto")
     except Exception:
         pass
@@ -561,6 +562,23 @@ def refresh_hb_konto_pivot(*, page: Any) -> None:
         pivot_df = build_pivot_by_account(df_filtered)
     else:
         pivot_df = pd.DataFrame(columns=["Konto", "Kontonavn", "Sum beløp", "Antall bilag"])
+
+    # Berik med UB_fjor slik at "Vis nullsaldo" kan sjekke år+fjor. Gjør ingen
+    # visningsendring — UB_fjor vises ikke i HB-konto-modus — men filteret
+    # skal ikke skjule kontoer som har fjorårssaldo.
+    sb_prev = getattr(page, "_rl_sb_prev_df", None)
+    if isinstance(sb_prev, pd.DataFrame) and not sb_prev.empty and not pivot_df.empty:
+        pk_col = next((c for c in sb_prev.columns if str(c).strip().lower() == "konto"), None)
+        pu_col = next((c for c in sb_prev.columns if str(c).strip().lower() == "ub"), None)
+        if pk_col and pu_col:
+            prev = sb_prev[[pk_col, pu_col]].copy()
+            prev[pk_col] = prev[pk_col].astype(str).str.strip()
+            prev[pu_col] = pd.to_numeric(prev[pu_col], errors="coerce").fillna(0.0)
+            prev = prev.groupby(pk_col, as_index=False).agg({pu_col: "sum"})
+            prev = prev.rename(columns={pk_col: "Konto", pu_col: "UB_fjor"})
+            pivot_df = pivot_df.copy()
+            pivot_df["Konto"] = pivot_df["Konto"].astype(str).str.strip()
+            pivot_df = pivot_df.merge(prev, how="left", on="Konto")
 
     if show_only_unmapped:
         wanted = {
@@ -654,8 +672,23 @@ def refresh_hb_konto_pivot(*, page: Any) -> None:
         sum_val = row.get("Sum beløp", 0.0)
         cnt_val = row.get("Antall bilag", 0)
 
-        if hide_zero and abs(float(sum_val or 0)) < 0.005:
-            continue
+        if hide_zero:
+            # Skjul kun kontoer som er 0 både i aktuelt år og i fjor.
+            try:
+                cur_zero = abs(float(sum_val or 0)) < 0.005
+            except Exception:
+                cur_zero = False
+            ub_fjor_val = row.get("UB_fjor") if "UB_fjor" in pivot_df.columns else None
+            try:
+                prev_zero = (
+                    ub_fjor_val is None
+                    or (isinstance(ub_fjor_val, float) and ub_fjor_val != ub_fjor_val)
+                    or abs(float(ub_fjor_val or 0)) < 0.005
+                )
+            except Exception:
+                prev_zero = True
+            if cur_zero and prev_zero:
+                continue
 
         comment = account_comments.get(konto, "")
         is_ok = bool(account_review.get(konto, {}).get("ok"))

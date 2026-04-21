@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
+from .control.basis import control_gl_basis_column_for_account
 from .utils import dec_round, nb_to_decimal
 
 
@@ -26,15 +27,26 @@ def _basis_value(row: pd.Series, basis_col: str) -> Decimal:
     ib = nb_to_decimal(row.get("IB"))
     ub = nb_to_decimal(row.get("UB"))
 
-    if basis == "IB":
-        return ib
-    if basis == "UB":
-        return ub
     if basis in ("IB-UB", "IB_MINUS_UB"):
         return ib - ub
     if basis in ("UB-IB", "UB_MINUS_IB"):
         return ub - ib
+    basis_name = _basis_column_for_account(row, fallback=basis_col)
+    if basis_name == "IB":
+        return ib
+    if basis_name == "UB":
+        return ub
+    if basis_name == "Endring":
+        return nb_to_decimal(row.get("Endring"))
     return nb_to_decimal(row.get(basis_col))
+
+
+def _basis_column_for_account(row: pd.Series, *, fallback: object = "Endring") -> str:
+    return control_gl_basis_column_for_account(
+        row.get("Konto"),
+        row.get("Navn"),
+        requested_basis=fallback,
+    )
 
 
 def mapping_to_assigned_df(

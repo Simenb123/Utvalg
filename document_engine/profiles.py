@@ -406,6 +406,12 @@ def _value_markers(field_name: str, value: str) -> list[str]:
     if not value:
         return []
 
+    # Normalize NBSP → regular space. Segment lines pass through
+    # `_candidate_lines` which collapses \s+ (including \u00a0) to " ",
+    # so markers containing NBSP never match. Without this, amounts
+    # like "183\u00a0592,50" produced by PDF extraction fail to learn.
+    value = value.replace("\u00a0", " ")
+
     markers = {value}
     if field_name.endswith("_amount"):
         compact = value.replace(" ", "")

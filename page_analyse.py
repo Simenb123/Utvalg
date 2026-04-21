@@ -292,6 +292,13 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
         # --- SB/transaksjonsvisning toggle ---
         self._var_tx_view_mode = tk.StringVar(value="Saldobalanse")
+        try:
+            self._var_tx_view_mode.trace_add(
+                "write",
+                lambda *_a: self._on_tx_view_mode_changed(),
+            )
+        except Exception:
+            pass
         self._var_decimals = tk.BooleanVar(value=True)  # vis desimaler
 
         # --- UI refs ---
@@ -1009,6 +1016,9 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
     def _bulk_map_selected_problem_accounts(self) -> None:
         analyse_mapping_ui.bulk_map_selected_problem_accounts(page=self)
+
+    def _show_mapping_drift_dialog(self) -> None:
+        analyse_mapping_ui.show_mapping_drift_dialog(page=self)
 
     def _update_ao_count_label(self) -> None:
         """Vis antall tilleggsposteringer ved ÅO-checkboxen."""

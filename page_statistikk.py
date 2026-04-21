@@ -22,55 +22,25 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
 
-_AMT_FMT = "#,##0.00;[Red]-#,##0.00"
 
-# MVA-koder → normalsats (brukes i avstemming)
-_MVA_SATS_MAP: dict[str, float] = {
-    "1": 0.25, "11": 0.15, "12": 0.12, "13": 0.0,
-    "3": 0.25, "31": 0.15, "32": 0.12, "33": 0.0,
-}
-# Kontoer for utgående MVA
-_MVA_KONTO_FRA = 2700
-_MVA_KONTO_TIL = 2799
-
-
-# ---------------------------------------------------------------------------
-# Hjelpere
-# ---------------------------------------------------------------------------
-
-def _safe_float(v: object) -> float:
-    try:
-        f = float(v)  # type: ignore[arg-type]
-        return f if f == f else 0.0
-    except Exception:
-        return 0.0
-
-
-def _safe_int(v: object) -> int:
-    try:
-        return int(float(v))  # type: ignore[arg-type]
-    except Exception:
-        return 0
-
-
-def _fmt_amount(v: object) -> str:
-    try:
-        f = float(v)  # type: ignore[arg-type]
-        if f != f:
-            return "\u2013"
-        return f"{f:,.0f}".replace(",", "\u202f")
-    except Exception:
-        return "\u2013"
-
-
-def _fmt_pct(v: object) -> str:
-    try:
-        f = float(v)  # type: ignore[arg-type]
-        if f != f:
-            return "\u2013"
-        return f"{f:.1f} %"
-    except Exception:
-        return "\u2013"
+# Data-beregning (utskilt til page_statistikk_compute)
+from page_statistikk_compute import (  # noqa: E402
+    _AMT_FMT,
+    _compute_bilag,
+    _compute_extra_stats,
+    _compute_kontoer,
+    _compute_maned_pivot,
+    _compute_motpost,
+    _compute_mva,
+    _filter_df,
+    _fmt_amount,
+    _fmt_pct,
+    _get_konto_ranges,
+    _get_konto_set_for_regnr,
+    _safe_float,
+    _safe_int,
+    _sb_kontoer_in_ranges,
+)
 
 
 def _open_file(path: str) -> None:
@@ -131,372 +101,6 @@ def _attach_sort(tree: object) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Databeregning
-# ---------------------------------------------------------------------------
-
-def _get_konto_ranges(page: object, regnr: int) -> list[tuple[int, int]]:
-    intervals = getattr(page, "_rl_intervals", None)
-    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
-    if intervals is None or (hasattr(intervals, "empty") and intervals.empty):
-        return []
-    leaf_set: set[int] = {regnr}
-    if regnskapslinjer is not None and not (hasattr(regnskapslinjer, "empty") and regnskapslinjer.empty):
-        try:
-            from regnskap_mapping import expand_regnskapslinje_selection, normalize_regnskapslinjer
-            regn = normalize_regnskapslinjer(regnskapslinjer)
-            if bool(regn.loc[regn["regnr"].astype(int) == regnr, "sumpost"].any()):
-                expanded = expand_regnskapslinje_selection(
-                    regnskapslinjer=regnskapslinjer, selected_regnr=[regnr]
-                )
-                if expanded:
-                    leaf_set = set(expanded)
-        except Exception as exc:
-            log.warning("_get_konto_ranges: %s", exc)
-    ranges: list[tuple[int, int]] = []
-    try:
-        for _, row in intervals.iterrows():
-            if int(row["regnr"]) in leaf_set:
-                ranges.append((int(row["fra"]), int(row["til"])))
-    except Exception as exc:
-        log.warning("_get_konto_ranges loop: %s", exc)
-    return ranges
-
-
-def _filter_df(df: pd.DataFrame, ranges: list[tuple[int, int]]) -> pd.DataFrame:
-    if not ranges or df is None or df.empty or "Konto" not in df.columns:
-        return pd.DataFrame(columns=(df.columns if df is not None else []))
-    try:
-        num = pd.to_numeric(df["Konto"], errors="coerce")
-        mask = pd.Series(False, index=df.index)
-        for fra, til in ranges:
-            mask |= (num >= fra) & (num <= til)
-        return df.loc[mask].copy()
-    except Exception as exc:
-        log.warning("_filter_df: %s", exc)
-        return pd.DataFrame(columns=df.columns)
-
-
-def _compute_kontoer(df_rl: pd.DataFrame, page: object) -> tuple[pd.DataFrame, str]:
-    """Returnerer (grp_df, ib_col_label) der label er 'UB fjor' eller 'IB'."""
-    if df_rl.empty or "Beløp" not in df_rl.columns:
-        return pd.DataFrame(columns=["Konto", "Kontonavn", "IB", "Bevegelse", "UB", "Antall"]), "IB"
-    df = df_rl.copy()
-    df["_b"] = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0)
-    grp = (
-        df.groupby("Konto", sort=False)
-        .agg(Kontonavn=("Kontonavn", "first"), Bevegelse=("_b", "sum"), Antall=("_b", "count"))
-        .reset_index()
-        .sort_values("Konto")
-    )
-
-    ib_map: dict[str, float] = {}
-    ub_map: dict[str, float] = {}
-    ib_label = "IB"
-
-    # Foretrekk UB fra fjorårets saldobalanse som IB-kolonne
-    sb_prev = getattr(page, "_rl_sb_prev_df", None)
-    if sb_prev is not None and not sb_prev.empty and "konto" in sb_prev.columns:
-        for _, r in sb_prev.iterrows():
-            k = str(r["konto"])
-            ib_map[k] = _safe_float(r.get("ub"))   # fjorår UB = årets IB
-        ib_label = "UB fjor"
-
-    # Aktuelle SB for UB (inneværende år)
-    try:
-        sb = page._get_effective_sb_df()  # type: ignore[union-attr]
-    except Exception:
-        sb = getattr(page, "_rl_sb_df", None)
-    if sb is not None and not sb.empty and "konto" in sb.columns:
-        for _, r in sb.iterrows():
-            k = str(r["konto"])
-            if not ib_map:   # fall back til IB fra sb dersom ingen prev år
-                ib_map[k] = _safe_float(r.get("ib"))
-            ub_map[k] = _safe_float(r.get("ub"))
-        if not ib_map:
-            ib_label = "IB"
-
-    grp["IB"] = grp["Konto"].astype(str).map(ib_map)
-    grp["UB"] = grp["Konto"].astype(str).map(ub_map)
-    return grp[["Konto", "Kontonavn", "IB", "Bevegelse", "UB", "Antall"]], ib_label
-
-
-def _compute_extra_stats(df_rl: pd.DataFrame) -> dict:
-    """Beregner ekstra analytiske nøkkeltall for visning under nøkkeltall-bandet."""
-    out: dict = {}
-    if df_rl.empty or "Beløp" not in df_rl.columns:
-        return out
-
-    beløp = pd.to_numeric(df_rl["Beløp"], errors="coerce").fillna(0)
-    total_abs = beløp.abs().sum()
-
-    # Konsentrasjon: topp 10 bilag som % av total
-    if "Bilag" in df_rl.columns and total_abs > 0:
-        bilag_abs = (
-            df_rl.assign(_b=beløp).groupby("Bilag")["_b"].sum().abs().nlargest(10)
-        )
-        out["top10_pct"] = bilag_abs.sum() / total_abs * 100
-        out["n_bilag"] = df_rl["Bilag"].nunique()
-
-    # Unike kunder
-    if "Kunder" in df_rl.columns:
-        out["n_kunder"] = int(df_rl["Kunder"].dropna().nunique())
-
-    # Månedlig spredning
-    if "Dato" in df_rl.columns:
-        try:
-            dato = pd.to_datetime(df_rl["Dato"], dayfirst=True, errors="coerce")
-            mnd_sum = (
-                df_rl.assign(_b=beløp, _mnd=dato.dt.to_period("M"))
-                .groupby("_mnd")["_b"].sum()
-            )
-            if len(mnd_sum) > 1:
-                out["mnd_snitt"] = float(mnd_sum.mean())
-                out["mnd_std"] = float(mnd_sum.std())
-                out["mnd_max_name"] = str(mnd_sum.abs().idxmax())
-                out["mnd_max_val"] = float(mnd_sum[mnd_sum.abs().idxmax()])
-                # Anomali: måneder der abs(avvik fra snitt) > 1.5 × std
-                if out["mnd_std"] > 0:
-                    avvik = (mnd_sum - out["mnd_snitt"]).abs()
-                    out["n_anomali_mnd"] = int((avvik > 1.5 * out["mnd_std"]).sum())
-        except Exception:
-            pass
-
-    # Runde beløp-andel (beløp delbart med 1000)
-    runde = (beløp.abs() % 1000 == 0) & (beløp.abs() >= 1000)
-    out["runde_pct"] = float(runde.sum() / len(beløp) * 100) if len(beløp) > 0 else 0.0
-
-    return out
-
-
-def _compute_maned_pivot(df_rl: pd.DataFrame) -> tuple[list[str], pd.DataFrame]:
-    if df_rl.empty or "Beløp" not in df_rl.columns:
-        return [], pd.DataFrame()
-    df = df_rl.copy()
-    df["_b"] = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0)
-    if "Dato" in df.columns:
-        try:
-            df["_mnd"] = pd.to_datetime(df["Dato"], dayfirst=True, errors="coerce").dt.to_period("M").astype(str)
-        except Exception:
-            df["_mnd"] = "Ukjent"
-    elif "Periode" in df.columns:
-        df["_mnd"] = df["Periode"].astype(str)
-    else:
-        df["_mnd"] = "Ukjent"
-    months = sorted(df["_mnd"].dropna().unique().tolist())
-    konto_navn = df.groupby("Konto")["Kontonavn"].first()
-    pivot = df.pivot_table(index="Konto", columns="_mnd", values="_b", aggfunc="sum", fill_value=0.0)
-    pivot = pivot.reindex(columns=months, fill_value=0.0)
-    pivot["Sum"] = pivot[months].sum(axis=1)
-    pivot = pivot.reset_index()
-    pivot.insert(1, "Kontonavn", pivot["Konto"].astype(str).map(konto_navn).fillna(""))
-    return months, pivot.sort_values("Konto")
-
-
-def _compute_bilag(df_rl: pd.DataFrame) -> pd.DataFrame:
-    empty = pd.DataFrame(columns=["Bilag", "Dato", "Tekst", "Sum beløp", "Antall poster", "Kontoer"])
-    if df_rl.empty or "Bilag" not in df_rl.columns or "Beløp" not in df_rl.columns:
-        return empty
-    df = df_rl.copy()
-    df["_b"] = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0)
-    if "Dato" in df.columns:
-        try:
-            df["_dato"] = pd.to_datetime(df["Dato"], dayfirst=True, errors="coerce").dt.strftime("%d.%m.%Y")
-        except Exception:
-            df["_dato"] = df["Dato"].astype(str)
-    else:
-        df["_dato"] = ""
-    tekst_col = "Tekst" if "Tekst" in df.columns else "_dato"
-
-    def _ktoer(s: pd.Series) -> str:
-        u = sorted(s.dropna().astype(str).unique())
-        return ", ".join(u[:5]) + (" …" if len(u) > 5 else "")
-
-    grp = df.groupby("Bilag", sort=False).agg(
-        Dato=("_dato", "first"),
-        Tekst=(tekst_col, "first"),
-        SumBeløp=("_b", "sum"),
-        Antall=("_b", "count"),
-        Kontoer=("Konto", _ktoer),
-    ).reset_index()
-    grp["_abs"] = grp["SumBeløp"].abs()
-    grp = grp.sort_values("_abs", ascending=False).drop(columns=["_abs"])
-    return grp.rename(columns={"SumBeløp": "Sum beløp", "Antall": "Antall poster"})
-
-
-def _compute_mva(df_rl: pd.DataFrame, df_all: Optional[pd.DataFrame] = None) -> dict:
-    """
-    MVA-analyse med to strategier for å finne faktisk MVA-beløp:
-    1. Direkte: MVA-beløp-feltet på transaksjonslinjen
-    2. Motpost: konto 2700-2799 med samme bilagsnummer
-
-    Inkluderer rader uten MVA-kode som egen gruppe.
-    Returnerer dict med 'rows' (DataFrame) og avstemmingstall.
-    """
-    _EMPTY_ROWS = pd.DataFrame(
-        columns=["MVA-kode", "Antall", "Grunnlag", "MVA-beløp", "Sats %", "Effektiv %", "Status"]
-    )
-    _empty = {
-        "rows": _EMPTY_ROWS, "total_bevegelse": 0.0,
-        "total_med_kode": 0.0, "total_uten_kode": 0.0,
-        "total_mva": 0.0, "total_forventet_mva": 0.0,
-    }
-
-    if df_rl.empty or "Beløp" not in df_rl.columns:
-        return _empty
-
-    df = df_rl.copy()
-    df["_b"] = pd.to_numeric(df["Beløp"], errors="coerce").fillna(0)
-    df["_mva_direkt"] = (
-        pd.to_numeric(df["MVA-beløp"], errors="coerce").fillna(0)
-        if "MVA-beløp" in df.columns else pd.Series(0.0, index=df.index)
-    )
-
-    total_bevegelse = float(df["_b"].sum())
-
-    if "MVA-kode" not in df.columns:
-        return {**_empty, "total_bevegelse": total_bevegelse, "total_uten_kode": total_bevegelse}
-
-    # Splitt i med/uten kode
-    has_kode = df["MVA-kode"].notna() & (df["MVA-kode"].astype(str).str.strip() != "")
-    df_med = df[has_kode]
-    df_uten = df[~has_kode]
-
-    total_med_kode = float(df_med["_b"].sum())
-    total_uten_kode = float(df_uten["_b"].sum())
-
-    # Motpost-oppslag for MVA-kontoer (2700-2799)
-    motpost_mva: dict[str, float] = {}
-    if (
-        df_all is not None and not df_all.empty
-        and "Bilag" in df.columns and "Bilag" in df_all.columns
-        and "Konto" in df_all.columns
-    ):
-        try:
-            konto_num_all = pd.to_numeric(df_all["Konto"], errors="coerce")
-            df_mva_k = df_all.loc[
-                (konto_num_all >= _MVA_KONTO_FRA) & (konto_num_all <= _MVA_KONTO_TIL)
-            ].copy()
-            if not df_mva_k.empty:
-                df_mva_k["_b"] = pd.to_numeric(df_mva_k["Beløp"], errors="coerce").fillna(0)
-                for kode in df_med["MVA-kode"].unique():
-                    ks = str(kode).strip()
-                    bilag_k = set(
-                        df_med[df_med["MVA-kode"].astype(str).str.strip() == ks]["Bilag"]
-                        .dropna().astype(str).unique()
-                    )
-                    if bilag_k:
-                        motpost_mva[ks] = float(
-                            df_mva_k.loc[df_mva_k["Bilag"].astype(str).isin(bilag_k), "_b"].sum()
-                        )
-        except Exception as exc:
-            log.warning("_compute_mva motpost-oppslag: %s", exc)
-
-    rows: list[dict] = []
-    total_faktisk_mva = 0.0
-    total_forventet_mva = 0.0
-
-    # --- Rader med MVA-kode ---
-    if not df_med.empty:
-        grp = df_med.groupby("MVA-kode", sort=False).agg(
-            Antall=("_b", "count"),
-            Grunnlag=("_b", "sum"),
-            MVADirekt=("_mva_direkt", "sum"),
-        ).reset_index()
-
-        for _, row in grp.iterrows():
-            kode = str(row["MVA-kode"]).strip()
-            grunnlag = float(row["Grunnlag"])
-            direkt = float(row["MVADirekt"])
-            motpost = motpost_mva.get(kode, 0.0)
-
-            actual_mva = direkt if abs(direkt) > 1 else (motpost if abs(motpost) > 1 else 0.0)
-            eff_sats = abs(actual_mva / grunnlag) * 100 if abs(grunnlag) > 1 else 0.0
-            forventet_sats = _MVA_SATS_MAP.get(kode)
-            forventet_mva_kode = abs(grunnlag) * (forventet_sats or 0.0)
-
-            total_faktisk_mva += actual_mva
-            total_forventet_mva += forventet_mva_kode
-
-            status = ""
-            if forventet_sats is not None and abs(grunnlag) > 100:
-                if abs(actual_mva) < 1:
-                    if forventet_mva_kode > 100:
-                        status = f"\u26a0 Ingen MVA funnet (forventet {_fmt_amount(forventet_mva_kode)})"
-                else:
-                    avvik = (
-                        abs(forventet_mva_kode - abs(actual_mva)) / forventet_mva_kode * 100
-                        if forventet_mva_kode > 0 else 0.0
-                    )
-                    status = "\u2713 OK" if avvik < 2.0 else f"\u26a0 Avvik {avvik:.1f}%"
-
-            rows.append({
-                "MVA-kode": kode,
-                "Antall": _safe_int(row["Antall"]),
-                "Grunnlag": grunnlag,
-                "MVA-beløp": actual_mva,
-                "Sats %": (forventet_sats or 0.0) * 100,
-                "Effektiv %": eff_sats,
-                "Status": status,
-            })
-
-    # --- Rader uten MVA-kode ---
-    if not df_uten.empty:
-        rows.append({
-            "MVA-kode": "\u2013 Ingen kode",
-            "Antall": len(df_uten),
-            "Grunnlag": float(df_uten["_b"].sum()),
-            "MVA-beløp": 0.0,
-            "Sats %": 0.0,
-            "Effektiv %": 0.0,
-            "Status": "",
-        })
-
-    result_df = pd.DataFrame(rows)
-    if not result_df.empty:
-        # Sorter: rader med kode øverst (etter grunnlag), "Ingen kode" sist
-        med_kode_df = result_df[~result_df["MVA-kode"].str.startswith("\u2013")].sort_values("Grunnlag")
-        ingen_df = result_df[result_df["MVA-kode"].str.startswith("\u2013")]
-        result_df = pd.concat([med_kode_df, ingen_df], ignore_index=True)
-
-    return {
-        "rows": result_df,
-        "total_bevegelse": total_bevegelse,
-        "total_med_kode": total_med_kode,
-        "total_uten_kode": total_uten_kode,
-        "total_mva": total_faktisk_mva,
-        "total_forventet_mva": total_forventet_mva,
-    }
-
-
-def _compute_motpost(df_all: pd.DataFrame, df_rl: pd.DataFrame) -> pd.DataFrame:
-    empty = pd.DataFrame(columns=["Konto", "Kontonavn", "Beløp", "Andel", "AntallBilag"])
-    if df_rl.empty or df_all is None or df_all.empty:
-        return empty
-    if "Bilag" not in df_rl.columns or "Bilag" not in df_all.columns:
-        return empty
-    rl_bilag = set(df_rl["Bilag"].dropna().astype(str).unique())
-    rl_kontoer = set(df_rl["Konto"].dropna().astype(str).unique()) if "Konto" in df_rl.columns else set()
-    mask = df_all["Bilag"].astype(str).isin(rl_bilag)
-    df_mp = df_all.loc[mask].copy()
-    if "Konto" in df_mp.columns:
-        df_mp = df_mp.loc[~df_mp["Konto"].astype(str).isin(rl_kontoer)]
-    if df_mp.empty:
-        return empty
-    df_mp = df_mp.copy()
-    df_mp["_b"] = pd.to_numeric(df_mp["Beløp"], errors="coerce").fillna(0)
-    grp = (
-        df_mp.groupby("Konto", sort=False)
-        .agg(Kontonavn=("Kontonavn", "first"), Beløp=("_b", "sum"), AntallBilag=("Bilag", "nunique"))
-        .reset_index()
-    )
-    grp["_abs"] = grp["Beløp"].abs()
-    grp = grp.sort_values("_abs", ascending=False)
-    total = grp["_abs"].sum()
-    grp["Andel"] = (grp["_abs"] / total * 100).round(1) if total > 0 else 0.0
-    return grp[["Konto", "Kontonavn", "Beløp", "Andel", "AntallBilag"]]
-
-
-# ---------------------------------------------------------------------------
 # Widget-hjelper
 # ---------------------------------------------------------------------------
 
@@ -552,6 +156,10 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         self._df_all_last: Optional[pd.DataFrame] = None
         self._mva_result_last: Optional[dict] = None
         self._motpost_data_last: Optional[pd.DataFrame] = None
+        self._motpost_rl_last: Optional[pd.DataFrame] = None
+        self._kombo_data_last: Optional[pd.DataFrame] = None
+        self._kombo_bilag_map_last: dict[str, str] = {}
+        self._kombo_rl_kontoer_last: set[str] = set()
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -646,14 +254,16 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         self._tab_bilag = ttk.Frame(self._nb)
         self._tab_mva = ttk.Frame(self._nb)
         self._tab_motpost = ttk.Frame(self._nb)
+        self._tab_kombo = ttk.Frame(self._nb)
 
         self._nb.add(self._tab_kontoer, text="Kontoer")
         self._nb.add(self._tab_maned, text="Månedspivot")
         self._nb.add(self._tab_bilag, text="Bilag-analyse")
         self._nb.add(self._tab_mva, text="MVA-analyse")
         self._nb.add(self._tab_motpost, text="Motpostfordeling")
+        self._nb.add(self._tab_kombo, text="Kombinasjoner")
 
-        for tab in (self._tab_kontoer, self._tab_maned, self._tab_bilag, self._tab_mva, self._tab_motpost):
+        for tab in (self._tab_kontoer, self._tab_maned, self._tab_bilag, self._tab_mva, self._tab_motpost, self._tab_kombo):
             tab.columnconfigure(0, weight=1)
             tab.rowconfigure(0, weight=1)
 
@@ -732,23 +342,82 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         ).grid(row=2, column=0, sticky="w", padx=6, pady=(0, 2))
 
         # --- Motpostfordeling ---
+        self._tab_motpost.rowconfigure(0, weight=0)
+        self._tab_motpost.rowconfigure(1, weight=1)
+        self._tab_motpost.rowconfigure(2, weight=0)
+
+        motpost_top = ttk.Frame(self._tab_motpost)
+        motpost_top.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
+        ttk.Label(motpost_top, text="Gruppér på:", foreground="#555555").grid(row=0, column=0, sticky="w")
+        self._var_motpost_mode = tk.StringVar(value="konto")
+        ttk.Radiobutton(
+            motpost_top, text="Konto", value="konto",
+            variable=self._var_motpost_mode, command=self._on_motpost_mode_change,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Radiobutton(
+            motpost_top, text="Regnskapslinje", value="rl",
+            variable=self._var_motpost_mode, command=self._on_motpost_mode_change,
+        ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+
+        motpost_mid = ttk.Frame(self._tab_motpost)
+        motpost_mid.grid(row=1, column=0, sticky="nsew")
+        motpost_mid.columnconfigure(0, weight=1)
+        motpost_mid.rowconfigure(0, weight=1)
         self._tree_motpost = _make_tree(
-            self._tab_motpost,
+            motpost_mid,
             ("Konto", "Kontonavn", "Beløp", "Andel %", "Antall bilag"),
             {"Konto": 80, "Kontonavn": 260, "Beløp": 140, "Andel %": 80, "Antall bilag": 90},
             text_cols=("Konto", "Kontonavn"), stretch_col="Kontonavn",
         )
         self._tree_motpost.bind("<Double-Button-1>", self._on_motpost_doubleclick)
         motpost_bot = ttk.Frame(self._tab_motpost)
-        motpost_bot.grid(row=1, column=0, sticky="ew", padx=6, pady=(2, 2))
+        motpost_bot.grid(row=2, column=0, sticky="ew", padx=6, pady=(2, 2))
         motpost_bot.columnconfigure(0, weight=1)
+        self._motpost_hint_var = tk.StringVar(
+            value="Dobbeltklikk en konto for å se tilhørende bilag"
+        )
         ttk.Label(
-            motpost_bot, text="Dobbeltklikk en konto for å se tilhørende bilag",
+            motpost_bot, textvariable=self._motpost_hint_var,
             foreground="#888888", font=("", 8),
         ).grid(row=0, column=0, sticky="w")
         ttk.Button(
             motpost_bot, text="\U0001f4ca  Vis flowchart", command=self._show_motpost_flowchart,
         ).grid(row=0, column=1, sticky="e")
+
+        # --- Kombinasjoner ---
+        self._tab_kombo.rowconfigure(0, weight=0)
+        self._tab_kombo.rowconfigure(1, weight=1)
+        self._tab_kombo.rowconfigure(2, weight=0)
+
+        kombo_top = ttk.Frame(self._tab_kombo)
+        kombo_top.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
+        ttk.Label(kombo_top, text="Vis kombinasjon som:", foreground="#555555").grid(row=0, column=0, sticky="w")
+        self._var_kombo_mode = tk.StringVar(value="konto")
+        ttk.Radiobutton(
+            kombo_top, text="Kontoer", value="konto",
+            variable=self._var_kombo_mode, command=self._on_kombo_mode_change,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        ttk.Radiobutton(
+            kombo_top, text="Regnskapslinjer", value="rl",
+            variable=self._var_kombo_mode, command=self._on_kombo_mode_change,
+        ).grid(row=0, column=2, sticky="w", padx=(8, 0))
+
+        kombo_mid = ttk.Frame(self._tab_kombo)
+        kombo_mid.grid(row=1, column=0, sticky="nsew")
+        kombo_mid.columnconfigure(0, weight=1)
+        kombo_mid.rowconfigure(0, weight=1)
+        self._tree_kombo = _make_tree(
+            kombo_mid,
+            ("Nr", "Kombinasjon", "Antall bilag", "Sum valgte kontoer", "Andel %"),
+            {"Nr": 50, "Kombinasjon": 360, "Antall bilag": 90, "Sum valgte kontoer": 150, "Andel %": 80},
+            text_cols=("Nr", "Kombinasjon"), stretch_col="Kombinasjon",
+        )
+        self._tree_kombo.bind("<Double-Button-1>", self._on_kombo_doubleclick)
+        ttk.Label(
+            self._tab_kombo,
+            text="Dobbeltklikk en rad for å se bilagene i kombinasjonen",
+            foreground="#888888", font=("", 8),
+        ).grid(row=2, column=0, sticky="w", padx=6, pady=(2, 2))
 
         # Statuslinje
         self._status_var = tk.StringVar(value="Velg en regnskapslinje og trykk Vis")
@@ -813,12 +482,28 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         ranges = _get_konto_ranges(page, self._current_regnr)
         df_rl = _filter_df(df_all, ranges)
 
+        # Post-filtrer på faktisk regnr-mapping (respekterer klient-overrides).
+        # Sikrer at summene i Kontoer-fanen matcher pivot-raden for regnr.
+        sb_df_eff: pd.DataFrame | None = None
+        try:
+            sb_df_eff = page._get_effective_sb_df()  # type: ignore[union-attr]
+        except Exception:
+            sb_df_eff = getattr(page, "_rl_sb_df", None)
+        konto_set = _get_konto_set_for_regnr(
+            page, self._current_regnr, ranges,
+            df_all=df_all,
+            sb_df=sb_df_eff,
+            sb_prev_df=getattr(page, "_rl_sb_prev_df", None),
+        )
+        if konto_set is not None and "Konto" in df_rl.columns:
+            df_rl = df_rl[df_rl["Konto"].astype(str).isin(konto_set)].copy()
+
         # Lagre for drill-down
         self._df_rl_last = df_rl
         self._df_all_last = df_all
 
         self._update_kpi(page, self._current_regnr)
-        kontoer_data, ib_label = _compute_kontoer(df_rl, page)
+        kontoer_data, ib_label = _compute_kontoer(df_rl, page, ranges=ranges, konto_set=konto_set)
         self._populate_kontoer(kontoer_data, ib_label)
         self._rebuild_maned_pivot(df_rl)
         self._populate_bilag(_compute_bilag(df_rl))
@@ -827,7 +512,21 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         self._populate_mva(mva_result)
         motpost_data = _compute_motpost(df_all, df_rl)
         self._motpost_data_last = motpost_data
+        self._motpost_rl_last = None  # reberegnes on-demand
+        if getattr(self, "_var_motpost_mode", None) and self._var_motpost_mode.get() == "rl":
+            self._motpost_rl_last = self._build_motpost_rl_df(motpost_data)
         self._populate_motpost(motpost_data)
+
+        rl_kontoer = (
+            set(df_rl["Konto"].dropna().astype(str).unique())
+            if "Konto" in df_rl.columns
+            else set()
+        )
+        self._kombo_rl_kontoer_last = rl_kontoer
+        combos_df, bilag_map = self._compute_kombinasjoner(df_all, rl_kontoer)
+        self._kombo_data_last = combos_df
+        self._kombo_bilag_map_last = bilag_map
+        self._populate_kombo()
         self._populate_extra_stats(_compute_extra_stats(df_rl))
 
         self._status_var.set(
@@ -1058,18 +757,102 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             ), tags=(tag,) if tag else ())
 
     def _populate_motpost(self, grp: pd.DataFrame) -> None:
+        mode = str(getattr(self, "_var_motpost_mode", None).get() if getattr(self, "_var_motpost_mode", None) else "konto")
         tree = self._tree_motpost
         tree.delete(*tree.get_children())
-        for _, row in grp.iterrows():
-            bel = _safe_float(row["Beløp"])
+
+        if mode == "rl":
+            tree.heading("Konto", text="Nr")
+            tree.heading("Kontonavn", text="Regnskapslinje")
+            tree.column("Konto", width=60, anchor="e")
+            tree.column("Kontonavn", width=280, anchor="w")
+            df = self._motpost_rl_last if isinstance(self._motpost_rl_last, pd.DataFrame) else pd.DataFrame()
+            self._motpost_hint_var.set("Dobbeltklikk en regnskapslinje for å se tilhørende bilag")
+            key_col, name_col = "Regnr", "Regnskapslinje"
+        else:
+            tree.heading("Konto", text="Konto")
+            tree.heading("Kontonavn", text="Kontonavn")
+            tree.column("Konto", width=80, anchor="w")
+            tree.column("Kontonavn", width=260, anchor="w")
+            df = grp if isinstance(grp, pd.DataFrame) else pd.DataFrame()
+            self._motpost_hint_var.set("Dobbeltklikk en konto for å se tilhørende bilag")
+            key_col, name_col = "Konto", "Kontonavn"
+
+        if df is None or df.empty:
+            self._tree_motpost.tag_configure("neg", foreground="#C62828")
+            return
+
+        for _, row in df.iterrows():
+            bel = _safe_float(row.get("Beløp"))
             tree.insert("", tk.END, values=(
-                str(row.get("Konto", "") or ""),
-                str(row.get("Kontonavn", "") or ""),
+                str(row.get(key_col, "") or ""),
+                str(row.get(name_col, "") or ""),
                 _fmt_amount(bel),
-                f"{float(row['Andel']):.1f}",
-                _safe_int(row["AntallBilag"]),
+                f"{float(row.get('Andel') or 0):.1f}",
+                _safe_int(row.get("AntallBilag")),
             ), tags=("neg",) if bel < 0 else ())
         self._tree_motpost.tag_configure("neg", foreground="#C62828")
+
+    def _on_motpost_mode_change(self) -> None:
+        """Triggeres når brukeren bytter Konto/RL-modus."""
+        mode = self._var_motpost_mode.get()
+        if mode == "rl" and (self._motpost_rl_last is None or self._motpost_rl_last is False):
+            self._motpost_rl_last = self._build_motpost_rl_df(self._motpost_data_last)
+        self._populate_motpost(self._motpost_data_last if isinstance(self._motpost_data_last, pd.DataFrame) else pd.DataFrame())
+
+    def _build_motpost_rl_df(self, grp: pd.DataFrame | None) -> pd.DataFrame:
+        """Aggregér konto-motpost på regnskapslinje-nivå.
+
+        Kontoer som ikke mapper til noen RL samles i en pseudo-rad
+        ``Regnr=<NA>, Regnskapslinje='— umappet —'``.
+        """
+        empty = pd.DataFrame(columns=["Regnr", "Regnskapslinje", "Beløp", "Andel", "AntallBilag"])
+        if not isinstance(grp, pd.DataFrame) or grp.empty:
+            return empty
+
+        page = self._analyse_page
+        if page is None:
+            return empty
+
+        try:
+            from regnskapslinje_mapping_service import context_from_page, resolve_accounts_to_rl
+            ctx = context_from_page(page)
+            kontoer = grp["Konto"].astype(str).tolist()
+            mapping = resolve_accounts_to_rl(kontoer, context=ctx)
+        except Exception as exc:
+            log.warning("_build_motpost_rl_df: mapping feilet: %s", exc)
+            return empty
+
+        df = grp.copy()
+        df["Konto"] = df["Konto"].astype(str)
+        mapping = mapping.rename(columns={"konto": "Konto"})[["Konto", "regnr", "regnskapslinje"]]
+        merged = df.merge(mapping, on="Konto", how="left")
+
+        def _fmt_regnr(v: object) -> str:
+            if v is None or (hasattr(v, "__class__") and pd.isna(v)):
+                return ""
+            try:
+                return str(int(v))
+            except Exception:
+                return ""
+
+        merged["Regnr"] = merged["regnr"].map(_fmt_regnr)
+        merged["Regnskapslinje"] = merged["regnskapslinje"].fillna("").astype(str)
+        merged.loc[merged["Regnr"] == "", "Regnskapslinje"] = "— umappet —"
+
+        merged["_b"] = pd.to_numeric(merged["Beløp"], errors="coerce").fillna(0.0)
+        merged["_n"] = pd.to_numeric(merged["AntallBilag"], errors="coerce").fillna(0).astype(int)
+
+        agg = (
+            merged.groupby(["Regnr", "Regnskapslinje"], sort=False, dropna=False)
+            .agg(Beløp=("_b", "sum"), AntallBilag=("_n", "sum"))
+            .reset_index()
+        )
+        agg["_abs"] = agg["Beløp"].abs()
+        total = agg["_abs"].sum()
+        agg["Andel"] = (agg["_abs"] / total * 100).round(1) if total > 0 else 0.0
+        agg = agg.sort_values("_abs", ascending=False).drop(columns=["_abs"])
+        return agg[["Regnr", "Regnskapslinje", "Beløp", "Andel", "AntallBilag"]].reset_index(drop=True)
 
     # ------------------------------------------------------------------
     # Drill-down: dobbeltklikk i Bilag-analyse
@@ -1188,17 +971,177 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         vals = tree.item(sel[0], "values")
         if not vals or not str(vals[0]).strip():
             return
-        konto = str(vals[0]).strip()
-        kontonavn = str(vals[1]) if len(vals) > 1 else konto
         df_rl = self._df_rl_last
         df_all = self._df_all_last
         if df_rl is None or df_all is None or "Bilag" not in df_rl.columns:
             return
-        # Finn bilag fra RL, filtrer df_all til de bilagene + korrekt konto
         rl_bilag = set(df_rl["Bilag"].dropna().astype(str).unique())
-        mask = df_all["Bilag"].astype(str).isin(rl_bilag) & (df_all["Konto"].astype(str) == konto)
+
+        mode = str(getattr(self, "_var_motpost_mode", None).get() if getattr(self, "_var_motpost_mode", None) else "konto")
+        if mode == "rl":
+            regnr_str = str(vals[0]).strip()
+            rl_navn = str(vals[1]) if len(vals) > 1 else regnr_str
+            kontoer_for_regnr = self._kontoer_for_regnr(regnr_str)
+            if not kontoer_for_regnr:
+                return
+            mask = (
+                df_all["Bilag"].astype(str).isin(rl_bilag)
+                & df_all["Konto"].astype(str).isin(kontoer_for_regnr)
+            )
+            df_detail = df_all[mask]
+            title = f"Motpostbilag — {regnr_str} {rl_navn}" if regnr_str else f"Motpostbilag — {rl_navn}"
+            self._open_tx_popup(title, df_detail)
+        else:
+            konto = str(vals[0]).strip()
+            kontonavn = str(vals[1]) if len(vals) > 1 else konto
+            mask = df_all["Bilag"].astype(str).isin(rl_bilag) & (df_all["Konto"].astype(str) == konto)
+            df_detail = df_all[mask]
+            self._open_tx_popup(f"Motpostbilag — konto {konto} {kontonavn}", df_detail)
+
+    def _kontoer_for_regnr(self, regnr_str: str) -> set[str]:
+        """Returner kontoer i _motpost_data_last som mapper til angitt regnr.
+
+        Tomt regnr_str = kontoer uten mapping ("— umappet —").
+        """
+        grp = self._motpost_data_last
+        if not isinstance(grp, pd.DataFrame) or grp.empty:
+            return set()
+        page = self._analyse_page
+        if page is None:
+            return set()
+        try:
+            from regnskapslinje_mapping_service import context_from_page, resolve_accounts_to_rl
+            ctx = context_from_page(page)
+            mapping = resolve_accounts_to_rl(grp["Konto"].astype(str).tolist(), context=ctx)
+        except Exception:
+            return set()
+        if regnr_str == "":
+            sub = mapping[mapping["regnr"].isna()]
+        else:
+            try:
+                target = int(regnr_str)
+            except Exception:
+                return set()
+            sub = mapping[mapping["regnr"] == target]
+        return set(sub["konto"].astype(str).tolist())
+
+    # ------------------------------------------------------------------
+    # Kombinasjoner
+
+    def _compute_kombinasjoner(
+        self, df_all: pd.DataFrame, rl_kontoer: set[str]
+    ) -> tuple[pd.DataFrame, dict[str, str]]:
+        """Bygg kombinasjoner + bilag→kombinasjon-mapping for drill-down."""
+        empty_cols = [
+            "Kombinasjon #", "Kombinasjon", "Kombinasjon (navn)",
+            "Antall bilag", "Sum valgte kontoer", "% andel bilag", "Outlier",
+        ]
+        if df_all is None or df_all.empty or not rl_kontoer:
+            return pd.DataFrame(columns=empty_cols), {}
+        try:
+            from motpost.konto_core import build_motpost_data
+            from motpost.combinations import (
+                build_bilag_to_motkonto_combo,
+                build_motkonto_combinations,
+            )
+            mp = build_motpost_data(df_all, set(rl_kontoer), selected_direction="Alle")
+            combos = build_motkonto_combinations(mp.df_scope, set(rl_kontoer))
+            bilag_map = build_bilag_to_motkonto_combo(mp.df_scope, list(rl_kontoer))
+        except Exception as exc:
+            log.warning("_compute_kombinasjoner: %s", exc)
+            return pd.DataFrame(columns=empty_cols), {}
+        return combos, bilag_map
+
+    def _kombo_rl_label(self, combo: str) -> str:
+        """Oversett kombinasjon-streng fra konto-numre til RL-navn."""
+        from motpost.combo_workflow import combo_display_name_for_mode
+
+        page = self._analyse_page
+        konto_rl_map: dict[str, str] = {}
+        konto_navn_map: dict[str, str] = {}
+        if page is not None:
+            try:
+                from regnskapslinje_mapping_service import context_from_page, resolve_accounts_to_rl
+                ctx = context_from_page(page)
+                kontoer = [
+                    p.strip()
+                    for p in str(combo or "").split(",")
+                    if p.strip()
+                ]
+                if kontoer:
+                    mapping = resolve_accounts_to_rl(kontoer, context=ctx)
+                    for _, r in mapping.iterrows():
+                        k = str(r.get("konto") or "").strip()
+                        nm = str(r.get("regnskapslinje") or "").strip()
+                        if k:
+                            konto_rl_map[k] = nm or k
+            except Exception:
+                konto_rl_map = {}
+        return combo_display_name_for_mode(
+            combo,
+            display_mode="regnskap",
+            konto_navn_map=konto_navn_map,
+            konto_regnskapslinje_map=konto_rl_map,
+        )
+
+    def _populate_kombo(self) -> None:
+        tree = self._tree_kombo
+        tree.delete(*tree.get_children())
+        df = self._kombo_data_last
+        if df is None or df.empty:
+            return
+
+        mode = self._var_kombo_mode.get() if getattr(self, "_var_kombo_mode", None) else "konto"
+        use_rl = (mode == "rl")
+
+        for _, row in df.iterrows():
+            combo_raw = str(row.get("Kombinasjon", "") or "")
+            if use_rl:
+                label = self._kombo_rl_label(combo_raw)
+            else:
+                label = str(row.get("Kombinasjon (navn)") or combo_raw)
+            bel = _safe_float(row.get("Sum valgte kontoer"))
+            tree.insert("", tk.END, values=(
+                _safe_int(row.get("Kombinasjon #")),
+                label,
+                _safe_int(row.get("Antall bilag")),
+                _fmt_amount(bel),
+                f"{float(row.get('% andel bilag') or 0):.1f}",
+            ), tags=("neg",) if bel < 0 else ())
+        tree.tag_configure("neg", foreground="#C62828")
+
+    def _on_kombo_mode_change(self) -> None:
+        self._populate_kombo()
+
+    def _on_kombo_doubleclick(self, event: object = None) -> None:
+        tree = self._tree_kombo
+        sel = tree.selection()
+        if not sel:
+            return
+        vals = tree.item(sel[0], "values")
+        if not vals:
+            return
+        try:
+            nr = int(vals[0])
+        except Exception:
+            return
+
+        df = self._kombo_data_last
+        bilag_map = self._kombo_bilag_map_last
+        df_all = self._df_all_last
+        if df is None or df.empty or not bilag_map or df_all is None or df_all.empty:
+            return
+        row = df[df["Kombinasjon #"].astype(int) == nr]
+        if row.empty:
+            return
+        combo_raw = str(row.iloc[0].get("Kombinasjon", "") or "")
+        bilag_set = {b for b, c in bilag_map.items() if c == combo_raw}
+        if not bilag_set:
+            return
+        mask = df_all["Bilag"].astype(str).isin(bilag_set)
         df_detail = df_all[mask]
-        self._open_tx_popup(f"Motpostbilag — konto {konto} {kontonavn}", df_detail)
+        label = str(vals[1]) if len(vals) > 1 else combo_raw
+        self._open_tx_popup(f"Bilag — kombinasjon {nr}: {label}", df_detail)
 
     def _show_motpost_flowchart(self) -> None:
         """Genererer D3 Sankey-diagram som HTML og åpner i nettleser."""
@@ -1457,9 +1400,22 @@ link.on("mousemove", function(event, d) {{
         try:
             ranges = _get_konto_ranges(page, self._current_regnr)
             df_rl = _filter_df(df_all, ranges)
+            try:
+                sb_eff = page._get_effective_sb_df()  # type: ignore[union-attr]
+            except Exception:
+                sb_eff = getattr(page, "_rl_sb_df", None)
+            konto_set = _get_konto_set_for_regnr(
+                page, self._current_regnr, ranges,
+                df_all=df_all,
+                sb_df=sb_eff,
+                sb_prev_df=getattr(page, "_rl_sb_prev_df", None),
+            )
+            if konto_set is not None and "Konto" in df_rl.columns:
+                df_rl = df_rl[df_rl["Konto"].astype(str).isin(konto_set)].copy()
             _write_workbook(
                 path, regnr=self._current_regnr, rl_name=self._current_rl_name,
                 df_rl=df_rl, df_all=df_all, page=page, client=client, year=year,
+                konto_set=konto_set,
             )
             self._status_var.set(f"Eksportert: {Path(path).name}")
             _open_file(path)
@@ -1468,221 +1424,13 @@ link.on("mousemove", function(event, d) {{
             log.exception("StatistikkPage: eksport feilet")
 
 
+
 # ---------------------------------------------------------------------------
-# Excel
+# Excel (re-eksport fra page_statistikk_excel)
 # ---------------------------------------------------------------------------
 
-def _write_workbook(
-    path: str, *, regnr: int, rl_name: str,
-    df_rl: pd.DataFrame, df_all: pd.DataFrame,
-    page: object, client: str = "", year: str = "",
-) -> None:
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
-
-    TITLE_FILL = PatternFill("solid", fgColor="DDEBF7")
-    HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")
-    SUM_FILL = PatternFill("solid", fgColor="D6E2EF")
-    AVVIK_FILL = PatternFill("solid", fgColor="FCE4EC")
-    OK_FILL = PatternFill("solid", fgColor="E8F5E9")
-    THIN = Side(style="thin", color="D9D9D9")
-    B = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-    NEG_FONT = Font(color="C62828")
-    ts = (f"  |  {client}" if client else "") + (f"  {year}" if year else "")
-
-    def _title(ws: object, title: str, n: int) -> None:
-        last = get_column_letter(n)
-        ws.merge_cells(f"A1:{last}1")  # type: ignore[union-attr]
-        ws["A1"] = title  # type: ignore[index]
-        ws["A1"].font = Font(size=13, bold=True)  # type: ignore[index]
-        ws["A1"].fill = TITLE_FILL  # type: ignore[index]
-        ws["A1"].alignment = Alignment(horizontal="left", vertical="center")  # type: ignore[index]
-        ws.row_dimensions[1].height = 22  # type: ignore[union-attr]
-        ws.merge_cells(f"A2:{last}2")  # type: ignore[union-attr]
-        ws["A2"] = f"Generert {datetime.now().strftime('%d.%m.%Y %H:%M')}"  # type: ignore[index]
-        ws["A2"].font = Font(italic=True, color="666666", size=9)  # type: ignore[index]
-
-    def _header(ws: object, row: int, cols: list[str]) -> None:
-        for i, col in enumerate(cols, 1):
-            c = ws.cell(row=row, column=i, value=col)  # type: ignore[union-attr]
-            c.font = Font(bold=True, size=10)
-            c.fill = HEADER_FILL
-            c.border = B
-            c.alignment = Alignment(horizontal="center")
-        ws.row_dimensions[row].height = 18  # type: ignore[union-attr]
-
-    def _amt(ws: object, r: int, c: int, v: object, neg: bool = False) -> None:
-        cell = ws.cell(row=r, column=c, value=_safe_float(v))  # type: ignore[union-attr]
-        cell.border = B
-        cell.number_format = _AMT_FMT
-        cell.alignment = Alignment(horizontal="right")
-        if neg:
-            cell.font = NEG_FONT
-
-    wb = Workbook()
-
-    # Ark 1: Sammendrag
-    ws1 = wb.active
-    ws1.title = "Sammendrag"
-    _title(ws1, f"Statistikk – {regnr} {rl_name}{ts}", 6)
-    _header(ws1, 4, ["UB", "UB i fjor", "Endring (kr)", "Endring %", "Antall bilag", ""])
-    pivot_df = getattr(page, "_pivot_df_last", None)
-    kpi = None
-    if pivot_df is not None and not pivot_df.empty:
-        kpi = next((r for _, r in pivot_df.iterrows() if _safe_int(r.get("regnr", -1)) == regnr), None)
-    if kpi is not None:
-        for i, (col, fmt) in enumerate([
-            ("UB", _AMT_FMT), ("UB_fjor", _AMT_FMT), ("Endring", _AMT_FMT),
-            ("Endring_pct", '0.0"%"'), ("Antall", "#,##0"),
-        ], 1):
-            v = _safe_int(kpi.get(col)) if fmt == "#,##0" else _safe_float(kpi.get(col))
-            c = ws1.cell(5, i, v)
-            c.border = B
-            c.number_format = fmt
-            c.alignment = Alignment(horizontal="right")
-    ws1.cell(7, 1).value = "Kontoer"
-    ws1.cell(7, 1).font = Font(bold=True, size=11)
-    _header(ws1, 8, ["Konto", "Kontonavn", "IB", "Bevegelse", "UB", "Antall"])
-    grp_k, _ib_label = _compute_kontoer(df_rl, page)
-    dr = 9
-    for _, row in grp_k.iterrows():
-        ws1.cell(dr, 1, str(row["Konto"])).border = B
-        ws1.cell(dr, 2, str(row.get("Kontonavn", "") or "")).border = B
-        for ci, cn in [(3, "IB"), (4, "Bevegelse"), (5, "UB")]:
-            raw = row.get(cn)
-            if raw is not None and str(raw) not in ("", "nan"):
-                _amt(ws1, dr, ci, raw, _safe_float(raw) < 0)
-            else:
-                ws1.cell(dr, ci, None).border = B
-        ws1.cell(dr, 6, _safe_int(row["Antall"])).border = B
-        dr += 1
-    ws1.column_dimensions["A"].width = 10
-    ws1.column_dimensions["B"].width = 35
-    for l in ["C", "D", "E"]:
-        ws1.column_dimensions[l].width = 18
-    ws1.column_dimensions["F"].width = 10
-    ws1.freeze_panes = "A5"
-
-    # Ark 2: Månedspivot
-    ws2 = wb.create_sheet("Månedspivot")
-    months, pivot = _compute_maned_pivot(df_rl)
-    nc = 2 + len(months) + 1
-    _title(ws2, f"Månedspivot – {regnr} {rl_name}{ts}", nc)
-    _header(ws2, 4, ["Konto", "Kontonavn"] + months + ["Sum"])
-    ws2.column_dimensions["A"].width = 10
-    ws2.column_dimensions["B"].width = 30
-    dr = 5
-    tot_m = {m: 0.0 for m in months}
-    gt = 0.0
-    for _, row in pivot.iterrows():
-        ws2.cell(dr, 1, str(row["Konto"])).border = B
-        ws2.cell(dr, 2, str(row.get("Kontonavn", "") or "")).border = B
-        for j, m in enumerate(months, 3):
-            v = _safe_float(row.get(m, 0))
-            tot_m[m] = tot_m.get(m, 0.0) + v
-            if v != 0.0:
-                _amt(ws2, dr, j, v, v < 0)
-            else:
-                ws2.cell(dr, j, None).border = B
-        s = _safe_float(row.get("Sum", 0))
-        gt += s
-        _amt(ws2, dr, nc, s, s < 0)
-        dr += 1
-    # Sum-rad
-    ws2.cell(dr, 1, "Sum").font = Font(bold=True)
-    ws2.cell(dr, 1).fill = SUM_FILL
-    ws2.cell(dr, 1).border = B
-    ws2.cell(dr, 2).fill = SUM_FILL
-    ws2.cell(dr, 2).border = B
-    for j, m in enumerate(months, 3):
-        c = ws2.cell(dr, j, tot_m[m])
-        c.font = Font(bold=True, color="C62828" if tot_m[m] < 0 else "000000")
-        c.fill = SUM_FILL
-        c.border = B
-        c.number_format = _AMT_FMT
-        c.alignment = Alignment(horizontal="right")
-    c_gt = ws2.cell(dr, nc, gt)
-    c_gt.font = Font(bold=True, color="C62828" if gt < 0 else "000000")
-    c_gt.fill = SUM_FILL
-    c_gt.border = B
-    c_gt.number_format = _AMT_FMT
-    c_gt.alignment = Alignment(horizontal="right")
-    for j in range(3, nc + 1):
-        ws2.column_dimensions[get_column_letter(j)].width = 14
-    ws2.freeze_panes = "C5"
-
-    # Ark 3: Bilag-analyse
-    ws3 = wb.create_sheet("Bilag-analyse")
-    _title(ws3, f"Bilag-analyse – {regnr} {rl_name}{ts}", 6)
-    _header(ws3, 4, ["Bilag", "Dato", "Tekst", "Sum beløp", "Antall poster", "Kontoer"])
-    grp_b = _compute_bilag(df_rl)
-    dr = 5
-    for _, row in grp_b.iterrows():
-        ws3.cell(dr, 1, str(row.get("Bilag", ""))).border = B
-        ws3.cell(dr, 2, str(row.get("Dato", ""))).border = B
-        ws3.cell(dr, 3, str(row.get("Tekst", ""))).border = B
-        v = _safe_float(row["Sum beløp"])
-        _amt(ws3, dr, 4, v, v < 0)
-        ws3.cell(dr, 5, _safe_int(row["Antall poster"])).border = B
-        ws3.cell(dr, 6, str(row.get("Kontoer", ""))).border = B
-        dr += 1
-    ws3.column_dimensions["A"].width = 12
-    ws3.column_dimensions["B"].width = 12
-    ws3.column_dimensions["C"].width = 45
-    ws3.column_dimensions["D"].width = 18
-    ws3.column_dimensions["E"].width = 12
-    ws3.column_dimensions["F"].width = 25
-    ws3.freeze_panes = "A5"
-
-    # Ark 4: MVA-analyse
-    ws4 = wb.create_sheet("MVA-analyse")
-    _title(ws4, f"MVA-analyse – {regnr} {rl_name}{ts}", 7)
-    _header(ws4, 4, ["MVA-kode", "Antall", "Grunnlag", "MVA-beløp", "Sats %", "Effektiv %", "Status"])
-    mva_result = _compute_mva(df_rl, df_all)
-    grp_mva = mva_result["rows"]
-    dr = 5
-    for _, row in grp_mva.iterrows():
-        status = str(row.get("Status", ""))
-        fill = OK_FILL if "\u2713" in status else (AVVIK_FILL if "\u26a0" in status else None)
-        ws4.cell(dr, 1, str(row.get("MVA-kode", ""))).border = B
-        ws4.cell(dr, 2, _safe_int(row["Antall"])).border = B
-        _amt(ws4, dr, 3, row["Grunnlag"])
-        _amt(ws4, dr, 4, row["MVA-beløp"])
-        ws4.cell(dr, 5, round(_safe_float(row.get("Sats %")), 1)).border = B
-        ws4.cell(dr, 6, round(_safe_float(row.get("Effektiv %")), 1)).border = B
-        ws4.cell(dr, 7, status).border = B
-        if fill:
-            for ci in range(1, 8):
-                ws4.cell(dr, ci).fill = fill
-        dr += 1
-    for col_letter, w in zip(["A", "B", "C", "D", "E", "F", "G"], [10, 8, 18, 15, 8, 10, 30]):
-        ws4.column_dimensions[col_letter].width = w
-    ws4.freeze_panes = "A5"
-
-    # Ark 5: Motpostfordeling
-    ws5 = wb.create_sheet("Motpostfordeling")
-    _title(ws5, f"Motpostfordeling – {regnr} {rl_name}{ts}", 5)
-    _header(ws5, 4, ["Konto", "Kontonavn", "Beløp", "Andel %", "Antall bilag"])
-    grp_mp = _compute_motpost(df_all, df_rl)
-    dr = 5
-    for _, row in grp_mp.iterrows():
-        ws5.cell(dr, 1, str(row.get("Konto", ""))).border = B
-        ws5.cell(dr, 2, str(row.get("Kontonavn", ""))).border = B
-        v = _safe_float(row["Beløp"])
-        _amt(ws5, dr, 3, v, v < 0)
-        ws5.cell(dr, 4, round(float(row["Andel"]), 1)).border = B
-        ws5.cell(dr, 5, _safe_int(row["AntallBilag"])).border = B
-        dr += 1
-    ws5.column_dimensions["A"].width = 10
-    ws5.column_dimensions["B"].width = 35
-    ws5.column_dimensions["C"].width = 18
-    ws5.column_dimensions["D"].width = 10
-    ws5.column_dimensions["E"].width = 14
-    ws5.freeze_panes = "A5"
-
-    out = Path(path)
-    if out.suffix.lower() != ".xlsx":
-        out = out.with_suffix(".xlsx")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
+from page_statistikk_excel import (  # noqa: E402
+    _compute_kombinasjoner_export,
+    _compute_motpost_rl,
+    write_workbook as _write_workbook,
+)

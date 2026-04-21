@@ -26,26 +26,62 @@ from workpaper_forside import build_forside_sheet
 _TITLE_FILL     = vxt.FILL_TITLE
 _SUBTITLE_FILL  = vxt.FILL_NEUTRAL
 _HEADER_FILL    = vxt.FILL_SUBHEADER
-_SUM_FILL       = vxt.FILL_SUMLINE
-_SUM_MAJOR_FILL = vxt.FILL_SUMLINE_MAJOR
-_ZEBRA_FILL     = vxt.FILL_ZEBRA
+# Mindre sum-rader (ikke major): bytt fra SAGE_WASH til BG_SAND_SOFT så de
+# leses tydelig over zebra-stripene i stedet for å drukne i dem.
+_SUM_FILL       = PatternFill("solid", fgColor=vt.BG_SAND_SOFT)
+# Hovedsum-rader (Driftsres., Årsres., Sum gjeld, …): lokal-override til
+# lysere Vaak-inspirert sage i stedet for den tunge FOREST-grønnen.
+_SUM_MAJOR_FILL = PatternFill("solid", fgColor=vt.SAGE)
+# Zebra: varmere sand-tone enn globalt token så stripen faktisk merkes.
+_ZEBRA_FILL     = PatternFill("solid", fgColor="F1EBDA")
 _CAT_FILL       = vxt.FILL_HEADER
 _NK_HEADER_FILL = vxt.FILL_TITLE
+_SECTION_FILL   = PatternFill("solid", fgColor=vt.BG_SAND_SOFT)
 _POS_FONT       = vxt.FONT_POS
 _NEG_FONT       = vxt.FONT_NEG
 _THIN_SIDE      = Side(style="thin", color=vt.BORDER_SOFT)
-_MEDIUM_SIDE    = Side(style="medium", color=vt.FOREST)
+_MEDIUM_SIDE    = Side(style="medium", color=vt.SAGE_DARK)
+_SECTION_SIDE   = Side(style="thin", color=vt.SAGE_DARK)
 _BORDER         = Border(left=_THIN_SIDE, right=_THIN_SIDE,
                          top=_THIN_SIDE, bottom=_THIN_SIDE)
 _BORDER_SUM_TOP = Border(left=_THIN_SIDE, right=_THIN_SIDE,
                          top=_MEDIUM_SIDE, bottom=_THIN_SIDE)
 _AMOUNT_FMT   = '#,##0;[Red]-#,##0'
+# Major-sum-rader: negative tall skal arve cellens TEXT_PRIMARY-font, ikke
+# blodrød [Red] som ellers drukner i SAGE-fill.
+_AMOUNT_FMT_MAJOR = '#,##0;-#,##0'
 _INT_FMT      = '#,##0'
 _PCT_FMT      = '0.0"%"'
 _DECIMAL_FMT  = '0.00'
 
 # Sumpost-nr som alltid markeres med ekstra uthevning
 _MAJOR_SUM_REGNR = {80, 160, 280, 665, 715, 820, 850}
+
+# Seksjoner i regnskapsoppstillingen — regnr-grenser bestemmer overskriftene
+_SECTION_LABELS = {
+    "resultat":  "RESULTATREGNSKAP",
+    "eiendeler": "EIENDELER",
+    "ek":        "EGENKAPITAL OG GJELD",
+}
+
+
+def _section_for_regnr(regnr: int) -> str:
+    if regnr <= 280:
+        return "resultat"
+    if regnr < 700:
+        return "eiendeler"
+    return "ek"
+
+
+def _emit_section_header(ws, row: int, label: str, last_col_letter: str) -> None:
+    """Skriv en seksjonsoverskrift (RESULTATREGNSKAP / EIENDELER / EK OG GJELD)."""
+    ws.merge_cells(f"A{row}:{last_col_letter}{row}")
+    cell = ws.cell(row=row, column=1, value=label)
+    cell.font = Font(name=vt.FONT_FAMILY_BODY, size=11, bold=True, color=vt.SAGE_DARK)
+    cell.fill = _SECTION_FILL
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    cell.border = Border(bottom=_SECTION_SIDE)
+    ws.row_dimensions[row].height = 22
 
 
 def _active_col_specs(rl_df: pd.DataFrame, *, include_antall: bool = True
@@ -77,13 +113,17 @@ def build_regnskapsoppstilling_workbook(
     *,
     regnskapslinjer: Optional[pd.DataFrame] = None,
     transactions_df: Optional[pd.DataFrame] = None,
+    sb_df: Optional[pd.DataFrame] = None,
+    intervals: object = None,
+    account_overrides: object = None,
     client: str | None = None,
     year: str | int | None = None,
 ) -> Workbook:
     """Bygg Excel-arbeidsbok med regnskapsoppstilling, nøkkeltall og beregningsgrunnlag.
 
     Ark 1: Regnskapsoppstilling + nøkkeltall under.
-    Ark 2: Beregningsgrunnlag (formelreferanse).
+    Ark 2: Kontospesifisert regnskapsoppstilling (kontoer under hver RL).
+    Ark 3: Beregningsgrunnlag (formelreferanse).
     """
     wb = Workbook()
 
@@ -91,7 +131,18 @@ def build_regnskapsoppstilling_workbook(
     _build_regnskapsoppstilling_sheet(wb, rl_df, regnskapslinjer=regnskapslinjer,
                                      client=client, year=year)
 
-    # --- Ark 2: Beregningsgrunnlag ---
+    # --- Ark 2: Kontospesifisert ---
+    _build_kontospesifisert_sheet(
+        wb, rl_df,
+        regnskapslinjer=regnskapslinjer,
+        sb_df=sb_df,
+        df_hb=transactions_df,
+        intervals=intervals,
+        account_overrides=account_overrides,
+        client=client, year=year,
+    )
+
+    # --- Ark 3: Beregningsgrunnlag ---
     _build_formula_sheet(wb)
 
     build_forside_sheet(wb, workpaper_navn="Regnskapsoppstilling")
@@ -163,11 +214,20 @@ def _build_regnskapsoppstilling_sheet(
     has_fjor = "UB_fjor" in rl_df.columns
     data_row = header_row + 1
     zebra_toggle = False
+    last_section: str | None = None
 
     for _, row in rl_df.iterrows():
         regnr = _safe_int(row.get("regnr"))
         is_major = regnr in _MAJOR_SUM_REGNR
         is_sum   = regnr in sum_regnr
+
+        # Seksjonsoverskrift når vi krysser en seksjonsgrense
+        section = _section_for_regnr(regnr)
+        if section != last_section:
+            _emit_section_header(ws, data_row, _SECTION_LABELS[section], last_col_letter)
+            data_row += 1
+            last_section = section
+            zebra_toggle = False
 
         # Beregn endring vs i fjor
         endr_kr = None
@@ -209,7 +269,7 @@ def _build_regnskapsoppstilling_sheet(
             elif fmt_type == "amount":
                 val = _safe_float(raw)
                 cell.value = val if val != 0.0 else None
-                cell.number_format = _AMOUNT_FMT
+                cell.number_format = _AMOUNT_FMT_MAJOR if is_major else _AMOUNT_FMT
                 cell.alignment = Alignment(horizontal="right", indent=1)
             elif fmt_type == "pct":
                 val = _safe_float(raw)
@@ -249,6 +309,280 @@ def _build_regnskapsoppstilling_sheet(
     # --- Nøkkeltall under regnskapsoppstillingen ---
     _append_nokkeltall_section(ws, rl_df, start_row=data_row + 3,
                                client=client, year=year)
+
+
+# ---------------------------------------------------------------------------
+# Ark 2: Kontospesifisert regnskapsoppstilling
+# ---------------------------------------------------------------------------
+
+def _build_kontospesifisert_sheet(
+    wb: Workbook,
+    rl_df: pd.DataFrame,
+    *,
+    regnskapslinjer: Optional[pd.DataFrame] = None,
+    sb_df: Optional[pd.DataFrame] = None,
+    df_hb: Optional[pd.DataFrame] = None,
+    intervals: object = None,
+    account_overrides: object = None,
+    client: str | None = None,
+    year: str | int | None = None,
+) -> None:
+    """Bygg "Kontospesifisert"-ark: RL-rader med tilhørende saldobalansekontoer.
+
+    Under hver RL-rad listes kontoene som mapper til den RL-en, med UB og
+    antall poster. Kontorader er indenterte, mindre og muted — de skal leses
+    som støttedata under RL-aggregatet, ikke konkurrere med det.
+    """
+    ws = wb.create_sheet("Kontospesifisert")
+
+    col_specs = _active_col_specs(rl_df)
+    n_cols = len(col_specs)
+    last_col_letter = get_column_letter(n_cols)
+
+    # --- Tittelbanner ---
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = "Kontospesifisert regnskapsoppstilling"
+    ws["A1"].font = Font(name=vt.FONT_FAMILY_BODY, size=16, bold=True, color=vt.TEXT_PRIMARY)
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws["A1"].fill = _TITLE_FILL
+    ws.row_dimensions[1].height = 32
+
+    sub_parts: list[str] = []
+    if client:
+        sub_parts.append(str(client))
+    if year not in {None, ""}:
+        sub_parts.append(str(year))
+    sub_parts.append("Saldobalansekontoer pr. regnskapslinje")
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    ws["A2"] = "   ·   ".join(sub_parts)
+    ws["A2"].font = Font(name=vt.FONT_FAMILY_BODY, size=10, color=vt.TEXT_MUTED)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws["A2"].fill = _SUBTITLE_FILL
+    ws.row_dimensions[2].height = 22
+
+    # --- Kolonneoverskrifter ---
+    header_row = 4
+    for col_idx, (_, header, _, _) in enumerate(col_specs, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(name=vt.FONT_FAMILY_BODY, bold=True, size=10, color=vt.TEXT_PRIMARY)
+        cell.fill = _HEADER_FILL
+        cell.border = _BORDER
+        align_h = "left" if header in {"Nr", "Regnskapslinje"} else "right"
+        cell.alignment = Alignment(
+            horizontal=align_h,
+            vertical="center",
+            wrap_text=True,
+            indent=1 if align_h == "left" else 0,
+        )
+    ws.row_dimensions[header_row].height = 30
+
+    # --- Bygg konto-per-regnr-gruppering én gang ---
+    accounts_by_regnr = _build_accounts_by_regnr(
+        df_hb=df_hb,
+        sb_df=sb_df,
+        intervals=intervals,
+        regnskapslinjer=regnskapslinjer,
+        account_overrides=account_overrides,
+    )
+
+    # --- Datalinjer ---
+    sum_regnr = _sumline_regnr(regnskapslinjer)
+    has_fjor = "UB_fjor" in rl_df.columns
+    data_row = header_row + 1
+    zebra_toggle = False
+    last_section: str | None = None
+
+    for _, row in rl_df.iterrows():
+        regnr = _safe_int(row.get("regnr"))
+        is_major = regnr in _MAJOR_SUM_REGNR
+        is_sum   = regnr in sum_regnr
+
+        section = _section_for_regnr(regnr)
+        if section != last_section:
+            _emit_section_header(ws, data_row, _SECTION_LABELS[section], last_col_letter)
+            data_row += 1
+            last_section = section
+            zebra_toggle = False
+
+        endr_kr = None
+        endr_pct = None
+        if has_fjor:
+            ub_val = _safe_float(row.get("UB"))
+            fjor_val = _safe_float(row.get("UB_fjor"))
+            if ub_val != 0.0 or fjor_val != 0.0:
+                endr_kr = ub_val - fjor_val
+                if abs(fjor_val) > 1e-9:
+                    endr_pct = (endr_kr / abs(fjor_val)) * 100
+
+        use_zebra = (not is_sum and not is_major) and zebra_toggle
+        if not is_sum and not is_major:
+            zebra_toggle = not zebra_toggle
+        else:
+            zebra_toggle = False
+
+        cell_border = _BORDER_SUM_TOP if is_major else _BORDER
+
+        for col_idx, (df_col, _, fmt_type, _) in enumerate(col_specs, start=1):
+            cell = ws.cell(row=data_row, column=col_idx)
+            cell.border = cell_border
+
+            if df_col == "_endr_fjor_kr":
+                raw = endr_kr
+            elif df_col == "_endr_fjor_pct":
+                raw = endr_pct
+            else:
+                raw = row.get(df_col) if df_col in row.index else None
+
+            if fmt_type == "int":
+                cell.value = _safe_int(raw)
+                cell.number_format = _INT_FMT
+                cell.alignment = Alignment(horizontal="right", indent=1)
+            elif fmt_type == "amount":
+                val = _safe_float(raw)
+                cell.value = val if val != 0.0 else None
+                cell.number_format = _AMOUNT_FMT_MAJOR if is_major else _AMOUNT_FMT
+                cell.alignment = Alignment(horizontal="right", indent=1)
+            elif fmt_type == "pct":
+                val = _safe_float(raw)
+                cell.value = val if val != 0.0 else None
+                cell.number_format = _PCT_FMT
+                cell.alignment = Alignment(horizontal="right", indent=1)
+                if val > 0.05:
+                    cell.font = _POS_FONT
+                elif val < -0.05:
+                    cell.font = _NEG_FONT
+            else:
+                cell.value = str(raw or "")
+                cell.alignment = Alignment(horizontal="left", indent=1)
+
+            if is_major:
+                cell.font = Font(name=vt.FONT_FAMILY_BODY, bold=True, size=11, color=vt.TEXT_PRIMARY)
+                cell.fill = _SUM_MAJOR_FILL
+            elif is_sum:
+                cell.font = Font(name=vt.FONT_FAMILY_BODY, bold=True, size=10, color=vt.TEXT_PRIMARY)
+                cell.fill = _SUM_FILL
+            elif use_zebra:
+                cell.fill = _ZEBRA_FILL
+
+        ws.row_dimensions[data_row].height = 20 if is_major else (18 if is_sum else 16)
+        data_row += 1
+
+        # Kontorader: kun for leaf-RL (ikke sum-poster)
+        if is_sum or is_major:
+            continue
+        kontos = accounts_by_regnr.get(regnr, [])
+        for konto, kontonavn, ub_val, antall in kontos:
+            _write_konto_row(ws, data_row, col_specs, konto, kontonavn, ub_val, antall)
+            data_row += 1
+
+    # --- Formatering ---
+    ws.freeze_panes = "A5"
+    ws.auto_filter.ref = f"A{header_row}:{last_col_letter}{max(data_row - 1, header_row)}"
+    ws.sheet_view.showGridLines = True
+
+    for col_idx, (_, _, _, width) in enumerate(col_specs, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+def _build_accounts_by_regnr(
+    *,
+    df_hb: Optional[pd.DataFrame],
+    sb_df: Optional[pd.DataFrame],
+    intervals: object,
+    regnskapslinjer: Optional[pd.DataFrame],
+    account_overrides: object,
+) -> dict[int, list[tuple[str, str, float, int]]]:
+    """Bygg mapping fra regnr til liste av (konto, kontonavn, UB, Antall)."""
+    if regnskapslinjer is None or intervals is None:
+        return {}
+
+    hb = df_hb if isinstance(df_hb, pd.DataFrame) else pd.DataFrame()
+    sb = sb_df if isinstance(sb_df, pd.DataFrame) else pd.DataFrame()
+
+    # Hvis HB mangler men vi har SB, bygg en minimal "HB"-stand-in fra SB så
+    # drilldown-funksjonen kan kjøre (trenger bare Konto-kolonnen for å starte).
+    if (hb is None or hb.empty or "Konto" not in hb.columns) and not sb.empty and "konto" in sb.columns:
+        hb = pd.DataFrame({
+            "Konto": sb["konto"].astype(str),
+            "Kontonavn": sb.get("kontonavn", "").astype(str) if "kontonavn" in sb.columns else "",
+            "Beløp": 0.0,
+        })
+
+    if hb.empty:
+        return {}
+
+    try:
+        from page_analyse_rl_drilldown import build_rl_account_drilldown
+        drill = build_rl_account_drilldown(
+            hb,
+            intervals,  # type: ignore[arg-type]
+            regnskapslinjer,
+            sb_df=sb if not sb.empty else None,
+            regnr_filter=None,
+            account_overrides=account_overrides,  # type: ignore[arg-type]
+        )
+    except Exception:
+        return {}
+
+    if not isinstance(drill, pd.DataFrame) or drill.empty:
+        return {}
+
+    grouped: dict[int, list[tuple[str, str, float, int]]] = {}
+    for _, r in drill.iterrows():
+        regnr = _safe_int(r.get("Nr"))
+        konto = str(r.get("Konto") or "").strip()
+        if not konto:
+            continue
+        kontonavn = str(r.get("Kontonavn") or "").strip()
+        ub_val = _safe_float(r.get("UB"))
+        antall = _safe_int(r.get("Antall"))
+        grouped.setdefault(regnr, []).append((konto, kontonavn, ub_val, antall))
+
+    for regnr, items in grouped.items():
+        items.sort(key=lambda t: t[0])
+
+    return grouped
+
+
+def _write_konto_row(
+    ws,
+    data_row: int,
+    col_specs: list[tuple[str, str, str, float]],
+    konto: str,
+    kontonavn: str,
+    ub_val: float,
+    antall: int,
+) -> None:
+    """Skriv en indentert kontorad under en RL-linje."""
+    muted_font = Font(name=vt.FONT_FAMILY_BODY, size=9, color=vt.TEXT_MUTED)
+    for col_idx, (df_col, _header, fmt_type, _w) in enumerate(col_specs, start=1):
+        cell = ws.cell(row=data_row, column=col_idx)
+        cell.border = _BORDER
+        cell.font = muted_font
+
+        if df_col == "regnr":
+            cell.value = konto
+            cell.number_format = '@'
+            cell.alignment = Alignment(horizontal="right", indent=1)
+        elif df_col == "regnskapslinje":
+            cell.value = kontonavn
+            cell.alignment = Alignment(horizontal="left", indent=3)
+        elif df_col == "UB":
+            cell.value = ub_val if ub_val != 0.0 else None
+            cell.number_format = _AMOUNT_FMT
+            cell.alignment = Alignment(horizontal="right", indent=1)
+        elif df_col == "Antall":
+            cell.value = antall if antall else None
+            cell.number_format = _INT_FMT
+            cell.alignment = Alignment(horizontal="right", indent=1)
+        else:
+            # UB_fjor / endring-kolonner er bevisst tomme på konto-nivå —
+            # fjorårstall pr. konto krever egen datakilde.
+            cell.value = None
+            cell.alignment = Alignment(horizontal="right", indent=1)
+
+    ws.row_dimensions[data_row].height = 14
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +829,9 @@ def save_regnskapsoppstilling_workbook(
     rl_df: pd.DataFrame,
     regnskapslinjer: Optional[pd.DataFrame] = None,
     transactions_df: Optional[pd.DataFrame] = None,
+    sb_df: Optional[pd.DataFrame] = None,
+    intervals: object = None,
+    account_overrides: object = None,
     client: str | None = None,
     year: str | int | None = None,
 ) -> str:
@@ -506,6 +843,9 @@ def save_regnskapsoppstilling_workbook(
         rl_df,
         regnskapslinjer=regnskapslinjer,
         transactions_df=transactions_df,
+        sb_df=sb_df,
+        intervals=intervals,
+        account_overrides=account_overrides,
         client=client,
         year=year,
     )

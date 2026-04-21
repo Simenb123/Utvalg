@@ -32,13 +32,73 @@ def refresh_mapping_issues(page: Any) -> None:
         accounts = []
     page._mapping_issues = list(issues)
     page._mapping_problem_accounts = list(accounts)
-    page._mapping_warning = str(summary or "")
+
+    # Drift-deteksjon: konto med ulik RL år<->fjor, eller kun i ett år.
+    drifts = _compute_mapping_drifts(page)
+    page._mapping_drifts = list(drifts)
+    drift_summary = ""
+    if drifts:
+        try:
+            import rl_mapping_drift
+            drift_summary = rl_mapping_drift.summary_text(drifts)
+        except Exception:
+            drift_summary = ""
+
+    full_summary = str(summary or "")
+    if drift_summary:
+        full_summary = (full_summary + " | " + drift_summary).strip(" |") if full_summary else drift_summary
+    page._mapping_warning = full_summary
+
     if getattr(page, "_mapping_warning_var", None) is not None:
         try:
             page._mapping_warning_var.set(page._mapping_warning)
         except Exception:
             pass
     update_mapping_warning_banner(page, problem_count=len(problems))
+
+
+def _compute_mapping_drifts(page: Any) -> list:
+    """Hent mapping-drift for gjeldende side. Returnerer tom liste ved feil."""
+    try:
+        import rl_mapping_drift
+    except Exception:
+        return []
+    client = ""
+    year: str | None = None
+    try:
+        import session as _session
+        client = str(getattr(_session, "client", "") or "")
+        _yv = getattr(_session, "year", None)
+        year = str(_yv) if _yv else None
+    except Exception:
+        client = ""
+        year = None
+    if not client or not year:
+        return []
+    sb_df = getattr(page, "_rl_sb_df", None)
+    sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+    try:
+        return rl_mapping_drift.detect_mapping_drift(
+            client=client, year=year,
+            sb_df=sb_df, sb_prev_df=sb_prev_df,
+            intervals=intervals, regnskapslinjer=regnskapslinjer,
+        )
+    except Exception:
+        return []
+
+
+def show_mapping_drift_dialog(page: Any) -> None:
+    """Åpne dialog som viser detaljert liste over mapping-drift."""
+    drifts = getattr(page, "_mapping_drifts", None) or []
+    if not drifts:
+        return
+    try:
+        import rl_mapping_drift_dialog
+        rl_mapping_drift_dialog.open_dialog(page, drifts)
+    except Exception:
+        pass
 
 
 def update_mapping_warning_banner(page: Any, *, problem_count: Optional[int] = None) -> None:
@@ -93,6 +153,18 @@ def update_mapping_warning_banner(page: Any, *, problem_count: Optional[int] = N
                 btn_bulk.state(["!disabled"])
             else:
                 btn_bulk.state(["disabled"])
+        btn_drift = getattr(page, "_btn_show_mapping_drift", None)
+        if btn_drift is not None:
+            drifts = getattr(page, "_mapping_drifts", None) or []
+            try:
+                if drifts:
+                    btn_drift.state(["!disabled"])
+                    btn_drift.grid()
+                else:
+                    btn_drift.state(["disabled"])
+                    btn_drift.grid_remove()
+            except Exception:
+                pass
     except Exception:
         pass
 

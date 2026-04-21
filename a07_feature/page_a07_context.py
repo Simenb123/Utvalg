@@ -56,23 +56,8 @@ from a07_feature import (
     suggest_mapping_candidates,
     unmapped_accounts_df,
 )
-from a07_feature import control_status as a07_control_status
-from a07_feature.control_matching import (
-    accounts_for_code,
-    best_suggestion_row_for_code,
-    build_suggestion_reason_label,
-    build_suggestion_status_label,
-    decorate_suggestions_for_display,
-    build_control_suggestion_effect_summary,
-    build_control_suggestion_summary,
-    build_smartmapping_fallback,
-    compact_accounts,
-    preferred_support_tab_key,
-    safe_previous_accounts_for_code,
-    select_safe_history_codes,
-    ui_suggestion_row_from_series,
-)
-from a07_feature.page_control_data import (
+from a07_feature.control import status as a07_control_status
+from a07_feature.control.data import (
     a07_suggestion_is_strict_auto,
     build_a07_overview_df,
     build_control_accounts_summary,
@@ -99,6 +84,20 @@ from a07_feature.page_control_data import (
     select_magic_wand_suggestion_rows,
     suggestion_tree_tag,
     unresolved_codes,
+)
+from a07_feature.control.matching import (
+    accounts_for_code,
+    best_suggestion_row_for_code,
+    build_suggestion_reason_label,
+    build_suggestion_status_label,
+    decorate_suggestions_for_display,
+    build_control_suggestion_effect_summary,
+    build_control_suggestion_summary,
+    build_smartmapping_fallback,
+    compact_accounts,
+    preferred_support_tab_key,
+    select_safe_history_codes,
+    ui_suggestion_row_from_series,
 )
 from a07_feature.page_paths import (
     MATCHER_SETTINGS_DEFAULTS as _MATCHER_SETTINGS_DEFAULTS,
@@ -154,10 +153,22 @@ try:
 except Exception:
     client_store = None
 
-from . import page_a07_shared as _shared
 from .page_a07_context_menu import A07PageContextMenuMixin
-from .page_a07_shared import *  # noqa: F401,F403
-from .page_a07_control_statement import A07PageControlStatementMixin
+from .page_a07_constants import (
+    _BASIS_LABELS,
+    _CONTROL_ALTERNATIVE_MODE_LABELS,
+    _CONTROL_GL_DATA_COLUMNS,
+    _CONTROL_GL_SCOPE_ALIASES,
+    _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL,
+    _CONTROL_GL_SCOPE_LABELS,
+    _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL,
+    _CONTROL_VIEW_LABELS,
+    _SUGGESTION_SCOPE_LABELS,
+)
+from .control.statement_ui import A07PageControlStatementMixin
+from .page_a07_dialogs import _parse_konto_tokens
+from .page_a07_env import session
+from .page_a07_frames import _empty_suggestions_df
 
 
 class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin):
@@ -189,6 +200,15 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
 
     def _selected_code_from_tree(self, tree: ttk.Treeview) -> str | None:
         if tree is getattr(self, "tree_a07", None):
+            selected_work_level = getattr(self, "_selected_control_work_level", None)
+            if callable(selected_work_level):
+                try:
+                    if selected_work_level() != "a07":
+                        resolver = getattr(type(self), "_selected_control_code", None)
+                        if callable(resolver):
+                            return resolver(self)
+                except Exception:
+                    pass
             try:
                 focused_code = str(tree.focus() or "").strip()
             except Exception:
@@ -204,14 +224,14 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
     def _selected_suggestion_row(self) -> pd.Series | None:
         control_tree = getattr(self, "tree_control_suggestions", None)
         support_tree = getattr(self, "tree_suggestions", None)
-        try:
-            support_nb = getattr(self, "control_support_nb", None)
-            if support_nb is not None:
-                current_tab = support_nb.nametowidget(support_nb.select())
-            else:
-                current_tab = None
-        except Exception:
-            current_tab = None
+        active_tab_getter = getattr(self, "_active_support_tab_key", None)
+        if callable(active_tab_getter):
+            try:
+                active_tab = active_tab_getter()
+            except Exception:
+                active_tab = None
+        else:
+            active_tab = None
         focused = None
         try:
             focused = self.focus_get()
@@ -226,7 +246,7 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
             row = self._selected_suggestion_row_from_tree(support_tree)
             if row is not None:
                 return row
-        if current_tab is getattr(self, "tab_alternatives", None) and self._selected_control_alternative_mode() == "suggestions" and control_tree is not None:
+        if active_tab == "suggestions" and control_tree is not None:
             row = self._selected_suggestion_row_from_tree(control_tree)
             if row is not None:
                 return row
@@ -302,6 +322,13 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         return accounts
 
     def _selected_control_suggestion_accounts(self) -> list[str]:
+        selected_work_level = getattr(self, "_selected_control_work_level", None)
+        if callable(selected_work_level):
+            try:
+                if selected_work_level() == "rf1022":
+                    return []
+            except Exception:
+                pass
         row = self._selected_suggestion_row()
         if row is None:
             return []
@@ -313,32 +340,6 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         self._diag(f"set_control_details_visible visible={self._control_details_visible}")
         support_nb = getattr(self, "control_support_nb", None)
         toggle_button = getattr(self, "btn_control_toggle_details", None)
-        panes = getattr(self, "control_vertical_panes", None)
-        if panes is not None:
-            try:
-                total_height = int(panes.winfo_height() or 0)
-            except Exception:
-                total_height = 0
-            if total_height > 0:
-                if self._control_details_visible:
-                    restore_target = getattr(self, "_control_details_restore_sashpos", None)
-                    if restore_target is None:
-                        restore_target = min(max(300, int(total_height * 0.58)), max(300, total_height - 120))
-                    restore_target = max(150, min(int(restore_target), max(150, total_height - 55)))
-                    try:
-                        panes.sashpos(0, restore_target)
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        self._control_details_restore_sashpos = int(panes.sashpos(0))
-                    except Exception:
-                        self._control_details_restore_sashpos = None
-                    collapsed_target = max(120, total_height - 36)
-                    try:
-                        panes.sashpos(0, collapsed_target)
-                    except Exception:
-                        pass
         if support_nb is not None and self._control_details_visible:
             try:
                 support_nb.update_idletasks()
@@ -362,20 +363,102 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
     def _toggle_control_details(self) -> None:
         self._set_control_details_visible(not bool(getattr(self, "_control_details_visible", True)))
 
+    def _sync_control_work_level_ui(self) -> None:
+        selected_work_level = getattr(self, "_selected_control_work_level", None)
+        try:
+            work_level = selected_work_level() if callable(selected_work_level) else "rf1022"
+        except Exception:
+            work_level = "rf1022"
+        view_widget = getattr(self, "a07_filter_widget", None)
+        if view_widget is not None:
+            try:
+                view_widget.configure(state=("disabled" if work_level == "rf1022" else "readonly"))
+            except Exception:
+                pass
+        view_label = getattr(self, "lbl_control_view_caption", None)
+        if view_label is not None:
+            try:
+                view_label.configure(style=("Muted.TLabel" if work_level == "rf1022" else "TLabel"))
+            except Exception:
+                pass
+        sync_gl_scope = getattr(self, "_sync_control_gl_scope_widget", None)
+        if callable(sync_gl_scope):
+            sync_gl_scope()
+
+    def _set_control_advanced_visible(self, visible: bool) -> None:
+        self._control_advanced_visible = bool(visible)
+        button = getattr(self, "btn_control_toggle_advanced", None)
+        if button is not None:
+            try:
+                button.configure(text="Skjul avansert" if self._control_advanced_visible else "Vis avansert")
+            except Exception:
+                pass
+        sync_tabs = getattr(self, "_sync_support_notebook_tabs", None)
+        if callable(sync_tabs):
+            sync_tabs()
+        sync_groups_panel_visibility = getattr(self, "_sync_groups_panel_visibility", None)
+        if callable(sync_groups_panel_visibility):
+            sync_groups_panel_visibility()
+
+    def _toggle_control_advanced(self) -> None:
+        self._set_control_advanced_visible(not bool(getattr(self, "_control_advanced_visible", False)))
+
+    def _sync_support_notebook_tabs(self) -> None:
+        notebook = getattr(self, "control_support_nb", None)
+        if notebook is None:
+            return
+        selected_work_level = getattr(self, "_selected_control_work_level", None)
+        work_level = "rf1022"
+        if callable(selected_work_level):
+            try:
+                work_level = selected_work_level()
+            except Exception:
+                work_level = "rf1022"
+        try:
+            notebook.tab(getattr(self, "tab_suggestions", None), text="Forslag")
+            notebook.tab(getattr(self, "tab_mapping", None), text="Koblinger")
+        except Exception:
+            pass
+        active_tab = None
+        active_tab_getter = getattr(self, "_active_support_tab_key", None)
+        if callable(active_tab_getter):
+            try:
+                active_tab = active_tab_getter()
+            except Exception:
+                active_tab = None
+        if active_tab not in {"suggestions", "mapping"}:
+            try:
+                notebook.select(getattr(self, "tab_suggestions", None))
+            except Exception:
+                pass
+
     def _update_control_transfer_buttons(self) -> None:
         assign_button = getattr(self, "btn_control_assign", None)
         clear_button = getattr(self, "btn_control_clear", None)
         if assign_button is None and clear_button is None:
             return
 
+        selected_work_level = getattr(self, "_selected_control_work_level", None)
+        try:
+            work_level = selected_work_level() if callable(selected_work_level) else "a07"
+        except Exception:
+            work_level = "a07"
         accounts = self._selected_control_gl_accounts()
         code = self._selected_control_code()
+        selected_group_getter = getattr(self, "_selected_rf1022_group", None)
+        try:
+            selected_group = selected_group_getter() if callable(selected_group_getter) else ""
+        except Exception:
+            selected_group = ""
         effective_mapping = self._effective_mapping()
         has_mapped_account = any(str(effective_mapping.get(account) or "").strip() for account in accounts)
 
         try:
             if assign_button is not None:
-                if accounts and code:
+                can_assign = (work_level == "a07" and bool(accounts and code)) or (
+                    work_level == "rf1022" and bool(accounts and selected_group)
+                )
+                if can_assign:
                     assign_button.state(["!disabled"])
                 else:
                     assign_button.state(["disabled"])
@@ -413,6 +496,56 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         fallback = str(self.suggestion_scope_var.get() or "").strip().lower()
         return fallback or "valgt_kode"
 
+    def _control_work_level_for_gl_scope(self) -> str:
+        selected_work_level = getattr(self, "_selected_control_work_level", None)
+        try:
+            work_level = selected_work_level() if callable(selected_work_level) else "rf1022"
+        except Exception:
+            work_level = "rf1022"
+        return work_level if work_level in _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL else "rf1022"
+
+    def _control_gl_scope_keys_for_work_level(self, work_level: str | None = None) -> tuple[str, ...]:
+        level = str(work_level or self._control_work_level_for_gl_scope()).strip().lower()
+        return _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL.get(level, _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL["rf1022"])
+
+    def _control_gl_scope_labels_for_work_level(self, work_level: str | None = None) -> dict[str, str]:
+        level = str(work_level or self._control_work_level_for_gl_scope()).strip().lower()
+        return _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL.get(level, _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL["rf1022"])
+
+    def _normalize_control_gl_scope(self, scope_key: str | None, *, work_level: str | None = None) -> str:
+        scope = str(scope_key or "").strip().lower()
+        scope = _CONTROL_GL_SCOPE_ALIASES.get(scope, scope)
+        keys = self._control_gl_scope_keys_for_work_level(work_level)
+        if scope in keys:
+            return scope
+        return "alle"
+
+    def _control_gl_scope_label(self, scope_key: str | None, *, work_level: str | None = None) -> str:
+        scope = self._normalize_control_gl_scope(scope_key, work_level=work_level)
+        labels = self._control_gl_scope_labels_for_work_level(work_level)
+        return labels.get(scope, _CONTROL_GL_SCOPE_LABELS.get(scope, _CONTROL_GL_SCOPE_LABELS["alle"]))
+
+    def _sync_control_gl_scope_widget(self) -> None:
+        work_level = self._control_work_level_for_gl_scope()
+        keys = self._control_gl_scope_keys_for_work_level(work_level)
+        labels = self._control_gl_scope_labels_for_work_level(work_level)
+        current = self._normalize_control_gl_scope(self._selected_control_gl_scope(), work_level=work_level)
+        if current not in keys:
+            current = "alle"
+        label_values = [labels[key] for key in keys]
+        try:
+            self.control_gl_scope_var.set(current)
+            self.control_gl_scope_label_var.set(labels[current])
+        except Exception:
+            pass
+        widget = getattr(self, "control_gl_scope_widget", None)
+        if widget is not None:
+            try:
+                widget.configure(values=label_values, state="readonly")
+                widget.set(labels[current])
+            except Exception:
+                pass
+
     def _selected_control_gl_scope(self) -> str:
         widget = getattr(self, "control_gl_scope_widget", None)
         try:
@@ -420,33 +553,39 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         except Exception:
             label = ""
 
+        work_level = self._control_work_level_for_gl_scope()
+        labels = self._control_gl_scope_labels_for_work_level(work_level)
+        for key, value in labels.items():
+            if value == label:
+                return self._normalize_control_gl_scope(key, work_level=work_level)
         for key, value in _CONTROL_GL_SCOPE_LABELS.items():
             if value == label:
-                return key
+                return self._normalize_control_gl_scope(key, work_level=work_level)
 
         fallback = str(self.control_gl_scope_var.get() or "").strip().lower()
-        return fallback or "alle"
+        return self._normalize_control_gl_scope(fallback or "alle", work_level=work_level)
 
     def _set_control_gl_scope(self, scope_key: str | None) -> None:
-        scope = str(scope_key or "").strip().lower()
-        if scope not in _CONTROL_GL_SCOPE_LABELS:
-            scope = "alle"
+        scope = self._normalize_control_gl_scope(scope_key)
+        label = self._control_gl_scope_label(scope)
         try:
             self.control_gl_scope_var.set(scope)
-            self.control_gl_scope_label_var.set(_CONTROL_GL_SCOPE_LABELS[scope])
+            self.control_gl_scope_label_var.set(label)
         except Exception:
             pass
         widget = getattr(self, "control_gl_scope_widget", None)
         if widget is not None:
             try:
-                widget.set(_CONTROL_GL_SCOPE_LABELS[scope])
+                widget.set(label)
             except Exception:
                 pass
         self._on_control_gl_filter_changed()
 
     def _on_control_gl_scope_changed(self) -> None:
+        scope = self._selected_control_gl_scope()
         try:
-            self.control_gl_scope_var.set(self._selected_control_gl_scope())
+            self.control_gl_scope_var.set(scope)
+            self.control_gl_scope_label_var.set(self._control_gl_scope_label(scope))
         except Exception:
             pass
         self._on_control_gl_filter_changed()
@@ -460,43 +599,49 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         if control_gl_df is None or control_gl_df.empty:
             return pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
 
-        scope = self._selected_control_gl_scope()
+        scope = self._normalize_control_gl_scope(self._selected_control_gl_scope())
         if scope == "alle":
             return control_gl_df.reset_index(drop=True)
 
         code = str(selected_code or "").strip()
-        if not code:
-            return control_gl_df.reset_index(drop=True)
-
         work = control_gl_df.copy()
         code_values = work.get("Kode", pd.Series("", index=work.index)).fillna("").astype(str).str.strip()
+        work_level = self._control_work_level_for_gl_scope()
+        group_id = str(getattr(self, "_selected_rf1022_group", lambda: None)() or "").strip() if work_level == "rf1022" else ""
+        if work_level == "rf1022" and group_id and "Rf1022GroupId" in work.columns:
+            group_values = work["Rf1022GroupId"].fillna("").astype(str).str.strip()
+        else:
+            group_values = pd.Series("", index=work.index, dtype="object")
 
         if scope == "koblede":
+            if work_level == "rf1022" and group_id and "Rf1022GroupId" in work.columns:
+                return work.loc[group_values == group_id].reset_index(drop=True)
+            if not code:
+                return work.iloc[0:0].copy().reset_index(drop=True)
             return work.loc[code_values == code].reset_index(drop=True)
 
-        suggestion_accounts = set(self._selected_control_suggestion_accounts()) if scope in {"forslag", "relevante"} else set()
         if scope == "forslag":
+            if work_level == "rf1022":
+                return work.iloc[0:0].copy().reset_index(drop=True)
+            suggestion_accounts = set(self._selected_control_suggestion_accounts())
             if not suggestion_accounts:
                 return work.iloc[0:0].copy().reset_index(drop=True)
             account_values = work.get("Konto", pd.Series("", index=work.index)).fillna("").astype(str).str.strip()
             return work.loc[account_values.isin(suggestion_accounts)].reset_index(drop=True)
 
-        relevant_accounts = set(accounts_for_code(self._effective_mapping(), code))
-        relevant_accounts.update(
-            safe_previous_accounts_for_code(
-                code,
-                mapping_current=self._effective_mapping(),
-                mapping_previous=self._effective_previous_mapping(),
-                gl_df=self.workspace.gl_df,
-            )
-        )
-        relevant_accounts.update(suggestion_accounts)
-        if not relevant_accounts:
-            return work.iloc[0:0].copy().reset_index(drop=True)
-        account_values = work.get("Konto", pd.Series("", index=work.index)).fillna("").astype(str).str.strip()
-        return work.loc[account_values.isin(relevant_accounts)].reset_index(drop=True)
+        return work.iloc[0:0].copy().reset_index(drop=True)
 
     def _selected_control_alternative_mode(self) -> str:
+        notebook = getattr(self, "control_support_nb", None)
+        if notebook is not None:
+            try:
+                current_tab = notebook.nametowidget(notebook.select())
+            except Exception:
+                current_tab = None
+            if current_tab is getattr(self, "tab_history", None):
+                return "history"
+            if current_tab is getattr(self, "tab_suggestions", None):
+                return "suggestions"
         widget = getattr(self, "control_alternative_mode_widget", None)
         try:
             label = str(widget.get() or "").strip() if widget is not None else ""
@@ -524,6 +669,40 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         return fallback if fallback in _BASIS_LABELS else "Endring"
 
     def _selected_control_codes(self) -> list[str]:
+        selected_work_level = getattr(self, "_selected_control_work_level", None)
+        if callable(selected_work_level):
+            try:
+                if selected_work_level() == "rf1022":
+                    out: list[str] = []
+                    seen: set[str] = set()
+                    try:
+                        selection = self.tree_a07.selection()
+                    except Exception:
+                        selection = ()
+                    groups = [str(item or "").strip() for item in selection or () if str(item or "").strip()]
+                    if not groups:
+                        current_group = str(getattr(self, "_selected_rf1022_group_id", "") or "").strip()
+                        if current_group:
+                            groups = [current_group]
+                    control_df = getattr(self, "control_df", None)
+                    if control_df is None or getattr(control_df, "empty", True):
+                        return out
+                    for group_id in groups:
+                        try:
+                            matches = control_df.loc[
+                                control_df["Rf1022GroupId"].fillna("").astype(str).str.strip() == group_id
+                            ]
+                        except Exception:
+                            matches = pd.DataFrame()
+                        for code in matches.get("Kode", pd.Series(dtype="object")).fillna("").astype(str):
+                            code_s = str(code).strip()
+                            if not code_s or code_s in seen:
+                                continue
+                            out.append(code_s)
+                            seen.add(code_s)
+                    return out
+            except Exception:
+                pass
         out: list[str] = []
         seen: set[str] = set()
         try:
@@ -669,7 +848,7 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         accounts = self._selected_code_accounts(code)
         row = self._selected_control_row()
         next_action = str((row.get("NesteHandling") if row is not None else "") or "").strip()
-        if is_saldobalanse_follow_up_action(next_action):
+        if a07_control_status.is_saldobalanse_follow_up_action(next_action):
             label = f"{next_action} A07 viser behovet, men klassifiseringen gjores i Saldobalanse."
             payroll_scope = a07_control_status.saldobalanse_queue_for_control_action(next_action)
         elif accounts:
@@ -734,17 +913,54 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
                 tree_groups.configure(height=max(2, min(group_count or 2, 4)))
             except Exception:
                 pass
+        lower_body = getattr(self, "control_lower_body", None)
+        groups_panel = getattr(self, "control_groups_panel", None)
+        if lower_body is not None and groups_panel is not None:
+            try:
+                pane_names = tuple(str(value) for value in lower_body.panes())
+            except Exception:
+                pane_names = ()
+            panel_name = str(groups_panel)
+            should_show = bool(getattr(self, "_control_advanced_visible", False))
+            if should_show and panel_name not in pane_names:
+                try:
+                    lower_body.add(groups_panel, weight=1)
+                except Exception:
+                    pass
+            elif not should_show and panel_name in pane_names:
+                try:
+                    lower_body.forget(groups_panel)
+                except Exception:
+                    pass
 
     def _sync_control_panel_visibility(self) -> None:
         label_specs = (
-            ("lbl_control_intro", getattr(self, "control_intro_var", None)),
             ("lbl_control_meta", getattr(self, "control_meta_var", None)),
-            ("lbl_control_match", getattr(self, "control_match_var", None)),
-            ("lbl_control_mapping", getattr(self, "control_mapping_var", None)),
-            ("lbl_control_best", getattr(self, "control_best_var", None)),
+            ("lbl_control_summary", getattr(self, "control_summary_var", None)),
             ("lbl_control_next", getattr(self, "control_next_var", None)),
-            ("lbl_control_drag", getattr(self, "control_drag_var", None)),
         )
+        if bool(getattr(self, "_compact_control_status", False)):
+            for label_name, _variable in label_specs:
+                label = getattr(self, label_name, None)
+                if label is None:
+                    continue
+                try:
+                    if bool(label.winfo_manager()):
+                        label.pack_forget()
+                except Exception:
+                    pass
+            smart_button = getattr(self, "btn_control_smart", None)
+            control_panel = getattr(self, "control_panel", None)
+            try:
+                smart_visible = bool(smart_button.winfo_manager()) if smart_button is not None else False
+            except Exception:
+                smart_visible = False
+            if control_panel is not None and not smart_visible:
+                try:
+                    control_panel.pack_forget()
+                except Exception:
+                    pass
+            return
         for label_name, variable in label_specs:
             label = getattr(self, label_name, None)
             if label is None or variable is None:
@@ -819,86 +1035,11 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         return "break"
 
     def _show_control_gl_context_menu(self, event: tk.Event) -> str | None:
-        iid = self._prepare_tree_context_selection(
-            self.tree_control_gl,
-            event,
-            preserve_existing_selection=True,
-        )
-        if not iid:
-            return None
-
-        accounts = self._selected_control_gl_accounts()
-        selected_code = str(self._selected_control_code() or "").strip()
-        has_mapped_accounts = any(str(self._effective_mapping().get(account) or "").strip() for account in accounts)
-        can_focus_mapped_code = len(accounts) == 1 and has_mapped_accounts
-        menu = tk.Menu(self, tearoff=0)
-        assign_label = "Tildel til valgt kode (->)"
-        if selected_code:
-            assign_label = f"Tildel til {selected_code} (->)"
-        menu.add_command(
-            label=assign_label,
-            command=self._assign_selected_control_mapping,
-            state=("normal" if accounts and selected_code else "disabled"),
-        )
-        menu.add_command(
-            label="Fjern mapping (<-)",
-            command=self._clear_selected_control_mapping,
-            state=("normal" if has_mapped_accounts else "disabled"),
-        )
-        menu.add_command(
-            label="Ga til koblet A07-kode",
-            command=self._focus_linked_code_for_selected_gl_account,
-            state=("normal" if can_focus_mapped_code else "disabled"),
-        )
-        menu.add_command(
-            label=("Vis konto i Saldobalanse" if len(accounts) == 1 else "Vis kontoer i Saldobalanse"),
-            command=self._open_saldobalanse_for_selected_accounts,
-            state=("normal" if accounts else "disabled"),
-        )
-        scope_menu = tk.Menu(menu, tearoff=0)
-        scope_menu.add_command(
-            label="Relevante for valgt kode",
-            command=lambda: self._set_control_gl_scope("relevante"),
-        )
-        scope_menu.add_command(
-            label="Koblet naa",
-            command=lambda: self._set_control_gl_scope("koblede"),
-        )
-        scope_menu.add_command(
-            label="Forslag",
-            command=lambda: self._set_control_gl_scope("forslag"),
-        )
-        scope_menu.add_command(
-            label="Alle kontoer",
-            command=lambda: self._set_control_gl_scope("alle"),
-        )
-        menu.add_separator()
-        menu.add_cascade(label="Vis i venstre liste", menu=scope_menu)
-        menu.add_separator()
-        menu.add_command(
-            label="Smartmapping for valgt kode",
-            command=self._run_selected_control_action,
-            state=("normal" if selected_code else "disabled"),
-        )
-        menu.add_command(
-            label="Bruk beste forslag",
-            command=self._apply_best_suggestion_for_selected_code,
-            state=("normal" if selected_code else "disabled"),
-        )
-        menu.add_command(
-            label="Bruk historikk",
-            command=self._apply_history_for_selected_code,
-            state=("normal" if selected_code else "disabled"),
-        )
-        menu.add_separator()
-        menu.add_command(
-            label="Avansert mapping...",
-            command=self._open_manual_mapping_clicked,
-            state=("normal" if accounts else "disabled"),
-        )
-        return self._post_context_menu(menu, event)
+        return A07PageContextMenuMixin._show_control_gl_context_menu(self, event)
 
     def _show_control_code_context_menu(self, event: tk.Event) -> str | None:
+        return A07PageContextMenuMixin._show_control_code_context_menu(self, event)
+
         iid = self._prepare_tree_context_selection(
             self.tree_a07,
             event,
@@ -973,6 +1114,8 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         return self._post_context_menu(menu, event)
 
     def _show_group_context_menu(self, event: tk.Event) -> str | None:
+        return A07PageContextMenuMixin._show_group_context_menu(self, event)
+
         iid = self._prepare_tree_context_selection(
             self.tree_groups,
             event,

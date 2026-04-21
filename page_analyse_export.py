@@ -155,6 +155,9 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
             "rl_df": pd.DataFrame(),
             "regnskapslinjer": None,
             "transactions_df": pd.DataFrame(),
+            "sb_df": pd.DataFrame(),
+            "intervals": None,
+            "account_overrides": None,
             "client": getattr(session, "client", None) if session is not None else None,
             "year": getattr(session, "year", None) if session is not None else None,
         }
@@ -169,13 +172,14 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
     except Exception:
         sb_df = getattr(page, "_rl_sb_df", None)
 
+    try:
+        account_overrides = page_analyse_rl._load_current_client_account_overrides()
+    except Exception:
+        account_overrides = None
+
     if not isinstance(df_filtered, pd.DataFrame) or df_filtered.empty or intervals is None or regnskapslinjer is None:
         rl_df = pd.DataFrame()
     else:
-        try:
-            account_overrides = page_analyse_rl._load_current_client_account_overrides()
-        except Exception:
-            account_overrides = None
         try:
             rl_df = page_analyse_rl.build_rl_pivot(
                 df_filtered,
@@ -221,6 +225,9 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
         "regnskapslinjer": regnskapslinjer,
         "transactions_df": tx_df if isinstance(tx_df, pd.DataFrame) else pd.DataFrame(),
         "reskontro_df": reskontro_df,
+        "sb_df": sb_df if isinstance(sb_df, pd.DataFrame) else pd.DataFrame(),
+        "intervals": intervals,
+        "account_overrides": account_overrides,
         "client": getattr(session, "client", None) if session is not None else None,
         "year": getattr(session, "year", None) if session is not None else None,
     }

@@ -9,15 +9,23 @@ from typing import Any
 
 import session
 from ar_store import (
+    MANUAL_OWNER_OP_REMOVE,
+    MANUAL_OWNER_OP_UPSERT,
     ManualOwnedChange,
+    ManualOwnerChange,
     accept_pending_ownership_changes,
+    accept_pending_owner_changes,
     classify_relation_type,
     delete_manual_owned_change,
+    delete_manual_owner_change,
+    detect_circular_ownership,
     get_client_ownership_overview,
     import_registry_pdf,
+    load_manual_owner_changes,
     normalize_orgnr,
     parse_year_from_filename,
     upsert_manual_owned_change,
+    upsert_manual_owner_change,
 )
 
 import page_ar_brreg
@@ -55,6 +63,7 @@ class ARPage(ttk.Frame):
         self._owners_rows_by_iid: dict[str, dict[str, Any]] = {}
         self._change_rows_by_iid: dict[str, dict[str, Any]] = {}
         self._current_manual_change_id: str | None = None
+        self._current_manual_owner_change_id: str | None = None
         self._chart_node_actions: dict[str, dict[str, Any]] = {}
         self._chart_node_keys: dict[str, str] = {}  # action_key -> position_key
         self._chart_node_centers: dict[str, tuple[float, float]] = {}  # pos_key -> (x, y)
@@ -68,6 +77,10 @@ class ARPage(ttk.Frame):
         self._chart_dirty = False
         self._overview_request_id = 0
         self._overview_loading = False
+        # Lazy circular-ownership beregning — egen worker, egen request-id.
+        # Blokkerer aldri AR-tabell-rendering; brukes kun av org-kart-varslet.
+        self._circular_request_id = 0
+        self._circular_in_flight = False
         self._current_source_pdf: str = ""
         self._compare_rows_by_iid: dict[str, dict[str, Any]] = {}
         self._history_rows_by_iid: dict[str, dict[str, Any]] = {}
@@ -549,6 +562,131 @@ class ARPage(ttk.Frame):
         self.var_status.set("Manuell AR-endring slettet.")
         self._refresh_current_overview()
 
+    # ── Manuelle aksjonær-endringer (eier-siden) ──
+    def _selected_owner_compare_row(self) -> dict[str, Any] | None:
+        tree = getattr(self, "_tree_owners", None)
+        if tree is None:
+            return None
+        sel = tree.selection()
+        if not sel:
+            return None
+        return self._compare_rows_by_iid.get(sel[0])
+
+    def _update_manual_owner_action_state(self, row: dict[str, Any] | None = None) -> None:
+        row = row if row is not None else self._selected_owner_compare_row()
+        has_row = row is not None
+        has_manual = bool(row and _safe_text(row.get("manual_change_id")))
+        is_hidden = _safe_text(row.get("source")) == "manual_hidden" if row else False
+        edit_state = "normal" if has_row and not is_hidden else "disabled"
+        remove_state = "normal" if has_row and not is_hidden else "disabled"
+        delete_state = "normal" if has_manual else "disabled"
+        for attr, state in (
+            ("_btn_edit_owner", edit_state),
+            ("_btn_remove_owner", remove_state),
+            ("_btn_delete_manual_owner", delete_state),
+        ):
+            btn = getattr(self, attr, None)
+            if btn is None:
+                continue
+            try:
+                btn.configure(state=state)
+            except Exception:
+                pass
+        self._current_manual_owner_change_id = (
+            _safe_text(row.get("manual_change_id")) or None if row else None
+        )
+
+    def _require_client_year(self) -> bool:
+        if not self._client or not self._year:
+            messagebox.showinfo(
+                "AR",
+                "Velg klient og år før du registrerer manuelle aksjonær-endringer.",
+            )
+            return False
+        return True
+
+    def _on_new_manual_owner_change(self) -> None:
+        if not self._require_client_year():
+            return
+        self._open_manual_owner_dialog(prefill=None)
+
+    def _on_edit_manual_owner_change(self) -> None:
+        if not self._require_client_year():
+            return
+        row = self._selected_owner_compare_row()
+        if row is None:
+            messagebox.showinfo("AR", "Velg en aksjonær i listen først.")
+            return
+        prefill = {
+            "change_id": _safe_text(row.get("manual_change_id")),
+            "shareholder_name": _safe_text(row.get("shareholder_name")),
+            "shareholder_orgnr": _safe_text(row.get("shareholder_orgnr")),
+            "shareholder_kind": _safe_text(row.get("shareholder_kind")) or "unknown",
+            "shares": int(row.get("shares_current") or 0),
+            "total_shares": 0,
+            "ownership_pct": float(row.get("ownership_pct_current") or 0.0),
+            "note": _safe_text(row.get("manual_note")),
+        }
+        self._open_manual_owner_dialog(prefill=prefill)
+
+    def _on_remove_owner_row(self) -> None:
+        if not self._require_client_year():
+            return
+        row = self._selected_owner_compare_row()
+        if row is None:
+            messagebox.showinfo("AR", "Velg en aksjonær å skjule først.")
+            return
+        name = _safe_text(row.get("shareholder_name"))
+        orgnr = _safe_text(row.get("shareholder_orgnr"))
+        label = f"{name}" + (f" ({orgnr})" if orgnr else "")
+        if not messagebox.askyesno(
+            "AR",
+            f"Skjul «{label}» fra aksjonærlisten?\n\n"
+            "Dette overstyrer RF-1086 lokalt. Ved ny import må du godkjenne "
+            "gjenoppretting eksplisitt i Registerendringer.",
+        ):
+            return
+        existing_id = _safe_text(row.get("manual_change_id"))
+        change = ManualOwnerChange(
+            change_id=existing_id or ManualOwnerChange().change_id,
+            op=MANUAL_OWNER_OP_REMOVE,
+            shareholder_name=name,
+            shareholder_orgnr=normalize_orgnr(orgnr),
+            shareholder_kind=_safe_text(row.get("shareholder_kind")) or "unknown",
+            note=f"Skjult manuelt {self._year}".strip(),
+        )
+        upsert_manual_owner_change(self._client, self._year, change)
+        self.var_status.set("Aksjonær skjult (manuell overstyring).")
+        self._refresh_current_overview()
+
+    def _on_delete_manual_owner_change(self) -> None:
+        if not self._require_client_year():
+            return
+        row = self._selected_owner_compare_row()
+        change_id = _safe_text(row.get("manual_change_id")) if row else ""
+        if not change_id:
+            messagebox.showinfo("AR", "Valgt rad har ingen manuell overstyring.")
+            return
+        if not messagebox.askyesno(
+            "AR",
+            "Slett manuell overstyring for denne aksjonæren?\n\n"
+            "Etter dette brukes RF-1086-registeret direkte.",
+        ):
+            return
+        delete_manual_owner_change(self._client, self._year, change_id)
+        self.var_status.set("Manuell aksjonær-overstyring slettet.")
+        self._refresh_current_overview()
+
+    def _open_manual_owner_dialog(self, *, prefill: dict[str, Any] | None) -> None:
+        dlg = _ManualOwnerChangeDialog(self, prefill=prefill)
+        self.wait_window(dlg)
+        if not getattr(dlg, "saved", False):
+            return
+        change: ManualOwnerChange = dlg.result  # type: ignore[assignment]
+        upsert_manual_owner_change(self._client, self._year, change)
+        self.var_status.set("Manuell aksjonær-endring lagret.")
+        self._refresh_current_overview()
+
     def _resolve_consolidation_page(self):
         app = getattr(session, "APP", None)
         if app is None:
@@ -667,10 +805,41 @@ class ARPage(ttk.Frame):
 
     def _build_owners_tab(self, parent: ttk.Frame) -> None:
         """Master-detail: upper = union-compare, lower = shareholder detail."""
-        parent.rowconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+        parent.columnconfigure(0, weight=1)
+
+        # ── Toolbar: manuell overstyring av aksjonærer ──
+        owner_tools = ttk.Frame(parent)
+        owner_tools.grid(row=0, column=0, sticky="ew", pady=(4, 4))
+        manual_group = ttk.LabelFrame(owner_tools, text="Manuell overstyring av eiere", padding=(6, 2))
+        manual_group.pack(side="left")
+        ttk.Button(
+            manual_group, text="Ny eier / overstyring",
+            command=self._on_new_manual_owner_change,
+        ).pack(side="left")
+        self._btn_edit_owner = ttk.Button(
+            manual_group, text="Rediger valgt",
+            command=self._on_edit_manual_owner_change, state="disabled",
+        )
+        self._btn_edit_owner.pack(side="left", padx=(4, 0))
+        self._btn_remove_owner = ttk.Button(
+            manual_group, text="Fjern valgt (skjul)",
+            command=self._on_remove_owner_row, state="disabled",
+        )
+        self._btn_remove_owner.pack(side="left", padx=(4, 0))
+        self._btn_delete_manual_owner = ttk.Button(
+            manual_group, text="Slett overstyring",
+            command=self._on_delete_manual_owner_change, state="disabled",
+        )
+        self._btn_delete_manual_owner.pack(side="left", padx=(4, 0))
+        ttk.Label(
+            owner_tools,
+            text="Manuelle endringer overlever RF-1086-import. Konflikter må aksepteres i Registerendringer.",
+            foreground="#667085",
+        ).pack(side="left", padx=(12, 0))
 
         pw = ttk.PanedWindow(parent, orient="vertical")
-        pw.grid(row=0, column=0, sticky="nsew")
+        pw.grid(row=1, column=0, sticky="nsew")
         self._owners_pw = pw
 
         # ── Upper: union-compare tree with year-aware columns ──
@@ -718,6 +887,9 @@ class ARPage(ttk.Frame):
         tree.tag_configure("new", background="#EAF7F0")
         tree.tag_configure("removed", background="#F2F4F7", foreground="#98A2B3")
         tree.tag_configure("changed", background="#FFFBEB")
+        tree.tag_configure("hidden", background="#F9FAFB", foreground="#98A2B3")
+        tree.tag_configure("manual", background="#EAF7F0")
+        tree.tag_configure("manual_override", background="#FFF4DD")
 
         ysb = ttk.Scrollbar(upper, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=ysb.set)
@@ -886,6 +1058,9 @@ class ARPage(ttk.Frame):
         ).start()
 
     def _load_overview_worker(self, request_id: int, client: str, year: str) -> None:
+        # Kritisk AR-last: bare get_client_ownership_overview, aldri tyngre
+        # analyse. Sirkulært eierskap kjøres i en egen lazy worker
+        # (_start_circular_worker) når brukeren faktisk åpner kart-fanen.
         overview: dict[str, Any] | None = None
         error: Exception | None = None
         try:
@@ -916,6 +1091,8 @@ class ARPage(ttk.Frame):
             return
 
         self._overview = overview or {}
+        # Ny overview → tidligere circular-worker er automatisk stale.
+        self._circular_request_id += 1
         client_orgnr = _safe_text(self._overview.get("client_orgnr")) or "-"
         self.var_orgnr.set(client_orgnr)
 
@@ -934,6 +1111,64 @@ class ARPage(ttk.Frame):
         self._update_trace_strip()
         self._refresh_trees()
 
+    # ── Lazy circular-ownership worker ─────────────────────────
+    # Kjøres kun når kart-fanen er synlig, aldri under kritisk AR-load.
+    # Bruker egen request-id slik at gamle resultater ikke skriver seg inn
+    # i en nyere overview.
+
+    def _start_circular_worker(self) -> None:
+        if not self._client or not self._year:
+            return
+        if not isinstance(self._overview, dict):
+            return
+        if "circular_ownership_cycles" in self._overview:
+            return
+        if self._circular_in_flight:
+            return
+        self._circular_request_id += 1
+        request_id = self._circular_request_id
+        client = self._client
+        year = self._year
+        self._circular_in_flight = True
+        threading.Thread(
+            target=self._circular_worker,
+            args=(request_id, client, year),
+            daemon=True,
+        ).start()
+
+    def _circular_worker(self, request_id: int, client: str, year: str) -> None:
+        cycles: list = []
+        error: Exception | None = None
+        try:
+            cycles = list(detect_circular_ownership(year))
+        except Exception as exc:  # pragma: no cover - robust mot DB-feil
+            error = exc
+        try:
+            self.after(0, lambda: self._apply_circular_result(request_id, client, year, cycles, error))
+        except Exception:
+            return
+
+    def _apply_circular_result(
+        self,
+        request_id: int,
+        client: str,
+        year: str,
+        cycles: list,
+        error: Exception | None,
+    ) -> None:
+        self._circular_in_flight = False
+        if request_id != self._circular_request_id:
+            return
+        if client != self._client or year != self._year:
+            return
+        if not isinstance(self._overview, dict):
+            return
+        self._overview["circular_ownership_cycles"] = [] if error else cycles
+        # Kart-fanen kan vise varsel nå. Hvis brukeren fortsatt ser kartet
+        # og ikke drar, tegn på nytt slik at varselet dukker opp.
+        if self._is_chart_tab_selected() and not getattr(self, "_chart_dragging", False):
+            self._refresh_org_chart()
+
     def _has_current_import(self) -> bool:
         """True iff a RF-1086 import exists for the current year in the overview."""
         ov = self._overview or {}
@@ -943,12 +1178,20 @@ class ARPage(ttk.Frame):
         """Populate the top sporbarhetsstripe based on current overview."""
         ov = self._overview or {}
         base_year = _safe_text(ov.get("owners_base_year_used"))
-        cur_year = _safe_text(ov.get("owners_current_year_used")) or _safe_text(self._year)
+        source_year = _safe_text(ov.get("owners_current_year_used"))
+        view_year = _safe_text(self._year) or _safe_text(ov.get("year")) or source_year
 
-        if base_year and cur_year and base_year != cur_year:
-            self.var_trace_compare.set(f"Sammenligning: {base_year} → {cur_year}")
-        elif cur_year:
-            self.var_trace_compare.set(f"Sammenligning: {cur_year}")
+        if base_year and view_year and base_year != view_year:
+            self.var_trace_compare.set(f"Sammenligning: {base_year} → {view_year}")
+        elif view_year:
+            if source_year and source_year != view_year:
+                self.var_trace_compare.set(
+                    f"Sammenligning: {view_year} (videreført fra {source_year})"
+                )
+            else:
+                self.var_trace_compare.set(
+                    f"Sammenligning: {view_year} (ingen tidligere snapshot)"
+                )
         else:
             self.var_trace_compare.set("Sammenligning: –")
 
@@ -959,16 +1202,18 @@ class ARPage(ttk.Frame):
             "register_baseline": "register",
             "accepted_update": "godkjent",
         }.get(source_kind, source_kind)
-        basis_target = cur_year or "–"
+        basis_target = view_year or "–"
+        if source_year and source_year != view_year and basis_label:
+            basis_label = f"{basis_label} (fra {source_year})"
         self.var_trace_basis.set(
             f"Grunnlag for {basis_target}: {basis_label}" if basis_label else f"Grunnlag for {basis_target}: –"
         )
 
         trace = ov.get("import_trace_current") or {}
         if trace:
-            reg_year = _safe_text(trace.get("register_year")) or _safe_text(trace.get("target_year")) or cur_year
+            reg_year = _safe_text(trace.get("register_year")) or _safe_text(trace.get("target_year")) or view_year
             imported_at = _safe_text(trace.get("imported_at_utc"))[:10]
-            label = f"RF-1086 for {cur_year or reg_year}: importert"
+            label = f"RF-1086 for {view_year or reg_year}: importert"
             if imported_at:
                 label += f" {imported_at}"
             self.var_trace_import.set(label)
@@ -981,7 +1226,7 @@ class ARPage(ttk.Frame):
                 pass
         else:
             self.var_trace_import.set(
-                f"RF-1086 for {cur_year}: ikke importert" if cur_year else "RF-1086: ikke importert"
+                f"RF-1086 for {view_year}: ikke importert" if view_year else "RF-1086: ikke importert"
             )
             self._current_source_pdf = ""
             try:
@@ -1067,12 +1312,21 @@ class ARPage(ttk.Frame):
             sh_tree.delete(*sh_tree.get_children())
 
             ov = self._overview or {}
-            base_year = _safe_text(ov.get("owners_base_year_used")) or "base"
-            cur_year = _safe_text(ov.get("owners_current_year_used")) or _safe_text(self._year) or "nå"
+            raw_base_year = _safe_text(ov.get("owners_base_year_used"))
+            source_year = _safe_text(ov.get("owners_current_year_used"))
+            view_year = _safe_text(self._year) or _safe_text(ov.get("year")) or source_year or "nå"
+            has_base = bool(raw_base_year) and raw_base_year != source_year
             try:
-                sh_tree.heading("shares_base", text=f"Aksjer {base_year}")
-                sh_tree.heading("shares_current", text=f"Aksjer {cur_year}")
-                sh_tree.heading("pct_current", text=f"Eierandel {cur_year}")
+                if has_base:
+                    sh_tree.heading("shares_base", text=f"Aksjer {raw_base_year}")
+                else:
+                    sh_tree.heading("shares_base", text="Aksjer (ingen sammenligning)")
+                if source_year and source_year != view_year:
+                    sh_tree.heading("shares_current", text=f"Aksjer {view_year} (fra {source_year})")
+                    sh_tree.heading("pct_current", text=f"Eierandel {view_year} (fra {source_year})")
+                else:
+                    sh_tree.heading("shares_current", text=f"Aksjer {view_year}")
+                    sh_tree.heading("pct_current", text=f"Eierandel {view_year}")
             except Exception:
                 pass
 
@@ -1127,23 +1381,38 @@ class ARPage(ttk.Frame):
         for idx, row in enumerate(pending_changes, start=1):
             iid = f"change-{idx}"
             self._change_rows_by_iid[iid] = dict(row)
-            current_label = (
-                f"{_fmt_optional_pct(row.get('current_pct'))} | {_relation_label(row.get('current_relation'))}"
-                if row.get("current_pct") is not None
-                else "-"
-            )
-            candidate_label = (
-                f"{_fmt_optional_pct(row.get('candidate_pct'))} | {_relation_label(row.get('candidate_relation'))}"
-                if row.get("candidate_pct") is not None
-                else "-"
-            )
+            is_owner_row = _safe_text(row.get("kind")) == "owner"
+            if is_owner_row:
+                display_name = _safe_text(row.get("shareholder_name"))
+                display_orgnr = _safe_text(row.get("shareholder_orgnr"))
+                current_label = (
+                    f"{_fmt_optional_pct(row.get('current_pct'))} | "
+                    f"{_fmt_thousand(int(row.get('current_shares') or 0))} aksjer"
+                )
+                candidate_label = (
+                    f"{_fmt_optional_pct(row.get('candidate_pct'))} | "
+                    f"{_fmt_thousand(int(row.get('candidate_shares') or 0))} aksjer"
+                )
+            else:
+                display_name = row.get("company_name", "")
+                display_orgnr = row.get("company_orgnr", "")
+                current_label = (
+                    f"{_fmt_optional_pct(row.get('current_pct'))} | {_relation_label(row.get('current_relation'))}"
+                    if row.get("current_pct") is not None
+                    else "-"
+                )
+                candidate_label = (
+                    f"{_fmt_optional_pct(row.get('candidate_pct'))} | {_relation_label(row.get('candidate_relation'))}"
+                    if row.get("candidate_pct") is not None
+                    else "-"
+                )
             self._tree_changes.insert(
                 "",
                 "end",
                 iid=iid,
                 values=(
-                    row.get("company_name", ""),
-                    row.get("company_orgnr", ""),
+                    display_name,
+                    display_orgnr,
                     _change_type_label(row.get("change_type")),
                     current_label,
                     candidate_label,
@@ -1210,7 +1479,10 @@ class ARPage(ttk.Frame):
                         pass
 
         self._chart_dirty = True
-        if self._is_chart_tab_selected():
+        # Ikke tegn kartet på nytt midt i en aktiv drag — det fjerner
+        # canvas-elementer bruker er i ferd med å flytte. on_chart_release
+        # plukker opp _chart_dirty og re-rendrer når brukeren slipper.
+        if self._is_chart_tab_selected() and not getattr(self, "_chart_dragging", False):
             self._refresh_org_chart()
         self._on_new_manual_change()
 
@@ -1458,3 +1730,120 @@ class ARPage(ttk.Frame):
 
 
 from page_ar_import_detail_dialog import _ImportDetailDialog  # noqa: F401
+
+
+class _ManualOwnerChangeDialog(tk.Toplevel):
+    """Editor for ManualOwnerChange (upsert). Remove/delete use separate buttons."""
+
+    _KIND_CHOICES = ("unknown", "company", "person")
+
+    def __init__(self, parent: tk.Misc, *, prefill: dict[str, Any] | None) -> None:
+        super().__init__(parent)
+        self.transient(parent)
+        self.title("Manuell aksjonær-endring")
+        self.resizable(False, False)
+        self.saved = False
+        self.result: ManualOwnerChange | None = None
+        self._prefill = prefill or {}
+
+        self.var_name = tk.StringVar(value=_safe_text(self._prefill.get("shareholder_name")))
+        self.var_orgnr = tk.StringVar(value=_safe_text(self._prefill.get("shareholder_orgnr")))
+        kind = _safe_text(self._prefill.get("shareholder_kind")) or "unknown"
+        if kind not in self._KIND_CHOICES:
+            kind = "unknown"
+        self.var_kind = tk.StringVar(value=kind)
+        self.var_shares = tk.StringVar(value=str(int(self._prefill.get("shares") or 0) or ""))
+        self.var_total_shares = tk.StringVar(
+            value=str(int(self._prefill.get("total_shares") or 0) or "")
+        )
+        pct_val = float(self._prefill.get("ownership_pct") or 0.0)
+        self.var_pct = tk.StringVar(value=f"{pct_val:.4f}".rstrip("0").rstrip(".") if pct_val else "")
+        self.var_note = tk.StringVar(value=_safe_text(self._prefill.get("note")))
+
+        body = ttk.Frame(self, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+
+        rows = (
+            ("Aksjonær (navn):", ttk.Entry(body, textvariable=self.var_name, width=38)),
+            ("Org.nr / fødselsår:", ttk.Entry(body, textvariable=self.var_orgnr, width=20)),
+            (
+                "Type:",
+                ttk.Combobox(
+                    body, textvariable=self.var_kind,
+                    values=self._KIND_CHOICES, state="readonly", width=12,
+                ),
+            ),
+            ("Aksjer:", ttk.Entry(body, textvariable=self.var_shares, width=14)),
+            ("Totalt antall aksjer:", ttk.Entry(body, textvariable=self.var_total_shares, width=14)),
+            ("Eierandel %:", ttk.Entry(body, textvariable=self.var_pct, width=14)),
+            ("Notat:", ttk.Entry(body, textvariable=self.var_note, width=38)),
+        )
+        for r, (label, widget) in enumerate(rows):
+            ttk.Label(body, text=label).grid(row=r, column=0, sticky="w", pady=2)
+            widget.grid(row=r, column=1, sticky="ew", pady=2, padx=(8, 0))
+
+        help_text = (
+            "Manuelle overstyringer overlever RF-1086-import. Ved avvik mot nytt "
+            "register genereres en pending-endring som må godkjennes eksplisitt."
+        )
+        ttk.Label(
+            body, text=help_text, foreground="#667085", wraplength=360, justify="left",
+        ).grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(8, 2))
+
+        btns = ttk.Frame(body)
+        btns.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="e", pady=(10, 0))
+        ttk.Button(btns, text="Avbryt", command=self._on_cancel).pack(side="right")
+        ttk.Button(btns, text="Lagre", command=self._on_save).pack(side="right", padx=(0, 6))
+
+        self.bind("<Escape>", lambda _e: self._on_cancel())
+        self.bind("<Return>", lambda _e: self._on_save())
+        self.grab_set()
+        self.update_idletasks()
+        try:
+            self.geometry(
+                f"+{parent.winfo_rootx() + 80}+{parent.winfo_rooty() + 80}"
+            )
+        except Exception:
+            pass
+
+    def _parse_int(self, text: str) -> int:
+        text = (text or "").strip().replace(" ", "")
+        if not text:
+            return 0
+        try:
+            return int(float(text))
+        except Exception:
+            return 0
+
+    def _on_save(self) -> None:
+        name = _safe_text(self.var_name.get())
+        orgnr = normalize_orgnr(self.var_orgnr.get())
+        if not name and not orgnr:
+            messagebox.showwarning(
+                "AR", "Skriv inn aksjonær-navn eller org.nr.", parent=self,
+            )
+            return
+        try:
+            pct = float((self.var_pct.get() or "0").replace(",", ".").strip())
+        except Exception:
+            messagebox.showerror("AR", "Ugyldig eierandel.", parent=self)
+            return
+        change_id = _safe_text(self._prefill.get("change_id")) or ManualOwnerChange().change_id
+        self.result = ManualOwnerChange(
+            change_id=change_id,
+            op=MANUAL_OWNER_OP_UPSERT,
+            shareholder_name=name,
+            shareholder_orgnr=orgnr,
+            shareholder_kind=_safe_text(self.var_kind.get()) or "unknown",
+            shares=self._parse_int(self.var_shares.get()),
+            total_shares=self._parse_int(self.var_total_shares.get()),
+            ownership_pct=pct,
+            note=_safe_text(self.var_note.get()),
+        )
+        self.saved = True
+        self.destroy()
+
+    def _on_cancel(self) -> None:
+        self.saved = False
+        self.destroy()

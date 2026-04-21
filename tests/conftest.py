@@ -216,3 +216,66 @@ try:
     import tkinter  # noqa: F401
 except Exception:
     _install_tkinter_stub()
+
+
+def _neutralize_blocking_dialogs() -> None:
+    """Erstatt messagebox/filedialog-funksjoner med no-ops under test.
+
+    Why: På Windows er ekte tkinter tilgjengelig, og produksjonskode kaller
+    messagebox.showinfo/askyesno/filedialog.askopenfilename osv. i flere
+    kodestier. Uten denne patchen poppet testene opp blokkerende GUI-dialoger
+    som stoppet hele suiten til en bruker klikket OK.
+    """
+    try:
+        import tkinter.messagebox as _mb  # type: ignore
+    except Exception:
+        _mb = None  # type: ignore
+    if _mb is not None:
+        def _none(*_a, **_k):
+            return None
+
+        def _false(*_a, **_k):
+            return False
+
+        def _no(*_a, **_k):
+            return "no"
+
+        for _name in ("showinfo", "showwarning", "showerror"):
+            try:
+                setattr(_mb, _name, _none)
+            except Exception:
+                pass
+        for _name in ("askyesno", "askokcancel", "askretrycancel", "askyesnocancel"):
+            try:
+                setattr(_mb, _name, _false)
+            except Exception:
+                pass
+        try:
+            setattr(_mb, "askquestion", _no)
+        except Exception:
+            pass
+
+    try:
+        import tkinter.filedialog as _fd  # type: ignore
+    except Exception:
+        _fd = None  # type: ignore
+    if _fd is not None:
+        def _empty_str(*_a, **_k):
+            return ""
+
+        def _empty_tuple(*_a, **_k):
+            return ()
+
+        for _name in ("askopenfilename", "asksaveasfilename", "askdirectory"):
+            try:
+                setattr(_fd, _name, _empty_str)
+            except Exception:
+                pass
+        for _name in ("askopenfilenames",):
+            try:
+                setattr(_fd, _name, _empty_tuple)
+            except Exception:
+                pass
+
+
+_neutralize_blocking_dialogs()

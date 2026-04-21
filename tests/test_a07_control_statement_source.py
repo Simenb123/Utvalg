@@ -194,6 +194,51 @@ def test_build_current_include_unclassified_adds_placeholder_group(monkeypatch):
     assert "__unclassified__" in group_ids
 
 
+def test_build_current_infers_payroll_control_group_from_known_a07_code(monkeypatch):
+    document = AccountProfileDocument(
+        client="Air Management AS",
+        year=2025,
+        profiles={
+            "5930": AccountProfile(
+                account_no="5930",
+                account_name="Pensjonsforsikring OTP",
+                a07_code="tilskuddOgPremieTilPensjon",
+                control_group=None,
+                source="manual",
+            ),
+        },
+    )
+    monkeypatch.setattr(
+        control_statement_source.mapping_source,
+        "load_current_document",
+        lambda *_a, **_k: document,
+    )
+    monkeypatch.setattr(
+        control_statement_source, "load_current_catalog", lambda: None
+    )
+
+    gl_df = pd.DataFrame(
+        [
+            {
+                "Konto": "5930",
+                "Navn": "Pensjonsforsikring OTP",
+                "IB": 0.0,
+                "Endring": 100.0,
+                "UB": 100.0,
+            },
+        ]
+    )
+
+    rows = control_statement_source.build_current_control_statement_rows(
+        "Air Management AS", 2025, gl_df
+    )
+
+    assert len(rows) == 1
+    assert rows[0].group_id == "112_pensjon"
+    assert rows[0].label == "112_pensjon"
+    assert rows[0].accounts == ("5930",)
+
+
 def test_load_current_catalog_returns_none_on_resolve_failure(monkeypatch):
     monkeypatch.setattr(
         control_statement_source.classification_config,
@@ -219,3 +264,59 @@ def test_load_current_catalog_returns_none_on_load_failure(monkeypatch, tmp_path
     )
 
     assert control_statement_source.load_current_catalog() is None
+
+
+def test_load_current_catalog_returns_catalog_on_success(monkeypatch, tmp_path):
+    catalog = _catalog_with_loenn()
+    catalog_path = tmp_path / "catalog.json"
+    monkeypatch.setattr(
+        control_statement_source.classification_config,
+        "resolve_catalog_path",
+        lambda: catalog_path,
+    )
+    monkeypatch.setattr(
+        control_statement_source,
+        "load_account_classification_catalog",
+        lambda path: catalog if path == catalog_path else None,
+    )
+
+    assert control_statement_source.load_current_catalog() is catalog
+
+
+def test_build_current_filters_groups_outside_control_statement_scope(monkeypatch):
+    document = AccountProfileDocument(
+        client="Air Management AS",
+        year=2025,
+        profiles={
+            "5000": AccountProfile(
+                account_no="5000",
+                account_name="Loenn fast",
+                a07_code="fastloenn",
+                control_group="AnalyseOnly",
+                source="manual",
+            ),
+        },
+    )
+    catalog = AccountClassificationCatalog(
+        groups=(
+            AccountClassificationCatalogEntry(
+                id="AnalyseOnly",
+                label="Analyse only",
+                active=True,
+                applies_to=("analyse",),
+            ),
+        ),
+        tags=(),
+    )
+    monkeypatch.setattr(
+        control_statement_source.mapping_source,
+        "load_current_document",
+        lambda *_a, **_k: document,
+    )
+    monkeypatch.setattr(control_statement_source, "load_current_catalog", lambda: catalog)
+
+    rows = control_statement_source.build_current_control_statement_rows(
+        "Air Management AS", 2025, _gl_df_5000()
+    )
+
+    assert rows == []

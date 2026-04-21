@@ -68,11 +68,19 @@ balansepunkt mellom år uten at saldoen har endret seg reelt.
 
 `build_rl_pivot` filtrerer visningen etter om SB er tilgjengelig:
 
-- **Med SB:** vis RL der `|UB| > 1e-9` **ELLER** `Antall > 0`.
+- **Med SB:** vis RL der `|UB| > 1e-9` **ELLER** `|UB_fjor| > 1e-9`
+  **ELLER** `Antall > 0`.
 - **Uten SB:** vis kun RL der `Antall > 0`.
 
 Grunn: uten SB kan vi ikke skille "null saldo" fra "ingen data". Da er
-Antall den eneste indikatoren.
+Antall den eneste indikatoren. Fjor-kolonnene legges på *før* filteret,
+slik at RL som kun har fjorårsdata (typisk pga. mapping-drift) ikke
+blir skjult. Se [rl_mapping_drift.md](rl_mapping_drift.md) for hvordan
+selve drift-funn eksponeres i GUI.
+
+HB-konto-modusen speiler denne regelen: `page_analyse_pivot.py`
+merger UB_fjor per konto og skjuler kun rader der både inneværende UB
+og UB_fjor er ≈0.
 
 ## Kolonne-kontrakt
 

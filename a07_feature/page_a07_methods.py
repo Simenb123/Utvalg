@@ -6,10 +6,10 @@ from .page_a07_locking import A07PageLockingMixin
 from .page_a07_mapping_actions import A07PageMappingActionsMixin
 from .page_a07_project_actions import A07PageProjectActionsMixin
 from .page_a07_refresh import A07PageRefreshMixin
-from .page_a07_render import A07PageRenderMixin
+from .ui.page import A07PageUiMixin
+from .ui.render import A07PageRenderMixin
+from .ui.selection import A07PageSelectionMixin
 from .page_a07_rf1022 import A07PageRf1022Mixin
-from .page_a07_selection import A07PageSelectionMixin
-from .page_a07_ui import A07PageUiMixin
 
 
 class A07PageMethodsMixin(

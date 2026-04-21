@@ -30,6 +30,29 @@ This fits the current repo style better than a full `features/` namespace and av
 - Use adapters between Utvalg data structures and A07 data structures.
 - Keep numeric behavior stable during migration. Do not rewrite all A07 money logic at the same time.
 
+## A07 Lonn Phase 1 Direction
+
+For A07-lonn follow-up work, phase 1 establishes a dedicated documentation set and
+target namespace structure without moving runtime files yet.
+
+Phase 1 references:
+
+- `doc/a07_payroll/README.md`
+- `doc/a07_payroll/WORKFLOW.md`
+- `doc/a07_payroll/MODULE_MAP.md`
+- `doc/a07_payroll/TESTING.md`
+
+The approved migration direction for this track is:
+
+- `a07_feature/payroll/`
+- `a07_feature/control/`
+- `a07_feature/ui/`
+
+Important constraint:
+
+- phase 1 is structure and documentation preparation only
+- no existing A07 or saldobalanse runtime files are moved in this phase
+
 ## Recommended Package Layout
 
 ```text

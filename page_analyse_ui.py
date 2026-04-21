@@ -16,6 +16,7 @@ from typing import Any, Optional, Sequence
 
 from page_analyse_ui_helpers import (  # noqa: F401
     _build_period_range_picker,
+    _nk_auto_fetch_brreg,
     _nk_fetch_brreg,
     _safe_period_value,
 )

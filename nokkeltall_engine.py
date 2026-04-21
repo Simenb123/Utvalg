@@ -86,6 +86,8 @@ class NokkeltallResult:
     reskontro_lev_top_ub: list[ReskontroRow] = field(default_factory=list)
     reskontro_kunder_top_debet: list[ReskontroRow] = field(default_factory=list)
     reskontro_lev_top_kredit: list[ReskontroRow] = field(default_factory=list)
+    reskontro_kunder_all: list[ReskontroRow] = field(default_factory=list)
+    reskontro_lev_all: list[ReskontroRow] = field(default_factory=list)
     has_prev_year: bool = False
     client: str = ""
     year: str = ""
@@ -97,6 +99,8 @@ class NokkeltallResult:
 
 def _format_value(value: float | None, fmt: str) -> str:
     if value is None:
+        return "–"
+    if isinstance(value, float) and value != value:  # NaN
         return "–"
     if fmt == "pct":
         return f"{value:.1f} %"
@@ -232,11 +236,17 @@ def _compute_metrics(ub: dict[int, float], ub_prev: dict[int, float] | None) -> 
     kundefordr_p = _get_prev(610)
     varelager_p = _get_prev(605)
     levgjeld_p = _get_prev(780)
+    avskriving_p = _get_prev(50)
+    sum_driftskost_p = _get_prev(79)
 
     # -- EBITDA --
     ebitda = None
     if driftsinnt is not None and sum_driftskost is not None and avskriving is not None:
         ebitda = driftsinnt - (sum_driftskost - avskriving)
+    ebitda_p = None
+    if (driftsinnt_p is not None and sum_driftskost_p is not None
+            and avskriving_p is not None):
+        ebitda_p = driftsinnt_p - (sum_driftskost_p - avskriving_p)
 
     metrics: list[Nokkeltall] = []
 
@@ -274,7 +284,9 @@ def _compute_metrics(ub: dict[int, float], ub_prev: dict[int, float] | None) -> 
     metrics.append(_metric("ebitda_pct", "EBITDA-margin",
                            "Lønnsomhet",
                            _safe_div(ebitda, driftsinnt) * 100
-                           if ebitda is not None and driftsinnt else None))
+                           if ebitda is not None and driftsinnt else None,
+                           _safe_div(ebitda_p, driftsinnt_p) * 100
+                           if ebitda_p is not None and driftsinnt_p else None))
 
     metrics.append(_metric("res_for_skatt_pct", "Resultat før skatt i % av inntekter",
                            "Lønnsomhet",
@@ -646,6 +658,21 @@ def _build_top_activity(
             ub_val = -ub_val
             if change_pct is not None:
                 change_pct = -change_pct
+
+        def _opt_float(key: str) -> float | None:
+            if key not in row.index:
+                return None
+            try:
+                v = float(row.get(key, 0) or 0)
+            except (ValueError, TypeError):
+                return None
+            return v
+
+        debet = _opt_float("Debet_sum")
+        kredit = _opt_float("Kredit_sum")
+        netto: float | None = None
+        if debet is not None and kredit is not None:
+            netto = debet - kredit
         items.append({
             "regnr": regnr,
             "name": name,
@@ -655,6 +682,12 @@ def _build_top_activity(
             "ub": ub_val,
             "formatted_ub": _format_value(ub_val, "amount"),
             "change_pct": change_pct,
+            "debet": debet,
+            "kredit": kredit,
+            "netto": netto,
+            "formatted_debet": _format_value(debet, "amount") if debet is not None else "",
+            "formatted_kredit": _format_value(kredit, "amount") if kredit is not None else "",
+            "formatted_netto": _format_value(netto, "amount") if netto is not None else "",
         })
     return items
 
@@ -1033,6 +1066,8 @@ def compute_nokkeltall(
         reskontro_lev_top_ub=_top_n(lev_rows, key=lambda r: r.ub),
         reskontro_kunder_top_debet=_top_n(kunder_rows, key=lambda r: r.debet),
         reskontro_lev_top_kredit=_top_n(lev_rows, key=lambda r: r.kredit),
+        reskontro_kunder_all=kunder_rows,
+        reskontro_lev_all=lev_rows,
         has_prev_year=has_prev,
         client=str(client),
         year=str(year or ""),

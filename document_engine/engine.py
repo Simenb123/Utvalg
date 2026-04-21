@@ -30,10 +30,26 @@ SUPPORTED_EXTENSIONS = {
 # Matches amounts in multiple formats:
 #   Norwegian: 1 990,00 | 1.990,00 | 1990,00
 #   English:   1,990.00 | 1990.00
-#   No decimals: 1990 | 1 990 | 1.990
+#   No decimals: 1990 | 1 990 | 1.990  (limited to 9 integer digits)
 #   Negative:  -500,00
-# The regex uses alternatives: first try with decimals, then whole numbers.
-_NUMBER_FRAGMENT = r"-?\d[\d\s.,\u00a0]*\d"
+#
+# Anchored with (?<!\d) so the match cannot start inside a longer digit run.
+# The alternatives are ordered by specificity — grouped-thousands-with-decimal
+# first, plain integer last — so findall prefers the most structured form.
+# Previously the pattern was r"-?\d[\d\s.,\u00a0]*\d" which is greedy and
+# unbounded; it could eat 50-digit table columns as one amount (e.g. a
+# Tripletex monthly-overview day header "1 2 3 4 ... 31") and produce
+# nonsense captures like "123456789...465216.00" for total_amount.
+_NUMBER_FRAGMENT = (
+    r"(?<!\d)-?(?:"
+    r"\d{1,3}(?:[ \u00a0.]\d{3})+,\d{1,2}"       # 213 855,00 / 1.234,56
+    r"|\d{1,3}(?:,\d{3})+\.\d{1,2}"              # 213,855.00
+    r"|\d{1,3}(?:[ \u00a0.]\d{3})+"              # 213 855 / 1.234 (no decimal)
+    r"|\d{1,9},\d{1,2}"                          # 1234,56
+    r"|\d{1,9}\.\d{1,2}"                         # 1234.56
+    r"|\d{1,9}"                                  # 12345 (max 9 digits)
+    r")"
+)
 _COMPANY_SUFFIX_RE = re.compile(r"\b(?:AS|ASA|ENK|AB|OY|LTD|LLC|INC|GMBH|BV|SA|SPA)\b", re.IGNORECASE)
 _PDF_TEXT_THRESHOLD = 40
 

@@ -269,13 +269,63 @@ def test_suggest_mappings_applies_rulebook_special_add_in_solver(tmp_path):
     )
 
     row = df.loc[df["Kode"] == "feriepenger"].iloc[0]
-    assert row["ForslagKontoer"] == "5000"
+    assert row["ForslagKontoer"] == "5000,2940"
     assert row["GL_Sum"] == 300.0
     assert bool(row["WithinTolerance"]) is True
     assert "special_add" in str(row["Explain"])
     assert bool(row["UsedSpecialAdd"]) is True
     assert bool(row["UsedRulebook"]) is True
     assert "special_add" in str(row["AnchorSignals"])
+
+
+def test_suggest_mappings_keeps_unmapped_special_add_as_mapping_candidate(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "feriepenger": {
+                        "basis": "UB",
+                        "allowed_ranges": ["5020", "2940"],
+                        "keywords": ["feriepenger"],
+                        "boost_accounts": ["2940"],
+                        "special_add": [{"account": "2940", "basis": "Endring", "weight": 1.0}],
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    a07 = pd.DataFrame([{"Kode": "feriepenger", "Navn": "Feriepenger", "Belop": 900.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5020", "Navn": "Feriepenger", "UB": 1000.0, "Endring": 1000.0},
+            {"Konto": "2940", "Navn": "Skyldig feriepenger", "UB": 4000.0, "Endring": -100.0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={"5020": "feriepenger"},
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="UB",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+        rulebook_path=str(rulebook_path),
+    )
+
+    row = df.loc[df["Kode"] == "feriepenger"].iloc[0]
+    assert row["ForslagKontoer"] == "2940"
+    assert row["GL_Sum"] == 900.0
+    assert bool(row["WithinTolerance"]) is True
 
 
 def test_suggest_mappings_expected_sign_prefers_negative_match(tmp_path):

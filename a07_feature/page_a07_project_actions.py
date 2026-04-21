@@ -55,23 +55,8 @@ from a07_feature import (
     suggest_mapping_candidates,
     unmapped_accounts_df,
 )
-from a07_feature import control_status as a07_control_status
-from a07_feature.control_matching import (
-    accounts_for_code,
-    best_suggestion_row_for_code,
-    build_suggestion_reason_label,
-    build_suggestion_status_label,
-    decorate_suggestions_for_display,
-    build_control_suggestion_effect_summary,
-    build_control_suggestion_summary,
-    build_smartmapping_fallback,
-    compact_accounts,
-    preferred_support_tab_key,
-    safe_previous_accounts_for_code,
-    select_safe_history_codes,
-    ui_suggestion_row_from_series,
-)
-from a07_feature.page_control_data import (
+from a07_feature.control import status as a07_control_status
+from a07_feature.control.data import (
     a07_suggestion_is_strict_auto,
     build_a07_overview_df,
     build_control_accounts_summary,
@@ -98,6 +83,21 @@ from a07_feature.page_control_data import (
     select_magic_wand_suggestion_rows,
     suggestion_tree_tag,
     unresolved_codes,
+)
+from a07_feature.control.matching import (
+    accounts_for_code,
+    best_suggestion_row_for_code,
+    build_suggestion_reason_label,
+    build_suggestion_status_label,
+    decorate_suggestions_for_display,
+    build_control_suggestion_effect_summary,
+    build_control_suggestion_summary,
+    build_smartmapping_fallback,
+    compact_accounts,
+    preferred_support_tab_key,
+    safe_previous_accounts_for_code,
+    select_safe_history_codes,
+    ui_suggestion_row_from_series,
 )
 from a07_feature.page_paths import (
     MATCHER_SETTINGS_DEFAULTS as _MATCHER_SETTINGS_DEFAULTS,
@@ -153,8 +153,10 @@ try:
 except Exception:
     client_store = None
 
-from . import page_a07_shared as _shared
-from .page_a07_shared import *  # noqa: F401,F403
+from .page_a07_constants import _MAPPING_COLUMNS, _MATCHER_SETTINGS_DEFAULTS
+from .page_a07_dialogs import _format_aliases_editor, _parse_aliases_editor
+from .page_a07_env import filedialog, messagebox, session, simpledialog
+from .page_a07_runtime_helpers import _clean_context_value
 
 class A07PageProjectActionsMixin:
     def _current_project_state(self) -> dict[str, object]:
@@ -264,7 +266,6 @@ class A07PageProjectActionsMixin:
                 path,
                 client=client,
                 year=year,
-                prefer_profiles=True,
             )
             self.mapping_path = Path(path)
             if client and year:

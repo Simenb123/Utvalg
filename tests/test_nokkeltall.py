@@ -526,3 +526,4 @@ class TestReport:
         # "Standardvurderinger" finnes i CSS-kommentar; sjekk heller at
         # selve section-title-divet ikke rendres.
         assert '<div class="section-title">Standardvurderinger</div>' not in html
+

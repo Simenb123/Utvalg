@@ -30,6 +30,21 @@
       "problemMatcher": []
     },
     {
+      "label": "Stopp Hengende Pytest",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\scripts\\Stop-StalePytest.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Bygg EXE",
       "type": "shell",
       "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",

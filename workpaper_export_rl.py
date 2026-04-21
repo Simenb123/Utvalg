@@ -106,6 +106,9 @@ def export_regnskapsoppstilling_excel(page) -> None:
             rl_df=rl_df,
             regnskapslinjer=payload.get("regnskapslinjer"),
             transactions_df=payload.get("transactions_df"),
+            sb_df=payload.get("sb_df"),
+            intervals=payload.get("intervals"),
+            account_overrides=payload.get("account_overrides"),
             client=payload.get("client"),
             year=payload.get("year"),
         )

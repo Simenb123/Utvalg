@@ -83,3 +83,24 @@ def test_unmapped_accounts_supports_ib_minus_ub_basis():
     df = unmapped_accounts_df(gl_df, {}, basis_col="IB-UB")
 
     assert df.loc[df["Konto"].astype(str) == "2940", "GL_Belop"].iloc[0] == Decimal("-40.00")
+
+
+def test_reconcile_uses_result_ub_and_balance_movement_for_a07_control():
+    a07_df = pd.DataFrame([{"Kode": "feriepenger", "Navn": "Feriepenger", "Belop": "1150"}])
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5020", "Navn": "Feriepenger", "IB": "10", "Endring": "990", "UB": "1000"},
+            {"Konto": "2940", "Navn": "Skyldig feriepenger", "IB": "-100", "Endring": "150", "UB": "50"},
+        ]
+    )
+
+    out = reconcile_a07_vs_gl(
+        a07_df,
+        gl_df,
+        {"5020": "feriepenger", "2940": "feriepenger"},
+        basis_col="Endring",
+    )
+
+    row = out.loc[out["Kode"] == "feriepenger"].iloc[0]
+    assert row["GL_Belop"] == Decimal("1150.00")
+    assert row["Diff"] == Decimal("0.00")

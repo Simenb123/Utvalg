@@ -218,6 +218,49 @@ def test_build_rl_pivot_with_previous_year_columns() -> None:
     assert float(row_10["Endring_pct"]) == pytest.approx(11.4, abs=0.1)
 
 
+def test_build_rl_pivot_includes_rl_with_only_prior_year_data() -> None:
+    """RL som kun har fjorårsdata (ingen UB/HB i år) skal vises i pivot.
+
+    Speiler bruker-rapportert feil: konto mappet til RL 10 i fjor, men ikke
+    i år, slik at RL 10 blir borte selv om fjorårstallet er vesentlig.
+    """
+    from page_analyse_rl import build_rl_pivot
+
+    df_hb = pd.DataFrame({"Konto": ["1000"], "Beløp": [100.0]})
+    sb_current = pd.DataFrame(
+        {
+            "konto": ["1000"],
+            "kontonavn": ["Bank"],
+            "ib": [500.0],
+            "ub": [600.0],
+            "netto": [100.0],
+        }
+    )
+    sb_prev = pd.DataFrame(
+        {
+            "konto": ["1000", "3000"],
+            "kontonavn": ["Bank", "Salg"],
+            "ib": [400.0, 0.0],
+            "ub": [500.0, -900.0],
+            "netto": [100.0, -900.0],
+        }
+    )
+
+    pivot = build_rl_pivot(
+        df_hb,
+        _make_intervals(),
+        _make_regnskapslinjer(),
+        sb_df=sb_current,
+        sb_prev_df=sb_prev,
+    )
+
+    regnr_list = set(pivot["regnr"].tolist())
+    assert 20 in regnr_list, "RL 20 med kun fjorårs-UB skal vises"
+    row_20 = pivot.loc[pivot["regnr"] == 20].iloc[0]
+    assert float(row_20["UB"]) == pytest.approx(0.0)
+    assert float(row_20["UB_fjor"]) == pytest.approx(-900.0)
+
+
 def test_add_adjustment_columns_shows_before_after_and_delta() -> None:
     from page_analyse_rl import _add_adjustment_columns
 

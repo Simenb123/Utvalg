@@ -114,6 +114,100 @@ def _clean_overrides_dict(mapping: dict) -> Dict[str, int]:
     return clean
 
 
+# ---------------------------------------------------------------------------
+# Aksepterte mapping-drift (konto som har ulik RL-mapping i år vs fjor men
+# som bruker har bekreftet er legitimt). Lagres som del av samme payload.
+# ---------------------------------------------------------------------------
+
+def _drift_key(current_year: str | int, prev_year: str | int) -> str:
+    return f"{prev_year}-{current_year}"
+
+
+def load_accepted_mapping_drift(
+    client: str | None, current_year: str | int, prev_year: str | int,
+) -> Dict[str, Dict[str, int | None]]:
+    """Returner dict[konto] = {"regnr_cur": X|None, "regnr_prev": Y|None}.
+
+    Kun aksepterte par med eksakt match på regnr-parene skal filtreres ut i
+    drift-deteksjonen — hvis mappingen endres igjen etter aksept, skal
+    driften dukke opp på nytt.
+    """
+    if not client:
+        return {}
+    raw = _read_payload(client)
+    if not isinstance(raw, dict):
+        return {}
+    bucket = raw.get("accepted_mapping_drift", {})
+    if not isinstance(bucket, dict):
+        return {}
+    entry = bucket.get(_drift_key(current_year, prev_year), {})
+    if not isinstance(entry, dict):
+        return {}
+    out: Dict[str, Dict[str, int | None]] = {}
+    for konto, pair in entry.items():
+        konto_s = str(konto or "").strip()
+        if not konto_s or not isinstance(pair, dict):
+            continue
+
+        def _coerce(v):
+            if v is None:
+                return None
+            try:
+                return int(v)
+            except Exception:
+                return None
+
+        out[konto_s] = {
+            "regnr_cur": _coerce(pair.get("regnr_cur")),
+            "regnr_prev": _coerce(pair.get("regnr_prev")),
+        }
+    return out
+
+
+def set_accepted_mapping_drift(
+    client: str, current_year: str | int, prev_year: str | int,
+    *, konto: str, regnr_cur: int | None, regnr_prev: int | None,
+) -> Path:
+    """Marker én konto som akseptert drift for (prev_year, current_year)-paret."""
+    payload = _read_payload(client)
+    bucket = payload.get("accepted_mapping_drift", {})
+    if not isinstance(bucket, dict):
+        bucket = {}
+    key = _drift_key(current_year, prev_year)
+    entry = bucket.get(key, {})
+    if not isinstance(entry, dict):
+        entry = {}
+    konto_s = str(konto or "").strip()
+    if not konto_s:
+        return overrides_path(client)
+    entry[konto_s] = {
+        "regnr_cur": int(regnr_cur) if regnr_cur is not None else None,
+        "regnr_prev": int(regnr_prev) if regnr_prev is not None else None,
+    }
+    bucket[key] = entry
+    payload["accepted_mapping_drift"] = bucket
+    return _write_payload(client, payload)
+
+
+def clear_accepted_mapping_drift(
+    client: str, current_year: str | int, prev_year: str | int, *, konto: str,
+) -> Path:
+    payload = _read_payload(client)
+    bucket = payload.get("accepted_mapping_drift", {})
+    if not isinstance(bucket, dict):
+        return overrides_path(client)
+    key = _drift_key(current_year, prev_year)
+    entry = bucket.get(key, {})
+    if isinstance(entry, dict):
+        entry.pop(str(konto or "").strip(), None)
+        if entry:
+            bucket[key] = entry
+        else:
+            bucket.pop(key, None)
+    payload["accepted_mapping_drift"] = bucket
+    return _write_payload(client, payload)
+
+
 def load_prior_year_overrides(client: str | None, year: str | None) -> Dict[str, int]:
     """Last overstyringer for forrige år, med årets overrides som fallback.
 

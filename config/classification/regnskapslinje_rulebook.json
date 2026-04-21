@@ -250,25 +250,33 @@
     "610": {
       "label": "Kundefordringer",
       "aliases": [
-        "kundefordringer"
+        "kundefordringer",
+        "avsetning tap til kundefordringer",
+        "avsetning tap på kundefordringer",
+        "avsetning til tap på kundefordringer",
+        "tapsavsetning kundefordringer"
       ]
     },
     "611": {
       "label": "Kundefordringer konsern",
       "aliases": [
-        "kundefordringer til foretak i samme konsern"
+        "kundefordringer til foretak i samme konsern",
+        "kundefordringer konsern"
       ]
     },
     "615": {
       "label": "Andre kortsiktige fordringer",
       "aliases": [
-        "kortsiktige fordringer"
+        "kortsiktige fordringer",
+        "Andre kortsiktige fordringer",
+        "tapsavsetning fordringer"
       ]
     },
     "618": {
       "label": "Kortsiktig lån til foretak i samme konsern",
       "aliases": [
-        "lån til foretak i samme konsern"
+        "lån til foretak i samme konsern",
+        "MV konsern"
       ],
       "normal_balance_hint": "kredit_typisk"
     },
@@ -370,6 +378,19 @@
         "forskuddsskatt utlignet"
       ],
       "normal_balance_hint": "kredit_typisk"
+    },
+    "330": {
+      "label": "Overført til udekket tap",
+      "normal_balance_hint": "debet_typisk"
+    },
+    "620": {
+      "label": "Krav på innbetaling av aksjekapital"
+    },
+    "296": {
+      "label": "Tilleggsutbytte"
+    },
+    "565": {
+      "label": "Investering i annet foretak i samme konsern"
     }
   }
 }

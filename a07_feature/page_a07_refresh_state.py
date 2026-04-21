@@ -1,12 +1,60 @@
 from __future__ import annotations
 
-import session
 import pandas as pd
+from pathlib import Path
+from typing import Callable
 
 from trial_balance_reader import read_trial_balance
 
-from .page_a07_shared import *  # noqa: F401,F403
-from .page_paths import _path_signature
+from a07_feature import from_trial_balance, load_mapping, parse_a07_json
+
+from .page_a07_constants import (
+    CONTROL_STATEMENT_VIEW_PAYROLL,
+    _BASIS_LABELS,
+    _CONTROL_COLUMNS,
+    _CONTROL_GL_COLUMNS,
+    _CONTROL_GL_DATA_COLUMNS,
+    _CONTROL_RF1022_COLUMNS,
+    _CONTROL_SELECTED_ACCOUNT_COLUMNS,
+    _CONTROL_STATEMENT_COLUMNS,
+    _CONTROL_STATEMENT_VIEW_LABELS,
+    _CONTROL_SUGGESTION_COLUMNS,
+    _CONTROL_VIEW_LABELS,
+    _CONTROL_WORK_LEVEL_LABELS,
+    _GROUP_COLUMNS,
+    _HISTORY_COLUMNS,
+    _MAPPING_COLUMNS,
+    _RECONCILE_COLUMNS,
+    _SUGGESTION_COLUMNS,
+    _SUGGESTION_SCOPE_LABELS,
+    _UNMAPPED_COLUMNS,
+    control_statement_view_requires_unclassified,
+)
+from .page_a07_env import session
+from .page_a07_frames import (
+    _empty_a07_df,
+    _empty_control_df,
+    _empty_control_statement_df,
+    _empty_gl_df,
+    _empty_groups_df,
+    _empty_history_df,
+    _empty_mapping_df,
+    _empty_reconcile_df,
+    _empty_rf1022_overview_df,
+    _empty_suggestions_df,
+    _empty_unmapped_df,
+)
+from .page_a07_runtime_helpers import (
+    _clean_context_value,
+    load_previous_year_mapping_for_context,
+    resolve_rulebook_path,
+)
+from .control.data import control_queue_tree_tag, filter_control_visible_codes_df
+from .page_paths import (
+    _path_signature,
+    get_active_trial_balance_path_for_context,
+    get_context_snapshot_with_paths,
+)
 
 
 class A07PageRefreshStateMixin:
@@ -252,6 +300,7 @@ class A07PageRefreshStateMixin:
         self.workspace.source_a07_df = _empty_a07_df()
         self.a07_overview_df = _empty_a07_df()
         self.control_df = _empty_control_df()
+        self.rf1022_overview_df = _empty_rf1022_overview_df()
         self.control_gl_df = pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
         self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
         self.control_statement_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
@@ -296,9 +345,10 @@ class A07PageRefreshStateMixin:
         sync_control_panel_visibility = getattr(self, "_sync_control_panel_visibility", None)
         if callable(sync_control_panel_visibility):
             sync_control_panel_visibility()
-        self.control_bucket_var.set("UlÃƒÂ¸ste 0 | Forslag 0 | Historikk 0 | Manuell 0 | Ferdig 0")
+        self.control_bucket_var.set("0 åpne")
         self.control_code_filter_var.set("")
         self._control_details_auto_revealed = False
+        self._selected_rf1022_group_id = None
         try:
             self._set_control_details_visible(True)
         except Exception:
@@ -311,6 +361,8 @@ class A07PageRefreshStateMixin:
         self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["neste"])
         self.basis_var.set(_BASIS_LABELS["Endring"])
         self.workspace.basis_col = "Endring"
+        self.control_work_level_var.set("rf1022")
+        self.control_work_level_label_var.set(_CONTROL_WORK_LEVEL_LABELS["rf1022"])
         self.control_statement_view_var.set(CONTROL_STATEMENT_VIEW_PAYROLL)
         self.control_statement_view_label_var.set(_CONTROL_STATEMENT_VIEW_LABELS[CONTROL_STATEMENT_VIEW_PAYROLL])
         self.control_statement_include_unclassified_var.set(
@@ -330,13 +382,16 @@ class A07PageRefreshStateMixin:
             self.control_statement_view_widget.set(_CONTROL_STATEMENT_VIEW_LABELS[CONTROL_STATEMENT_VIEW_PAYROLL])
         except Exception:
             pass
+        try:
+            self.control_work_level_widget.set(_CONTROL_WORK_LEVEL_LABELS["rf1022"])
+        except Exception:
+            pass
         _fill_optional_tree("tree_control_gl", self.control_gl_df, _CONTROL_GL_COLUMNS)
         _fill_optional_tree(
             "tree_a07",
-            filter_control_visible_codes_df(self.control_df),
-            _CONTROL_COLUMNS,
-            iid_column="Kode",
-            row_tag_fn=control_queue_tree_tag,
+            self.rf1022_overview_df,
+            _CONTROL_RF1022_COLUMNS,
+            iid_column="GroupId",
         )
         _fill_optional_tree("tree_groups", self.groups_df, _GROUP_COLUMNS, iid_column="GroupId")
         sync_groups_panel_visibility = getattr(self, "_sync_groups_panel_visibility", None)
@@ -358,7 +413,6 @@ class A07PageRefreshStateMixin:
         )
         _fill_optional_tree("tree_mapping", _empty_mapping_df(), _MAPPING_COLUMNS, iid_column="Konto")
         _fill_optional_tree("tree_history", _empty_history_df(), _HISTORY_COLUMNS, iid_column="Kode")
-        _fill_optional_tree("tree_reconcile", _empty_reconcile_df(), _RECONCILE_COLUMNS)
         _fill_optional_tree("tree_unmapped", _empty_unmapped_df(), _UNMAPPED_COLUMNS, iid_column="Konto")
         _fill_optional_tree(
             "tree_control_statement",

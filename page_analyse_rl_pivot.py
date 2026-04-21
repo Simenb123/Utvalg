@@ -107,6 +107,27 @@ def build_rl_pivot(
             log.warning("RL-pivot: kunne ikke telle unike bilag per regnr: %s", exc)
             antall_bilag_per_regnr = None
 
+    # --- Debet/Kredit per regnr (SAF-T: Beløp > 0 = debet, < 0 = kredit) ---
+    debet_kredit_per_regnr: Optional[pd.DataFrame] = None
+    if "Beløp" in df_hb.columns:
+        try:
+            konto_regnr_map = cnt_mapped[["konto", "regnr"]].dropna(subset=["regnr"]).copy()
+            konto_regnr_map["regnr"] = konto_regnr_map["regnr"].astype(int)
+            hb_bel = df_hb[["Konto", "Beløp"]].copy()
+            hb_bel["konto"] = hb_bel["Konto"].astype(str)
+            hb_bel["_belop"] = pd.to_numeric(hb_bel["Beløp"], errors="coerce").fillna(0.0)
+            hb_bel["_debet"] = hb_bel["_belop"].where(hb_bel["_belop"] > 0, 0.0)
+            hb_bel["_kredit"] = (-hb_bel["_belop"]).where(hb_bel["_belop"] < 0, 0.0)
+            hb_with_regnr = hb_bel.merge(konto_regnr_map, on="konto", how="inner")
+            debet_kredit_per_regnr = (
+                hb_with_regnr.groupby("regnr", as_index=False)
+                .agg(Debet_sum=("_debet", "sum"), Kredit_sum=("_kredit", "sum"))
+            )
+            debet_kredit_per_regnr["regnr"] = debet_kredit_per_regnr["regnr"].astype(int)
+        except Exception as exc:
+            log.warning("RL-pivot: kunne ikke aggregere debet/kredit per regnr: %s", exc)
+            debet_kredit_per_regnr = None
+
     # --- IB og UB ---
     if sb_df is not None and not sb_df.empty and "konto" in sb_df.columns:
         ib_ub = _aggregate_sb_to_regnr(
@@ -138,12 +159,19 @@ def build_rl_pivot(
         merged = merged.merge(antall_bilag_per_regnr, how="left", on="regnr")
     else:
         merged["Antall_bilag"] = 0
+    if debet_kredit_per_regnr is not None:
+        merged = merged.merge(debet_kredit_per_regnr, how="left", on="regnr")
+    else:
+        merged["Debet_sum"] = 0.0
+        merged["Kredit_sum"] = 0.0
 
     merged["IB"] = merged["IB"].fillna(0.0)
     merged["UB"] = merged["UB"].fillna(0.0)
     merged["Endring"] = merged["UB"] - merged["IB"]
     merged["Antall"] = merged["Antall"].fillna(0).astype(int)
     merged["Antall_bilag"] = merged["Antall_bilag"].fillna(0).astype(int)
+    merged["Debet_sum"] = merged["Debet_sum"].fillna(0.0).astype(float)
+    merged["Kredit_sum"] = merged["Kredit_sum"].fillna(0.0).astype(float)
 
     all_lines = regn[["regnr", "regnskapslinje", "sumpost", "formel"]].copy()
     if bool(all_lines["sumpost"].any()):
@@ -152,6 +180,8 @@ def build_rl_pivot(
         base_endring = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Endring"])}
         base_antall = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Antall"])}
         base_antall_bilag = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Antall_bilag"])}
+        base_debet = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Debet_sum"])}
+        base_kredit = {int(r): float(v) for r, v in zip(merged["regnr"], merged["Kredit_sum"])}
 
         try:
             ib_values = compute_sumlinjer(base_values=base_ib, regnskapslinjer=regn)
@@ -159,6 +189,8 @@ def build_rl_pivot(
             endring_values = compute_sumlinjer(base_values=base_endring, regnskapslinjer=regn)
             antall_values = compute_sumlinjer(base_values=base_antall, regnskapslinjer=regn)
             antall_bilag_values = compute_sumlinjer(base_values=base_antall_bilag, regnskapslinjer=regn)
+            debet_values = compute_sumlinjer(base_values=base_debet, regnskapslinjer=regn)
+            kredit_values = compute_sumlinjer(base_values=base_kredit, regnskapslinjer=regn)
         except Exception as exc:
             log.warning("RL-pivot: kunne ikke beregne sumposter: %s", exc)
             ib_values = base_ib
@@ -166,6 +198,8 @@ def build_rl_pivot(
             endring_values = base_endring
             antall_values = base_antall
             antall_bilag_values = base_antall_bilag
+            debet_values = base_debet
+            kredit_values = base_kredit
 
         all_lines["IB"] = all_lines["regnr"].map(lambda r: float(ib_values.get(int(r), 0.0)))
         all_lines["UB"] = all_lines["regnr"].map(lambda r: float(ub_values.get(int(r), 0.0)))
@@ -180,9 +214,12 @@ def build_rl_pivot(
             .map(lambda r: int(round(float(antall_bilag_values.get(int(r), 0.0)))))
             .astype(int)
         )
+        all_lines["Debet_sum"] = all_lines["regnr"].map(lambda r: float(debet_values.get(int(r), 0.0)))
+        all_lines["Kredit_sum"] = all_lines["regnr"].map(lambda r: float(kredit_values.get(int(r), 0.0)))
     else:
         all_lines = all_lines.merge(
-            merged[["regnr", "IB", "Endring", "UB", "Antall", "Antall_bilag"]],
+            merged[["regnr", "IB", "Endring", "UB", "Antall",
+                    "Antall_bilag", "Debet_sum", "Kredit_sum"]],
             how="left",
             on="regnr",
         )
@@ -191,23 +228,18 @@ def build_rl_pivot(
         all_lines["Endring"] = all_lines["Endring"].fillna(0.0)
         all_lines["Antall"] = all_lines["Antall"].fillna(0).astype(int)
         all_lines["Antall_bilag"] = all_lines["Antall_bilag"].fillna(0).astype(int)
+        all_lines["Debet_sum"] = all_lines["Debet_sum"].fillna(0.0).astype(float)
+        all_lines["Kredit_sum"] = all_lines["Kredit_sum"].fillna(0.0).astype(float)
 
-    # --- Filtrer tomme linjer ---
-    if sb_df is not None and not sb_df.empty:
-        mask = (all_lines["UB"].abs() > 1e-9) | (all_lines["Antall"] > 0)
-    else:
-        mask = all_lines["Antall"] > 0
-
-    merged = all_lines.loc[mask].sort_values("regnr").reset_index(drop=True)
-
-    result = merged[["regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall", "Antall_bilag"]]
-
+    # --- Legg på fjorårskolonner før filter, slik at RL som kun har fjor-data
+    #     overlever filtrering. Gjøres her (ikke etter filter) for å unngå at
+    #     "Vis nullsaldo" skjuler linjer med UB_fjor != 0.
     if sb_prev_df is not None and not sb_prev_df.empty:
         try:
             import previous_year_comparison
 
-            result = previous_year_comparison.add_previous_year_columns(
-                result,
+            all_lines = previous_year_comparison.add_previous_year_columns(
+                all_lines,
                 sb_prev_df,
                 intervals,
                 regnskapslinjer,
@@ -216,6 +248,22 @@ def build_rl_pivot(
             )
         except Exception as exc:
             log.warning("build_rl_pivot: fjorårskolonner feilet: %s", exc)
+
+    # --- Filtrer tomme linjer ---
+    if sb_df is not None and not sb_df.empty:
+        mask = (all_lines["UB"].abs() > 1e-9) | (all_lines["Antall"] > 0)
+    else:
+        mask = all_lines["Antall"] > 0
+
+    if "UB_fjor" in all_lines.columns:
+        ub_fjor_num = pd.to_numeric(all_lines["UB_fjor"], errors="coerce").fillna(0.0)
+        mask = mask | (ub_fjor_num.abs() > 1e-9)
+
+    merged = all_lines.loc[mask].sort_values("regnr").reset_index(drop=True)
+
+    base_cols = ["regnr", "regnskapslinje", "IB", "Endring", "UB", "Antall", "Antall_bilag"]
+    extra_cols = [c for c in ("UB_fjor", "Endring_fjor", "Endring_pct") if c in merged.columns]
+    result = merged[base_cols + extra_cols]
 
     return result
 

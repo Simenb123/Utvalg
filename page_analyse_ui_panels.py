@@ -71,10 +71,20 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     btn_map_problem.grid(row=0, column=3, sticky="e", padx=4, pady=4)
     btn_bulk_problem = ttk.Button(mapping_banner, text="Flytt valgte...", command=page._bulk_map_selected_problem_accounts)
     btn_bulk_problem.grid(row=0, column=4, sticky="e", padx=(4, 8), pady=4)
+    btn_mapping_drift = ttk.Button(
+        mapping_banner, text="Se endret mapping...",
+        command=getattr(page, "_show_mapping_drift_dialog", lambda: None),
+    )
+    btn_mapping_drift.grid(row=0, column=5, sticky="e", padx=(4, 8), pady=4)
+    try:
+        btn_mapping_drift.grid_remove()
+    except Exception:
+        pass
     page._mapping_banner_frame = mapping_banner
     page._btn_show_only_unmapped = btn_show_unmapped
     page._btn_map_selected_problem = btn_map_problem
     page._btn_bulk_map_problem = btn_bulk_problem
+    page._btn_show_mapping_drift = btn_mapping_drift
 
     paned_cls = getattr(ttk, "Panedwindow", None)
     if paned_cls is not None:

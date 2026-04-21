@@ -851,7 +851,11 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
 
         # Merge UB_fjor from Analyse pivot if available
         pivot_df = getattr(self._analyse_page, "_pivot_df_last", None)
-        if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
+        if (
+            isinstance(pivot_df, pd.DataFrame)
+            and "UB_fjor" in pivot_df.columns
+            and "regnr" in pivot_df.columns
+        ):
             rl_df = rl_df.copy()
             for col in ("UB_fjor",):
                 if col in pivot_df.columns and col not in rl_df.columns:

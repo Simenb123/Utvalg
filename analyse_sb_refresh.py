@@ -204,8 +204,24 @@ def _resolve_target_kontoer(*, page: Any, sb_df: pd.DataFrame,
         return set()
 
     sb_konto_str = sb_df[konto_src].astype(str).str.strip()
-    accounts = sb_konto_str.unique().tolist()
-    resolved = _rl_svc.resolve_accounts_to_rl(accounts, context=context)
+    accounts = set(sb_konto_str.unique().tolist())
+
+    # Inkluder også kontoer som kun finnes i fjor-SB, slik at RL med kun
+    # fjorårsdata kan resolveres og vises i hoyre-panelet.
+    sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+    if isinstance(sb_prev_df, pd.DataFrame) and not sb_prev_df.empty:
+        prev_cols = _resolve_sb_columns(sb_prev_df)
+        prev_konto_src = prev_cols.get("konto")
+        if prev_konto_src:
+            try:
+                prev_accounts = (
+                    sb_prev_df[prev_konto_src].astype(str).str.strip().unique().tolist()
+                )
+                accounts.update(prev_accounts)
+            except Exception:
+                pass
+
+    resolved = _rl_svc.resolve_accounts_to_rl(list(accounts), context=context)
     if resolved.empty:
         return set()
     return set(
@@ -270,25 +286,10 @@ def refresh_sb_view(*, page: Any) -> None:
 
     matched = sb_df[sb_df[konto_src].astype(str).isin(target_konto)].copy()
 
-    # Filtrer bort rader der IB, Endring og UB alle er 0
-    num_keys = ["ib", "endring", "ub"]
-    num_cols = [col_map[k] for k in num_keys if k in col_map]
-    if num_cols:
-        for c in num_cols:
-            matched[c] = pd.to_numeric(matched[c], errors="coerce").fillna(0.0)
-        has_activity = matched[num_cols].abs().sum(axis=1) > 0.005
-        active = matched[has_activity]
-    else:
-        active = matched
-
-    # Sorter etter konto-nummer
-    try:
-        active = active.sort_values(konto_src, key=lambda s: pd.to_numeric(s, errors="coerce"))
-    except Exception:
-        pass
-
     # Bygg UB-i-fjor-map per konto fra _rl_sb_prev_df (lastet idempotent)
+    # NB: Gjoeres foer filtrering slik at kontoer med kun fjor-data overlever.
     prev_map: dict[str, float] = {}
+    prev_name_map: dict[str, str] = {}
     try:
         import page_analyse_rl as _rl_mod
         _rl_mod.ensure_sb_prev_loaded(page=page)
@@ -300,6 +301,7 @@ def refresh_sb_view(*, page: Any) -> None:
             prev_cols = _resolve_cols(sb_prev_df)
             prev_konto = prev_cols.get("konto")
             prev_ub = prev_cols.get("ub")
+            prev_navn = prev_cols.get("kontonavn")
             if prev_konto and prev_ub:
                 wp = sb_prev_df[[prev_konto, prev_ub]].copy()
                 wp[prev_konto] = wp[prev_konto].astype(str)
@@ -307,8 +309,76 @@ def refresh_sb_view(*, page: Any) -> None:
                 wp = wp.dropna(subset=[prev_ub])
                 # Ved duplikater: ta siste verdi
                 prev_map = dict(zip(wp[prev_konto].tolist(), wp[prev_ub].astype(float).tolist()))
+            if prev_konto and prev_navn:
+                try:
+                    wn = sb_prev_df[[prev_konto, prev_navn]].copy()
+                    wn[prev_konto] = wn[prev_konto].astype(str)
+                    prev_name_map = dict(
+                        zip(wn[prev_konto].tolist(), wn[prev_navn].astype(str).tolist())
+                    )
+                except Exception:
+                    prev_name_map = {}
     except Exception:
         prev_map = {}
+
+    # Legg til syntetiske rader for target-kontoer som kun finnes i sb_prev.
+    present_in_matched: set[str] = set()
+    try:
+        present_in_matched = set(matched[konto_src].astype(str).str.strip().tolist())
+    except Exception:
+        present_in_matched = set()
+    only_prev = [
+        k for k in target_konto
+        if str(k).strip() in prev_map and str(k).strip() not in present_in_matched
+    ]
+    if only_prev:
+        extra_rows = []
+        for k in only_prev:
+            row: dict[str, Any] = {c: 0 for c in matched.columns}
+            if konto_src in matched.columns:
+                row[konto_src] = str(k).strip()
+            navn_src = col_map.get("kontonavn")
+            if navn_src and navn_src in matched.columns:
+                row[navn_src] = prev_name_map.get(str(k).strip(), "")
+            for nk in ("ib", "endring", "ub"):
+                col = col_map.get(nk)
+                if col and col in matched.columns:
+                    row[col] = 0.0
+            antall_col = col_map.get("antall")
+            if antall_col and antall_col in matched.columns:
+                row[antall_col] = 0
+            extra_rows.append(row)
+        if extra_rows:
+            matched = pd.concat(
+                [matched, pd.DataFrame(extra_rows, columns=matched.columns)],
+                ignore_index=True,
+            )
+
+    # Filtrer bort rader der IB, Endring, UB *og* UB_fjor alle er 0.
+    num_keys = ["ib", "endring", "ub"]
+    num_cols = [col_map[k] for k in num_keys if k in col_map]
+    if num_cols:
+        for c in num_cols:
+            matched[c] = pd.to_numeric(matched[c], errors="coerce").fillna(0.0)
+        has_activity = matched[num_cols].abs().sum(axis=1) > 0.005
+        if prev_map:
+            prev_series = (
+                matched[konto_src].astype(str).str.strip()
+                .map(lambda k: abs(float(prev_map.get(k, 0.0) or 0.0)))
+            )
+            has_prev_activity = prev_series > 0.005
+            keep = has_activity | has_prev_activity
+        else:
+            keep = has_activity
+        active = matched[keep]
+    else:
+        active = matched
+
+    # Sorter etter konto-nummer
+    try:
+        active = active.sort_values(konto_src, key=lambda s: pd.to_numeric(s, errors="coerce"))
+    except Exception:
+        pass
 
     # Koble UB-fjor til aktive rader per konto
     ub_fjor_by_konto: dict[str, float] = {}

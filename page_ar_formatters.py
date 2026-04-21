@@ -122,6 +122,10 @@ def _change_type_label(value: object) -> str:
         return "Mangler i register"
     if text == "changed":
         return "Endret"
+    if text == "owner_overwrite":
+        return "Eier: register vs manuell"
+    if text == "owner_restored":
+        return "Eier: gjenopprettet i register"
     return text or "-"
 
 

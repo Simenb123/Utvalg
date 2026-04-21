@@ -183,32 +183,39 @@ def open_rl_drilldown_from_pivot_selection(
 
 def refresh_nokkeltall_view(page: Any) -> None:
     """Beregn og vis nøkkeltall inline i _nk_text-widgeten."""
+    import logging
+    _log = logging.getLogger(__name__)
+
     nk_text = getattr(page, "_nk_text", None)
     if nk_text is None:
+        _log.warning("refresh_nokkeltall_view: _nk_text mangler — nk_frame ble sannsynligvis ikke bygget")
         return
+
+    def _write(msg: str) -> None:
+        try:
+            from page_analyse import _nk_write
+            _nk_write(nk_text, msg)
+        except Exception:
+            pass
 
     try:
         import nokkeltall_engine
-    except Exception:
-        return
-
-    try:
         import page_analyse_export
-    except Exception:
+    except Exception as exc:
+        _write(f"Kunne ikke laste nøkkeltall-moduler:\n{exc}")
         return
 
     # Hent rl_df via eksisterende eksport-logikk
     try:
         payload = page_analyse_export.prepare_regnskapsoppstilling_export_data(page=page)
-    except Exception:
-        payload = {}
+    except Exception as exc:
+        _log.warning("refresh_nokkeltall_view: prepare_regnskapsoppstilling_export_data feilet: %s", exc, exc_info=True)
+        _write(f"Feil ved forberedelse av data:\n{exc}")
+        return
+
     rl_df = payload.get("rl_df")
     if not isinstance(rl_df, pd.DataFrame) or rl_df.empty:
-        try:
-            from page_analyse import _nk_write
-            _nk_write(nk_text, "Ingen regnskapsdata tilgjengelig.\n\nLast inn HB-data og velg klient.")
-        except Exception:
-            pass
+        _write("Ingen regnskapsdata tilgjengelig.\n\nLast inn HB-data og velg klient.")
         return
 
     # Legg til fjorårskolonner hvis tilgjengelig
@@ -226,16 +233,14 @@ def refresh_nokkeltall_view(page: Any) -> None:
     try:
         result = nokkeltall_engine.compute_nokkeltall(rl_df, client=client, year=year)
     except Exception as exc:
-        try:
-            from page_analyse import _nk_write
-            _nk_write(nk_text, f"Feil ved beregning av nøkkeltall:\n{exc}")
-        except Exception:
-            pass
+        _log.warning("refresh_nokkeltall_view: compute_nokkeltall feilet: %s", exc, exc_info=True)
+        _write(f"Feil ved beregning av nøkkeltall:\n{exc}")
         return
 
     brreg = getattr(page, "_nk_brreg_data", None)
     try:
         from page_analyse import _nk_render
         _nk_render(nk_text, result, brreg_data=brreg)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.warning("refresh_nokkeltall_view: _nk_render feilet: %s", exc, exc_info=True)
+        _write(f"Feil ved rendering:\n{exc}")

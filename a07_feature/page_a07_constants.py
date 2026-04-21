@@ -1,0 +1,412 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+from .control.data import (
+    CONTROL_STATEMENT_VIEW_ALL,
+    CONTROL_STATEMENT_VIEW_LABELS as _PAGE_CONTROL_STATEMENT_VIEW_LABELS,
+    CONTROL_STATEMENT_VIEW_LEGACY,
+    CONTROL_STATEMENT_VIEW_PAYROLL,
+    CONTROL_STATEMENT_VIEW_UNCLASSIFIED,
+    control_statement_view_requires_unclassified,
+)
+
+
+_A07_DIAGNOSTICS_ENABLED = True
+_A07_DIAGNOSTICS_LOG = Path(tempfile.gettempdir()) / "utvalg_a07_debug.log"
+
+_A07_COLUMNS = (
+    ("Kode", "Kode", 180, "w"),
+    ("Navn", "Navn", 280, "w"),
+    ("Belop", "Belop", 120, "e"),
+    ("Status", "Status", 120, "w"),
+    ("Kontoer", "Kontoer", 200, "w"),
+)
+
+_CONTROL_COLUMNS = (
+    ("A07Post", "A07-post", 320, "w"),
+    ("A07_Belop", "A07", 120, "e"),
+    ("GL_Belop", "GL", 120, "e"),
+    ("Diff", "Diff", 120, "e"),
+)
+
+_CONTROL_RF1022_COLUMNS = (
+    ("Post", "Post", 70, "w"),
+    ("Kontrollgruppe", "Kontrollgruppe", 260, "w"),
+    ("GL_Belop", "GL", 120, "e"),
+    ("A07", "A07", 120, "e"),
+    ("Diff", "Diff", 120, "e"),
+)
+
+_CONTROL_GL_COLUMNS = (
+    ("Konto", "Konto", 80, "w"),
+    ("Navn", "Navn", 280, "w"),
+    ("Rf1022GroupId", "RF-1022", 135, "w"),
+    ("Kode", "A07-kode", 155, "w"),
+    ("Kol", "Kol", 70, "w"),
+    ("IB", "IB", 110, "e"),
+    ("Endring", "Endring", 120, "e"),
+    ("UB", "UB", 110, "e"),
+)
+
+_CONTROL_GL_DATA_COLUMNS = (
+    "Konto",
+    "Navn",
+    "IB",
+    "Endring",
+    "UB",
+    "BelopAktiv",
+    "Kol",
+    "Kode",
+    "Rf1022GroupId",
+    "WorkFamily",
+)
+
+_CONTROL_SELECTED_ACCOUNT_COLUMNS = (
+    ("Konto", "Konto", 90, "w"),
+    ("Navn", "Navn", 260, "w"),
+    ("IB", "IB", 110, "e"),
+    ("Endring", "Endring", 120, "e"),
+    ("UB", "UB", 110, "e"),
+)
+
+_CONTROL_SUGGESTION_COLUMNS = (
+    ("ForslagVisning", "Forslag", 420, "w"),
+    ("Forslagsstatus", "Status", 120, "w"),
+    ("HvorforKort", "Hvorfor", 240, "w"),
+    ("Diff", "Diff", 110, "e"),
+)
+
+_RF1022_CANDIDATE_COLUMNS = (
+    ("Konto", "Konto", 90, "w"),
+    ("Navn", "Navn", 260, "w"),
+    ("Kode", "A07-kode", 170, "w"),
+    ("BelopAktiv", "Belop", 120, "e"),
+    ("Matchgrunnlag", "Matchgrunnlag", 220, "w"),
+    ("Belopsgrunnlag", "Belopsgrunnlag", 180, "w"),
+    ("Forslagsstatus", "Status", 120, "w"),
+)
+
+_CONTROL_GL_SCOPE_LABELS = {
+    "alle": "Alle kontoer",
+    "koblede": "Koblet til valgt A07-kode",
+    "forslag": "Forslag for valgt A07-kode",
+    # Legacy input alias only. It is intentionally not shown in the UI.
+    "relevante": "Koblet til valgt A07-kode",
+}
+
+_CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL = {
+    "rf1022": {
+        "alle": "Alle kontoer",
+        "koblede": "Valgt RF-1022-post",
+    },
+    "a07": {
+        "alle": "Alle kontoer",
+        "koblede": "Koblet til valgt A07-kode",
+        "forslag": "Forslag for valgt A07-kode",
+    },
+}
+
+_CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL = {
+    "rf1022": ("alle", "koblede"),
+    "a07": ("alle", "koblede", "forslag"),
+}
+
+_CONTROL_GL_SCOPE_ALIASES = {
+    "relevante": "koblede",
+}
+
+_CONTROL_ALTERNATIVE_MODE_LABELS = {
+    "suggestions": "Beste forslag",
+    "history": "Historikk",
+}
+
+_CONTROL_HIDDEN_CODES = {
+    "aga",
+    "forskuddstrekk",
+    "finansskattloenn",
+    "finansskattlÃ¸nn",
+}
+
+_CONTROL_EXTRA_COLUMNS = (
+    "Kode",
+    "Navn",
+    "Status",
+    "AntallKontoer",
+    "Anbefalt",
+    "DagensMapping",
+    "Arbeidsstatus",
+    "GuidetStatus",
+    "GuidetNeste",
+    "MatchingReady",
+    "SuggestionGuardrail",
+    "SuggestionGuardrailReason",
+    "CurrentMappingSuspicious",
+    "CurrentMappingSuspiciousReason",
+    "Rf1022GroupId",
+    "WorkFamily",
+    "ReconcileStatus",
+    "NesteHandling",
+    "Locked",
+    "Hvorfor",
+)
+
+_GROUP_COLUMNS = (
+    ("GroupId", "Gruppe", 180, "w"),
+    ("Navn", "Navn", 220, "w"),
+    ("Members", "Medlemmer", 280, "w"),
+    ("Locked", "LÃ¥st", 70, "center"),
+)
+
+_SUGGESTION_COLUMNS = (
+    ("Kode", "Kode", 140, "w"),
+    ("KodeNavn", "KodeNavn", 220, "w"),
+    ("Basis", "Basis", 80, "w"),
+    ("A07_Belop", "A07_Belop", 120, "e"),
+    ("ForslagVisning", "Forslag", 320, "w"),
+    ("Forslagsstatus", "Status", 110, "w"),
+    ("HvorforKort", "Hvorfor", 220, "w"),
+    ("Diff", "Diff", 120, "e"),
+    ("GL_Sum", "GL_Sum", 120, "e"),
+)
+
+_RECONCILE_COLUMNS = (
+    ("Kode", "Kode", 140, "w"),
+    ("Navn", "Navn", 220, "w"),
+    ("A07_Belop", "A07_Belop", 120, "e"),
+    ("GL_Belop", "GL_Belop", 120, "e"),
+    ("Diff", "Diff", 120, "e"),
+    ("AntallKontoer", "AntallKontoer", 110, "e"),
+    ("Kontoer", "Kontoer", 200, "w"),
+    ("WithinTolerance", "OK", 70, "center"),
+)
+
+_MAPPING_COLUMNS = (
+    ("Konto", "Konto", 110, "w"),
+    ("Navn", "Navn", 260, "w"),
+    ("Kode", "Kode", 180, "w"),
+)
+
+_UNMAPPED_COLUMNS = (
+    ("Konto", "Konto", 110, "w"),
+    ("Navn", "Navn", 260, "w"),
+    ("GL_Belop", "GL_Belop", 120, "e"),
+)
+
+_HISTORY_COLUMNS = (
+    ("Kode", "Kode", 140, "w"),
+    ("Navn", "Navn", 220, "w"),
+    ("AarKontoer", "I aar", 180, "w"),
+    ("HistorikkKontoer", "Historikk", 180, "w"),
+    ("Status", "Status", 160, "w"),
+    ("KanBrukes", "Kan brukes", 90, "center"),
+    ("Merknad", "Merknad", 320, "w"),
+)
+
+_CONTROL_STATEMENT_COLUMNS = (
+    ("Gruppe", "Gruppe", 180, "w"),
+    ("Navn", "Navn", 220, "w"),
+    ("IB", "IB", 110, "e"),
+    ("Endring", "Endring", 120, "e"),
+    ("UB", "UB", 110, "e"),
+    ("A07", "A07", 110, "e"),
+    ("Diff", "Diff", 110, "e"),
+    ("Status", "Status", 140, "w"),
+    ("AntallKontoer", "Antall", 90, "e"),
+)
+
+_RF1022_OVERVIEW_COLUMNS = (
+    ("Post", "Post", 70, "w"),
+    ("Omraade", "Omrade", 190, "w"),
+    ("Kontrollgruppe", "Kontrollgruppe", 220, "w"),
+    ("GL_Belop", "GL", 120, "e"),
+    ("A07", "A07", 120, "e"),
+    ("Diff", "Diff", 120, "e"),
+    ("Status", "Status", 100, "w"),
+    ("AntallKontoer", "Antall", 80, "e"),
+)
+
+_CONTROL_WORK_LEVEL_LABELS = {
+    "rf1022": "RF-1022",
+    "a07": "A07",
+}
+
+_RF1022_A07_BRIDGE = {
+    "100_loenn_ol": (
+        "fastloenn",
+        "timeloenn",
+        "overtidsgodtgjoerelse",
+        "feriepenger",
+        "trekkloennForFerie",
+        "styrehonorarOgGodtgjoerelseVerv",
+        "annet",
+    ),
+    "100_refusjon": (
+        "sumAvgiftsgrunnlagRefusjon",
+    ),
+    "111_naturalytelser": (
+        "elektroniskKommunikasjon",
+        "skattepliktigDelForsikringer",
+    ),
+    "112_pensjon": (
+        "tilskuddOgPremieTilPensjon",
+    ),
+}
+
+_RF1022_ACCOUNT_COLUMNS = (
+    ("Post", "Post", 150, "w"),
+    ("Konto", "Kontonr", 90, "w"),
+    ("Navn", "Kontobetegnelse", 240, "w"),
+    ("KostnadsfortYtelse", "Kostnadsfort", 120, "e"),
+    ("TilleggTidligereAar", "Tillegg tidl. ar", 120, "e"),
+    ("FradragPaalopt", "Fradrag palopt", 120, "e"),
+    ("SamledeYtelser", "Samlede ytelser", 120, "e"),
+    ("AgaPliktig", "AGA-pliktig", 95, "center"),
+    ("AgaGrunnlag", "AGA-grunnlag", 120, "e"),
+    ("Feriepengegrunnlag", "Feriep.grl.", 95, "center"),
+)
+
+_RF1022_POST_RULES = (
+    (100, "LÃ¸nn o.l.", {"100_loenn_ol"}),
+    (100, "Refusjon", {"100_refusjon"}),
+    (111, "Naturalytelser", {"111_naturalytelser"}),
+    (112, "Pensjon", {"112_pensjon"}),
+    (
+        100,
+        "Lonn og trekk",
+        {"Lonnskostnad", "Skyldig lonn", "Feriepenger", "Skyldig feriepenger", "Skattetrekk"},
+    ),
+    (
+        110,
+        "Arbeidsgiveravgift",
+        {
+            "Kostnadsfort arbeidsgiveravgift",
+            "Kostnadsfort arbeidsgiveravgift av feriepenger",
+            "Skyldig arbeidsgiveravgift",
+            "Skyldig arbeidsgiveravgift av feriepenger",
+        },
+    ),
+    (120, "Pensjon og refusjon", {"Pensjonskostnad", "Skyldig pensjon", "Refusjon"}),
+    (130, "Naturalytelser og styrehonorar", {"Naturalytelse", "Styrehonorar"}),
+)
+
+_A07_FILTER_LABELS = {
+    "alle": "Alle",
+    "uloste": "Uloste",
+    "avvik": "Avvik",
+    "ikke_mappet": "Ikke mappet",
+    "ok": "OK",
+    "ekskludert": "Ekskludert",
+}
+
+# Guided standardvisning viser bare arbeidsko, alle og ferdige i filteret,
+# men vi beholder resten av noklene for compat i status-/filterlogikken.
+_CONTROL_PRIMARY_VIEW_KEYS = ("neste", "alle", "ferdig")
+
+_CONTROL_VIEW_LABELS = {
+    "neste": "Arbeidskø",
+    "ulost": "Må avklares",
+    "forslag": "Trygge forslag",
+    "historikk": "Historikk",
+    "manuell": "Til kontroll",
+    "ferdig": "Ferdig",
+    "alle": "Alle",
+}
+
+_CONTROL_VIEW_LABELS = {
+    "neste": "Arbeidsko",
+    "ulost": "Maa avklares",
+    "forslag": "Har forslag",
+    "historikk": "Historikk",
+    "manuell": "Kontroller kobling",
+    "ferdig": "Ferdige",
+    "alle": "Alle",
+}
+
+_SUGGESTION_SCOPE_LABELS = {
+    "valgt_kode": "Valgt kode",
+    "uloste": "Uloste koder",
+    "alle": "Alle forslag",
+}
+
+_BASIS_LABELS = {
+    "Endring": "Endring",
+    "UB": "UB",
+    "IB": "IB",
+}
+
+_CONTROL_DRAG_IDLE_HINT = "Velg kode og konto, eller dra konto inn."
+_CONTROL_STATEMENT_VIEW_LABELS = dict(_PAGE_CONTROL_STATEMENT_VIEW_LABELS)
+
+_NUMERIC_COLUMNS_ZERO_DECIMALS = {"AntallKontoer"}
+_NUMERIC_COLUMNS_THREE_DECIMALS = {"Score"}
+_NUMERIC_COLUMNS_TWO_DECIMALS = {
+    "Belop",
+    "Diff",
+    "A07",
+    "A07_Belop",
+    "GL_Belop",
+    "GL_Sum",
+    "IB",
+    "UB",
+    "Endring",
+}
+
+_MATCHER_SETTINGS_DEFAULTS = {
+    "tolerance_rel": 0.02,
+    "tolerance_abs": 100.0,
+    "max_combo": 2,
+    "candidates_per_code": 20,
+    "top_suggestions_per_code": 5,
+    "historical_account_boost": 0.12,
+    "historical_combo_boost": 0.10,
+}
+
+
+__all__ = [
+    "CONTROL_STATEMENT_VIEW_ALL",
+    "CONTROL_STATEMENT_VIEW_LEGACY",
+    "CONTROL_STATEMENT_VIEW_PAYROLL",
+    "CONTROL_STATEMENT_VIEW_UNCLASSIFIED",
+    "_A07_COLUMNS",
+    "_A07_DIAGNOSTICS_ENABLED",
+    "_A07_DIAGNOSTICS_LOG",
+    "_A07_FILTER_LABELS",
+    "_BASIS_LABELS",
+    "_CONTROL_ALTERNATIVE_MODE_LABELS",
+    "_CONTROL_COLUMNS",
+    "_CONTROL_DRAG_IDLE_HINT",
+    "_CONTROL_EXTRA_COLUMNS",
+    "_CONTROL_GL_COLUMNS",
+    "_CONTROL_GL_DATA_COLUMNS",
+    "_CONTROL_GL_SCOPE_ALIASES",
+    "_CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL",
+    "_CONTROL_GL_SCOPE_LABELS",
+    "_CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL",
+    "_CONTROL_HIDDEN_CODES",
+    "_CONTROL_RF1022_COLUMNS",
+    "_CONTROL_SELECTED_ACCOUNT_COLUMNS",
+    "_CONTROL_STATEMENT_COLUMNS",
+    "_CONTROL_STATEMENT_VIEW_LABELS",
+    "_CONTROL_SUGGESTION_COLUMNS",
+    "_CONTROL_PRIMARY_VIEW_KEYS",
+    "_CONTROL_VIEW_LABELS",
+    "_CONTROL_WORK_LEVEL_LABELS",
+    "_GROUP_COLUMNS",
+    "_HISTORY_COLUMNS",
+    "_MAPPING_COLUMNS",
+    "_MATCHER_SETTINGS_DEFAULTS",
+    "_NUMERIC_COLUMNS_THREE_DECIMALS",
+    "_NUMERIC_COLUMNS_TWO_DECIMALS",
+    "_NUMERIC_COLUMNS_ZERO_DECIMALS",
+    "_RECONCILE_COLUMNS",
+    "_RF1022_A07_BRIDGE",
+    "_RF1022_ACCOUNT_COLUMNS",
+    "_RF1022_OVERVIEW_COLUMNS",
+    "_RF1022_POST_RULES",
+    "_SUGGESTION_COLUMNS",
+    "_SUGGESTION_SCOPE_LABELS",
+    "_UNMAPPED_COLUMNS",
+    "control_statement_view_requires_unclassified",
+]

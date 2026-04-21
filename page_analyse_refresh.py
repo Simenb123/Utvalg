@@ -49,6 +49,11 @@ def refresh_from_session(
         except Exception:
             pass
         page._session_cache_key = cur_key
+        try:
+            import page_analyse_ui_helpers as _puh
+            page.after_idle(lambda: _puh._nk_auto_fetch_brreg(page))
+        except Exception:
+            pass
     page._refresh_mva_code_choices()
     page._update_data_level()
     if defer_heavy:

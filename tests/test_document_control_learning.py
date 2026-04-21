@@ -5,6 +5,8 @@ from document_control_learning import (
     build_supplier_profile,
     match_supplier_profile,
 )
+from document_engine.engine import TextSegment
+from document_engine.profiles import _find_hint_in_segments, infer_field_hints
 
 
 def test_build_supplier_profile_collects_vendor_specific_hints() -> None:
@@ -95,3 +97,45 @@ def test_match_supplier_profile_can_match_on_alias_in_raw_text() -> None:
     assert matched["profile_key"] == "orgnr:987654321"
     assert matched["supplier_name"] == "Eksempel Partner AS"
     assert score >= 60.0
+
+
+def test_infer_field_hints_handles_nbsp_in_amount_values() -> None:
+    # Regression: PDF extraction produces NBSP (\u00a0) in grouped amounts
+    # like "183\xa0592,50". `_candidate_lines` collapses NBSP → space, but
+    # `_value_markers` used to preserve NBSP, so markers never matched the
+    # normalized segment lines. Result: 23 Brage saves, 0 amount hints.
+    segments = [
+        TextSegment(
+            text="Beløp ekskl. mva 183\u00a0592,50 NOK",
+            source="pdf_text_pdfplumber",
+            page=2,
+            bbox=(0.0, 400.0, 500.0, 440.0),
+        ),
+    ]
+    hints = infer_field_hints(
+        raw_text="",
+        fields={"subtotal_amount": "183\u00a0592,50"},
+        segments=segments,
+        field_evidence={"subtotal_amount": {"page": 2, "bbox": (388.0, 429.0, 438.0, 438.0)}},
+    )
+    assert "subtotal_amount" in hints
+    assert hints["subtotal_amount"][0]["label"] == "beløp ekskl mva"
+    assert hints["subtotal_amount"][0]["page"] == 2
+
+
+def test_value_markers_amount_nbsp_matches_normalized_segment_line() -> None:
+    # Direct check: `_find_hint_in_segments` must find the value even when
+    # the stored value keeps the NBSP but the segment text has been
+    # whitespace-collapsed.
+    seg = TextSegment(
+        text="Totalt 229\u00a0490,63 NOK",
+        source="pdf_text",
+        page=2,
+        bbox=(0.0, 0.0, 1.0, 1.0),
+    )
+    hint = _find_hint_in_segments(
+        [seg], "total_amount", "229\u00a0490,63",
+        evidence_page=2, evidence_bbox=None,
+    )
+    assert hint is not None
+    assert hint["label"] == "totalt"

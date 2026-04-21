@@ -230,12 +230,8 @@ def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
         )
 
         allowed = _parse_ranges(rule.get("allowed_ranges", []) or [])
-        if concept_ranges:
-            merged_allowed = list(allowed)
-            for item in concept_ranges:
-                if item not in merged_allowed:
-                    merged_allowed.append(item)
-            allowed = tuple(merged_allowed)
+        if concept_ranges and not allowed:
+            allowed = tuple(concept_ranges)
 
         keywords = _expand_keywords(
             code=rule.get("code") or code,

@@ -20,6 +20,7 @@ GLOBAL_DIR = "aksjonaerregister"
 IMPORTS_DIR = "imports"
 DB_FILE = "ar_index.sqlite"
 MANUAL_FILE = "manual_owned_changes.json"
+MANUAL_OWNER_FILE = "manual_owner_changes.json"
 ACCEPTED_FILE = "accepted_owned_base.json"
 SCHEMA_VERSION = 2
 _YEAR_RE = re.compile(r"(20\d{2})")
@@ -196,6 +197,10 @@ def _accepted_state_path(client: str, year: str) -> Path:
     return _client_ar_dir(client, year) / ACCEPTED_FILE
 
 
+def _manual_owner_changes_path(client: str, year: str) -> Path:
+    return _client_ar_dir(client, year) / MANUAL_OWNER_FILE
+
+
 def _client_imports_dir(client: str, year: str, company_orgnr: str, import_id: str) -> Path:
     base = _client_ar_dir(client, year) / IMPORTS_DIR
     orgnr = normalize_orgnr(company_orgnr) or "unknown"
@@ -330,6 +335,267 @@ def delete_manual_owned_change(client: str, year: str, change_id: str) -> list[M
     changes = [item for item in load_manual_owned_changes(client, year) if item.change_id != change_id]
     save_manual_owned_changes(client, year, changes)
     return changes
+
+
+# ── Manuelle aksjonær-endringer (eier-siden) ───────────────────
+# Speiler ManualOwnedChange-mønsteret, men for klientens aksjonærer.
+# ``op`` er enten ``"upsert"`` (legg til / overstyr) eller ``"remove"``
+# (fjern en eier fra RF-1086-grunnlaget). Endringene lagres separat fra
+# RF-1086-data og overstyrer registerdata ved lesetid. Ved ny import som
+# konflikterer med en manuell overstyring, genereres en pending change
+# som må aksepteres eksplisitt i Registerendringer-fanen.
+
+MANUAL_OWNER_OP_UPSERT = "upsert"
+MANUAL_OWNER_OP_REMOVE = "remove"
+_VALID_OWNER_OPS = (MANUAL_OWNER_OP_UPSERT, MANUAL_OWNER_OP_REMOVE)
+
+
+@dataclass
+class ManualOwnerChange:
+    change_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    op: str = MANUAL_OWNER_OP_UPSERT
+    shareholder_name: str = ""
+    shareholder_orgnr: str = ""
+    shareholder_kind: str = ""  # "company" | "person" | "unknown" | ""
+    shares: int = 0
+    total_shares: int = 0
+    ownership_pct: float = 0.0
+    note: str = ""
+    updated_at_utc: str = field(default_factory=_utc_now_z)
+
+
+def _coerce_owner_op(value: object) -> str:
+    raw = _normalize_text(value).lower()
+    return raw if raw in _VALID_OWNER_OPS else MANUAL_OWNER_OP_UPSERT
+
+
+def load_manual_owner_changes(client: str, year: str) -> list[ManualOwnerChange]:
+    payload = _read_json(_manual_owner_changes_path(client, year))
+    if not isinstance(payload, list):
+        return []
+    out: list[ManualOwnerChange] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        try:
+            out.append(
+                ManualOwnerChange(
+                    change_id=str(item.get("change_id") or str(uuid.uuid4())),
+                    op=_coerce_owner_op(item.get("op")),
+                    shareholder_name=_normalize_text(item.get("shareholder_name")),
+                    shareholder_orgnr=normalize_orgnr(item.get("shareholder_orgnr")),
+                    shareholder_kind=_normalize_text(item.get("shareholder_kind")),
+                    shares=_parse_int(item.get("shares")),
+                    total_shares=_parse_int(item.get("total_shares")),
+                    ownership_pct=float(item.get("ownership_pct") or 0.0),
+                    note=_normalize_text(item.get("note")),
+                    updated_at_utc=_normalize_text(item.get("updated_at_utc")) or _utc_now_z(),
+                )
+            )
+        except Exception:
+            continue
+    return out
+
+
+def save_manual_owner_changes(client: str, year: str, changes: list[ManualOwnerChange]) -> Path:
+    serialized = [asdict(change) for change in changes]
+    path = _manual_owner_changes_path(client, year)
+    _write_json_atomic(path, serialized)
+    return path
+
+
+def upsert_manual_owner_change(
+    client: str, year: str, change: ManualOwnerChange
+) -> list[ManualOwnerChange]:
+    change.op = _coerce_owner_op(change.op)
+    changes = load_manual_owner_changes(client, year)
+    replaced = False
+    for idx, existing in enumerate(changes):
+        if existing.change_id == change.change_id:
+            change.updated_at_utc = _utc_now_z()
+            changes[idx] = change
+            replaced = True
+            break
+    if not replaced:
+        change.updated_at_utc = _utc_now_z()
+        changes.append(change)
+    save_manual_owner_changes(client, year, changes)
+    return changes
+
+
+def delete_manual_owner_change(
+    client: str, year: str, change_id: str
+) -> list[ManualOwnerChange]:
+    changes = [
+        item for item in load_manual_owner_changes(client, year)
+        if item.change_id != change_id
+    ]
+    save_manual_owner_changes(client, year, changes)
+    return changes
+
+
+def _manual_owner_match_key(change: ManualOwnerChange) -> str:
+    if change.shareholder_orgnr:
+        return f"org:{change.shareholder_orgnr}"
+    name = change.shareholder_name.casefold()
+    return f"name:{name}" if name else f"id:{change.change_id}"
+
+
+def _merge_owners(
+    register_rows: list[dict[str, Any]],
+    manual_changes: list[ManualOwnerChange],
+) -> list[dict[str, Any]]:
+    """Slå sammen RF-1086-eiere med manuelle overstyringer.
+
+    Manuelle endringer overstyrer alltid RF-1086 ved samme shareholder-key
+    (org.nr, ellers navn). ``op=remove`` filtrerer raden vekk.
+    ``op=upsert`` oppdaterer eksisterende rad eller legger til ny.
+    """
+    by_key: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for row in register_rows:
+        key = _shareholder_union_key(row)
+        if not key:
+            continue
+        if key not in by_key:
+            order.append(key)
+        enriched = dict(row)
+        enriched.setdefault("source", "register")
+        enriched.setdefault("manual_change_id", "")
+        by_key[key] = enriched
+
+    removed_keys: set[str] = set()
+    for change in manual_changes:
+        key = _manual_owner_match_key(change)
+        if change.op == MANUAL_OWNER_OP_REMOVE:
+            removed_keys.add(key)
+            by_key.pop(key, None)
+            continue
+        base = by_key.get(key, {})
+        merged: dict[str, Any] = dict(base)
+        merged.update({
+            "shareholder_name": change.shareholder_name or _normalize_text(base.get("shareholder_name")),
+            "shareholder_orgnr": change.shareholder_orgnr or normalize_orgnr(base.get("shareholder_orgnr")),
+            "shareholder_kind": change.shareholder_kind or _normalize_text(base.get("shareholder_kind")) or "unknown",
+            "shares": int(change.shares or 0),
+            "total_shares": int(change.total_shares or base.get("total_shares") or 0),
+            "ownership_pct": float(change.ownership_pct or 0.0),
+            "source": "manual_override" if base else "manual",
+            "manual_change_id": change.change_id,
+            "manual_note": change.note,
+        })
+        if key not in by_key:
+            order.append(key)
+        by_key[key] = merged
+    return [by_key[k] for k in order if k in by_key]
+
+
+def _candidate_owner_signature(row: dict[str, Any]) -> tuple[int, int, float]:
+    return (
+        int(row.get("shares") or 0),
+        int(row.get("total_shares") or 0),
+        round(float(row.get("ownership_pct") or 0.0), 6),
+    )
+
+
+def build_pending_owner_changes(
+    manual_changes: list[ManualOwnerChange],
+    candidate_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Generer pending-rader for aksjonærer der RF-1086-importen avviker
+    fra en aktiv manuell overstyring.
+
+    ``manual_changes`` er alle lagrede manuelle eier-endringer.
+    ``candidate_rows`` er de rå RF-1086-radene (uten manuell merge).
+
+    Returnert rad har samme form som ``pending_changes`` for eide selskaper,
+    slik at eksisterende accept-knapper kan brukes (change_type='owner_*').
+    """
+    by_key: dict[str, dict[str, Any]] = {}
+    for row in candidate_rows:
+        key = _shareholder_union_key(row)
+        if key:
+            by_key[key] = row
+
+    pending: list[dict[str, Any]] = []
+    for change in manual_changes:
+        key = _manual_owner_match_key(change)
+        candidate = by_key.get(key)
+        if change.op == MANUAL_OWNER_OP_REMOVE:
+            # Registerdata reintroduserer en aksjonær vi har fjernet manuelt.
+            if candidate:
+                pending.append({
+                    "kind": "owner",
+                    "change_type": "owner_restored",
+                    "shareholder_name": change.shareholder_name
+                        or _normalize_text(candidate.get("shareholder_name")),
+                    "shareholder_orgnr": change.shareholder_orgnr
+                        or normalize_orgnr(candidate.get("shareholder_orgnr")),
+                    "manual_change_id": change.change_id,
+                    "current_pct": 0.0,
+                    "current_shares": 0,
+                    "candidate_pct": float(candidate.get("ownership_pct") or 0.0),
+                    "candidate_shares": int(candidate.get("shares") or 0),
+                    "candidate_total_shares": int(candidate.get("total_shares") or 0),
+                    "current_source": "manual_removal",
+                    "candidate_source": "register_candidate",
+                })
+            continue
+        # op == upsert
+        manual_sig = (
+            int(change.shares or 0),
+            int(change.total_shares or 0),
+            round(float(change.ownership_pct or 0.0), 6),
+        )
+        if candidate is None:
+            # Manuell eier finnes ikke i registeret — ingen konflikt.
+            continue
+        cand_sig = _candidate_owner_signature(candidate)
+        if manual_sig == cand_sig:
+            continue
+        pending.append({
+            "kind": "owner",
+            "change_type": "owner_overwrite",
+            "shareholder_name": change.shareholder_name
+                or _normalize_text(candidate.get("shareholder_name")),
+            "shareholder_orgnr": change.shareholder_orgnr
+                or normalize_orgnr(candidate.get("shareholder_orgnr")),
+            "manual_change_id": change.change_id,
+            "current_pct": float(change.ownership_pct or 0.0),
+            "current_shares": int(change.shares or 0),
+            "current_total_shares": int(change.total_shares or 0),
+            "candidate_pct": float(candidate.get("ownership_pct") or 0.0),
+            "candidate_shares": int(candidate.get("shares") or 0),
+            "candidate_total_shares": int(candidate.get("total_shares") or 0),
+            "current_source": "manual_override",
+            "candidate_source": "register_candidate",
+        })
+    return pending
+
+
+def accept_pending_owner_changes(
+    client: str,
+    year: str,
+    keys: list[str] | None = None,
+) -> list[ManualOwnerChange]:
+    """Aksepter RF-1086-verdier over manuelle overstyringer ved å slette
+    de aktuelle manuelle endringene. Etter dette vil merge bruke
+    RF-1086-data direkte.
+
+    ``keys`` er en liste av ``manual_change_id``-er. Hvis ``None`` aksepteres
+    alle manuelle eier-endringer (full registeroverstyring).
+    """
+    existing = load_manual_owner_changes(client, year)
+    if not existing:
+        return []
+    if keys is None:
+        save_manual_owner_changes(client, year, [])
+        return existing
+    target = set(keys)
+    kept = [c for c in existing if c.change_id not in target]
+    removed = [c for c in existing if c.change_id in target]
+    save_manual_owner_changes(client, year, kept)
+    return removed
 
 
 def _normalize_owned_row(row: dict[str, Any], *, default_source: str) -> dict[str, Any]:
@@ -1424,6 +1690,7 @@ def _build_owners_compare(
     base_year: str,
     current_year: str,
     current_import_id: str,
+    manual_changes: list[ManualOwnerChange] | None = None,
 ) -> list[dict[str, Any]]:
     base_map = {
         _shareholder_union_key(r): r
@@ -1477,6 +1744,12 @@ def _build_owners_compare(
         else:
             change_type = "unchanged"
 
+        manual_change_id = _normalize_text(
+            (current or base).get("manual_change_id")
+        )
+        row_source = _normalize_text((current or base).get("source")) or (
+            "register" if (base or current) else ""
+        )
         out.append({
             "shareholder_name": _normalize_text(picked.get("shareholder_name")),
             "shareholder_orgnr": normalize_orgnr(picked.get("shareholder_orgnr")),
@@ -1493,13 +1766,56 @@ def _build_owners_compare(
             "transaction_value_total": tx_value,
             "change_type": change_type,
             "source_kind": "register" if (base or current) else "",
+            "source": row_source,
+            "manual_change_id": manual_change_id,
+            "manual_note": _normalize_text((current or base).get("manual_note")),
             "current_import_id": current_import_id if current else "",
             "page_number": int(sh_meta.get("page_number") or 0),
             "base_year": base_year,
             "current_year": current_year,
         })
 
-    change_order = {"new": 0, "changed": 1, "removed": 2, "unchanged": 3}
+    # Surface manually-hidden (op=remove) owners so the user can undo them
+    # from the compare view. A hidden row has zero shares and a flag.
+    if manual_changes:
+        seen_keys = {_shareholder_union_key(r) for r in out if _shareholder_union_key(r)}
+        for change in manual_changes:
+            if change.op != MANUAL_OWNER_OP_REMOVE:
+                continue
+            synth = {
+                "shareholder_orgnr": change.shareholder_orgnr,
+                "shareholder_name": change.shareholder_name,
+            }
+            synth_key = _shareholder_union_key(synth)
+            if not synth_key or synth_key in seen_keys:
+                continue
+            seen_keys.add(synth_key)
+            out.append({
+                "shareholder_name": change.shareholder_name,
+                "shareholder_orgnr": change.shareholder_orgnr,
+                "shareholder_kind": change.shareholder_kind or "unknown",
+                "shareholder_ref": "",
+                "shares_base": 0,
+                "shares_current": 0,
+                "shares_delta": 0,
+                "ownership_pct_base": 0.0,
+                "ownership_pct_current": 0.0,
+                "ownership_pct_delta": 0.0,
+                "shares_bought": 0,
+                "shares_sold": 0,
+                "transaction_value_total": 0.0,
+                "change_type": "hidden",
+                "source_kind": "",
+                "source": "manual_hidden",
+                "manual_change_id": change.change_id,
+                "manual_note": change.note,
+                "current_import_id": "",
+                "page_number": 0,
+                "base_year": base_year,
+                "current_year": current_year,
+            })
+
+    change_order = {"new": 0, "changed": 1, "removed": 2, "unchanged": 3, "hidden": 4}
     return sorted(
         out,
         key=lambda r: (
@@ -1588,6 +1904,27 @@ def get_client_ownership_overview(client: str, year: str) -> dict[str, Any]:
         orgnr_key="shareholder_orgnr",
     )
 
+    manual_owner_changes = (
+        load_manual_owner_changes(client_name, target_year) if target_year else []
+    )
+    # Når target_year mangler eget register, brukes fallback fra et tidligere år.
+    # Men hvis brukeren har registrert manuelle eier-endringer for target_year,
+    # representerer disse hele eierbildet for året — fallback-registeret skal
+    # ikke lekke gjennom som "nå-tall" eller bli merget inn.
+    fallback_active = bool(owner_year) and owner_year != target_year
+    manual_replaces_fallback = fallback_active and bool(manual_owner_changes)
+    if manual_replaces_fallback:
+        register_owner_rows_raw: list[dict[str, Any]] = []
+        owner_year = target_year
+        owners_meta = {}
+    else:
+        register_owner_rows_raw = list(incoming)
+    incoming = _merge_owners(register_owner_rows_raw, manual_owner_changes)
+    pending_owner_changes = build_pending_owner_changes(
+        manual_owner_changes,
+        register_owner_rows_raw,
+    )
+
     candidate_rows = (
         _build_register_rows(client_orgnr, target_year, source="register_candidate")
         if client_orgnr and target_year and current_meta
@@ -1599,6 +1936,10 @@ def get_client_ownership_overview(client: str, year: str) -> dict[str, Any]:
         orgnr_key="company_orgnr",
     )
     pending_changes = build_pending_ownership_changes(effective_rows, candidate_rows) if candidate_rows else []
+    # Eier-side pending changes slås inn i samme liste. Accept/reject i
+    # Registerendringer-fanen ruter etter 'kind' ('owner' vs. eide-standard).
+    if pending_owner_changes:
+        pending_changes = list(pending_changes) + list(pending_owner_changes)
     self_ownership = _summarize_self_ownership(self_owned_rows)
     if not self_ownership:
         self_ownership = _summarize_self_ownership(
@@ -1649,7 +1990,12 @@ def get_client_ownership_overview(client: str, year: str) -> dict[str, Any]:
     current_owner_rows = incoming
 
     if client_orgnr:
-        base_year_used, base_owner_rows = _find_owners_prior_to(client_orgnr, target_year)
+        # Base skal være strengt eldre enn året som faktisk brukes som
+        # "current" (ikke klientens valgte år). Hvis klient er på 2025 og
+        # fallback finner 2024, skal base være 2023 eller eldre — ellers
+        # sammenligner vi 2024 mot seg selv.
+        prior_anchor = current_owner_year_used or target_year
+        base_year_used, base_owner_rows = _find_owners_prior_to(client_orgnr, prior_anchor)
         _, base_owner_rows = _split_self_relations(
             base_owner_rows, client_orgnr=client_orgnr, orgnr_key="shareholder_orgnr",
         )
@@ -1661,6 +2007,7 @@ def get_client_ownership_overview(client: str, year: str) -> dict[str, Any]:
         base_year=base_year_used,
         current_year=current_owner_year_used,
         current_import_id=_normalize_text(import_trace_current.get("import_id")) if import_trace_current else "",
+        manual_changes=manual_owner_changes,
     )
 
     owners_compare_trace_available = bool(import_trace_current)
@@ -1686,7 +2033,9 @@ def get_client_ownership_overview(client: str, year: str) -> dict[str, Any]:
         "owners_compare_changed": owners_compare_changed,
         "self_ownership": self_ownership,
         "manual_changes": manual_changes,
+        "manual_owner_changes": manual_owner_changes,
         "pending_changes": pending_changes,
+        "pending_owner_changes": pending_owner_changes,
         "current_register_rows": candidate_rows,
         "import_trace_current": import_trace_current,
         "import_history": import_history,

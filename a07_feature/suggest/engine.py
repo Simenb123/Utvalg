@@ -43,25 +43,63 @@ def _special_add_total(
     *,
     rule: Optional[RulebookRule],
     selected_basis: str,
+    include_accounts: Optional[Set[str]] = None,
+    exclude_accounts: Optional[Set[str]] = None,
 ) -> float:
+    total, _accounts = _special_add_details(
+        gl_df,
+        rule=rule,
+        selected_basis=selected_basis,
+        include_accounts=include_accounts,
+        exclude_accounts=exclude_accounts,
+    )
+    return total
+
+
+def _special_add_details(
+    gl_df: pd.DataFrame,
+    *,
+    rule: Optional[RulebookRule],
+    selected_basis: str,
+    include_accounts: Optional[Set[str]] = None,
+    exclude_accounts: Optional[Set[str]] = None,
+) -> tuple[float, tuple[str, ...]]:
+    include = (
+        None
+        if include_accounts is None
+        else {str(account).strip() for account in include_accounts if str(account).strip()}
+    )
+    exclude = {str(account).strip() for account in (exclude_accounts or set()) if str(account).strip()}
     if rule is None or not rule.special_add or gl_df is None or gl_df.empty:
-        return 0.0
+        return 0.0, ()
 
     gl_lookup = gl_df.copy()
     gl_lookup["Konto"] = gl_lookup["Konto"].astype(str).str.strip()
     total = 0.0
+    accounts: List[str] = []
     for item in rule.special_add:
+        account = str(item.account).strip()
+        if not account:
+            continue
+        if include is not None and account not in include:
+            continue
+        if account in exclude:
+            continue
         basis_name = str(item.basis or selected_basis or BASIS_UB).strip() or BASIS_UB
         series = _get_series(gl_lookup, basis_name)
-        mask = gl_lookup["Konto"] == str(item.account).strip()
+        mask = gl_lookup["Konto"] == account
         if not bool(mask.any()):
             continue
         try:
             subtotal = float(series.loc[mask].sum())
         except Exception:
             subtotal = 0.0
+        if abs(subtotal) <= 0.000001:
+            continue
         total += float(item.weight) * subtotal
-    return float(total)
+        if account not in accounts:
+            accounts.append(account)
+    return float(total), tuple(accounts)
 
 
 def _build_explain_text(
@@ -327,21 +365,34 @@ def suggest_mappings(
         historical_for_code = historical_code_to_accounts.get(code_l, set())
         series_all = _series_for_basis(selected_basis)
         target_effective = _effective_target_value(target, rule)
+        special_accounts_for_rule = {
+            str(item.account).strip()
+            for item in (rule.special_add if rule else ())
+            if str(item.account).strip()
+        }
 
         current_raw = 0.0
         if mapped_for_code:
             try:
-                mask = gl_all["Konto"].isin(mapped_for_code)
+                ordinary_mapped_accounts = set(mapped_for_code) - special_accounts_for_rule
+                mask = gl_all["Konto"].isin(ordinary_mapped_accounts)
                 current_raw = float(series_all[mask].sum())
             except Exception:
                 current_raw = 0.0
 
-        special_add_raw = _special_add_total(
+        special_current_raw = _special_add_total(
             gl_all,
             rule=rule,
             selected_basis=selected_basis,
+            include_accounts=set(mapped_for_code),
         )
-        current_total = float(current_raw + special_add_raw)
+        special_proposal_raw, special_proposal_accounts = _special_add_details(
+            gl_all,
+            rule=rule,
+            selected_basis=selected_basis,
+            exclude_accounts=mapped_accounts_nonexcluded,
+        )
+        current_total = float(current_raw + special_current_raw)
         target_abs = abs(float(target_effective))
         current_abs = abs(float(current_total))
         tol = max(float(eff_cfg.tolerance_abs), float(eff_cfg.tolerance_rel) * max(target_abs, 1.0))
@@ -390,12 +441,10 @@ def suggest_mappings(
                 )
             ].copy()
 
-        if rule and rule.special_add:
-            special_accounts = {str(item.account).strip() for item in rule.special_add if str(item.account).strip()}
-            if special_accounts:
-                gl_pool = gl_pool[~gl_pool["Konto"].isin(special_accounts)].copy()
+        if special_accounts_for_rule:
+            gl_pool = gl_pool[~gl_pool["Konto"].isin(special_accounts_for_rule)].copy()
 
-        if len(gl_pool) == 0:
+        if len(gl_pool) == 0 and not special_proposal_accounts:
             continue
 
         cand_list: List[tuple[str, float, float, tuple[str, ...], bool, tuple[str, ...], float]] = []
@@ -426,7 +475,7 @@ def suggest_mappings(
 
         cand_list.sort(key=lambda x: (-x[2], 1 if x[4] else 0, -x[6], abs(float(x[1]) - residual_target)))
         cand_list = cand_list[: int(eff_cfg.candidates_per_code)]
-        if not cand_list:
+        if not cand_list and not special_proposal_accounts:
             continue
 
         combo_rows: List[tuple[SuggestionRow, str, Set[str], Dict[str, Any]]] = []
@@ -438,12 +487,18 @@ def suggest_mappings(
         if rule and rule.keywords:
             for keyword in rule.keywords:
                 rule_keyword_tokens |= _tokenize(keyword)
-        special_add_active = abs(float(special_add_raw)) > 1e-6
+        special_add_active = abs(float(special_proposal_raw)) > 1e-6
         used_residual_flag = bool(eff_cfg.use_residual and mapped_for_code)
 
-        for combo_size in range(1, max_k + 1):
-            for idxs in combinations(range(len(cand_list)), combo_size):
+        combo_sizes = list(range(1, max_k + 1))
+        if special_proposal_accounts:
+            combo_sizes.insert(0, 0)
+
+        for combo_size in combo_sizes:
+            combo_iter = ((),) if combo_size == 0 else combinations(range(len(cand_list)), combo_size)
+            for idxs in combo_iter:
                 accounts = tuple(str(cand_list[i][0]) for i in idxs)
+                suggestion_accounts = tuple(dict.fromkeys([*accounts, *special_proposal_accounts]))
                 amounts = [float(cand_list[i][1]) for i in idxs]
                 scores = [float(cand_list[i][2]) for i in idxs]
                 hits_union: Set[str] = set()
@@ -456,7 +511,7 @@ def suggest_mappings(
                     usage_reason_union |= set(cand_list[i][5])
 
                 combo_raw = float(sum(amounts))
-                base_total = float(special_add_raw + (current_raw if eff_cfg.use_residual else 0.0))
+                base_total = float(special_proposal_raw + (current_total if eff_cfg.use_residual else 0.0))
                 total_raw = float(base_total + combo_raw)
                 gl_sum_total = float(total_raw)
                 diff_total = float(target_effective - gl_sum_total)
@@ -466,7 +521,7 @@ def suggest_mappings(
                 token_score = (len(hits_union) / max(len(code_tokens), 1)) if code_tokens else 0.0
                 base = 0.65 * amount_score + 0.20 * token_score + 0.15 * (sum(scores) / max(len(scores), 1))
                 avg_cand = sum(scores) / max(len(scores), 1)
-                size_penalty = 0.98 ** (combo_size - 1)
+                size_penalty = 0.98 ** max(combo_size - 1, 0)
                 final_score = base * (0.85 + 0.15 * avg_cand) * size_penalty
                 if historical_for_code and historical_hits:
                     history_score = historical_hits / max(combo_size, 1)
@@ -480,7 +535,7 @@ def suggest_mappings(
                     history_accounts=history_accounts,
                     usage_reasons=usage_reason_union,
                     residual_target=residual_target,
-                    special_add_raw=special_add_raw,
+                    special_add_raw=special_proposal_raw,
                     diff_total=diff_total,
                 )
 
@@ -553,7 +608,7 @@ def suggest_mappings(
                     (
                         SuggestionRow(
                             code=code,
-                            accounts=accounts,
+                            accounts=suggestion_accounts,
                             gl_sum=float(gl_sum_total),
                             diff=float(diff_total),
                             score=float(final_score),

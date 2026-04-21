@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from .page_a07_shared import *  # noqa: F401,F403
+from typing import Sequence
+
+from a07_feature import apply_groups_to_mapping
 
 
 class A07PageLockingMixin:

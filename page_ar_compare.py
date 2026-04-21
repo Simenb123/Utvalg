@@ -12,7 +12,7 @@ from typing import Any
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ar_store import accept_pending_ownership_changes
+from ar_store import accept_pending_ownership_changes, accept_pending_owner_changes
 
 from page_ar_formatters import (
     _compare_change_label,
@@ -215,46 +215,80 @@ def populate_compare_tree(page) -> None:
 
     ov = page._overview or {}
     compare_rows = ov.get("owners_compare") or []
-    base_year = _safe_text(ov.get("owners_base_year_used")) or "base"
-    cur_year = _safe_text(ov.get("owners_current_year_used")) or _safe_text(ov.get("year")) or "nå"
+    raw_base_year = _safe_text(ov.get("owners_base_year_used"))
+    source_year = _safe_text(ov.get("owners_current_year_used"))
+    view_year = _safe_text(ov.get("year")) or _safe_text(page._year) or source_year or "nå"
     has_import = page._has_current_import()
+    has_base = bool(raw_base_year) and raw_base_year != source_year
     try:
-        tree.heading("shares_base", text=f"Aksjer {base_year}")
-        tree.heading("shares_current", text=f"Aksjer {cur_year}")
-        tree.heading("pct_current", text=f"Eierandel {cur_year}")
+        if has_base:
+            tree.heading("shares_base", text=f"Aksjer {raw_base_year}")
+        else:
+            tree.heading("shares_base", text="Aksjer (ingen sammenligning)")
+        if source_year and source_year != view_year:
+            tree.heading("shares_current", text=f"Aksjer {view_year} (fra {source_year})")
+            tree.heading("pct_current", text=f"Eierandel {view_year} (fra {source_year})")
+        else:
+            tree.heading("shares_current", text=f"Aksjer {view_year}")
+            tree.heading("pct_current", text=f"Eierandel {view_year}")
     except Exception:
         pass
 
     try:
-        if has_import:
+        if has_import and has_base:
             tree.configure(displaycolumns="#all")
-        else:
+        elif has_base:
             tree.configure(displaycolumns=(
                 "owner", "orgnr", "kind",
                 "shares_base", "shares_current", "shares_delta",
                 "pct_current",
             ))
+        elif has_import:
+            tree.configure(displaycolumns=(
+                "owner", "orgnr", "kind",
+                "shares_current",
+                "bought", "sold", "tx_value",
+                "pct_current",
+            ))
+        else:
+            tree.configure(displaycolumns=(
+                "owner", "orgnr", "kind",
+                "shares_current",
+                "pct_current",
+            ))
     except Exception:
         pass
 
+    base_label = raw_base_year if has_base else None
     if not compare_rows:
         page.var_owners_caption.set(
             "Ingen aksjonærdata importert ennå — bruk «Importer RF-1086 (PDF)» for å fylle oversikten.",
         )
-    elif has_import:
-        page.var_owners_caption.set(
-            f"Aksjonærer i klienten — {base_year} → {cur_year} (RF-1086)",
-        )
     else:
+        if base_label:
+            timeline = f"{base_label} → {view_year}"
+        else:
+            timeline = view_year
+        suffix = " (RF-1086)" if has_import else ""
+        source_note = (
+            f" — videreført fra {source_year}"
+            if source_year and source_year != view_year
+            else ""
+        )
         page.var_owners_caption.set(
-            f"Aksjonærer i klienten — {base_year} → {cur_year}",
+            f"Aksjonærer i klienten — {timeline}{suffix}{source_note}"
         )
 
     for idx, row in enumerate(compare_rows, start=1):
         iid = f"compare-{idx}"
         page._compare_rows_by_iid[iid] = dict(row)
         change_type = _safe_text(row.get("change_type"))
-        tag = (change_type,) if change_type in {"new", "removed", "changed"} else ()
+        source = _safe_text(row.get("source"))
+        tags: tuple[str, ...] = ()
+        if change_type in {"new", "removed", "changed", "hidden"}:
+            tags = (change_type,)
+        elif source in {"manual", "manual_override"}:
+            tags = (source,)
         shares_base = int(row.get("shares_base") or 0)
         shares_current = int(row.get("shares_current") or 0)
         delta = int(row.get("shares_delta") or 0)
@@ -275,10 +309,19 @@ def populate_compare_tree(page) -> None:
                 _fmt_currency(tx_val) if tx_val else "",
                 _fmt_pct(row.get("ownership_pct_current")),
             ),
-            tags=tag,
+            tags=tags,
         )
 
     page._clear_compare_detail()
+
+
+def _update_owner_buttons(page, row: dict[str, Any] | None) -> None:
+    updater = getattr(page, "_update_manual_owner_action_state", None)
+    if callable(updater):
+        try:
+            updater(row)
+        except Exception:
+            pass
 
 
 def clear_compare_detail(page) -> None:
@@ -318,11 +361,14 @@ def on_compare_selected(page, _event=None) -> None:
     sel = page._tree_owners.selection()
     if not sel:
         page._clear_compare_detail()
+        _update_owner_buttons(page, None)
         return
     row = page._compare_rows_by_iid.get(sel[0])
     if not row:
         page._clear_compare_detail()
+        _update_owner_buttons(page, None)
         return
+    _update_owner_buttons(page, row)
 
     name = _safe_text(row.get("shareholder_name"))
     orgnr = _safe_text(row.get("shareholder_orgnr"))
@@ -492,16 +538,39 @@ def selected_change_keys(page) -> list[str]:
     return keys
 
 
+def _partition_selected_changes(page) -> tuple[list[str], list[str]]:
+    """Return (owned_change_keys, owner_manual_ids) for the current selection."""
+    owned_keys: list[str] = []
+    owner_ids: list[str] = []
+    for iid in page._tree_changes.selection():
+        row = page._change_rows_by_iid.get(iid)
+        if row is None:
+            continue
+        if _safe_text(row.get("kind")) == "owner":
+            mid = _safe_text(row.get("manual_change_id"))
+            if mid:
+                owner_ids.append(mid)
+        else:
+            key = _safe_text(row.get("change_key"))
+            if key:
+                owned_keys.append(key)
+    return owned_keys, owner_ids
+
+
 def on_accept_selected_changes(page) -> None:
     if not page._client or not page._year:
         return
-    keys = page._selected_change_keys()
-    if not keys:
+    owned_keys, owner_ids = _partition_selected_changes(page)
+    if not owned_keys and not owner_ids:
         messagebox.showinfo("AR", "Velg minst én registerendring å godta.")
         return
-    accept_pending_ownership_changes(page._client, page._year, keys)
+    if owned_keys:
+        accept_pending_ownership_changes(page._client, page._year, owned_keys)
+    if owner_ids:
+        accept_pending_owner_changes(page._client, page._year, owner_ids)
     page._refresh_current_overview()
-    page.var_status.set(f"Godkjente {len(keys)} registerendringer.")
+    total = len(owned_keys) + len(owner_ids)
+    page.var_status.set(f"Godkjente {total} registerendringer.")
 
 
 def on_accept_all_changes(page) -> None:
@@ -513,7 +582,12 @@ def on_accept_all_changes(page) -> None:
         return
     if not messagebox.askyesno("AR", f"Godta alle {len(pending)} registerendringer for {page._year}?"):
         return
-    accept_pending_ownership_changes(page._client, page._year)
+    has_owner = any(_safe_text(r.get("kind")) == "owner" for r in pending)
+    has_owned = any(_safe_text(r.get("kind")) != "owner" for r in pending)
+    if has_owned:
+        accept_pending_ownership_changes(page._client, page._year)
+    if has_owner:
+        accept_pending_owner_changes(page._client, page._year)
     page._refresh_current_overview()
     page.var_status.set(f"Godkjente alle registerendringer for {page._year}.")
 

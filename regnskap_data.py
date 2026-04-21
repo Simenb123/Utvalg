@@ -457,6 +457,8 @@ def fmt_amount(val: float | None, blank_zero: bool = True) -> str:
     """Formater beløp med norsk tusenskille, uten desimaler. Returnerer '–' for None."""
     if val is None:
         return "–"
+    if isinstance(val, float) and val != val:  # NaN
+        return "–"
     if blank_zero and abs(val) < 0.5:
         return "–"
     rounded = round(val)

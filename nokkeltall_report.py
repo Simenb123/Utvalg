@@ -26,6 +26,25 @@ from nokkeltall_svg import (
 )
 
 
+# Fargepaletter brukt i både vannfall-diagram og resultatsammensetning.
+# Samme kategori → samme farge i begge visninger så brukeren lett kan koble
+# dem sammen. Annen driftskostnad bruker brun for ikke å forveksles med
+# driftsresultat (grønn).
+_CATEGORY_COLORS = {
+    "inntekt":      "#4472C4",  # blå — driftsinntekter
+    "varekost":     "#ED7D31",  # oransje — RL 20
+    "lonn":         "#8FAADC",  # lyseblå — RL 40
+    "avskriv":      "#FFC000",  # gul — RL 50
+    "annen_drift":  "#A66B2B",  # brun — RL 70
+    "driftsres":    "#70AD47",  # grønn — driftsresultat (positivt)
+    "driftstap":    "#E74C3C",  # rød — driftstap (negativt)
+    "finans_pos":   "#2E8B57",  # sjøgrønn — netto finans positiv
+    "finans_neg":   "#B94A48",  # rust — netto finans negativ
+    "skatt":        "#7F7F7F",  # grå — skattekostnad
+    "arsres":       "#1F4E79",  # mørk blå — årsresultat
+}
+
+
 # ---------------------------------------------------------------------------
 # HTML Template
 # ---------------------------------------------------------------------------
@@ -85,11 +104,18 @@ body {
     justify-content: space-between;
     align-items: baseline;
     border-bottom: 3px solid #4472C4;
-    padding-bottom: 10px;
-    margin-bottom: 18px;
+    padding-bottom: 6px;
+    margin-bottom: 12px;
+}
+.report-header .title-wrap {
+    display: flex; align-items: baseline; gap: 12px;
+    flex-wrap: wrap;
 }
 .report-title { font-size: 20px; font-weight: 700; color: #1a1a2e; }
 .report-subtitle { font-size: 12px; color: #7f8c8d; }
+.report-header .title-wrap .report-subtitle::before {
+    content: "— "; color: #bfc6cc;
+}
 
 /* Section */
 .section-title {
@@ -280,13 +306,13 @@ body {
 
 /* Reskontro — kunder og leverandører */
 .resk-grid { display: grid; grid-template-columns: 1fr 1fr;
-             gap: 20px 22px; margin-top: 6px; }
+             gap: 16px 14px; margin-top: 6px; }
 .resk-section { position: relative;
                 page-break-inside: avoid;
                 background: #fff;
                 border: 1px solid #eef1f5;
                 border-radius: 8px;
-                padding: 14px 16px 12px;
+                padding: 14px 10px 12px;
                 overflow: hidden; }
 .resk-accent { position: absolute; top: 0; left: 0; right: 0;
                height: 3px; }
@@ -304,30 +330,31 @@ body {
                  font-size: 9px; color: #98a2b3;
                  text-transform: uppercase; letter-spacing: 0.06em;
                  border-bottom: 1px solid #e5e7eb;
-                 padding: 4px 8px 6px; white-space: nowrap; }
+                 padding: 4px 4px 6px; white-space: nowrap; }
 .resk-table th.num { text-align: right; }
-.resk-table th.rank-col { width: 22px; padding-left: 0; padding-right: 4px; }
+.resk-table th.rank-col { width: 20px; padding-left: 0; padding-right: 3px; }
 .resk-table tbody tr:nth-child(even) { background: #fafbfc; }
-.resk-table td { padding: 8px 8px;
+.resk-table td { padding: 7px 4px;
                  border-bottom: 1px solid #f2f4f7;
                  vertical-align: middle; }
 .resk-table tbody tr:last-child td { border-bottom: none; }
 .resk-table td.num { text-align: right;
                      font-variant-numeric: tabular-nums;
-                     white-space: nowrap; }
-.resk-table td.num-sec { color: #667085; font-size: 10.5px; }
+                     white-space: nowrap;
+                     font-size: 10px; }
+.resk-table td.num-sec { color: #667085; font-size: 9.5px; }
 .resk-table td.num-main { color: #101828;
                           position: relative;
-                          padding-left: 14px; padding-right: 10px;
-                          min-width: 90px; }
-.resk-table th.num-main { color: #344054; padding-right: 10px; }
+                          padding-left: 8px; padding-right: 4px;
+                          min-width: 70px; }
+.resk-table th.num-main { color: #344054; padding-right: 4px; }
 .resk-table td.num-main .num-main-txt { position: relative;
                                          font-weight: 700;
-                                         font-size: 12px;
+                                         font-size: 10.5px;
                                          display: inline-block; }
 .resk-table td.num-main .bar-bg { position: absolute;
-                                   left: 10px; right: 6px;
-                                   bottom: 3px; height: 3px;
+                                   left: 6px; right: 3px;
+                                   bottom: 2px; height: 3px;
                                    background: #f2f4f7;
                                    border-radius: 2px;
                                    overflow: hidden; }
@@ -336,8 +363,8 @@ body {
                                      float: right; }
 .resk-kunder td.num-main .bar-fill { background: #4a7dc6; }
 .resk-lev    td.num-main .bar-fill { background: #e08a3c; }
-.resk-table td.rank-col { padding-left: 0; padding-right: 4px;
-                          width: 22px; }
+.resk-table td.rank-col { padding-left: 0; padding-right: 3px;
+                          width: 20px; }
 .rank-pill { display: inline-block; width: 18px; height: 18px;
              line-height: 18px; border-radius: 50%;
              font-size: 9.5px; font-weight: 700; text-align: center;
@@ -345,12 +372,19 @@ body {
 .resk-kunder .rank-pill { background: #4a7dc6; }
 .resk-lev    .rank-pill { background: #e08a3c; }
 .resk-table td.navn { overflow: hidden; text-overflow: ellipsis;
-                      white-space: nowrap; max-width: 180px;
-                      color: #101828; font-weight: 500; }
+                      white-space: nowrap; max-width: 130px;
+                      color: #101828; font-weight: 500;
+                      font-size: 10.5px; padding-right: 4px; }
 .resk-table .navn-missing { color: #98a2b3; font-style: italic;
                             font-weight: 400; }
 .resk-empty { font-size: 10.5px; color: #98a2b3; font-style: italic;
               padding: 12px 0; text-align: center; }
+.resk-table tr.resk-sum td { background: #f8fafc; font-weight: 600;
+                             border-top: 1px solid #d0d5dd; }
+.resk-table tr.resk-sum-total td { background: #eef2f6;
+                                   border-top: 2px solid #667085; }
+.resk-table tr.resk-sum td.num-main { padding-left: 10px; }
+.resk-table tr.resk-sum td.navn { color: #344054; font-weight: 700; }
 """
 
 _TEMPLATE = Template("""\
@@ -369,9 +403,9 @@ $css
 <!-- ============ Side 1: Resultatregnskap ============ -->
 <div class="page">
   <div class="report-header">
-    <div>
+    <div class="title-wrap">
       <div class="report-title">$client</div>
-      <div class="report-subtitle">Resultatregnskap — $year</div>
+      <div class="report-subtitle">Resultatregnskap $year</div>
     </div>
   </div>
 
@@ -395,9 +429,9 @@ $css
 <!-- ============ Side 2: Balanse ============ -->
 <div class="page">
   <div class="report-header">
-    <div>
+    <div class="title-wrap">
       <div class="report-title">$client</div>
-      <div class="report-subtitle">Balanse — $year</div>
+      <div class="report-subtitle">Balanse $year</div>
     </div>
   </div>
 
@@ -421,9 +455,9 @@ $css
 <!-- ============ Side 3: N&#248;kkeltall ============ -->
 <div class="page">
   <div class="report-header">
-    <div>
+    <div class="title-wrap">
       <div class="report-title">$client</div>
-      <div class="report-subtitle">N&#248;kkeltall — $year</div>
+      <div class="report-subtitle">N&#248;kkeltall $year</div>
     </div>
   </div>
 
@@ -444,9 +478,9 @@ $css
 <!-- ============ Side 4: Aktivitet og endringer ============ -->
 <div class="page">
   <div class="report-header">
-    <div>
+    <div class="title-wrap">
       <div class="report-title">$client</div>
-      <div class="report-subtitle">Aktivitet og endringer — $year</div>
+      <div class="report-subtitle">Aktivitet og endringer $year</div>
     </div>
   </div>
 
@@ -458,7 +492,7 @@ $reskontro_page_html
 <!-- ============ Side 5: Beregningsgrunnlag ============ -->
 <div class="page">
   <div class="report-header">
-    <div>
+    <div class="title-wrap">
       <div class="report-title">Beregningsgrunnlag</div>
       <div class="report-subtitle">Formler og regnskapslinjer brukt i n&#248;kkeltallsberegning</div>
     </div>
@@ -519,6 +553,22 @@ def _build_summary_table(lines: list[dict], has_prev: bool) -> str:
     if not lines:
         return '<p style="color:#aaa">Ingen data</p>'
 
+    # Skjul detaljrader hvor både i år og fjor er null — reduserer visuell
+    # støy i balansetabellen. Sumrader beholdes alltid (0-sum er meningsfylt).
+    def _is_zero(v: object) -> bool:
+        try:
+            return v is None or abs(float(v)) < 0.5
+        except (TypeError, ValueError):
+            return True
+
+    visible = [
+        line for line in lines
+        if line.get("is_sum")
+        or not (_is_zero(line.get("value")) and _is_zero(line.get("prev")))
+    ]
+    if not visible:
+        return '<p style="color:#aaa">Ingen data</p>'
+
     prev_cols = ""
     if has_prev:
         prev_cols = ('<th class="num">I fjor</th>'
@@ -526,7 +576,7 @@ def _build_summary_table(lines: list[dict], has_prev: bool) -> str:
                      '<th class="num" style="width:1%;white-space:nowrap">%</th>')
 
     rows: list[str] = []
-    for line in lines:
+    for line in visible:
         cls = ' class="sum-row"' if line.get("is_sum") else ""
         prev_cells = ""
         if has_prev:
@@ -606,21 +656,23 @@ def _build_activity_html(top_activity: list[dict]) -> str:
         return ""
 
     label = top_activity[0].get("count_label", "bilag")
+    has_dk = any(it.get("formatted_debet") for it in top_activity)
+
     rows: list[str] = []
     for item in top_activity:
         bar_pct = float(item.get("bar_pct") or 0.0)
         count = int(item.get("count") or 0)
-        change_html = "&ndash;"
-        if item.get("change_pct") is not None:
-            ch = item["change_pct"]
-            css = "change-pos" if ch >= 0 else "change-neg"
-            sign = "+" if ch >= 0 else ""
-            change_html = f'<span class="{css}">{sign}{ch:.1f}%</span>'
+        dk_cells = ""
+        if has_dk:
+            dk_cells = (
+                f'<td class="num">{_esc(item.get("formatted_debet") or "")}</td>'
+                f'<td class="num">{_esc(item.get("formatted_kredit") or "")}</td>'
+                f'<td class="num">{_esc(item.get("formatted_netto") or "")}</td>'
+            )
         rows.append(
             f'<tr>'
             f'<td>{_esc(item["name"])}</td>'
-            f'<td class="num">{_esc(item["formatted_ub"])}</td>'
-            f'<td class="num">{change_html}</td>'
+            f'{dk_cells}'
             f'<td class="num">{count:,}</td>'
             f'<td class="bar-cell">'
             f'<div class="bar-wrap"><div class="bar-fill" '
@@ -629,14 +681,21 @@ def _build_activity_html(top_activity: list[dict]) -> str:
             f'</tr>'.replace(",", " ")
         )
 
+    dk_headers = ""
+    if has_dk:
+        dk_headers = (
+            '<th class="num">Debet</th>'
+            '<th class="num">Kredit</th>'
+            '<th class="num">Netto</th>'
+        )
+
     return (
         f'<div class="section-title" style="margin-top:0">'
         f'Topp regnskapslinjer etter {_esc(label)}svolum</div>'
         f'<table class="activity-table">'
         f'<thead><tr>'
         f'<th>Regnskapslinje</th>'
-        f'<th class="num">Bel\u00f8p</th>'
-        f'<th class="num">Endring</th>'
+        f'{dk_headers}'
         f'<th class="num">Antall {_esc(label)}</th>'
         f'<th class="num">Fordeling</th>'
         f'</tr></thead>'
@@ -868,8 +927,13 @@ def _build_reskontro_table(
     theme: str,            # "kunder" | "lev"
     main_col: str,         # "ub" | "debet" | "kredit"
     empty_msg: str = "Ingen data.",
+    all_rows: list[ReskontroRow] | None = None,
 ) -> str:
-    """Bygg én seksjon med aksent, rangering-pill og data-bar bak hovedverdi."""
+    """Bygg én seksjon med aksent, rangering-pill og data-bar bak hovedverdi.
+
+    Når ``all_rows`` er gitt legges det på to sumrader under topp-radene:
+    ``Sum andre`` (resten) og ``Sum totalt`` (alle).
+    """
     from nokkeltall_engine import _format_value
 
     col_label = {"ub": "UB", "debet": "Debet", "kredit": "Kredit"}
@@ -899,10 +963,12 @@ def _build_reskontro_table(
         max_main = max((abs(getattr(r, main_col)) for r in rows), default=0.0)
         trs: list[str] = []
 
-        def _cell(val: float, col: str) -> str:
+        def _cell(val: float, col: str, *, is_sum: bool = False) -> str:
             fmt = _format_value(val, "amount")
             if col != main_col:
                 return f'<td class="num num-sec">{fmt}</td>'
+            if is_sum:
+                return f'<td class="num num-main">{fmt}</td>'
             pct = 0.0
             if max_main > 1e-9:
                 pct = max(0.0, min(100.0, abs(val) / max_main * 100.0))
@@ -925,6 +991,39 @@ def _build_reskontro_table(
                 f'{_cell(r.debet, "debet")}'
                 f'{_cell(r.kredit, "kredit")}'
                 f'{_cell(r.ub, "ub")}'
+                '</tr>'
+            )
+
+        if all_rows:
+            top_nrs = {r.nr for r in rows}
+            total_ib = sum(r.ib for r in all_rows)
+            total_debet = sum(r.debet for r in all_rows)
+            total_kredit = sum(r.kredit for r in all_rows)
+            total_ub = sum(r.ub for r in all_rows)
+            other = [r for r in all_rows if r.nr not in top_nrs]
+            if other:
+                o_ib = sum(r.ib for r in other)
+                o_debet = sum(r.debet for r in other)
+                o_kredit = sum(r.kredit for r in other)
+                o_ub = sum(r.ub for r in other)
+                trs.append(
+                    '<tr class="resk-sum resk-sum-other">'
+                    '<td class="rank-col"></td>'
+                    f'<td class="navn">Sum andre ({len(other)})</td>'
+                    f'<td class="num num-sec">{_format_value(o_ib, "amount")}</td>'
+                    f'{_cell(o_debet, "debet", is_sum=True)}'
+                    f'{_cell(o_kredit, "kredit", is_sum=True)}'
+                    f'{_cell(o_ub, "ub", is_sum=True)}'
+                    '</tr>'
+                )
+            trs.append(
+                '<tr class="resk-sum resk-sum-total">'
+                '<td class="rank-col"></td>'
+                f'<td class="navn">Sum totalt ({len(all_rows)})</td>'
+                f'<td class="num num-sec">{_format_value(total_ib, "amount")}</td>'
+                f'{_cell(total_debet, "debet", is_sum=True)}'
+                f'{_cell(total_kredit, "kredit", is_sum=True)}'
+                f'{_cell(total_ub, "ub", is_sum=True)}'
                 '</tr>'
             )
         body = f'<tbody>{"".join(trs)}</tbody>'
@@ -958,12 +1057,14 @@ def _build_reskontro_html(result: NokkeltallResult) -> str:
             title="Topp 5 kunder — st\u00f8rste UB-saldo",
             navn_header="Kunde",
             theme="kunder", main_col="ub",
+            all_rows=result.reskontro_kunder_all,
         ))
         sections.append(_build_reskontro_table(
             result.reskontro_kunder_top_debet,
             title="Topp 5 kunder — st\u00f8rste debet-bevegelse",
             navn_header="Kunde",
             theme="kunder", main_col="debet",
+            all_rows=result.reskontro_kunder_all,
         ))
     if has_lev:
         sections.append(_build_reskontro_table(
@@ -971,12 +1072,14 @@ def _build_reskontro_html(result: NokkeltallResult) -> str:
             title="Topp 5 leverand\u00f8rer — st\u00f8rste UB-saldo",
             navn_header="Leverand\u00f8r",
             theme="lev", main_col="ub",
+            all_rows=result.reskontro_lev_all,
         ))
         sections.append(_build_reskontro_table(
             result.reskontro_lev_top_kredit,
             title="Topp 5 leverand\u00f8rer — st\u00f8rste kredit-bevegelse",
             navn_header="Leverand\u00f8r",
             theme="lev", main_col="kredit",
+            all_rows=result.reskontro_lev_all,
         ))
     return f'<div class="resk-grid">{"".join(sections)}</div>'
 
@@ -1079,8 +1182,9 @@ def _build_pl_composition_svg(pl_summary: list[dict], *, width: int = 900) -> st
     """Stacked bar — resultatsammensetning.
 
     Rad 1 (Inntekter): driftsinntektene fordelt på sine enkeltposter.
-    Rad 2 (Fordeling): samme totalbeløp fordelt på kostnadstyper + driftsresultat.
-    Dersom driftsresultatet er negativt, vises det som rødt segment.
+    Rad 2 (Fordeling): samme totalbeløp fordelt på kostnadstyper +
+    driftsresultat + netto finans. Fargene er låst per kategori slik at
+    vannfall-diagrammet og fordelingsbaren kan kobles visuelt.
     """
     if not pl_summary:
         return ""
@@ -1100,33 +1204,71 @@ def _build_pl_composition_svg(pl_summary: list[dict], *, width: int = 900) -> st
     for r in income_regnrs:
         v = _val(r)
         if abs(v) > 1e-9:
-            inntekter_items.append({"label": by_regnr[r]["name"], "value": abs(v)})
+            inntekter_items.append({
+                "label": by_regnr[r]["name"],
+                "value": abs(v),
+                "color": _CATEGORY_COLORS["inntekt"],
+            })
     if not inntekter_items:
         v = _val(19)
         if abs(v) > 1e-9:
-            inntekter_items.append({"label": "Driftsinntekter", "value": abs(v)})
+            inntekter_items.append({
+                "label": "Driftsinntekter",
+                "value": abs(v),
+                "color": _CATEGORY_COLORS["inntekt"],
+            })
 
-    # --- Fordeling: kostnader + driftsresultat ---
+    # --- Fordeling: kostnader + driftsresultat + netto finans ---
     # PL-linjer er lagret med regnskapsmessig fortegn (inntekt=negativ,
     # kostnad=positiv). Driftsresultat utledes fra inntekter minus
     # kostnader i display-fortegn, ikke fra RL 80 direkte, for å være
     # robust mot ulike lagringskonvensjoner.
     fordeling_items: list[dict] = []
     kostnader_total = 0.0
-    for regnr, label in [(20, "Varekostnad"), (40, "Lønnskostnad"),
-                         (50, "Avskrivning"), (70, "Annen driftskostnad")]:
+    cost_cats = [
+        (20, "Varekostnad",        "varekost"),
+        (40, "Lønnskostnad",       "lonn"),
+        (50, "Avskrivning",        "avskriv"),
+        (70, "Annen driftskostnad", "annen_drift"),
+    ]
+    for regnr, label, cat in cost_cats:
         v = _val(regnr)
         if abs(v) > 1e-9:
-            fordeling_items.append({"label": label, "value": abs(v)})
+            fordeling_items.append({
+                "label": label,
+                "value": abs(v),
+                "color": _CATEGORY_COLORS[cat],
+            })
             kostnader_total += abs(v)
 
     inntekter_total = sum(d["value"] for d in inntekter_items)
-    driftsres_display = inntekter_total - kostnader_total
-    if abs(driftsres_display) > 1e-9:
+
+    # Netto finans (inntekter lagres negativt → flip med minus)
+    fin_net = sum(
+        -_val(r) for r, line in by_regnr.items()
+        if isinstance(r, int) and 90 <= r < 160 and not line.get("is_sum")
+    )
+    if abs(fin_net) > 1e-9:
+        is_pos = fin_net >= 0
         fordeling_items.append({
-            "label": "Driftsresultat" if driftsres_display >= 0 else "Driftstap",
-            "value": abs(driftsres_display),
-            "color": "#70AD47" if driftsres_display >= 0 else "#E74C3C",
+            "label": "Netto finans" if is_pos else "Netto finanskost",
+            "value": abs(fin_net),
+            "color": _CATEGORY_COLORS["finans_pos" if is_pos else "finans_neg"],
+        })
+
+    # Årsresultat (sluttmål) — grønn ved overskudd, rød ved tap.
+    skatt = sum(
+        _val(r) for r, line in by_regnr.items()
+        if isinstance(r, int) and 160 < r < 280 and not line.get("is_sum")
+    )
+    driftsres_display = inntekter_total - kostnader_total
+    arsres_display = driftsres_display + fin_net - abs(skatt)
+    if abs(arsres_display) > 1e-9:
+        is_pos = arsres_display >= 0
+        fordeling_items.append({
+            "label": "Årsresultat" if is_pos else "Årstap",
+            "value": abs(arsres_display),
+            "color": _CATEGORY_COLORS["driftsres" if is_pos else "driftstap"],
         })
 
     return _build_stacked_composition_svg(
@@ -1165,15 +1307,17 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
     # Bygg steg-sekvens. `delta` er endringen på running-totalen.
     # For "subtotal"/"total" settes delta til None og den faktiske verdien
     # utledes fra running når vi beregner søylene nedenfor.
-    steps: list[tuple[str, float | None, str]] = []
-    steps.append(("Driftsinnt.", driftsinnt, "start"))
-    for regnr, short in [(20, "Varekost"), (40, "Lønn"),
-                         (50, "Avskriv."), (70, "Annen drift")]:
+    # Hver tuple: (label, delta, kind, category). Category styrer fargen og
+    # matcher resultatsammensetningen slik at bruker kan koble dem visuelt.
+    steps: list[tuple[str, float | None, str, str]] = []
+    steps.append(("Driftsinnt.", driftsinnt, "start", "inntekt"))
+    for regnr, short, cat in [(20, "Varekost", "varekost"),
+                               (40, "Lønn", "lonn"),
+                               (50, "Avskriv.", "avskriv"),
+                               (70, "Annen drift", "annen_drift")]:
         v = _val(regnr)
         if abs(v) > 1e-9:
-            steps.append((short, -abs(v), "subtract"))
-
-    steps.append(("Driftsres.", None, "subtotal"))
+            steps.append((short, -abs(v), "subtract", cat))
 
     # Netto finans i display-fortegn (finansinntekter - finanskostnader).
     # Rå finansinntekter lagres som negative, rå finanskostnader som positive.
@@ -1182,14 +1326,13 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
         if isinstance(r, int) and 90 <= r < 160 and not line.get("is_sum")
     )
     if abs(fin_net_display) > 1e-9:
+        is_pos = fin_net_display >= 0
         steps.append((
             "Finans",
-            fin_net_display if fin_net_display >= 0 else -abs(fin_net_display),
-            "add" if fin_net_display >= 0 else "subtract",
+            fin_net_display if is_pos else -abs(fin_net_display),
+            "add" if is_pos else "subtract",
+            "finans_pos" if is_pos else "finans_neg",
         ))
-
-    if 160 in by_regnr:
-        steps.append(("Res. f. skatt", None, "subtotal"))
 
     # Skatt (positiv raw = kostnad)
     skatt = sum(
@@ -1197,10 +1340,10 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
         if isinstance(r, int) and 160 < r < 280 and not line.get("is_sum")
     )
     if abs(skatt) > 1e-9:
-        steps.append(("Skatt", -abs(skatt), "subtract"))
+        steps.append(("Skatt", -abs(skatt), "subtract", "skatt"))
 
     if 280 in by_regnr:
-        steps.append(("Årsres.", None, "total"))
+        steps.append(("Årsres.", None, "total", "arsres"))
 
     if len(steps) < 3:
         return ""
@@ -1208,7 +1351,7 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
     # Beregn baseline + top for hver søyle. Subtotal/total utledes fra running.
     running = 0.0
     bars: list[dict] = []
-    for lbl, delta, kind in steps:
+    for lbl, delta, kind, cat in steps:
         if kind == "start":
             running = delta or 0.0
             top, bottom = running, 0.0
@@ -1228,7 +1371,7 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
             shown_delta = delta or 0.0
         bars.append({
             "label": lbl, "top": top, "bottom": bottom,
-            "kind": kind, "delta": shown_delta,
+            "kind": kind, "delta": shown_delta, "cat": cat,
         })
 
     # Y-skala
@@ -1254,13 +1397,6 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
         return margin_t + (y_max - val) / (y_max - y_min) * plot_h
 
     parts: list[str] = []
-    colors = {
-        "start": "#4472C4",
-        "subtotal": "#5B9BD5",
-        "total": "#1F4E79",
-        "subtract": "#E74C3C",
-        "add": "#70AD47",
-    }
 
     # Null-linje
     y0 = _y(0)
@@ -1277,7 +1413,14 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
         yb = _y(b["bottom"])
         h = abs(yb - yt)
         y = min(yt, yb)
-        color = colors.get(b["kind"], "#888")
+        cat = b.get("cat") or ""
+        # Årsres og andre result-totaler farges dynamisk: grønn ved positivt
+        # resultat, rød ved tap. Koblet visuelt til resultatsammensetningen.
+        if cat == "arsres":
+            result_val = b.get("top", 0.0) or 0.0
+            color = _CATEGORY_COLORS["driftsres" if result_val >= 0 else "driftstap"]
+        else:
+            color = _CATEGORY_COLORS.get(cat, "#888")
 
         parts.append(
             f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{max(h, 1):.1f}" '
@@ -1324,7 +1467,19 @@ def _build_waterfall_svg(pl_summary: list[dict], *, width: int = 420, height: in
 def build_report_html(result: NokkeltallResult) -> str:
     """Bygg komplett HTML-rapport fra NokkeltallResult."""
 
-    pl_table = _build_summary_table(result.pl_summary, result.has_prev_year)
+    # Skjul detaljerte finansposter i PL-tabellen — kun sumposten
+    # "Resultat av finansposter" (regnr 155) vises. Detaljene brukes fortsatt
+    # i waterfall og resultatsammensetning.
+    def _is_finans_detail(line: dict) -> bool:
+        if line.get("is_sum"):
+            return False
+        try:
+            regnr = int(line.get("regnr") or 0)
+        except (TypeError, ValueError):
+            return False
+        return 90 <= regnr <= 154
+    pl_lines_collapsed = [ln for ln in result.pl_summary if not _is_finans_detail(ln)]
+    pl_table = _build_summary_table(pl_lines_collapsed, result.has_prev_year)
     bs_eien = _build_summary_table(result.bs_eiendeler, result.has_prev_year)
     bs_ekg = _build_summary_table(result.bs_ek_gjeld, result.has_prev_year)
     key_pl = _build_key_metrics_mini(result.metrics, _KEY_PL_IDS, result.has_prev_year)
@@ -1338,7 +1493,7 @@ def build_report_html(result: NokkeltallResult) -> str:
             '<!-- ============ Side: Reskontro ============ -->\n'
             '<div class="page">\n'
             '  <div class="report-header">\n'
-            f'    <div>\n'
+            f'    <div class="title-wrap">\n'
             f'      <div class="report-title">{_esc(result.client)}</div>\n'
             f'      <div class="report-subtitle">Reskontro \u2014 '
             f'kunder og leverand\u00f8rer {_esc(result.year)}</div>\n'
