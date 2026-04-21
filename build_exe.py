@@ -131,12 +131,10 @@ except Exception:
 def _iter_hidden_imports(opts: BuildOptions) -> List[str]:
     # app.py importerer ui_main via importlib, så den må eksplisitt inkluderes.
     # Fagchat/RAG-avhengigheter importeres dynamisk via sys.path og må med.
+    # Merk: tiktoken og tiktoken_ext håndteres via --collect-all (trenger datafiler).
     base = [
         "ui_main",
         "openai",
-        "tiktoken",
-        "tiktoken_ext",
-        "tiktoken_ext.openai_public",
         "dotenv",
     ]
     extra = [s.strip() for s in (opts.extra_hidden_imports or []) if str(s).strip()]
@@ -145,6 +143,19 @@ def _iter_hidden_imports(opts: BuildOptions) -> List[str]:
         if item not in out:
             out.append(item)
     return out
+
+
+def _iter_bundled_data(project_root: Path) -> List[tuple[Path, str]]:
+    """Mapper (kilde-sti, mål-rel-sti) for data-filer/mapper som må følge med exe-en.
+
+    I onefile blir disse pakket inn i sys._MEIPASS ved kjøring, slik at kode som
+    bruker Path(__file__).parent / "config" / ... fortsatt finner filene.
+    """
+    candidates: List[tuple[Path, str]] = [
+        (project_root / "config", "config"),
+        (project_root / "a07_feature" / "defaults", "a07_feature/defaults"),
+    ]
+    return [(src, dest) for src, dest in candidates if src.exists()]
 
 
 def build_pyinstaller_args(project_root: Path, opts: BuildOptions, runtime_hook: Path) -> List[str]:
@@ -165,6 +176,7 @@ def build_pyinstaller_args(project_root: Path, opts: BuildOptions, runtime_hook:
         "--clean" if opts.clean else "",
         "--onefile" if opts.onefile else "",
         "--console" if opts.console else "--noconsole",
+        "--noupx",  # UPX-komprimering utløser oftere AV false-positives
         "--runtime-hook",
         str(runtime_hook),
     ]
@@ -176,18 +188,13 @@ def build_pyinstaller_args(project_root: Path, opts: BuildOptions, runtime_hook:
     for mod in _iter_hidden_imports(opts):
         args.extend(["--hidden-import", mod])
 
-    # Collect all submodules for packages with complex internal structure
-    for pkg in ["chromadb"]:
+    # Collect all submodules + datafiler for pakker med kompleks intern struktur
+    # eller som trenger sidekar-data (tiktoken: BPE-merges, chromadb: sqlite + migrations).
+    for pkg in ["chromadb", "tiktoken", "tiktoken_ext"]:
         args.extend(["--collect-all", pkg])
 
-    bundled_rulebook = project_root / "a07_feature" / "defaults" / "global_full_a07_rulebook.json"
-    if bundled_rulebook.exists():
-        args.extend(
-            [
-                "--add-data",
-                f"{bundled_rulebook}{os.pathsep}a07_feature/defaults",
-            ]
-        )
+    for src, dest in _iter_bundled_data(project_root):
+        args.extend(["--add-data", f"{src}{os.pathsep}{dest}"])
 
     # Ekstra argumenter
     for a in (opts.extra_args or []):
