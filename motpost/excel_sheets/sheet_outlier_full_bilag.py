@@ -581,7 +581,7 @@ def write_outlier_detail_sheets(
             ws,
             title_row=next_row + 1,
             title="Resultat",
-            body="",
+            body=kommentar,
             start_col=1,
             end_col=8,
             height_rows=6,

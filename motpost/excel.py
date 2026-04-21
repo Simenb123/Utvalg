@@ -449,6 +449,7 @@ def build_motpost_excel_workbook(
     combo_status_map: Optional[dict[str, str]] = None,
     combo_comment_map: Optional[dict[str, str]] = None,
     include_outlier_transactions: bool = True,
+    materiality_amount: Optional[float] = None,
 ) -> Workbook:
     """Bygg en Excel-workbook for motpostanalyse."""
 
@@ -541,6 +542,7 @@ def build_motpost_excel_workbook(
         sum_label=s_label,
         population_label=pop_label,
         net_label=net_label,
+        materiality_amount=materiality_amount,
     )
 
     return wb

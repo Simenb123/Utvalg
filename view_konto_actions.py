@@ -21,6 +21,46 @@ import sys
 import subprocess
 
 
+def _resolve_client_materiality_amount() -> Optional[float]:
+    """Slå opp gjeldende klient/år sin valgte utvalgsterskel (arbeidsvesentlighet).
+
+    Returnerer ``None`` hvis klient/år mangler, modulen ikke finnes, eller
+    beløpet ikke er satt. Feil fanges stille — eksport skal aldri avbrytes
+    fordi arbeidsvesentlighet ikke kan slås opp.
+    """
+
+    try:
+        import session  # type: ignore
+        import materiality_store  # type: ignore
+    except Exception:
+        return None
+
+    client = getattr(session, "client", None)
+    year = getattr(session, "year", None)
+    if not client or not year:
+        return None
+
+    try:
+        state = materiality_store.load_state(str(client), str(year))
+    except Exception:
+        return None
+
+    active = state.get("active_materiality") if isinstance(state, dict) else None
+    preferred_key = state.get("selection_threshold_key") if isinstance(state, dict) else None
+
+    try:
+        _, amount = materiality_store.resolve_selection_threshold(active, preferred_key)
+    except Exception:
+        return None
+
+    if amount is None:
+        return None
+    try:
+        return float(amount)
+    except Exception:
+        return None
+
+
 def on_select_motkonto(view: Any, *, konto_str_fn: Callable[[Any], str]) -> None:
     """Håndter valg av motkonto i pivot-tabellen."""
 
@@ -275,6 +315,8 @@ def export_excel(
         selected_motkonto = getattr(view, "_selected_motkonto", None)
         outlier_motkonto = getattr(view, "_outliers", set())
 
+        materiality_amount = _resolve_client_materiality_amount()
+
         try:
             wb = build_motpost_excel_workbook_fn(
                 view._data,
@@ -284,6 +326,7 @@ def export_excel(
                 combo_comment_map=combo_comment_map,
                 outlier_combinations=outlier_combinations,
                 include_outlier_transactions=include_outlier_transactions,
+                materiality_amount=materiality_amount,
             )
         except TypeError:
             # Bakoverkompatibilitet hvis funksjonen ikke støtter flagget

@@ -101,6 +101,7 @@ def write_oversikt_sheet(
     df_status: pd.DataFrame,
     df_outlier_index: pd.DataFrame,
     outlier_sheet_name: str,
+    materiality_amount: float | None = None,
 ) -> OversiktLayout:
     hide_gridlines(ws)
 
@@ -227,7 +228,12 @@ def write_oversikt_sheet(
         next_row = res_out.last_row + 2
 
     rest_population = _extract_rest_population(df_status)
-    return _write_materiality_and_conclusion(ws, start_row=next_row, rest_population=rest_population)
+    return _write_materiality_and_conclusion(
+        ws,
+        start_row=next_row,
+        rest_population=rest_population,
+        materiality_amount=materiality_amount,
+    )
 
 
 def _write_handling_box(ws: Worksheet, *, start_row: int, start_col: int) -> None:
@@ -273,19 +279,21 @@ def _write_materiality_and_conclusion(
     *,
     start_row: int,
     rest_population: float,
+    materiality_amount: float | None = None,
 ) -> OversiktLayout:
     r = start_row
 
     ws.cell(row=r, column=2, value="Arbeidsvesentlighetsgrense").font = HEADER_FONT
 
     thr = ws.cell(row=r, column=3)
-    thr.value = None
+    thr.value = float(materiality_amount) if materiality_amount is not None else None
     thr.number_format = DEFAULT_INT_FORMAT
     thr.fill = _FILL_INPUT
     thr.border = THIN_BORDER
     thr.alignment = Alignment(horizontal="right")
 
-    hint = ws.cell(row=r, column=4, value="\u2190 legg inn beløp")
+    hint_text = "" if materiality_amount is not None else "\u2190 legg inn beløp"
+    hint = ws.cell(row=r, column=4, value=hint_text)
     hint.font = Font(italic=True, color="666666")
     hint.alignment = Alignment(vertical="top")
 
