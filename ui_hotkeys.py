@@ -48,6 +48,35 @@ def _tree_get_columns(tree: Any) -> list[str]:
         return []
 
 
+def _tree_get_visible_columns(tree: Any) -> list[str]:
+    """Returner kun kolonner som faktisk er synlige i treet.
+
+    Tk Treeview lagrer alle kolonner i tree["columns"], men kan begrense
+    hvilke som vises via tree["displaycolumns"]. Returverdien respekterer
+    rekkefølgen i displaycolumns slik at copy-paste matcher GUI.
+
+    Faller tilbake til alle kolonner hvis displaycolumns mangler eller er
+    satt til "#all".
+    """
+    all_cols = _tree_get_columns(tree)
+    if not all_cols:
+        return []
+    try:
+        disp = tree["displaycolumns"]  # type: ignore[index]
+    except Exception:
+        return all_cols
+    try:
+        disp_list = list(disp)
+    except TypeError:
+        disp_list = [disp]
+    disp_strs = [str(c) for c in disp_list if str(c).strip()]
+    if not disp_strs or "#all" in disp_strs:
+        return all_cols
+    # Filtrer til IDs som faktisk finnes (defensivt mot stale displaycolumns)
+    visible = [c for c in disp_strs if c in all_cols]
+    return visible if visible else all_cols
+
+
 def _tree_get_heading_text(tree: Any, col_id: str) -> str:
     try:
         txt = tree.heading(col_id, option="text")
@@ -118,7 +147,12 @@ def listbox_select_all(listbox: Any) -> int:
 # --------------------------------------------------------------------------------------
 
 def treeview_selection_to_tsv(tree: Any) -> str:
-    """Kopier markerte rader i Treeview som TSV (Excel-vennlig), alltid med header."""
+    """Kopier markerte rader i Treeview som TSV (Excel-vennlig), alltid med header.
+
+    Tar kun med kolonner som faktisk er synlige i GUI (respekterer
+    displaycolumns). Skjulte kolonner ekskluderes — det brukeren ser i
+    GUI er det som havner på utklippstavlen.
+    """
     if not _tree_is_treeview(tree):
         return ""
 
@@ -127,7 +161,7 @@ def treeview_selection_to_tsv(tree: Any) -> str:
     except Exception:
         selected = []
 
-    cols = _tree_get_columns(tree)
+    cols = _tree_get_visible_columns(tree)
     if not cols or not selected:
         return ""
 

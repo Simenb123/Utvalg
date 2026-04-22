@@ -8,16 +8,22 @@ import ui_selection_summary
 
 
 class DummyTree:
-    def __init__(self, columns: list[str], values: dict[str, dict[str, Any]]):
+    def __init__(self, columns: list[str], values: dict[str, dict[str, Any]],
+                 displaycolumns: list[str] | str | None = None):
         self._columns = list(columns)
         self._values = values
         self._selection: list[str] = []
         self._children = list(values.keys())
         self._headings = {c: c for c in columns}
+        self._displaycolumns = displaycolumns
 
     def __getitem__(self, key: str):
         if key == "columns":
             return tuple(self._columns)
+        if key == "displaycolumns":
+            if self._displaycolumns is None:
+                raise KeyError(key)
+            return tuple(self._displaycolumns) if isinstance(self._displaycolumns, list) else self._displaycolumns
         raise KeyError(key)
 
     def heading(self, col: str, option: str = "text"):
@@ -135,6 +141,39 @@ def test_treeview_selection_to_tsv_has_no_blank_lines_between_rows() -> None:
     parts = tsv.split("\n")
     assert len(parts) == 3  # header + 2 rader
     assert all(p != "" for p in parts)
+
+
+def test_treeview_selection_to_tsv_only_includes_visible_columns() -> None:
+    """displaycolumns må respekteres — skjulte kolonner skal ikke kopieres."""
+    tree = DummyTree(
+        columns=["Konto", "Kontonavn", "IB", "Endring", "UB", "AO_belop"],
+        values={
+            "a": {"Konto": "1000", "Kontonavn": "Bank", "IB": "100",
+                  "Endring": "50", "UB": "150", "AO_belop": "X"},
+        },
+        displaycolumns=["Konto", "Kontonavn", "UB"],
+    )
+    tree.selection_set(["a"])
+    tsv = ui_hotkeys.treeview_selection_to_tsv(tree)
+    lines = tsv.splitlines()
+    assert lines[0] == "Konto\tKontonavn\tUB"
+    assert lines[1] == "1000\tBank\t150"
+    # Skjulte kolonner skal IKKE være med
+    assert "AO_belop" not in tsv
+    assert "Endring" not in tsv
+    assert "IB" not in tsv
+
+
+def test_treeview_selection_to_tsv_falls_back_when_displaycolumns_is_all() -> None:
+    """displaycolumns="#all" betyr "vis alle" og skal gi samme som uten."""
+    tree = DummyTree(
+        columns=["Konto", "UB"],
+        values={"a": {"Konto": "1000", "UB": "150"}},
+        displaycolumns="#all",
+    )
+    tree.selection_set(["a"])
+    tsv = ui_hotkeys.treeview_selection_to_tsv(tree)
+    assert tsv.splitlines()[0] == "Konto\tUB"
 
 
 def test_treeview_selection_to_tsv_sanitizes_nan_tokens_to_empty_cells() -> None:
