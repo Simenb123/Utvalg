@@ -1,5 +1,9 @@
 # Arkitektur og repo-struktur (pågående refaktor)
 
+> **Se også:** [architecture/src_struktur_og_vokabular.md](architecture/src_struktur_og_vokabular.md)
+> for konkret status på `src/pages/`-strukturen, det felles kolonne-vokabularet
+> og pivot-cache-skjemaene (innført April 2026, gradvis utrullet fane-for-fane).
+
 Dette prosjektet er en desktop-app (Tkinter) som gjør analyse/utvalg/eksport på regnskapsdata (pandas).
 Repoet har historisk vært ganske “flatt” (mange `.py`-filer i rot), og flere store moduler har blandet UI og logikk.
 
