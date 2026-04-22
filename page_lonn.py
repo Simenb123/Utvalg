@@ -22,6 +22,8 @@ except Exception:  # pragma: no cover
 
 import formatting
 
+from src.shared.columns_vocabulary import active_year_from_session, heading
+
 # ---------------------------------------------------------------------------
 # Lønn-gruppe-konfigurasjon
 # ---------------------------------------------------------------------------
@@ -125,13 +127,37 @@ class LonnPage(ttk.Frame):  # type: ignore[misc]
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         self._build_ui()
+        # Sett initial labels — overskrives ved refresh_from_session.
+        self._apply_vocabulary_labels()
 
     def set_analyse_page(self, page: Any) -> None:
         self._analyse_page = page
 
     def refresh_from_session(self, session: Any = None) -> None:
         self._load_data()
+        self._apply_vocabulary_labels()
         self._refresh_all()
+
+    def _apply_vocabulary_labels(self) -> None:
+        """Oppdater saldo-headings ('IB', 'Bevegelse', 'UB') med aktivt år
+        fra felles kolonne-vokabular. Kall etter session-oppdatering."""
+        yr = active_year_from_session()
+        ib_label = heading("IB", year=yr)
+        bev_label = heading("Endring", year=yr)   # periode-bevegelse
+        ub_label = heading("UB", year=yr)
+        for tree in (
+            getattr(self, "_rs_tree", None),
+            getattr(self, "_bs_tree", None),
+            getattr(self, "_konto_tree", None),
+        ):
+            if tree is None:
+                continue
+            try:
+                tree.heading("ib",        text=ib_label,  anchor="e")
+                tree.heading("bevegelse", text=bev_label, anchor="e")
+                tree.heading("ub",        text=ub_label,  anchor="e")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # UI
@@ -199,9 +225,10 @@ class LonnPage(ttk.Frame):  # type: ignore[misc]
         cols = ("gruppe", "ib", "bevegelse", "ub")
         tree = ttk.Treeview(parent, columns=cols, show="headings",
                              selectmode="browse", height=8)
+        # Saldo-headings settes via _apply_vocabulary_labels() etterpå.
         tree.heading("gruppe",    text="Post",      anchor="w")
         tree.heading("ib",        text="IB",        anchor="e")
-        tree.heading("bevegelse", text="Bevegelse",  anchor="e")
+        tree.heading("bevegelse", text="Bevegelse", anchor="e")
         tree.heading("ub",        text="UB",        anchor="e")
         tree.column("gruppe",    width=280, anchor="w", stretch=True)
         tree.column("ib",        width=140, anchor="e", stretch=False)

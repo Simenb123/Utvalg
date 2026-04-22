@@ -23,6 +23,8 @@ except Exception:  # pragma: no cover
 
 import formatting
 
+from src.shared.columns_vocabulary import active_year_from_session, heading
+
 # ---------------------------------------------------------------------------
 # MVA-gruppe-konfigurasjon
 # ---------------------------------------------------------------------------
@@ -122,6 +124,8 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
         self._build_ui()
+        # Sett initial labels — overskrives ved refresh_from_session.
+        self._apply_vocabulary_labels()
 
     # ------------------------------------------------------------------
     # API
@@ -132,7 +136,28 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
 
     def refresh_from_session(self, session: Any = None) -> None:
         self._load_data()
+        self._apply_vocabulary_labels()
         self._refresh_all()
+
+    def _apply_vocabulary_labels(self) -> None:
+        """Oppdater saldo-headings ('IB', 'Bevegelse', 'UB') med aktivt år
+        fra felles kolonne-vokabular. Kall etter session-oppdatering."""
+        yr = active_year_from_session()
+        ib_label = heading("IB", year=yr)
+        bev_label = heading("Endring", year=yr)   # periode-bevegelse
+        ub_label = heading("UB", year=yr)
+        for tree in (
+            getattr(self, "_summary_tree", None),
+            getattr(self, "_konto_tree", None),
+        ):
+            if tree is None:
+                continue
+            try:
+                tree.heading("ib",        text=ib_label,  anchor="e")
+                tree.heading("bevegelse", text=bev_label, anchor="e")
+                tree.heading("ub",        text=ub_label,  anchor="e")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # UI
