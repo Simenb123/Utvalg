@@ -46,7 +46,7 @@ except Exception:
     DocumentsPage = None  # type: ignore
 
 try:
-    from page_statistikk import StatistikkPage
+    from src.pages.statistikk import StatistikkPage
 except Exception:
     StatistikkPage = None  # type: ignore
 

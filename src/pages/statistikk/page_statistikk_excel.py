@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from page_statistikk_compute import _AMT_FMT
+from .page_statistikk_compute import _AMT_FMT
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ def write_workbook(
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
-    from page_statistikk_compute import (
+    from .page_statistikk_compute import (
         _compute_bilag,
         _compute_kontoer,
         _compute_maned_pivot,

@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
 
 
 # Data-beregning (utskilt til page_statistikk_compute)
-from page_statistikk_compute import (  # noqa: E402
+from .page_statistikk_compute import (  # noqa: E402
     _AMT_FMT,
     _compute_bilag,
     _compute_extra_stats,
@@ -1431,7 +1431,7 @@ link.on("mousemove", function(event, d) {{
 # Excel (re-eksport fra page_statistikk_excel)
 # ---------------------------------------------------------------------------
 
-from page_statistikk_excel import (  # noqa: E402
+from .page_statistikk_excel import (  # noqa: E402
     _compute_kombinasjoner_export,
     _compute_motpost_rl,
     write_workbook as _write_workbook,
