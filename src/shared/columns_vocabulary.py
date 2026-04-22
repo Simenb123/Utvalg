@@ -29,6 +29,8 @@ LABELS_STATIC: dict[str, str] = {
     "OK_dato":        "OK dato",
     "Vedlegg":        "Vedlegg",
     "Gruppe":         "Gruppe",
+    "regnr":          "Regnr",
+    "regnskapslinje": "Regnskapslinje",
 
     # Saldo / bevegelse — fallback-labels uten år. Med år får disse 4-sifret
     # årstall (UB 2025) for rene verdier, eller 2-sifret (Endr UB 25/24)

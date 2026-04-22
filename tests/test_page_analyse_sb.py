@@ -934,8 +934,8 @@ def test_sb_remember_column_widths_persists_with_own_key(monkeypatch):
 
 
 # Kolonne-indeks for UB_fjor i ny SB-layout: Konto, Kontonavn, OK, OK_av,
-# OK_dato, Vedlegg, Gruppe, IB, Endring, UB, UB_fjor, Antall
-_UB_FJOR_IDX = 10
+# OK_dato, Vedlegg, Gruppe, regnr, regnskapslinje, IB, Endring, UB, UB_fjor, ...
+_UB_FJOR_IDX = 12
 
 
 def test_resolve_raw_kontonavn_returns_dataframe_value_not_display() -> None:

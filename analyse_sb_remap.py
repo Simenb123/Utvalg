@@ -101,6 +101,7 @@ def _bind_sb_once(*, page: Any, tree: Any) -> None:
 
 # Numeriske kolonner som sorteres som tall (bruker SB_COLS-IDs).
 _SB_NUMERIC_SORT_COLS = {
+    "regnr",
     "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
 }
 

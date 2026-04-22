@@ -487,6 +487,59 @@ def refresh_sb_view(*, page: Any) -> None:
             return formatting.fmt_amount(round(v))
         return formatting.fmt_amount(v)
 
+    # Bygg konto→regnr- og regnr→regnskapslinje-mapping for valgfrie
+    # SB-kolonner ("regnr", "regnskapslinje"). Disse er ikke i default
+    # visible men kan slås på via kolonnemenyen.
+    konto_to_regnr: dict[str, int] = {}
+    regnr_to_navn: dict[int, str] = {}
+    try:
+        intervals = getattr(page, "_rl_intervals", None)
+        regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+        if intervals is not None and regnskapslinjer is not None:
+            try:
+                from page_analyse_rl_data import (
+                    _load_current_client_account_overrides,
+                    _resolve_regnr_for_accounts,
+                )
+                ao = None
+                try:
+                    ao = _load_current_client_account_overrides()
+                except Exception:
+                    ao = None
+                kontoer_iter = (
+                    str(tup[konto_idx]) for tup in active.itertuples(index=False)
+                    if konto_idx >= 0
+                )
+                kontoer_unique = list({k for k in kontoer_iter if k})
+                if kontoer_unique:
+                    lookup = _resolve_regnr_for_accounts(
+                        kontoer_unique,
+                        intervals=intervals,
+                        regnskapslinjer=regnskapslinjer,
+                        account_overrides=ao,
+                    )
+                    if isinstance(lookup, pd.DataFrame) and not lookup.empty:
+                        for _, r in lookup.iterrows():
+                            try:
+                                konto_to_regnr[str(r["konto"])] = int(r["regnr"])
+                            except (KeyError, TypeError, ValueError):
+                                continue
+            except Exception:
+                pass
+            # Bygg regnr→navn
+            try:
+                from regnskap_mapping import normalize_regnskapslinjer
+                regn = normalize_regnskapslinjer(regnskapslinjer)
+                for _, r in regn.iterrows():
+                    try:
+                        regnr_to_navn[int(r["regnr"])] = str(r["regnskapslinje"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     for tup in active.itertuples(index=False):
         try:
             konto = str(tup[konto_idx]) if konto_idx >= 0 else ""
@@ -546,6 +599,11 @@ def refresh_sb_view(*, page: Any) -> None:
             n_atts = len(review_entry.get("attachments") or [])
             vedlegg_cell = str(n_atts) if n_atts > 0 else ""
 
+            # Valgfrie kolonner: regnr og regnskapslinje (lookup pr konto)
+            _regnr_int = konto_to_regnr.get(konto)
+            regnr_cell = str(_regnr_int) if _regnr_int is not None else ""
+            regnsl_cell = regnr_to_navn.get(_regnr_int, "") if _regnr_int is not None else ""
+
             tree.insert("", "end", values=(
                 konto,
                 display_name,
@@ -554,6 +612,8 @@ def refresh_sb_view(*, page: Any) -> None:
                 ok_dato_cell,
                 vedlegg_cell,
                 gruppe,
+                regnr_cell,
+                regnsl_cell,
                 _fmt(ib_val),
                 _fmt(endring_val),
                 _fmt(ub_val),

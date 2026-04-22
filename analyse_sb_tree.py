@@ -16,11 +16,13 @@ from typing import Any
 # og vises som "Bevegelse i år" via den felles label-mapperen.
 SB_COLS = (
     "Konto", "Kontonavn", "OK", "OK_av", "OK_dato", "Vedlegg", "Gruppe",
+    "regnr", "regnskapslinje",
     "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
 )
 
 # Kanonisk standardvisning — matcher venstre pivot:
 # Konto | Kontonavn | UB <år> | UB <år-1> | Endring | Endring % | Antall
+# regnr/regnskapslinje er valgfrie ekstrakolonner; ikke i default visible.
 SB_DEFAULT_VISIBLE = (
     "Konto", "Kontonavn", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
 )
@@ -30,23 +32,26 @@ SB_DEFAULT_VISIBLE = (
 _SB_COL_HEADINGS: dict[str, str] = {}
 
 _SB_COL_WIDTHS = {
-    "Konto":        70,
-    "Kontonavn":    220,
-    "OK":           40,
-    "OK_av":        70,
-    "OK_dato":      90,
-    "Vedlegg":      60,
-    "Gruppe":       150,
-    "IB":           110,
-    "Endring":      110,
-    "UB":           110,
-    "UB_fjor":      110,
-    "Endring_fjor": 110,
-    "Endring_pct":  90,
-    "Antall":       70,
+    "Konto":          70,
+    "Kontonavn":      220,
+    "OK":             40,
+    "OK_av":          70,
+    "OK_dato":        90,
+    "Vedlegg":        60,
+    "Gruppe":         150,
+    "regnr":          60,
+    "regnskapslinje": 180,
+    "IB":             110,
+    "Endring":        110,
+    "UB":             110,
+    "UB_fjor":        110,
+    "Endring_fjor":   110,
+    "Endring_pct":    90,
+    "Antall":         70,
 }
 
 _SB_NUMERIC_COLS = (
+    "regnr",
     "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
 )
 _SB_CENTER_COLS = ("OK", "OK_av", "OK_dato", "Vedlegg")
