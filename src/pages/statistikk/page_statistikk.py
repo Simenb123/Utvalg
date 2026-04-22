@@ -11,6 +11,8 @@ from typing import Optional
 
 import pandas as pd
 
+from src.shared.columns_vocabulary import active_year_from_session, heading
+
 log = logging.getLogger(__name__)
 
 try:
@@ -212,10 +214,17 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         kpi_frame = ttk.Frame(kpi_outer)
         kpi_frame.grid(row=0, column=0, sticky="ew")
         self._kpi_vars: dict[str, tk.StringVar] = {}
-        for i, (key, label) in enumerate([
-            ("ub", "UB"), ("ub_fjor", "UB i fjor"), ("endring_kr", "Endring (kr)"),
-            ("endring_pct", "Endring %"), ("antall", "Antall bilag"),
+        # Labels hentes fra felles kolonne-vokabular slik at
+        # Statistikk og Analyse viser samme tekst for samme konsept.
+        _yr = active_year_from_session()
+        for i, (key, col_id) in enumerate([
+            ("ub", "UB"),
+            ("ub_fjor", "UB_fjor"),
+            ("endring_kr", "Endring_fjor"),
+            ("endring_pct", "Endring_pct"),
+            ("antall", "Antall_bilag"),
         ]):
+            label = heading(col_id, year=_yr)
             f = ttk.Frame(kpi_frame)
             f.grid(row=0, column=i, padx=(0 if i == 0 else 20, 0), sticky="w")
             ttk.Label(f, text=label, font=("", 8), foreground="#666666").pack(anchor="w")
@@ -274,6 +283,18 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             {"Konto": 80, "Kontonavn": 260, "IB": 140, "Bevegelse": 140, "UB": 140, "Antall": 80},
             text_cols=("Konto", "Kontonavn"), stretch_col="Kontonavn",
         )
+        # Overskriv heading-labels med kanonisk vokabular (samme tekst som Analyse).
+        # Internt kolonnenavn = "Bevegelse" mappes til kanonisk "Endring"-ID.
+        _yr_kontoer = active_year_from_session()
+        for _col_id, _label_id in (
+            ("Konto", "Konto"),
+            ("Kontonavn", "Kontonavn"),
+            ("IB", "IB"),
+            ("Bevegelse", "Endring"),  # periode-bevegelse → "Bevegelse i år"
+            ("UB", "UB"),
+            ("Antall", "Antall"),
+        ):
+            self._tree_kontoer.heading(_col_id, text=heading(_label_id, year=_yr_kontoer))
         self._tree_kontoer.bind("<Double-Button-1>", self._on_kontoer_doubleclick)
         ttk.Label(
             self._tab_kontoer, text="Dobbeltklikk en rad for å se transaksjoner",

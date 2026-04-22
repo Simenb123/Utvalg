@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.shared.columns_vocabulary import active_year_from_session, heading
+
 from .page_statistikk_compute import _AMT_FMT
 
 log = logging.getLogger(__name__)
@@ -183,7 +185,15 @@ def write_workbook(
     ws1 = wb.active
     ws1.title = "Sammendrag"
     _title(ws1, f"Statistikk – {regnr} {rl_name}{ts}", 6)
-    _header(ws1, 4, ["UB", "UB i fjor", "Endring (kr)", "Endring %", "Antall bilag", ""])
+    _yr = active_year_from_session()
+    _header(ws1, 4, [
+        heading("UB", year=_yr),
+        heading("UB_fjor", year=_yr),
+        heading("Endring_fjor"),
+        heading("Endring_pct"),
+        heading("Antall_bilag"),
+        "",
+    ])
     # Bruk _pivot_df_rl (RL-spesifikk), ikke _pivot_df_last — sistnevnte
     # kan være konto-pivot uten regnr.
     pivot_df = getattr(page, "_pivot_df_rl", None)
@@ -202,7 +212,14 @@ def write_workbook(
             c.alignment = Alignment(horizontal="right")
     ws1.cell(7, 1).value = "Kontoer"
     ws1.cell(7, 1).font = Font(bold=True, size=11)
-    _header(ws1, 8, ["Konto", "Kontonavn", "IB", "Bevegelse", "UB", "Antall"])
+    _header(ws1, 8, [
+        heading("Konto"),
+        heading("Kontonavn"),
+        heading("IB"),
+        heading("Endring"),       # periode-bevegelse → "Bevegelse i år"
+        heading("UB", year=_yr),
+        heading("Antall"),
+    ])
     grp_k, _ib_label = _compute_kontoer(df_rl, page, konto_set=konto_set)
     dr = 9
     sum_ib = sum_bev = sum_ub = 0.0

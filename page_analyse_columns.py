@@ -75,53 +75,15 @@ def _read_view_mode(page: Any) -> str:
 # Felles brukerrettet label-mapper for Analyse-kolonner
 # =====================================================================
 
-# Kanoniske labels for kolonne-ID-er som brukes både i venstre pivot og
-# høyre SB-tree. UB / UB_fjor får årstall injisert via analysis_heading.
-_ANALYSIS_HEADINGS_STATIC = {
-    "Konto": "Konto",
-    "Kontonavn": "Kontonavn",
-    "OK": "OK",
-    "OK_av": "OK av",
-    "OK_dato": "OK dato",
-    "Vedlegg": "Vedlegg",
-    "Gruppe": "Gruppe",
-    "IB": "IB",
-    "Endring": "Bevegelse i år",       # periode-bevegelse (UB-IB)
-    "Endring_fjor": "Endring",          # år-over-år (UB - UB_fjor)
-    "Endring_pct": "Endring %",
-    "Antall": "Antall",
-    "AO_belop": "Tilleggspostering",
-    "UB_for_ao": "UB før ÅO",
-    "UB_etter_ao": "UB etter ÅO",
-    "BRREG": "BRREG",
-    "Avvik_brreg": "Avvik mot BRREG",
-    "Avvik_brreg_pct": "Avvik % mot BRREG",
-}
+# Den faktiske mappingen ligger nå i src/shared/columns_vocabulary.py
+# (delt på tvers av fanene). Vi re-eksporterer her for bakoverkompatibilitet
+# slik at eksisterende kode som bruker analysis_heading()/_ANALYSIS_HEADINGS_STATIC
+# fortsetter å virke uendret.
 
-
-def analysis_heading(
-    col_id: str,
-    *,
-    year: Optional[int] = None,
-    brreg_year: Optional[int] = None,
-) -> str:
-    """Returner kanonisk brukerrettet overskrift for en Analyse-kolonne-ID.
-
-    Brukes av både venstre pivot og høyre SB-tree slik at samme kolonne
-    ID vises med samme label overalt.
-
-    - ``Sum`` / ``UB``   → ``UB <år>`` når år er kjent, ellers ``UB``.
-    - ``UB_fjor``        → ``UB <år-1>`` når år er kjent, ellers ``UB i fjor``.
-    - ``BRREG``          → ``BRREG <år>`` når brreg_year er kjent, ellers ``BRREG``.
-    - Øvrige kolonner    → fra ``_ANALYSIS_HEADINGS_STATIC``, fallback til ID.
-    """
-    if col_id in ("Sum", "UB"):
-        return f"UB {year}" if year is not None else "UB"
-    if col_id == "UB_fjor":
-        return f"UB {year - 1}" if year is not None else "UB i fjor"
-    if col_id == "BRREG":
-        return f"BRREG {brreg_year}" if brreg_year is not None else "BRREG"
-    return _ANALYSIS_HEADINGS_STATIC.get(col_id, col_id)
+from src.shared.columns_vocabulary import (  # noqa: E402
+    LABELS_STATIC as _ANALYSIS_HEADINGS_STATIC,
+    heading as analysis_heading,
+)
 
 
 def _active_year() -> Optional[int]:
