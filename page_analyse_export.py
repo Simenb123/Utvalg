@@ -14,12 +14,15 @@ ligger i andre moduler (f.eks. controller_export / dataset_export).
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 import pandas as pd
 
 import analyse_viewdata
 from analyse_model import build_pivot_by_account
+
+log = logging.getLogger(__name__)
 
 
 def prepare_transactions_export_sheets(*, page: Any) -> Dict[str, pd.DataFrame]:
@@ -167,9 +170,15 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
     regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
 
     # Bruk samme SB-visning som UI-en (respekterer "Inkluder ÅO"-toggle).
+    # NB: _resolve_analysis_sb_views er keyword-only (def f(*, page)),
+    # så dette må kalles med page=page — ikke positional.
     try:
-        _, _, sb_df = page_analyse_rl._resolve_analysis_sb_views(page)
-    except Exception:
+        _, _, sb_df = page_analyse_rl._resolve_analysis_sb_views(page=page)
+    except Exception as exc:
+        log.warning(
+            "prepare_regnskapsoppstilling_export_data: _resolve_analysis_sb_views feilet, "
+            "faller tilbake til base SB uten ÅO-justering: %s", exc, exc_info=True,
+        )
         sb_df = getattr(page, "_rl_sb_df", None)
 
     try:

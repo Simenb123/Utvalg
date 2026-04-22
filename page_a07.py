@@ -51,6 +51,7 @@ _CONTROL_DRAG_IDLE_HINT = _shared._CONTROL_DRAG_IDLE_HINT
 _CONTROL_VIEW_LABELS = _shared._CONTROL_VIEW_LABELS
 _CONTROL_WORK_LEVEL_LABELS = _shared._CONTROL_WORK_LEVEL_LABELS
 _CONTROL_GL_SCOPE_LABELS = _shared._CONTROL_GL_SCOPE_LABELS
+_MAPPING_FILTER_LABELS = _shared._MAPPING_FILTER_LABELS
 _CONTROL_ALTERNATIVE_MODE_LABELS = _shared._CONTROL_ALTERNATIVE_MODE_LABELS
 _CONTROL_STATEMENT_VIEW_LABELS = _shared._CONTROL_STATEMENT_VIEW_LABELS
 _SUGGESTION_SCOPE_LABELS = _shared._SUGGESTION_SCOPE_LABELS
@@ -124,6 +125,7 @@ _PUBLIC_HELPER_NAMES = (
     "A07WorkspaceData",
     "SuggestConfig",
     "EXCLUDED_A07_CODES",
+    "a07_code_rf1022_group",
     "build_a07_overview_df",
     "build_control_accounts_summary",
     "build_control_gl_df",
@@ -133,6 +135,11 @@ _PUBLIC_HELPER_NAMES = (
     "build_control_statement_export_df",
     "build_control_statement_overview",
     "build_control_statement_summary",
+    "build_global_auto_mapping_plan",
+    "build_mapping_audit_df",
+    "build_mapping_review_df",
+    "build_mapping_review_summary",
+    "build_mapping_review_summary_text",
     "build_rf1022_candidate_df",
     "build_control_bucket_summary",
     "build_control_suggestion_effect_summary",
@@ -171,6 +178,7 @@ _PUBLIC_HELPER_NAMES = (
     "filter_control_gl_df",
     "filter_control_queue_df",
     "filter_control_visible_codes_df",
+    "filter_mapping_rows_by_audit_status",
     "filter_suggestions_df",
     "find_previous_year_context",
     "find_previous_year_mapping_path",
@@ -185,6 +193,7 @@ _PUBLIC_HELPER_NAMES = (
     "load_matcher_settings",
     "load_previous_year_mapping_for_context",
     "normalize_matcher_settings",
+    "next_mapping_review_problem_account",
     "open_manual_mapping_dialog",
     "parse_a07_json",
     "reconcile_tree_tag",
@@ -199,12 +208,15 @@ _PUBLIC_HELPER_NAMES = (
     "select_batch_suggestion_rows",
     "select_magic_wand_suggestion_rows",
     "select_safe_history_codes",
+    "sort_mapping_rows_by_audit_status",
     "suggest_default_mapping_path",
     "suggestion_tree_tag",
     "ui_suggestion_row_from_series",
     "unresolved_codes",
     "best_suggestion_row_for_code",
     "a07_suggestion_is_strict_auto",
+    "apply_mapping_audit_to_control_gl_df",
+    "apply_mapping_audit_to_mapping_df",
     "_build_usage_features_for_a07",
     "_empty_a07_df",
     "_empty_control_df",
@@ -289,12 +301,14 @@ class A07Page(A07PageMethodsMixin, ttk.Frame):
         self.groups_df = _empty_groups_df()
         self.reconcile_df = _empty_reconcile_df()
         self.mapping_df = _empty_mapping_df()
+        self.mapping_audit_df = pd.DataFrame()
         self.unmapped_df = _empty_unmapped_df()
         self.history_compare_df = _empty_history_df()
         self.previous_mapping: dict[str, str] = {}
         self.effective_a07_mapping: dict[str, str] | None = None
         self.effective_previous_a07_mapping: dict[str, str] | None = None
         self.matcher_settings = load_matcher_settings()
+        self.effective_rulebook = None
 
         self.a07_path: Path | None = None
         self.tb_path: Path | None = None
@@ -352,6 +366,7 @@ class A07Page(A07PageMethodsMixin, ttk.Frame):
         self._support_refresh_thread: threading.Thread | None = None
         self._support_refresh_result: dict[str, object] | None = None
         self._loaded_support_tabs: set[str] = set()
+        self._loaded_support_context_keys: dict[str, tuple[object, ...]] = {}
         self._pending_focus_code: str | None = None
         self._suspend_selection_sync = False
         self._suppressed_tree_select_keys: set[str] = set()
@@ -402,6 +417,9 @@ class A07Page(A07PageMethodsMixin, ttk.Frame):
         self.control_gl_filter_var = tk.StringVar(value="")
         self.control_gl_scope_var = tk.StringVar(value="alle")
         self.control_gl_scope_label_var = tk.StringVar(value=_CONTROL_GL_SCOPE_LABELS["alle"])
+        self.mapping_filter_var = tk.StringVar(value="alle")
+        self.mapping_filter_label_var = tk.StringVar(value=_MAPPING_FILTER_LABELS["alle"])
+        self._mapping_filter_user_selected = False
         self.control_gl_active_only_var = tk.BooleanVar(value=True)
         self.control_gl_unmapped_only_var = tk.BooleanVar(value=False)
         self.control_alternative_mode_var = tk.StringVar(value="suggestions")

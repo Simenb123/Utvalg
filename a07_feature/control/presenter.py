@@ -17,6 +17,10 @@ class A07ControlPanelState:
     next_action: str = ""
     action_label: str = ""
     action_target: str = "mapping"
+    meta_text: str = ""
+    next_text: str = ""
+    match_text: str = ""
+    use_saldobalanse_action: bool = False
     has_history: bool = False
     has_best_suggestion: bool = False
     best_suggestion_within_tolerance: bool = False
@@ -56,6 +60,12 @@ def build_gl_selection_status_message(
 
     matches = control_gl_df.loc[control_gl_df["Konto"].astype(str).str.strip() == account_s]
     code_s = str(matches.iloc[0].get("Kode") or "").strip() if not matches.empty else ""
+    audit_status = str(matches.iloc[0].get("MappingAuditStatus") or "").strip() if not matches.empty else ""
+    audit_reason = str(matches.iloc[0].get("MappingAuditReason") or "").strip() if not matches.empty else ""
+
+    if audit_status in {"Mistenkelig", "Feil"}:
+        suffix = f": {audit_reason}" if audit_reason else "."
+        return f"Konto {account_s} har {audit_status.lower()} A07-kobling{suffix}"
 
     if len(selected) == 1:
         if code_s:
@@ -84,10 +94,10 @@ def build_control_panel_state(
     *,
     code: object,
     navn: object,
-    guided_status: object,
-    guided_next: object,
-    why_text: object,
-    next_action: object,
+    guided_status: object = "",
+    guided_next: object = "",
+    why_text: object = "",
+    next_action: object = "",
     linked_accounts_df: pd.DataFrame | None = None,
     basis_col: str = "Endring",
     has_history: bool = False,
@@ -97,6 +107,11 @@ def build_control_panel_state(
     current_mapping_suspicious: bool = False,
     current_mapping_suspicious_reason: object = "",
     is_locked: bool = False,
+    status: object = "",
+    work_label: object = "",
+    a07_amount_text: object = "",
+    gl_amount_text: object = "",
+    diff_amount_text: object = "",
 ) -> A07ControlPanelState:
     code_s = str(code or "").strip()
     if not code_s:
@@ -112,8 +127,10 @@ def build_control_panel_state(
         )
 
     display_name = str(navn or "").strip() or code_s
-    status_text = str(guided_status or "").strip() or "Maa avklares"
+    legacy_status_text = str(work_label or status or "").strip()
+    status_text = str(guided_status or "").strip() or legacy_status_text or "Maa avklares"
     next_text = str(guided_next or "").strip() or "Kontroller kobling"
+    next_action_text = str(next_action or "").strip()
     reason_text = str(current_mapping_suspicious_reason or why_text or next_action or "").strip()
 
     badge_parts: list[str] = []
@@ -177,15 +194,33 @@ def build_control_panel_state(
         basis_col=basis_col,
     )
 
+    use_saldobalanse_action = action_target == "saldobalanse" or "Saldobalanse" in next_action_text
+    meta_text = "Klassifisering i Saldobalanse." if use_saldobalanse_action else " | ".join(badge_parts)
+    legacy_next_text = f"Neste: {next_action_text}" if next_action_text else ""
+    match_parts = [
+        ("A07", a07_amount_text),
+        ("GL", gl_amount_text),
+        ("Diff", diff_amount_text),
+    ]
+    match_text = " | ".join(
+        f"{label} {str(value).strip()}"
+        for label, value in match_parts
+        if str(value or "").strip()
+    )
+
     return A07ControlPanelState(
         code=code_s,
         summary_text=f"{display_name} | {status_text}",
         badges_text=" | ".join(badge_parts),
         reason_text=reason_text,
         linked_accounts_summary=linked_accounts_summary,
-        next_action=str(next_action or "").strip(),
+        next_action=next_action_text,
         action_label=action_label,
         action_target=action_target,
+        meta_text=meta_text,
+        next_text=legacy_next_text,
+        match_text=match_text,
+        use_saldobalanse_action=use_saldobalanse_action,
         has_history=bool(has_history),
         has_best_suggestion=best_suggestion is not None,
         best_suggestion_within_tolerance=bool(best_suggestion is not None and best_suggestion.get("WithinTolerance", False)),

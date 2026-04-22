@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from .control.data import rf1022_group_label
+from .control.data import RF1022_UNKNOWN_GROUP, rf1022_group_label
 from .page_a07_constants import (
     _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL,
     _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL,
@@ -12,6 +12,17 @@ from .page_a07_constants import (
 
 
 class A07PageContextMenuMixin:
+    def _rf1022_auto_menu_state(self) -> str:
+        try:
+            group_getter = getattr(self, "_selected_rf1022_group", None)
+            if callable(group_getter) and str(group_getter() or "").strip() == RF1022_UNKNOWN_GROUP:
+                return "disabled"
+            candidates = self._all_rf1022_candidate_df()
+            counts = self._rf1022_candidate_action_counts(candidates)
+        except Exception:
+            return "disabled"
+        return "normal" if int(counts.get("actionable", 0) or 0) > 0 else "disabled"
+
     def _prepare_tree_context_selection(
         self,
         tree: ttk.Treeview,
@@ -151,21 +162,33 @@ class A07PageContextMenuMixin:
         menu.add_separator()
         menu.add_cascade(label="Vis i venstre liste", menu=scope_menu)
         menu.add_separator()
-        menu.add_command(
-            label="Smartmapping for valgt kode",
-            command=self._run_selected_control_action,
-            state=("normal" if selected_code else "disabled"),
-        )
-        menu.add_command(
-            label="Bruk beste forslag",
-            command=self._apply_best_suggestion_for_selected_code,
-            state=("normal" if selected_code else "disabled"),
-        )
-        menu.add_command(
-            label="Bruk historikk",
-            command=self._apply_history_for_selected_code,
-            state=("normal" if selected_code else "disabled"),
-        )
+        if work_level == "rf1022":
+            menu.add_command(
+                label="Vis RF-1022-kandidater",
+                command=self._run_selected_control_action,
+                state=("normal" if selected_group else "disabled"),
+            )
+            menu.add_command(
+                label="Kjør trygg auto-matching",
+                command=self._apply_rf1022_candidate_suggestions,
+                state=A07PageContextMenuMixin._rf1022_auto_menu_state(self),
+            )
+        else:
+            menu.add_command(
+                label="Smartmapping for valgt kode",
+                command=self._run_selected_control_action,
+                state=("normal" if selected_code else "disabled"),
+            )
+            menu.add_command(
+                label="Bruk beste forslag",
+                command=self._apply_best_suggestion_for_selected_code,
+                state=("normal" if selected_code else "disabled"),
+            )
+            menu.add_command(
+                label="Bruk historikk",
+                command=self._apply_history_for_selected_code,
+                state=("normal" if selected_code else "disabled"),
+            )
         menu.add_separator()
         menu.add_command(
             label="Avansert mapping...",
@@ -187,15 +210,59 @@ class A07PageContextMenuMixin:
         except Exception:
             accounts = []
 
+        account_count = len(accounts)
+        multi = account_count > 1
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(
-            label="Vis i GL",
+            label="Vis første i GL" if multi else "Vis i GL",
             command=self._focus_selected_control_account_in_gl,
             state=("normal" if accounts else "disabled"),
         )
         menu.add_command(
-            label="Fjern valgt",
+            label=f"Fjern mapping fra {account_count} valgte" if multi else "Fjern mapping",
             command=self._remove_selected_control_accounts,
+            state=("normal" if accounts else "disabled"),
+        )
+        learning_context_getter = getattr(self, "_selected_control_account_learning_context", None)
+        try:
+            learning_context = learning_context_getter() if callable(learning_context_getter) else {}
+        except Exception:
+            learning_context = {}
+        learning_enabled = bool(learning_context.get("enabled")) if isinstance(learning_context, dict) else False
+        code_label = (
+            str(learning_context.get("code_label") or "A07-kode").strip()
+            if isinstance(learning_context, dict)
+            else "A07-kode"
+        )
+        learning_state = "normal" if accounts and learning_enabled else "disabled"
+        learn_menu = tk.Menu(menu, tearoff=0)
+        learn_menu.add_command(
+            label=(
+                f"Legg valgte navn til {code_label} som A07-alias"
+                if multi
+                else f"Legg navn til {code_label} som A07-alias"
+            ),
+            command=self._append_selected_control_account_names_to_a07_alias,
+            state=learning_state,
+        )
+        learn_menu.add_command(
+            label=f"Ekskluder valgte navn fra {code_label}" if multi else f"Ekskluder navn fra {code_label}",
+            command=self._exclude_selected_control_account_names_from_a07_code,
+            state=learning_state,
+        )
+        learn_menu.add_separator()
+        learn_menu.add_command(
+            label=(
+                f"Fjern mapping og ekskluder valgte navn fra {code_label}"
+                if multi
+                else f"Fjern mapping og ekskluder navn fra {code_label}"
+            ),
+            command=self._remove_selected_control_accounts_and_exclude_alias,
+            state=learning_state,
+        )
+        menu.add_cascade(
+            label="Laer av valgte kontonavn" if multi else "Laer av kontonavn",
+            menu=learn_menu,
             state=("normal" if accounts else "disabled"),
         )
         menu.add_separator()
@@ -241,7 +308,8 @@ class A07PageContextMenuMixin:
         is_group = code.startswith("A07_GROUP:")
         selected_codes = self._groupable_selected_control_codes()
         selected_accounts = self._selected_control_gl_accounts()
-        has_group_selection = len(selected_codes) >= 2
+        advanced_groups_visible = bool(getattr(self, "_control_advanced_visible", False))
+        has_group_selection = len(selected_codes) >= 2 and advanced_groups_visible
         has_account_mapping = any(str(self._effective_mapping().get(account) or "").strip() for account in selected_accounts)
         is_locked = code in self._locked_codes()
         selected_work_level = getattr(self, "_selected_control_work_level", None)
@@ -251,6 +319,39 @@ class A07PageContextMenuMixin:
             work_level = "a07"
 
         menu = tk.Menu(self, tearoff=0)
+        if work_level == "rf1022":
+            group_getter = getattr(self, "_selected_rf1022_group", None)
+            try:
+                group_id = group_getter() if callable(group_getter) else ""
+            except Exception:
+                group_id = ""
+            group_label = rf1022_group_label(group_id) or str(group_id or "").strip()
+            assign_label = "Tildel valgte kontoer hit (RF-1022 ->)"
+            if group_label:
+                assign_label = f"Tildel valgte kontoer til {group_label} (RF-1022 ->)"
+            menu.add_command(
+                label=assign_label,
+                command=self._assign_selected_control_mapping,
+                state=("normal" if group_id and selected_accounts else "disabled"),
+            )
+            menu.add_command(
+                label="Fjern mapping fra valgte kontoer (<-)",
+                command=self._clear_selected_control_mapping,
+                state=("normal" if has_account_mapping else "disabled"),
+            )
+            menu.add_separator()
+            menu.add_command(
+                label="Vis RF-1022-kandidater",
+                command=self._run_selected_control_action,
+                state=("normal" if group_id else "disabled"),
+            )
+            menu.add_command(
+                label="Kjør trygg auto-matching",
+                command=self._apply_rf1022_candidate_suggestions,
+                state=A07PageContextMenuMixin._rf1022_auto_menu_state(self),
+            )
+            return self._post_context_menu(menu, event)
+
         menu.add_command(
             label=("Tildel valgte kontoer hit (RF-1022 ->)" if work_level == "rf1022" else "Tildel valgte kontoer hit (->)"),
             command=self._assign_selected_control_mapping,
@@ -279,7 +380,7 @@ class A07PageContextMenuMixin:
         )
         menu.add_separator()
         menu.add_command(
-            label="Opprett gruppe fra valgte koder",
+            label="Opprett A07-gruppe fra valgte koder (avansert)",
             command=self._create_group_from_selection,
             state=("normal" if has_group_selection else "disabled"),
         )

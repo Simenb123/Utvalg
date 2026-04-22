@@ -32,7 +32,7 @@ from .page_a07_refresh_services import (
 from .page_a07_runtime_helpers import _load_code_profile_state, resolve_rulebook_path
 from .page_a07_dialogs import _format_picker_amount
 from .control import status as a07_control_status
-from .control.data import filter_control_statement_df
+from .control.data import filter_control_statement_df, preferred_rf1022_overview_group
 
 
 class A07PageBackgroundMixin:
@@ -209,6 +209,7 @@ class A07PageBackgroundMixin:
 
     def _apply_core_refresh_payload(self, payload: dict[str, object]) -> None:
         self.rulebook_path = payload["rulebook_path"]
+        self.effective_rulebook = payload.get("effective_rulebook")
         self.matcher_settings = payload["matcher_settings"]
         self.previous_mapping = payload["previous_mapping"]
         self.previous_mapping_path = payload["previous_mapping_path"]
@@ -220,6 +221,8 @@ class A07PageBackgroundMixin:
         self.workspace.suggestions = payload["suggestions"]
         self.reconcile_df = payload.get("reconcile_df", _empty_reconcile_df())
         self.mapping_df = payload.get("mapping_df", _empty_mapping_df())
+        self.mapping_audit_df = payload.get("mapping_audit_df", pd.DataFrame())
+        self.mapping_review_df = payload.get("mapping_review_df", pd.DataFrame())
         self.unmapped_df = payload.get("unmapped_df", _empty_unmapped_df())
         self.control_gl_df = payload["control_gl_df"]
         self.a07_overview_df = payload["a07_overview_df"]
@@ -274,6 +277,10 @@ class A07PageBackgroundMixin:
         self._support_views_dirty = False
         self._history_compare_ready = False
         self._loaded_support_tabs.clear()
+        try:
+            self._loaded_support_context_keys.clear()
+        except Exception:
+            self._loaded_support_context_keys = {}
         pending_focus_code = (self._pending_focus_code or "").strip()
         self._pending_focus_code = None
         selected_group_id = str(getattr(self, "_selected_rf1022_group_id", "") or "").strip()
@@ -339,6 +346,7 @@ class A07PageBackgroundMixin:
                 self.details_var.set("Velg konto og kode for aa jobbe videre. Historikk lastes ved behov.")
                 try:
                     self._set_control_details_visible(True)
+                    self._support_requested = True
                 except Exception:
                     pass
 
@@ -353,7 +361,13 @@ class A07PageBackgroundMixin:
                         if selected_group_id and selected_group_id in code_children:
                             target_group = str(selected_group_id)
                         else:
-                            target_group = str(code_children[0])
+                            target_group = str(
+                                preferred_rf1022_overview_group(
+                                    getattr(self, "rf1022_overview_df", None),
+                                    code_children,
+                                )
+                                or code_children[0]
+                            )
                 else:
                     if code_children:
                         if pending_focus_code and pending_focus_code in code_children:
@@ -502,6 +516,10 @@ class A07PageBackgroundMixin:
         self._support_views_ready = True
         self._support_views_dirty = False
         self._loaded_support_tabs.discard("history")
+        try:
+            self._loaded_support_context_keys.pop("history", None)
+        except Exception:
+            pass
 
         def _apply_support_ui_updates() -> None:
             active_tab = self._active_support_tab_key()

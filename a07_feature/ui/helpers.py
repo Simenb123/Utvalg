@@ -6,7 +6,7 @@ from typing import Sequence
 
 import pandas as pd
 
-from ..page_a07_constants import _CONTROL_DRAG_IDLE_HINT, _CONTROL_GL_COLUMNS, _CONTROL_VIEW_LABELS
+from ..page_a07_constants import _CONTROL_DRAG_IDLE_HINT, _CONTROL_GL_COLUMNS, _CONTROL_VIEW_LABELS, _MAPPING_COLUMNS
 from ..page_a07_dialogs import remove_mapping_accounts
 from ..page_a07_env import messagebox
 
@@ -127,8 +127,14 @@ class A07PageUiHelpersMixin:
         if mapping_values:
             if konto is None:
                 konto = str(mapping_values[0]).strip() or None
-            if kode is None and len(mapping_values) >= 3:
-                kode = str(mapping_values[2]).strip() or None
+            if kode is None:
+                mapping_column_ids = [column_id for column_id, *_rest in _MAPPING_COLUMNS]
+                try:
+                    code_index = mapping_column_ids.index("Kode")
+                except ValueError:
+                    code_index = -1
+                if code_index >= 0 and len(mapping_values) > code_index:
+                    kode = str(mapping_values[code_index]).strip() or None
 
         control_account_values = self._selected_tree_values(self.tree_control_accounts)
         if control_account_values and konto is None:
@@ -275,7 +281,10 @@ class A07PageUiHelpersMixin:
             return
         selector = getattr(self, "_set_tree_selection", None)
         if callable(selector):
-            selector(self.tree_control_accounts, konto_s)
+            try:
+                selector(self.tree_control_accounts, konto_s, reveal=False)
+            except TypeError:
+                selector(self.tree_control_accounts, konto_s)
             return
         try:
             self.tree_control_accounts.selection_set(konto_s)
@@ -284,12 +293,14 @@ class A07PageUiHelpersMixin:
         except Exception:
             pass
 
-    def _focus_selected_control_account_in_gl(self) -> None:
+    def _focus_selected_control_account_in_gl(self, *, allow_multi: bool = True) -> None:
         suppressed_check = getattr(self, "_is_tree_selection_suppressed", None)
         if callable(suppressed_check) and suppressed_check(getattr(self, "tree_control_accounts", None)):
             return
         accounts = self._selected_control_account_ids()
         if not accounts:
+            return
+        if len(accounts) > 1 and not allow_multi:
             return
         self._focus_mapping_account(accounts[0])
 

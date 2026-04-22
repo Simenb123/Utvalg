@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,11 +11,14 @@ import a07_feature.control.data as a07_control_data
 import a07_feature.page_a07_context_menu as a07_context_menu
 import a07_feature.page_a07_constants as a07_constants
 import a07_feature.page_a07_control_statement as page_a07_control_statement
+import a07_feature.page_a07_mapping_actions as a07_mapping_actions
+import a07_feature.rule_learning as a07_rule_learning
 import a07_feature.ui.canonical_layout as a07_canonical_layout
 import classification_workspace
 import page_a07
 import ui_main
 from account_profile import AccountProfile, AccountProfileDocument
+from a07_feature.suggest.rulebook import RulebookRule
 
 
 def test_get_a07_workspace_dir_uses_client_store_years_dir(monkeypatch, tmp_path) -> None:
@@ -837,10 +841,21 @@ def test_rf1022_post_for_group_maps_payroll_groups_to_expected_sections() -> Non
     assert page_a07.rf1022_post_for_group("Skattetrekk") == (100, "Lonn og trekk")
     assert page_a07.rf1022_post_for_group("Skyldig arbeidsgiveravgift") == (110, "Arbeidsgiveravgift")
     assert page_a07.rf1022_post_for_group("Skyldig pensjon") == (120, "Pensjon og refusjon")
+    assert page_a07.rf1022_post_for_group("uavklart_rf1022") == (999, "Uavklart RF-1022")
     assert page_a07.rf1022_post_for_group("ukjent_gruppe", "Naturalytelse") == (
         130,
         "Naturalytelser og styrehonorar",
     )
+
+
+def test_a07_code_rf1022_group_is_fail_closed_for_unknown_code() -> None:
+    assert page_a07.a07_code_rf1022_group("bonus") == "100_loenn_ol"
+    assert page_a07.a07_code_rf1022_group("fastTillegg") == "100_loenn_ol"
+    assert page_a07.a07_code_rf1022_group("sumAvgiftsgrunnlagRefusjon") == "100_refusjon"
+    assert page_a07.a07_code_rf1022_group("A07_GROUP:fastloenn+timeloenn") == "100_loenn_ol"
+    assert page_a07.a07_code_rf1022_group("A07_GROUP:fastloenn+sumAvgiftsgrunnlagRefusjon") == "uavklart_rf1022"
+    assert page_a07.a07_code_rf1022_group("A07_GROUP:ukjentNyKode") == "uavklart_rf1022"
+    assert page_a07.a07_code_rf1022_group("ukjentNyKode") == "uavklart_rf1022"
 
 
 def test_build_rf1022_statement_df_sorts_rows_by_post_and_uses_selected_basis() -> None:
@@ -885,6 +900,408 @@ def test_build_rf1022_statement_df_sorts_rows_by_post_and_uses_selected_basis() 
         "Skyldig pensjon",
     ]
     assert out["GL_Belop"].tolist() == [200.0, 100.0, 300.0]
+
+
+def test_build_rf1022_statement_df_uses_a07_expected_amounts_without_gl_rows() -> None:
+    a07_overview_df = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1000.0},
+            {"Kode": "bonus", "Navn": "Bonus", "Belop": 250.0},
+            {"Kode": "fastTillegg", "Navn": "Fast tillegg", "Belop": 50.0},
+            {"Kode": "sumAvgiftsgrunnlagRefusjon", "Navn": "Refusjon", "Belop": -75.0},
+            {"Kode": "elektroniskKommunikasjon", "Navn": "Telefon", "Belop": 40.0},
+            {"Kode": "tilskuddOgPremieTilPensjon", "Navn": "Pensjon", "Belop": 500.0},
+            {"Kode": "ukjentNyKode", "Navn": "Ukjent", "Belop": 13.0},
+        ]
+    )
+
+    out = page_a07.build_rf1022_statement_df(
+        pd.DataFrame(),
+        a07_overview_df=a07_overview_df,
+        basis_col="Endring",
+    )
+
+    assert out["GroupId"].tolist() == [
+        "100_loenn_ol",
+        "100_refusjon",
+        "111_naturalytelser",
+        "112_pensjon",
+        "uavklart_rf1022",
+    ]
+    assert out["GL_Belop"].tolist() == [0.0, 0.0, 0.0, 0.0, 0.0]
+    assert out["A07"].tolist() == [1300.0, -75.0, 40.0, 500.0, 13.0]
+    assert out["Diff"].tolist() == [1300.0, -75.0, 40.0, 500.0, 13.0]
+    assert out["Status"].tolist() == ["Mangler GL", "Mangler GL", "Mangler GL", "Mangler GL", "Mangler GL"]
+
+
+def test_build_rf1022_statement_df_overlays_a07_expected_amounts_on_control_rows() -> None:
+    control_statement_df = pd.DataFrame(
+        [
+            {
+                "Gruppe": "100_loenn_ol",
+                "Navn": "Post 100 Lonn o.l.",
+                "Endring": 800.0,
+                "A07": None,
+                "Diff": None,
+                "Status": "Manuell",
+                "AntallKontoer": 2,
+            }
+        ]
+    )
+    a07_overview_df = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "Belop": 1000.0},
+            {"Kode": "feriepenger", "Belop": 100.0},
+        ]
+    )
+
+    out = page_a07.build_rf1022_statement_df(
+        control_statement_df,
+        a07_overview_df=a07_overview_df,
+        basis_col="Endring",
+    )
+
+    row = out.loc[out["GroupId"] == "100_loenn_ol"].iloc[0]
+    assert row["GL_Belop"] == 800.0
+    assert row["A07"] == 1100.0
+    assert row["Diff"] == 300.0
+
+
+def test_build_mapping_audit_df_flags_known_bad_saved_mappings() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "2940", "Navn": "Skyldig feriepenger", "IB": -743491.69, "Endring": -4207.18, "UB": -747698.87},
+            {"Konto": "5800", "Navn": "Refusjon av sykepenger", "IB": 0.0, "Endring": -465809.0, "UB": -465809.0},
+            {"Konto": "5890", "Navn": "Annen refusjon", "IB": 0.0, "Endring": -58009.0, "UB": -58009.0},
+            {"Konto": "6701", "Navn": "Honorar revisjon", "IB": 0.0, "Endring": 72250.4, "UB": 72250.4},
+        ]
+    )
+
+    out = page_a07.build_mapping_audit_df(
+        gl_df,
+        {
+            "2940": "feriepenger",
+            "5800": "sumAvgiftsgrunnlagRefusjon",
+            "5890": "sumAvgiftsgrunnlagRefusjon",
+            "6701": "annet",
+        },
+        basis_col="Endring",
+    )
+
+    by_account = out.set_index("Konto")
+    assert by_account.loc["2940", "Kol"] == "Endring"
+    assert by_account.loc["2940", "Status"] == "Trygg"
+    assert by_account.loc["2940", "CurrentRf1022GroupId"] == "100_loenn_ol"
+    assert by_account.loc["5800", "Status"] == "Trygg"
+    assert by_account.loc["5890", "Status"] == "Mistenkelig"
+    assert "Generisk refusjon" in by_account.loc["5890", "Reason"]
+    assert by_account.loc["6701", "Kol"] == "UB"
+    assert by_account.loc["6701", "Status"] == "Feil"
+    assert "utenfor A07-lonn" in by_account.loc["6701", "Reason"]
+
+
+def test_mapping_audit_never_marks_uavklart_rf1022_as_safe() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Lonn ansatte", "IB": 0.0, "Endring": 1000.0, "UB": 1000.0},
+        ]
+    )
+    suggestions_df = pd.DataFrame(
+        [
+            {
+                "Kode": "ukjentNyKode",
+                "ForslagKontoer": "5000",
+                "WithinTolerance": True,
+                "SuggestionGuardrail": "accepted",
+                "UsedRulebook": True,
+                "HitTokens": "lonn",
+            }
+        ]
+    )
+
+    out = page_a07.build_mapping_audit_df(
+        gl_df,
+        {"5000": "ukjentNyKode"},
+        suggestions_df=suggestions_df,
+        basis_col="Endring",
+    )
+
+    row = out.iloc[0]
+    assert row["CurrentRf1022GroupId"] == "uavklart_rf1022"
+    assert row["Status"] == "Uavklart"
+    assert "RF-1022-bro" in row["Reason"]
+
+
+def test_mapping_audit_treats_excluded_codes_case_insensitively() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5400", "Navn": "Arbeidsgiveravgift", "IB": 0.0, "Endring": 100.0, "UB": 100.0},
+        ]
+    )
+
+    out = page_a07.build_mapping_audit_df(gl_df, {"5400": "AGA"}, basis_col="Endring")
+
+    row = out.iloc[0]
+    assert row["Status"] == "Uavklart"
+    assert "ekskludert" in row["Reason"]
+
+
+def test_mapping_audit_rows_sort_and_filter_by_status_priority() -> None:
+    mapping_df = pd.DataFrame(
+        [
+            {"Konto": "5000", "Status": "Trygg"},
+            {"Konto": "6701", "Status": "Feil"},
+            {"Konto": "2940", "Status": "Uavklart"},
+            {"Konto": "5890", "Status": "Mistenkelig"},
+        ]
+    )
+
+    sorted_df = page_a07.sort_mapping_rows_by_audit_status(mapping_df)
+    critical_df = page_a07.filter_mapping_rows_by_audit_status(mapping_df, "kritiske")
+
+    assert sorted_df["Konto"].tolist() == ["6701", "5890", "2940", "5000"]
+    assert critical_df["Konto"].tolist() == ["6701", "5890"]
+
+
+def test_build_mapping_review_df_prioritizes_cleanup_and_recommends_actions() -> None:
+    audit_df = pd.DataFrame(
+        [
+            {
+                "Konto": "5000",
+                "Navn": "Lonn ansatte",
+                "CurrentA07Code": "fastloenn",
+                "CurrentRf1022GroupId": "100_loenn_ol",
+                "ExpectedRf1022GroupId": "100_loenn_ol",
+                "AliasStatus": "",
+                "Kol": "UB",
+                "Belop": 1000.0,
+                "Status": "Trygg",
+                "Reason": "Konto og RF-1022-gruppe peker samme faglige vei.",
+                "Evidence": "katalog",
+            },
+            {
+                "Konto": "6701",
+                "Navn": "Honorar revisjon",
+                "CurrentA07Code": "annet",
+                "CurrentRf1022GroupId": "100_loenn_ol",
+                "ExpectedRf1022GroupId": "",
+                "AliasStatus": "Ekskludert",
+                "Kol": "UB",
+                "Belop": 72250.4,
+                "Status": "Feil",
+                "Reason": "Konto ser ut som drifts-/honorarkostnad utenfor A07-lonn.",
+                "Evidence": "manual",
+            },
+            {
+                "Konto": "5890",
+                "Navn": "Annen refusjon",
+                "CurrentA07Code": "sumAvgiftsgrunnlagRefusjon",
+                "CurrentRf1022GroupId": "100_refusjon",
+                "ExpectedRf1022GroupId": "100_refusjon",
+                "AliasStatus": "",
+                "Kol": "Endring",
+                "Belop": -58009.0,
+                "Status": "Mistenkelig",
+                "Reason": "Generisk refusjon mangler NAV/sykepenger-stotte.",
+                "Evidence": "belop",
+            },
+        ]
+    )
+
+    out = page_a07.build_mapping_review_df(audit_df)
+    summary = page_a07.build_mapping_review_summary(out)
+
+    assert out["Konto"].tolist() == ["6701", "5890", "5000"]
+    assert out.loc[out["Konto"] == "6701", "AnbefaltHandling"].iloc[0] == "Fjern mapping og ekskluder navn"
+    assert summary == {"total": 3, "kritiske": 2, "feil": 1, "mistenkelige": 1, "uavklarte": 0, "trygge": 1}
+    assert page_a07.next_mapping_review_problem_account(out, "6701") == "5890"
+    assert page_a07.next_mapping_review_problem_account(out, "5890") == "6701"
+
+
+def test_mapping_audit_downgrades_excluded_alias_from_safe_to_suspicious(monkeypatch) -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Lonn ansatte", "IB": 0.0, "Endring": 1000.0, "UB": 1000.0},
+        ]
+    )
+    monkeypatch.setattr(a07_control_data, "load_rulebook", lambda _path: {})
+    monkeypatch.setattr(a07_control_data, "evaluate_a07_rule_name_status", lambda _code, _name, _rulebook=None: "Ekskludert")
+
+    out = page_a07.build_mapping_audit_df(
+        gl_df,
+        {"5000": "fastloenn"},
+        suggestions_df=pd.DataFrame(
+            [
+                {
+                    "Kode": "fastloenn",
+                    "ForslagKontoer": "5000",
+                    "SuggestionGuardrail": "accepted",
+                    "UsedRulebook": True,
+                }
+            ]
+        ),
+        basis_col="Endring",
+    )
+
+    row = out.iloc[0]
+    assert row["AliasStatus"] == "Ekskludert"
+    assert row["Status"] == "Mistenkelig"
+    assert "ekskludert" in row["Reason"]
+
+
+def test_build_global_auto_mapping_plan_applies_only_strict_and_audit_safe_candidates() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5800", "Navn": "Refusjon av sykepenger", "Endring": -465809.0, "UB": -465809.0},
+            {"Konto": "5890", "Navn": "Annen refusjon", "Endring": -58009.0, "UB": -58009.0},
+            {"Konto": "6701", "Navn": "Honorar revisjon", "Endring": 72250.4, "UB": 72250.4},
+            {"Konto": "5000", "Navn": "Lonn ansatte", "Endring": 1000.0, "UB": 1000.0},
+            {"Konto": "5010", "Navn": "Bonus", "Endring": 250.0, "UB": 250.0},
+        ]
+    )
+    candidates = pd.DataFrame(
+        [
+            {
+                "Konto": "5800",
+                "Navn": "Refusjon av sykepenger",
+                "Kode": "sumAvgiftsgrunnlagRefusjon",
+                "Rf1022GroupId": "100_refusjon",
+                "BelopAktiv": -465809.0,
+                "Matchgrunnlag": "Regelbok",
+                "Belopsgrunnlag": "Eksakt belop",
+                "Forslagsstatus": "Trygt forslag",
+            },
+            {
+                "Konto": "5890",
+                "Navn": "Annen refusjon",
+                "Kode": "sumAvgiftsgrunnlagRefusjon",
+                "Rf1022GroupId": "100_refusjon",
+                "BelopAktiv": -58009.0,
+                "Matchgrunnlag": "Regelbok",
+                "Belopsgrunnlag": "Eksakt belop",
+                "Forslagsstatus": "Trygt forslag",
+            },
+            {
+                "Konto": "6701",
+                "Navn": "Honorar revisjon",
+                "Kode": "annet",
+                "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 72250.4,
+                "Matchgrunnlag": "Regelbok",
+                "Belopsgrunnlag": "Eksakt belop",
+                "Forslagsstatus": "Trygt forslag",
+            },
+            {
+                "Konto": "5000",
+                "Navn": "Lonn ansatte",
+                "Kode": "fastloenn",
+                "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 1000.0,
+                "Matchgrunnlag": "Regelbok",
+                "Belopsgrunnlag": "Eksakt belop",
+                "Forslagsstatus": "Trygt forslag",
+            },
+            {
+                "Konto": "5010",
+                "Navn": "Bonus",
+                "Kode": "bonus",
+                "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 250.0,
+                "Matchgrunnlag": "Regelbok",
+                "Belopsgrunnlag": "Eksakt belop",
+                "Forslagsstatus": "Trygt forslag",
+            },
+        ]
+    )
+
+    plan = page_a07.build_global_auto_mapping_plan(
+        candidates,
+        gl_df,
+        pd.DataFrame(),
+        {"5000": "fastloenn"},
+        locked_codes={"bonus"},
+        basis_col="Endring",
+    )
+
+    by_account = plan.set_index("Konto")
+    assert by_account.loc["5800", "Action"] == "apply"
+    assert by_account.loc["5800", "Status"] == "Trygg"
+    assert by_account.loc["5890", "Action"] == "review"
+    assert by_account.loc["5890", "Status"] == "Mistenkelig"
+    assert by_account.loc["6701", "Action"] == "blocked"
+    assert by_account.loc["6701", "Status"] == "Feil"
+    assert by_account.loc["5000", "Action"] == "already"
+    assert by_account.loc["5010", "Action"] == "locked"
+
+
+def test_build_global_auto_mapping_plan_blocks_stale_and_thin_candidates() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Lonn ansatte", "Endring": 1000.0, "UB": 1000.0},
+        ]
+    )
+    candidates = pd.DataFrame(
+        [
+            {
+                "Konto": "5000",
+                "Navn": "Lonn ansatte",
+                "Kode": "fastloenn",
+                "Rf1022GroupId": "100_loenn_ol",
+                "Forslagsstatus": "Trygt forslag",
+            },
+            {
+                "Konto": "5999",
+                "Navn": "Stale konto",
+                "Kode": "fastloenn",
+                "Rf1022GroupId": "100_loenn_ol",
+                "Matchgrunnlag": "Regelbok",
+                "Belopsgrunnlag": "Eksakt belop",
+                "Forslagsstatus": "Trygt forslag",
+            },
+        ]
+    )
+
+    plan = page_a07.build_global_auto_mapping_plan(
+        candidates,
+        gl_df,
+        pd.DataFrame(),
+        {},
+        basis_col="Endring",
+    )
+
+    by_account = plan.set_index("Konto")
+    assert by_account.loc["5000", "Action"] == "review"
+    assert "ikke godkjent" in by_account.loc["5000", "Reason"]
+    assert by_account.loc["5999", "Action"] == "invalid"
+    assert "aktiv GL" in by_account.loc["5999", "Reason"]
+
+
+def test_build_control_queue_df_uses_mapping_audit_for_suspicious_saved_mapping() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "6701", "Navn": "Honorar revisjon", "IB": 0.0, "Endring": 72250.4, "UB": 72250.4},
+        ]
+    )
+    mapping = {"6701": "annet"}
+    audit_df = page_a07.build_mapping_audit_df(gl_df, mapping)
+    overview_df = pd.DataFrame(
+        [
+            {"Kode": "annet", "Navn": "Annet", "Belop": 72250.4, "GL_Belop": 72250.4, "Diff": 0.0},
+        ]
+    )
+
+    out = page_a07.build_control_queue_df(
+        overview_df,
+        page_a07._empty_suggestions_df(),
+        mapping_current=mapping,
+        mapping_previous={},
+        gl_df=gl_df,
+        mapping_audit_df=audit_df,
+    )
+
+    assert out.loc[0, "GuidetStatus"] == "Mistenkelig kobling"
+    assert bool(out.loc[0, "CurrentMappingSuspicious"]) is True
+    assert "6701:" in out.loc[0, "CurrentMappingSuspiciousReason"]
 
 
 def test_build_rf1022_accounts_df_shapes_workbook_like_rows_for_payroll_accounts() -> None:
@@ -1179,8 +1596,82 @@ def test_build_control_selected_account_df_filters_accounts_for_selected_code() 
     )
 
     assert out["Konto"].tolist() == ["5000", "5001"]
-    assert out.columns.tolist() == ["Konto", "Navn", "IB", "Endring", "UB"]
+    assert out.columns.tolist() == [
+        "Konto",
+        "Navn",
+        "AliasStatus",
+        "MappingAuditStatus",
+        "MappingAuditReason",
+        "IB",
+        "Endring",
+        "UB",
+    ]
     assert out["Endring"].tolist() == [1200.0, 300.0]
+
+
+def test_build_control_gl_df_shows_alias_status_from_effective_rulebook(monkeypatch) -> None:
+    monkeypatch.setattr(
+        a07_control_data,
+        "load_rulebook",
+        lambda _path: {
+            "fastloenn": RulebookRule(keywords=("Lonn",)),
+            "annet": RulebookRule(exclude_keywords=("Honorar revisjon",)),
+        },
+    )
+    gl_df = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Lonn til ansatte", "IB": 0.0, "Endring": 10.0, "UB": 10.0},
+            {"Konto": "6701", "Navn": "Honorar revisjon", "IB": 0.0, "Endring": 20.0, "UB": 20.0},
+        ]
+    )
+
+    out = page_a07.build_control_gl_df(gl_df, {"5000": "fastloenn", "6701": "annet"})
+
+    assert out.loc[out["Konto"] == "5000", "AliasStatus"].iloc[0] == "Inkludert"
+    assert out.loc[out["Konto"] == "6701", "AliasStatus"].iloc[0] == "Ekskludert"
+
+
+def test_a07_rule_learning_writes_keywords_and_excludes_to_rulebook(monkeypatch, tmp_path) -> None:
+    rulebook_path = tmp_path / "global_full_a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "fastloenn": {
+                        "keywords": ["Honorar revisjon"],
+                        "exclude_keywords": [],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(a07_rule_learning.classification_config, "resolve_rulebook_path", lambda: rulebook_path)
+    monkeypatch.setattr(a07_rule_learning.classification_config, "repo_rulebook_path", lambda: rulebook_path)
+    monkeypatch.setattr(a07_rule_learning.app_paths, "data_dir", lambda: tmp_path / "data")
+
+    result = a07_rule_learning.append_a07_rule_keyword("fastloenn", "Honorar revisjon", exclude=True)
+
+    saved = json.loads(rulebook_path.read_text(encoding="utf-8"))
+    assert result.field == "exclude_keywords"
+    assert saved["rules"]["fastloenn"]["label"] == "fastloenn"
+    assert saved["rules"]["fastloenn"]["exclude_keywords"] == ["Honorar revisjon"]
+    assert "keywords" not in saved["rules"]["fastloenn"]
+    assert (tmp_path / "data" / "a07" / "global_full_a07_rulebook.json").is_file()
+
+
+def test_a07_rule_learning_creates_visible_rule_for_missing_code(monkeypatch, tmp_path) -> None:
+    rulebook_path = tmp_path / "global_full_a07_rulebook.json"
+    rulebook_path.write_text(json.dumps({"rules": {}}), encoding="utf-8")
+    monkeypatch.setattr(a07_rule_learning.classification_config, "resolve_rulebook_path", lambda: rulebook_path)
+    monkeypatch.setattr(a07_rule_learning.classification_config, "repo_rulebook_path", lambda: rulebook_path)
+    monkeypatch.setattr(a07_rule_learning.app_paths, "data_dir", lambda: tmp_path / "data")
+
+    a07_rule_learning.append_a07_rule_keyword("timeloenn", "Honorar juridisk", exclude=True)
+
+    saved = json.loads(rulebook_path.read_text(encoding="utf-8"))
+    assert saved["rules"]["timeloenn"]["label"] == "timeloenn"
+    assert saved["rules"]["timeloenn"]["exclude_keywords"] == ["Honorar juridisk"]
 
 
 def test_build_control_selected_account_df_uses_requested_basis_as_active_amount() -> None:
@@ -1231,12 +1722,56 @@ def test_filter_suggestions_for_rf1022_group_scopes_candidates() -> None:
     assert out["Kode"].tolist() == ["elektroniskKommunikasjon"]
 
 
+def test_preferred_rf1022_overview_group_prioritizes_unknown_then_largest_diff() -> None:
+    overview = pd.DataFrame(
+        [
+            {"GroupId": "100_loenn_ol", "A07": 100.0, "Diff": 500.0},
+            {"GroupId": "uavklart_rf1022", "A07": 25.0, "Diff": 25.0},
+            {"GroupId": "112_pensjon", "A07": 0.0, "Diff": 1000.0},
+        ]
+    )
+
+    assert a07_control_data.preferred_rf1022_overview_group(overview, ["100_loenn_ol", "uavklart_rf1022"]) == "uavklart_rf1022"
+    no_unknown_amount = overview.copy()
+    no_unknown_amount.loc[no_unknown_amount["GroupId"] == "uavklart_rf1022", ["A07", "Diff"]] = 0.0
+
+    assert (
+        a07_control_data.preferred_rf1022_overview_group(
+            no_unknown_amount,
+            ["100_loenn_ol", "uavklart_rf1022", "112_pensjon"],
+        )
+        == "112_pensjon"
+    )
+
+
+def test_selected_rf1022_group_does_not_leak_stored_group_in_a07_mode() -> None:
+    dummy = SimpleNamespace(
+        _selected_control_work_level=lambda: "a07",
+        _selected_rf1022_group_id="100_loenn_ol",
+        workspace=SimpleNamespace(selected_code="fastloenn"),
+        control_df=pd.DataFrame([{"Kode": "fastloenn", "Rf1022GroupId": "100_loenn_ol"}]),
+    )
+
+    assert page_a07.A07Page._selected_rf1022_group(dummy) is None
+
+
 def test_control_main_columns_hide_status_and_left_gl_keeps_regnskap_columns() -> None:
     left_columns = [column_id for column_id, *_rest in a07_constants._CONTROL_GL_COLUMNS]
     a07_columns = [column_id for column_id, *_rest in a07_constants._CONTROL_COLUMNS]
     rf1022_columns = [column_id for column_id, *_rest in a07_constants._CONTROL_RF1022_COLUMNS]
 
-    assert left_columns == ["Konto", "Navn", "Rf1022GroupId", "Kode", "Kol", "IB", "Endring", "UB"]
+    assert left_columns == [
+        "Konto",
+        "Navn",
+        "Rf1022GroupId",
+        "Kode",
+        "AliasStatus",
+        "Kol",
+        "MappingAuditStatus",
+        "IB",
+        "Endring",
+        "UB",
+    ]
     assert "Status" not in a07_columns
     assert "Status" not in rf1022_columns
 
@@ -1400,17 +1935,20 @@ def test_filter_control_queue_df_and_bucket_summary_group_rows_for_human_workflo
         [
             {"Kode": "bonus", "Arbeidsstatus": "Ferdig"},
             {"Kode": "telefon", "Arbeidsstatus": "Forslag"},
+            {"Kode": "refusjon", "GuidetStatus": "Mistenkelig kobling"},
             {"Kode": "pensjon", "Arbeidsstatus": "Manuell"},
         ]
     )
 
     next_rows = page_a07.filter_control_queue_df(control_df, "neste")
+    suspicious_rows = page_a07.filter_control_queue_df(control_df, "mistenkelig")
     manual_rows = page_a07.filter_control_queue_df(control_df, "manuell")
     summary = page_a07.build_control_bucket_summary(control_df)
 
-    assert next_rows["Kode"].tolist() == ["telefon", "pensjon"]
+    assert next_rows["Kode"].tolist() == ["telefon", "refusjon", "pensjon"]
+    assert suspicious_rows["Kode"].tolist() == ["refusjon"]
     assert manual_rows["Kode"].tolist() == ["pensjon"]
-    assert summary == "2 åpne"
+    assert summary == "3 åpne"
 
 
 def test_build_control_queue_df_sorts_by_work_priority_then_amount() -> None:
@@ -1496,7 +2034,7 @@ def test_control_queue_tree_tag_uses_diff_first_for_green_and_red() -> None:
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": 0.0, "Arbeidsstatus": "Ulost"})) == "control_done"
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": 10.0, "Arbeidsstatus": "Historikk"})) == "control_review"
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": None, "Arbeidsstatus": "Forslag"})) == "control_review"
-    assert page_a07.control_queue_tree_tag(pd.Series({"Diff": None, "GuidetStatus": "Kontroller kobling"})) == "control_manual"
+    assert page_a07.control_queue_tree_tag(pd.Series({"Diff": None, "GuidetStatus": "Kontroller kobling"})) == "control_review"
 
 
 def test_filter_control_visible_codes_df_hides_non_matching_codes_for_this_view() -> None:
@@ -1858,6 +2396,61 @@ def test_apply_selected_suggestion_uses_selected_rf1022_candidate() -> None:
     assert calls == ["candidate"]
 
 
+def test_apply_selected_rf1022_candidate_requires_auto_plan_apply() -> None:
+    statuses: list[str] = []
+    assigned: list[tuple[list[str], str]] = []
+
+    class _Tree:
+        def selection(self):
+            return ("5000",)
+
+    class DummyPage:
+        tree_control_suggestions = _Tree()
+        rf1022_candidate_df = pd.DataFrame(
+            [
+                {
+                    "Konto": "5000",
+                    "Navn": "Lonn ansatte",
+                    "Kode": "fastloenn",
+                    "Rf1022GroupId": "100_loenn_ol",
+                    "Matchgrunnlag": "Regelbok/alias",
+                    "Belopsgrunnlag": "",
+                    "Forslagsstatus": "Maa vurderes",
+                }
+            ]
+        )
+
+        def _current_rf1022_candidate_df(self):
+            return self.rf1022_candidate_df
+
+        def _selected_rf1022_candidate_row(self):
+            return page_a07.A07Page._selected_rf1022_candidate_row(self)
+
+        def _build_global_auto_mapping_plan(self, _candidates):
+            return pd.DataFrame(
+                [
+                    {
+                        "Konto": "5000",
+                        "Kode": "fastloenn",
+                        "Action": "review",
+                        "Status": "Maa vurderes",
+                        "Reason": "Mangler belopsstotte.",
+                    }
+                ]
+            )
+
+        def _assign_accounts_to_a07_code(self, accounts, code, **_kwargs):
+            assigned.append((list(accounts), code))
+
+        def _notify_inline(self, message, **_kwargs):
+            statuses.append(message)
+
+    page_a07.A07Page._apply_selected_rf1022_candidate(DummyPage())
+
+    assert assigned == []
+    assert statuses == ["Kandidaten kan ikke brukes automatisk (Maa vurderes): Mangler belopsstotte."]
+
+
 def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> None:
     calls: list[tuple[str, object]] = []
     statuses: list[str] = []
@@ -1865,20 +2458,32 @@ def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> 
         [
             {
                 "Konto": "2940",
+                "Navn": "Skyldig feriepenger",
                 "Kode": "feriepenger",
                 "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": -100.0,
+                "Matchgrunnlag": "special_add",
+                "Belopsgrunnlag": "Tilleggsregel",
                 "Forslagsstatus": "Trygt forslag",
             },
             {
                 "Konto": "5000",
+                "Navn": "Lonn ansatte",
                 "Kode": "fastloenn",
                 "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 1000.0,
+                "Matchgrunnlag": "Regelbok/alias",
+                "Belopsgrunnlag": "Eksakt belop",
                 "Forslagsstatus": "Trygt forslag",
             },
             {
                 "Konto": "5001",
+                "Navn": "Lonn ansatte",
                 "Kode": "fastloenn",
                 "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 1000.0,
+                "Matchgrunnlag": "Regelbok/alias",
+                "Belopsgrunnlag": "",
                 "Forslagsstatus": "Maa vurderes",
             },
         ]
@@ -1887,6 +2492,13 @@ def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> 
     class DummyPage:
         tree_control_suggestions = object()
         workspace = SimpleNamespace(mapping={}, locks=set(), membership={})
+        control_gl_df = pd.DataFrame(
+            [
+                {"Konto": "2940", "Navn": "Skyldig feriepenger", "Endring": -100.0, "UB": -500.0, "BelopAktiv": -100.0},
+                {"Konto": "5000", "Navn": "Lonn ansatte", "Endring": 1000.0, "UB": 1000.0, "BelopAktiv": 1000.0},
+                {"Konto": "5001", "Navn": "Lonn ansatte", "Endring": 1000.0, "UB": 1000.0, "BelopAktiv": 1000.0},
+            ]
+        )
         rf1022_candidate_df = candidate_df
         rf1022_all_candidate_df = candidate_df
 
@@ -1903,7 +2515,7 @@ def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> 
             return page_a07.A07Page._current_rf1022_candidate_df(self)
 
         def _all_rf1022_candidate_df(self):
-            return page_a07.A07Page._all_rf1022_candidate_df(self)
+            return self.rf1022_all_candidate_df.copy()
 
         def _effective_mapping(self):
             return {}
@@ -1937,7 +2549,7 @@ def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> 
         ("code", "feriepenger"),
         ("tab", "primary"),
     ]
-    assert statuses == ["Automatisk RF-1022-matching: brukte 2 sikre forslag (1 post(er), 1 maa vurderes)."]
+    assert statuses == ["Trygg auto-matching: brukte 2 sikre forslag (1 post(er), 1 maa vurderes)."]
 
 
 def test_apply_rf1022_candidate_suggestions_uses_all_groups_not_only_visible_group() -> None:
@@ -1947,8 +2559,12 @@ def test_apply_rf1022_candidate_suggestions_uses_all_groups_not_only_visible_gro
         [
             {
                 "Konto": "5000",
+                "Navn": "Lonn ansatte",
                 "Kode": "fastloenn",
                 "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 1000.0,
+                "Matchgrunnlag": "Regelbok/alias",
+                "Belopsgrunnlag": "Eksakt belop",
                 "Forslagsstatus": "Trygt forslag",
             }
         ]
@@ -1957,14 +2573,22 @@ def test_apply_rf1022_candidate_suggestions_uses_all_groups_not_only_visible_gro
         [
             {
                 "Konto": "5000",
+                "Navn": "Lonn ansatte",
                 "Kode": "fastloenn",
                 "Rf1022GroupId": "100_loenn_ol",
+                "BelopAktiv": 1000.0,
+                "Matchgrunnlag": "Regelbok/alias",
+                "Belopsgrunnlag": "Eksakt belop",
                 "Forslagsstatus": "Trygt forslag",
             },
             {
                 "Konto": "5940",
+                "Navn": "Pensjon",
                 "Kode": "tilskuddOgPremieTilPensjon",
                 "Rf1022GroupId": "112_pensjon",
+                "BelopAktiv": 200.0,
+                "Matchgrunnlag": "Regelbok/alias",
+                "Belopsgrunnlag": "Eksakt belop",
                 "Forslagsstatus": "Trygt forslag",
             },
         ]
@@ -1973,6 +2597,12 @@ def test_apply_rf1022_candidate_suggestions_uses_all_groups_not_only_visible_gro
     class DummyPage:
         tree_control_suggestions = object()
         workspace = SimpleNamespace(mapping={}, locks=set(), membership={})
+        control_gl_df = pd.DataFrame(
+            [
+                {"Konto": "5000", "Navn": "Lonn ansatte", "Endring": 1000.0, "UB": 1000.0, "BelopAktiv": 1000.0},
+                {"Konto": "5940", "Navn": "Pensjon", "Endring": 200.0, "UB": 200.0, "BelopAktiv": 200.0},
+            ]
+        )
         rf1022_candidate_df = visible_df
         rf1022_all_candidate_df = all_df
 
@@ -1980,7 +2610,7 @@ def test_apply_rf1022_candidate_suggestions_uses_all_groups_not_only_visible_gro
             self.status_var = SimpleNamespace(set=lambda value: statuses.append(value))
 
         def _all_rf1022_candidate_df(self):
-            return page_a07.A07Page._all_rf1022_candidate_df(self)
+            return self.rf1022_all_candidate_df.copy()
 
         def _effective_mapping(self):
             return {}
@@ -2009,7 +2639,7 @@ def test_apply_rf1022_candidate_suggestions_uses_all_groups_not_only_visible_gro
 
     assert page.workspace.mapping == {"5000": "fastloenn", "5940": "tilskuddOgPremieTilPensjon"}
     assert calls[0] == ("refresh", "fastloenn")
-    assert statuses == ["Automatisk RF-1022-matching: brukte 2 sikre forslag (2 post(er))."]
+    assert statuses == ["Trygg auto-matching: brukte 2 sikre forslag (2 post(er))."]
 
 
 def test_apply_rf1022_candidate_suggestions_rebuilds_fresh_candidates() -> None:
@@ -2160,6 +2790,25 @@ def test_clear_selected_control_mapping_checks_lock_before_mutating() -> None:
     assert autosaves == []
 
 
+def test_remove_selected_mapping_uses_checked_remove_service() -> None:
+    calls: list[tuple[tuple[str, ...], str, str]] = []
+
+    class _Tree:
+        def selection(self):
+            return ("6701", "5890")
+
+    dummy = SimpleNamespace(
+        tree_mapping=_Tree(),
+        _remove_mapping_accounts_checked=lambda accounts, **kwargs: calls.append(
+            (tuple(accounts), kwargs.get("refresh"), kwargs.get("source_label"))
+        ),
+    )
+
+    page_a07.A07Page._remove_selected_mapping(dummy)
+
+    assert calls == [(("6701", "5890"), "core", "Fjernet mapping fra")]
+
+
 def test_focus_linked_code_for_selected_gl_account_uses_effective_mapping() -> None:
     calls: list[str] = []
     statuses: list[str] = []
@@ -2206,6 +2855,18 @@ def test_resolve_rf1022_target_code_uses_naturalytelse_name_hints() -> None:
 
     assert phone_code == "elektroniskKommunikasjon"
     assert insurance_code == "skattepliktigDelForsikringer"
+
+
+def test_resolve_rf1022_target_code_does_not_default_broad_payroll_to_annet() -> None:
+    dummy = SimpleNamespace(
+        workspace=SimpleNamespace(mapping={}, suggestions=pd.DataFrame(), selected_code=None, gl_df=pd.DataFrame()),
+        control_gl_df=pd.DataFrame([{"Konto": "6701", "Navn": "Honorar revisjon"}]),
+        _effective_mapping=lambda: {},
+    )
+
+    out = page_a07.A07Page._resolve_rf1022_target_code(dummy, "100_loenn_ol", ["6701"])
+
+    assert out is None
 
 
 def test_drop_unmapped_on_control_assigns_to_rf1022_group_in_rf_mode() -> None:
@@ -2278,6 +2939,9 @@ def test_show_control_gl_context_menu_offers_rf1022_group_submenu(monkeypatch) -
         _focus_linked_code_for_selected_gl_account=lambda: None,
         _set_control_gl_scope=lambda _scope: None,
         _run_selected_control_action=lambda: None,
+        _apply_rf1022_candidate_suggestions=lambda: None,
+        _all_rf1022_candidate_df=lambda: pd.DataFrame([{"Konto": "5800", "Forslagsstatus": "Trygt forslag"}]),
+        _rf1022_candidate_action_counts=lambda _candidates: {"actionable": 1},
         _apply_best_suggestion_for_selected_code=lambda: None,
         _apply_history_for_selected_code=lambda: None,
         _open_manual_mapping_clicked=lambda: None,
@@ -2295,6 +2959,10 @@ def test_show_control_gl_context_menu_offers_rf1022_group_submenu(monkeypatch) -
         for kind, label, _payload in menu.items
         if kind == "command"
     )
+    assert "Vis RF-1022-kandidater" in labels
+    assert "Kjør trygg auto-matching" in labels
+    assert "Bruk beste forslag" not in labels
+    assert "Bruk historikk" not in labels
     rf_menu = next(payload for kind, label, payload in menu.items if kind == "cascade" and label == "Velg RF-1022-post")
     assert [label for kind, label, _payload in rf_menu.items if kind == "command"] == [
         "Post 100 Lonn o.l.",
@@ -2308,6 +2976,54 @@ def test_show_control_gl_context_menu_offers_rf1022_group_submenu(monkeypatch) -
     ]
 
 
+def test_show_control_code_context_menu_uses_rf1022_actions_in_rf_mode(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu=None, state=None) -> None:
+            self.items.append(("cascade", label, menu))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+
+    dummy = SimpleNamespace(
+        tree_a07=object(),
+        _prepare_tree_context_selection=lambda *args, **kwargs: "100_refusjon",
+        _on_control_selection_changed=lambda: None,
+        _selected_control_code=lambda: "sumAvgiftsgrunnlagRefusjon",
+        _groupable_selected_control_codes=lambda: [],
+        _selected_control_gl_accounts=lambda: ["5800"],
+        _effective_mapping=lambda: {"5800": "sumAvgiftsgrunnlagRefusjon"},
+        _locked_codes=lambda: set(),
+        _selected_control_work_level=lambda: "rf1022",
+        _selected_rf1022_group=lambda: "100_refusjon",
+        _assign_selected_control_mapping=lambda: None,
+        _clear_selected_control_mapping=lambda: None,
+        _run_selected_control_action=lambda: None,
+        _apply_rf1022_candidate_suggestions=lambda: None,
+        _all_rf1022_candidate_df=lambda: pd.DataFrame([{"Konto": "5800", "Forslagsstatus": "Trygt forslag"}]),
+        _rf1022_candidate_action_counts=lambda _candidates: {"actionable": 1},
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_code_context_menu(dummy, SimpleNamespace())
+
+    labels = [label for kind, label, _payload in menu.items if kind == "command"]
+    assert any(label.startswith("Tildel valgte kontoer til Post 100 Refusjon") for label in labels)
+    assert "Fjern mapping fra valgte kontoer (<-)" in labels
+    assert "Vis RF-1022-kandidater" in labels
+    assert "Kjør trygg auto-matching" in labels
+    assert "Smartmapping for valgt kode" not in labels
+    assert "Bruk beste forslag" not in labels
+    assert "Bruk historikk" not in labels
+
+
 def test_control_account_context_menu_keeps_hidden_button_actions_available(monkeypatch) -> None:
     class _Menu:
         def __init__(self, *_args, **_kwargs) -> None:
@@ -2315,6 +3031,9 @@ def test_control_account_context_menu_keeps_hidden_button_actions_available(monk
 
         def add_command(self, *, label, command=None, state=None) -> None:
             self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu=None, state=None) -> None:
+            self.items.append(("cascade", label, menu))
 
         def add_separator(self) -> None:
             self.items.append(("separator", "", None))
@@ -2326,6 +3045,9 @@ def test_control_account_context_menu_keeps_hidden_button_actions_available(monk
         _selected_control_account_ids=lambda: ["5000"],
         _focus_selected_control_account_in_gl=lambda: None,
         _remove_selected_control_accounts=lambda: None,
+        _append_selected_control_account_names_to_a07_alias=lambda: None,
+        _exclude_selected_control_account_names_from_a07_code=lambda: None,
+        _remove_selected_control_accounts_and_exclude_alias=lambda: None,
         _open_manual_mapping_clicked=lambda: None,
         _post_context_menu=lambda menu, _event: menu,
     )
@@ -2334,9 +3056,313 @@ def test_control_account_context_menu_keeps_hidden_button_actions_available(monk
 
     assert [label for kind, label, _payload in menu.items if kind == "command"] == [
         "Vis i GL",
-        "Fjern valgt",
+        "Fjern mapping",
         "Avansert mapping...",
     ]
+    cascades = [(label, payload) for kind, label, payload in menu.items if kind == "cascade"]
+    assert [label for label, _payload in cascades] == ["Laer av kontonavn"]
+    learn_menu = cascades[0][1]
+    assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
+        "Legg navn til A07-kode som A07-alias",
+        "Ekskluder navn fra A07-kode",
+        "Fjern mapping og ekskluder navn fra A07-kode",
+    ]
+    assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
+        "disabled",
+        "disabled",
+        "disabled",
+    ]
+
+
+def test_control_account_context_menu_labels_learning_actions_with_a07_code(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu=None, state=None) -> None:
+            self.items.append(("cascade", label, menu))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+    dummy = SimpleNamespace(
+        tree_control_accounts=object(),
+        _prepare_tree_context_selection=lambda *args, **kwargs: "6701",
+        _selected_control_account_ids=lambda: ["6701"],
+        _selected_control_account_learning_context=lambda: {
+            "enabled": True,
+            "code_label": "annet",
+            "accounts": ["6701"],
+        },
+        _focus_selected_control_account_in_gl=lambda: None,
+        _remove_selected_control_accounts=lambda: None,
+        _append_selected_control_account_names_to_a07_alias=lambda: None,
+        _exclude_selected_control_account_names_from_a07_code=lambda: None,
+        _remove_selected_control_accounts_and_exclude_alias=lambda: None,
+        _open_manual_mapping_clicked=lambda: None,
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_accounts_context_menu(dummy, SimpleNamespace())
+
+    learn_menu = [payload for kind, label, payload in menu.items if kind == "cascade" and label == "Laer av kontonavn"][0]
+    assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
+        "Legg navn til annet som A07-alias",
+        "Ekskluder navn fra annet",
+        "Fjern mapping og ekskluder navn fra annet",
+    ]
+    assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
+        "normal",
+        "normal",
+        "normal",
+    ]
+
+
+def test_control_account_context_menu_labels_multi_select_learning_actions(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu=None, state=None) -> None:
+            self.items.append(("cascade", label, menu))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+    dummy = SimpleNamespace(
+        tree_control_accounts=object(),
+        _prepare_tree_context_selection=lambda *args, **kwargs: "6701",
+        _selected_control_account_ids=lambda: ["6701", "7040"],
+        _selected_control_account_learning_context=lambda: {
+            "enabled": True,
+            "code_label": "valgte A07-koder",
+            "accounts": ["6701", "7040"],
+        },
+        _focus_selected_control_account_in_gl=lambda: None,
+        _remove_selected_control_accounts=lambda: None,
+        _append_selected_control_account_names_to_a07_alias=lambda: None,
+        _exclude_selected_control_account_names_from_a07_code=lambda: None,
+        _remove_selected_control_accounts_and_exclude_alias=lambda: None,
+        _open_manual_mapping_clicked=lambda: None,
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_accounts_context_menu(dummy, SimpleNamespace())
+
+    assert [label for kind, label, _payload in menu.items if kind == "command"] == [
+        "Vis første i GL",
+        "Fjern mapping fra 2 valgte",
+        "Avansert mapping...",
+    ]
+    cascades = [(label, payload) for kind, label, payload in menu.items if kind == "cascade"]
+    assert [label for label, _payload in cascades] == ["Laer av valgte kontonavn"]
+    learn_menu = cascades[0][1]
+    assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
+        "Legg valgte navn til valgte A07-koder som A07-alias",
+        "Ekskluder valgte navn fra valgte A07-koder",
+        "Fjern mapping og ekskluder valgte navn fra valgte A07-koder",
+    ]
+    assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
+        "normal",
+        "normal",
+        "normal",
+    ]
+
+
+def test_mapping_filter_defaults_to_critical_when_problems_exist() -> None:
+    class _Var:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    dummy = SimpleNamespace(
+        _mapping_filter_user_selected=False,
+        mapping_filter_widget=None,
+        mapping_filter_var=_Var("alle"),
+        mapping_filter_label_var=_Var("Alle"),
+    )
+    dummy._selected_mapping_filter_key = lambda: page_a07.A07Page._selected_mapping_filter_key(dummy)
+    dummy._set_mapping_filter_key = lambda key: page_a07.A07Page._set_mapping_filter_key(dummy, key)
+    accounts_df = pd.DataFrame(
+        [
+            {"Konto": "6701", "MappingAuditStatus": "Feil"},
+            {"Konto": "5000", "MappingAuditStatus": "Trygg"},
+        ]
+    )
+
+    page_a07.A07Page._maybe_default_mapping_filter_to_critical(dummy, accounts_df)
+
+    assert dummy.mapping_filter_var.get() == "kritiske"
+    assert dummy.mapping_filter_label_var.get() == "Kritiske"
+
+
+def test_focus_next_control_account_problem_cycles_visible_critical_rows() -> None:
+    class _Tree:
+        def __init__(self):
+            self.selection_value = ("6701",)
+            self.selected = None
+            self.focused = False
+
+        def selection(self):
+            return self.selection_value
+
+        def get_children(self):
+            return ("6701", "5890", "5000")
+
+        def focus_set(self):
+            self.focused = True
+
+    class _Status:
+        def __init__(self):
+            self.value = ""
+
+        def set(self, value):
+            self.value = value
+
+    tree = _Tree()
+    status = _Status()
+    dummy = SimpleNamespace(
+        tree_control_accounts=tree,
+        status_var=status,
+        control_selected_accounts_df=pd.DataFrame(
+            [
+                {"Konto": "6701", "MappingAuditStatus": "Feil"},
+                {"Konto": "5890", "MappingAuditStatus": "Mistenkelig"},
+                {"Konto": "5000", "MappingAuditStatus": "Trygg"},
+            ]
+        ),
+        _set_tree_selection=lambda _tree, target: setattr(tree, "selected", target) or True,
+    )
+
+    page_a07.A07Page._focus_next_control_account_problem(dummy)
+
+    assert tree.selected == "5890"
+    assert tree.focused is True
+    assert status.value == "Neste problem: konto 5890."
+
+
+def test_remove_and_exclude_control_account_uses_rule_learning_and_checked_remove(monkeypatch) -> None:
+    learned: list[tuple[str, str, bool]] = []
+    removed_calls: list[tuple[list[str], str]] = []
+
+    class _Status:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+        def get(self) -> str:
+            return self.value
+
+    monkeypatch.setattr(
+        a07_mapping_actions,
+        "append_a07_rule_keywords",
+        lambda entries, exclude=False: (
+            (entry_list := list(entries)),
+            learned.extend((code, term, exclude) for code, term in entry_list),
+            SimpleNamespace(
+                results=tuple(SimpleNamespace(code=code, term=term, changed=True) for code, term in entry_list),
+                changed_count=len(entry_list),
+                path=Path("rules.json"),
+            ),
+        )[2],
+    )
+    monkeypatch.setattr(
+        a07_mapping_actions.payroll_classification,
+        "invalidate_runtime_caches",
+        lambda: None,
+    )
+    dummy = SimpleNamespace(
+        tree_control_accounts=object(),
+        status_var=_Status(),
+        _selected_control_account_ids=lambda: ["6701"],
+        _locked_mapping_conflicts=lambda accounts, target_code=None: [],
+        _notify_locked_conflicts=lambda conflicts, focus_widget=None: bool(conflicts),
+        _control_account_name_lookup=lambda accounts: {"6701": "Honorar revisjon"},
+        _mapped_a07_code_for_account=lambda account: "annet",
+        _remove_mapping_accounts_checked=lambda accounts, **kwargs: (
+            removed_calls.append((list(accounts), kwargs.get("refresh"))),
+            list(accounts),
+        )[1],
+        _refresh_all=lambda: None,
+        _notify_inline=lambda *_args, **_kwargs: None,
+    )
+
+    page_a07.A07Page._learn_selected_control_account_names(dummy, exclude=True, remove_mapping=True)
+
+    assert learned == [("annet", "Honorar revisjon", True)]
+    assert removed_calls == [(["6701"], "none")]
+    assert "mapping" in dummy.status_var.get()
+
+
+def test_learning_control_account_names_handles_multi_select_mixed_codes(monkeypatch) -> None:
+    learned: list[tuple[str, str, bool]] = []
+
+    class _Status:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+        def get(self) -> str:
+            return self.value
+
+    monkeypatch.setattr(
+        a07_mapping_actions,
+        "append_a07_rule_keywords",
+        lambda entries, exclude=False: (
+            (entry_list := list(entries)),
+            learned.extend((code, term, exclude) for code, term in entry_list),
+            SimpleNamespace(
+                results=tuple(SimpleNamespace(code=code, term=term, changed=True) for code, term in entry_list),
+                changed_count=len(entry_list),
+                path=Path("rules.json"),
+            ),
+        )[2],
+    )
+    monkeypatch.setattr(
+        a07_mapping_actions.payroll_classification,
+        "invalidate_runtime_caches",
+        lambda: None,
+    )
+    dummy = SimpleNamespace(
+        tree_control_accounts=object(),
+        status_var=_Status(),
+        _selected_control_account_ids=lambda: ["6701", "7040"],
+        _control_account_name_lookup=lambda accounts: {
+            "6701": "Honorar revisjon",
+            "7040": "Forsikring ansvar rettshjelp",
+        },
+        _mapped_a07_code_for_account=lambda account: {
+            "6701": "annet",
+            "7040": "overtidsgodtgjoerelse",
+        }.get(account, ""),
+        _refresh_all=lambda: None,
+        _notify_inline=lambda *_args, **_kwargs: None,
+    )
+
+    page_a07.A07Page._learn_selected_control_account_names(dummy, exclude=True, remove_mapping=False)
+
+    assert learned == [
+        ("annet", "Honorar revisjon", True),
+        ("overtidsgodtgjoerelse", "Forsikring ansvar rettshjelp", True),
+    ]
+    assert "2 kontonavn" in dummy.status_var.get()
 
 
 def test_control_statement_account_context_menu_keeps_focus_action_available(monkeypatch) -> None:
@@ -2422,6 +3448,16 @@ def test_bind_canonical_events_registers_right_click_context_menus() -> None:
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in dummy.tree_control_accounts.calls)
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in dummy.tree_control_statement_accounts.calls)
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in tree_groups.calls)
+
+
+def test_canonical_a07_account_lists_use_extended_multiselect() -> None:
+    source = (Path(__file__).resolve().parent.parent / "a07_feature" / "ui" / "canonical_layout.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'self.tree_control_gl.configure(selectmode="extended")' in source
+    assert 'self.tree_control_accounts.configure(height=6, selectmode="extended")' in source
+    assert "self._focus_selected_control_account_in_gl(allow_multi=False)" in source
 
 
 def test_canonical_control_statement_tab_omits_noisy_header_controls() -> None:
@@ -2967,6 +4003,21 @@ def test_focus_selected_control_account_in_gl_focuses_first_account() -> None:
     assert calls == ["5000"]
 
 
+def test_focus_selected_control_account_in_gl_skips_passive_multiselect() -> None:
+    calls: list[str] = []
+
+    class DummyPage:
+        def _selected_control_account_ids(self):
+            return ["5000", "5001"]
+
+        def _focus_mapping_account(self, konto):
+            calls.append(konto)
+
+    page_a07.A07Page._focus_selected_control_account_in_gl(DummyPage(), allow_multi=False)
+
+    assert calls == []
+
+
 def test_focus_control_code_defers_while_refresh_is_running() -> None:
     dummy = SimpleNamespace(
         _refresh_in_progress=True,
@@ -3203,7 +4254,7 @@ def test_select_batch_suggestion_rows_picks_only_safe_top_suggestions() -> None:
 
     out = page_a07.select_batch_suggestion_rows(suggestions_df, {"5100": "annet"}, min_score=0.85)
 
-    assert out == [0, 2]
+    assert out == [0]
 
 
 def test_select_magic_wand_suggestion_rows_uses_within_tolerance_without_score_gate() -> None:
@@ -3223,7 +4274,7 @@ def test_select_magic_wand_suggestion_rows_uses_within_tolerance_without_score_g
         unresolved_codes=["fastloenn", "telefon", "bonus", "pensjon"],
     )
 
-    assert out == [1, 2]
+    assert out == [1]
 
 
 def test_create_app_exposes_a07_page() -> None:
@@ -3366,7 +4417,7 @@ def test_refresh_support_views_skips_when_details_are_hidden() -> None:
     assert dummy._pending_support_refresh is False
 
 
-def test_refresh_support_views_skips_when_support_not_requested() -> None:
+def test_refresh_support_views_requests_support_when_details_are_visible() -> None:
     calls: list[str] = []
     dummy = SimpleNamespace(
         _control_details_visible=True,
@@ -3383,8 +4434,33 @@ def test_refresh_support_views_skips_when_support_not_requested() -> None:
 
     page_a07.A07Page._refresh_support_views(dummy)
 
-    assert calls == []
+    assert calls == ["start"]
+    assert dummy._support_requested is True
     assert dummy._pending_support_refresh is False
+
+
+def test_render_active_support_tab_uses_context_key_not_tab_only() -> None:
+    calls: list[str] = []
+    context = {"value": ("mapping", "rf1022", "100_refusjon", "", "alle", "")}
+    dummy = SimpleNamespace(
+        _control_details_visible=True,
+        _loaded_support_tabs={"mapping"},
+        _loaded_support_context_keys={"mapping": ("mapping", "rf1022", "100_loenn_ol", "", "alle", "")},
+        _active_support_tab_key=lambda: "mapping",
+        _support_tab_context_key=lambda tab_key=None: context["value"],
+        _refresh_groups_tree=lambda: calls.append("groups"),
+        _refresh_control_support_trees=lambda: calls.append("support"),
+    )
+
+    page_a07.A07Page._render_active_support_tab(dummy)
+
+    assert calls == ["groups", "support"]
+    assert dummy._loaded_support_context_keys["mapping"] == context["value"]
+
+    calls.clear()
+    page_a07.A07Page._render_active_support_tab(dummy)
+
+    assert calls == ["groups"]
 
 
 def test_selected_suggestion_row_prefers_control_support_notebook() -> None:
@@ -3443,7 +4519,7 @@ def test_on_control_selection_changed_skips_hidden_detail_refresh() -> None:
     assert calls == ["history", "panel", "buttons"]
 
 
-def test_schedule_control_selection_followup_skips_support_when_not_requested() -> None:
+def test_schedule_control_selection_followup_requests_support_when_details_are_visible() -> None:
     calls: list[str] = []
 
     class _Dummy:
@@ -3486,7 +4562,7 @@ def test_schedule_control_selection_followup_skips_support_when_not_requested() 
 
     page_a07.A07Page._schedule_control_selection_followup(_Dummy())
 
-    assert calls == ["buttons"]
+    assert calls == ["schedule_support", "buttons"]
 
 
 def test_on_control_gl_selection_changed_skips_code_sync_while_refresh_runs() -> None:
@@ -3693,6 +4769,46 @@ def test_on_suggestion_selected_prefers_retagging_gl_tree() -> None:
     assert calls == ["details", "history"]
 
 
+def test_on_rf1022_suggestion_selected_enables_candidate_button_only_for_apply_plan() -> None:
+    button_states: list[tuple[str, ...]] = []
+
+    class _Button:
+        def state(self, values):
+            button_states.append(tuple(values))
+
+    dummy = SimpleNamespace(
+        _suspend_selection_sync=False,
+        _is_tree_selection_suppressed=lambda _tree: False,
+        _selected_control_work_level=lambda: "rf1022",
+        tree_control_suggestions=object(),
+        btn_control_best=_Button(),
+        _selected_suggestion_row_from_tree=lambda _tree: pd.Series(
+            {
+                "Konto": "5000",
+                "Kode": "fastloenn",
+                "Forslagsstatus": "Maa vurderes",
+            }
+        ),
+        _build_global_auto_mapping_plan=lambda _df: pd.DataFrame(
+            [{"Konto": "5000", "Kode": "fastloenn", "Action": "review"}]
+        ),
+        suggestion_details_var=SimpleNamespace(set=lambda _value: None),
+        control_suggestion_effect_var=SimpleNamespace(set=lambda _value: None),
+    )
+
+    page_a07.A07Page._on_suggestion_selected(dummy)
+
+    assert button_states == [("disabled",)]
+    button_states.clear()
+    dummy._build_global_auto_mapping_plan = lambda _df: pd.DataFrame(
+        [{"Konto": "5000", "Kode": "fastloenn", "Action": "apply"}]
+    )
+
+    page_a07.A07Page._on_suggestion_selected(dummy)
+
+    assert button_states == [("!disabled",)]
+
+
 def test_on_suggestion_selected_does_not_require_missing_highlight_helper() -> None:
     calls: list[str] = []
     dummy = SimpleNamespace(
@@ -3717,6 +4833,88 @@ def test_on_suggestion_selected_does_not_require_missing_highlight_helper() -> N
     page_a07.A07Page._on_suggestion_selected(dummy)
 
     assert calls == ["details", "summary", "effect", "history"]
+
+
+def test_refresh_suggestions_tree_shows_unresolved_rf1022_codes_and_disables_auto() -> None:
+    filled: list[pd.DataFrame] = []
+    configured: list[tuple[str, ...]] = []
+    button_states: dict[str, list[tuple[str, ...]]] = {"best": [], "batch": []}
+    button_texts: dict[str, str] = {}
+
+    class _Var:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value) -> None:
+            self.value = value
+
+        def get(self) -> str:
+            return self.value
+
+    class _Tree:
+        def selection(self):
+            return ()
+
+    class _Button:
+        def __init__(self, key: str) -> None:
+            self.key = key
+
+        def configure(self, **kwargs) -> None:
+            if "text" in kwargs:
+                button_texts[self.key] = kwargs["text"]
+
+        def state(self, values) -> None:
+            button_states[self.key].append(tuple(values))
+
+    class _Dummy:
+        tree_control_suggestions = _Tree()
+        tree_suggestions = None
+        control_df = pd.DataFrame(
+            [
+                {
+                    "Kode": "timeloenn",
+                    "A07Post": "timeloenn",
+                    "A07_Belop": 100.0,
+                    "GL_Belop": 0.0,
+                    "Diff": 100.0,
+                    "Rf1022GroupId": "uavklart_rf1022",
+                    "GuidetStatus": "Maa avklares",
+                }
+            ]
+        )
+        btn_control_best = _Button("best")
+        btn_control_batch_suggestions = _Button("batch")
+        control_suggestion_summary_var = _Var()
+        control_suggestion_effect_var = _Var()
+        suggestion_details_var = _Var()
+
+        def _selected_control_work_level(self):
+            return "rf1022"
+
+        def _selected_control_code(self):
+            return "timeloenn"
+
+        def _selected_rf1022_group(self):
+            return "uavklart_rf1022"
+
+        def _refresh_unresolved_rf1022_suggestions(self, group_id):
+            return page_a07.A07Page._refresh_unresolved_rf1022_suggestions(self, group_id)
+
+        def _reconfigure_tree_columns(self, _tree, columns):
+            configured.append(tuple(column_id for column_id, *_rest in columns))
+
+        def _fill_tree(self, _tree, df, _columns, **_kwargs):
+            filled.append(df.copy())
+
+    dummy = _Dummy()
+
+    page_a07.A07Page._refresh_suggestions_tree(dummy)
+
+    assert configured[-1] == ("A07Post", "A07_Belop", "GL_Belop", "Diff")
+    assert filled[-1]["Kode"].tolist() == ["timeloenn"]
+    assert button_texts == {"best": "Bruk trygg kandidat", "batch": "Kjør trygg auto-matching"}
+    assert button_states == {"best": [("disabled",)], "batch": [("disabled",)]}
+    assert "Uavklart RF-1022" in dummy.control_suggestion_summary_var.get()
 
 
 def test_apply_core_refresh_payload_clears_pending_support_refresh() -> None:

@@ -2,6 +2,10 @@
 
 Denne mappen samler dokumentasjon for A07-lonnsporet i Utvalg.
 
+Hvis du er ny i repoet, start med `STATUS_AND_GOAL.md`. Det dokumentet fungerer
+som overtakelsesnotat: hvorfor A07-sporet finnes, hva som nettopp er gjort,
+dagens tekniske status, og hvilken plan som bor folges videre.
+
 ## Hva dette sporet dekker
 
 A07-lonnsporet dekker fire tett koblede omrader:
@@ -97,7 +101,9 @@ kanoniske plasseringen for den flyttede payroll-kjernen.
 
 ## Hva du finner i denne dokumentasjonen
 
+- `STATUS_AND_GOAL.md`: samlet status, formal, arbeidsprinsipper og neste mal
 - `WORKFLOW.md`: hvordan A07-lonn faktisk flyter i dag
+- `LIVE_VERIFICATION_CHECKLIST.md`: sjekkliste for test mot faktisk klientdata
 - `MODULE_MAP.md`: dagens filer og framtidig plassering
 - `TESTING.md`: hvilke tester som beskytter dette sporet
 
@@ -111,3 +117,18 @@ kontrolloppstilling. Den sentrale UI-slicen lever na ogsa under
 `a07_feature/ui/`, inkludert seleksjonslaget og legacy tree-UI. Fasaden peker
 na direkte til de flyttede kanoniske modulene, mens `page_a07_shared.py`
 bevisst er beholdt som compat-lag.
+
+## Aktiv Produktretning
+
+A07-sporet er na mer enn en migreringsstruktur. Vi jobber aktivt med a gjore
+matching, RF-1022 og koblingsflyten tryggere i praktisk revisjonsarbeid. Les
+`STATUS_AND_GOAL.md` for gjeldende mal, prinsipper og neste prioriteringer.
+
+## Viktig Retning Etter A07-13
+
+- A07-koder er canonical matchingnivaa.
+- RF-1022 er aggregert kontroll- og visningsnivaa.
+- Nye A07-aliaser, ekskluderinger og boost-kontoer skal skrives til
+  `global_full_a07_rulebook.json`.
+- `payroll_alias_library.json` beholdes som legacy/kompatibilitetslag, men skal
+  ikke vaere hovedflate for nye A07-laeringer.

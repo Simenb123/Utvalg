@@ -20,6 +20,7 @@ import konto_klassifisering
 import payroll_classification
 import payroll_feedback
 import session
+from a07_feature.rule_learning import append_a07_rule_boost_account, append_a07_rule_keyword
 
 try:
     import tkinter as tk
@@ -414,17 +415,12 @@ def append_selected_account_name_to_a07_alias(page, code: str) -> None:
     if not code_s or not alias_text:
         page._set_status("Velg én konto med kontonavn for å legge til A07-alias.")
         return
-    document = classification_config.load_alias_library_document()
-    concepts = document.setdefault("concepts", {})
-    payload = concepts.setdefault(code_s, {})
-    aliases = [str(value).strip() for value in payload.get("aliases", []) if str(value).strip()]
-    if alias_text not in aliases:
-        aliases.append(alias_text)
-    payload["aliases"] = aliases
-    concepts[code_s] = payload
-    document["concepts"] = concepts
-    path = classification_config.save_alias_library_document(document)
-    page._after_rule_learning_saved(f"La til kontonavn som A07-alias for {code_s}: {alias_text} ({path.name})")
+    try:
+        result = append_a07_rule_keyword(code_s, alias_text, exclude=False)
+    except Exception as exc:
+        page._set_status(f"Kunne ikke lagre A07-alias: {exc}")
+        return
+    page._after_rule_learning_saved(f"La til kontonavn som A07-alias for {code_s}: {alias_text} ({result.path.name})")
 
 def append_selected_account_to_a07_boost(page, code: str) -> None:
     code_s = str(code or "").strip()
@@ -432,27 +428,12 @@ def append_selected_account_to_a07_boost(page, code: str) -> None:
     if not code_s or not account_no:
         page._set_status("Velg én konto for å legge kontonummer til A07-oppsettet.")
         return
-    document = classification_config.load_alias_library_document()
-    concepts = document.setdefault("concepts", {})
-    payload = concepts.setdefault(code_s, {})
-    boost_accounts: list[int] = []
-    for raw in payload.get("boost_accounts", []):
-        try:
-            boost_accounts.append(int(raw))
-        except Exception:
-            continue
     try:
-        account_int = int(str(account_no).strip())
-    except Exception:
-        page._set_status("Kunne ikke lese kontonummeret som heltall.")
+        result = append_a07_rule_boost_account(code_s, account_no)
+    except Exception as exc:
+        page._set_status(f"Kunne ikke lagre A07-boost: {exc}")
         return
-    if account_int not in boost_accounts:
-        boost_accounts.append(account_int)
-    payload["boost_accounts"] = sorted(boost_accounts)
-    concepts[code_s] = payload
-    document["concepts"] = concepts
-    path = classification_config.save_alias_library_document(document)
-    page._after_rule_learning_saved(f"La til konto {account_no} som A07-boost for {code_s} ({path.name})")
+    page._after_rule_learning_saved(f"La til konto {account_no} som A07-boost for {code_s} ({result.path.name})")
 
 def append_selected_account_name_to_rf1022_alias(page, group_id: str) -> None:
     group_s = str(group_id or "").strip()

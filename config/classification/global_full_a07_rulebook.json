@@ -70,7 +70,12 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5000-5091"
@@ -92,7 +97,19 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "lønn",
+        "lonn",
+        "lønn til ansatte",
+        "fastlønn til ansatte",
+        "fastlønn",
+        "fastlonn",
+        "etterlønn",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5002",
@@ -126,7 +143,12 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5420-5429",
@@ -144,12 +166,19 @@
       "keywords": [
         "refusjon",
         "sykepenger",
-        "foreldrepenger"
+        "foreldrepenger",
+        "refusjon av sykepenger"
       ],
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "annen refusjon",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5800-5899"
@@ -170,7 +199,12 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5210-5219"
@@ -189,7 +223,20 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "lønn",
+        "lonn",
+        "lønn til ansatte",
+        "fastlønn til ansatte",
+        "fastlønn",
+        "fastlonn",
+        "etterlønn",
+        "Etterlønn /uferiepenger",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5250-5259",
@@ -209,12 +256,16 @@
         "styre",
         "styrehonorar",
         "honorar",
-        "verv"
+        "verv",
+        "Godtgjørelse til styre- og bedriftsforsamling"
       ],
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "revisjonshonorar",
+        "advokathonorar",
+        "regnskapshonorar"
       ],
       "allowed_ranges": [
         "5330-5339",
@@ -236,7 +287,12 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5200-5209"
@@ -257,7 +313,12 @@
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
-        "forskuddstrekk"
+        "forskuddstrekk",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
       ],
       "allowed_ranges": [
         "5200-5209"
@@ -293,6 +354,13 @@
         "arbeidsgiveravgift",
         "aga"
       ],
+      "exclude_keywords": [
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
+      ],
       "allowed_ranges": [
         "2770-2799"
       ],
@@ -302,6 +370,46 @@
       ],
       "basis": "UB",
       "expected_sign": -1
+    },
+    "annet": {
+      "label": "annet",
+      "keywords": [
+        "naturalytelser",
+        "annen lønnsytelse",
+        "andre lønnsytelser",
+        "annen lønnsytelser"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk",
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "Annen kontorkostnad"
+      ],
+      "basis": "Endring"
+    },
+    "timeloenn": {
+      "label": "timeloenn",
+      "exclude_keywords": [
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "Forsikringer personal",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer"
+      ],
+      "basis": "Endring"
+    },
+    "overtidsgodtgjoerelse": {
+      "label": "overtidsgodtgjoerelse",
+      "exclude_keywords": [
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget"
+      ],
+      "basis": "Endring"
     }
   }
 }

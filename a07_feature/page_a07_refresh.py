@@ -193,16 +193,12 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
                 self._diag("skip initial control selection followup")
                 self._update_control_transfer_buttons()
                 return
-            support_requested = bool(getattr(self, "_support_requested", True))
+            details_visible = bool(getattr(self, "_control_details_visible", False))
+            if details_visible:
+                self._support_requested = True
+            support_requested = bool(getattr(self, "_support_requested", True)) or details_visible
             active_tab = self._active_support_tab_key()
-            if (
-                bool(getattr(self, "_control_details_visible", False))
-                and support_requested
-                and self._support_views_ready
-                and active_tab == "suggestions"
-            ):
-                self._refresh_suggestions_tree()
-            if bool(getattr(self, "_control_details_visible", False)) and support_requested:
+            if details_visible and support_requested:
                 if active_tab == "history" and not bool(getattr(self, "_history_compare_ready", False)):
                     self._schedule_support_refresh()
                 elif self._support_views_ready:
@@ -226,12 +222,11 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
         self._support_refresh_job = None
 
     def _schedule_support_refresh(self) -> None:
-        if (
-            not bool(getattr(self, "_control_details_visible", False))
-            or not bool(getattr(self, "_support_requested", True))
-        ):
+        details_visible = bool(getattr(self, "_control_details_visible", False))
+        if not details_visible:
             self._pending_support_refresh = False
             return
+        self._support_requested = True
         if self._refresh_in_progress:
             self._pending_support_refresh = True
             return
@@ -405,12 +400,11 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
             start_core_refresh()
 
     def _refresh_support_views(self) -> None:
-        if (
-            not bool(getattr(self, "_control_details_visible", False))
-            or not bool(getattr(self, "_support_requested", True))
-        ):
+        details_visible = bool(getattr(self, "_control_details_visible", False))
+        if not details_visible:
             self._pending_support_refresh = False
             return
+        self._support_requested = True
         active_tab_getter = getattr(self, "_active_support_tab_key", None)
         loaded_tabs = getattr(self, "_loaded_support_tabs", set())
         active_tab = active_tab_getter() if callable(active_tab_getter) else None

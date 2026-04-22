@@ -145,7 +145,7 @@ def test_rf1022_post_for_group_supports_new_payroll_post_ids() -> None:
     assert page_a07.rf1022_post_for_group("111_naturalytelser") == (111, "Naturalytelser")
 
 
-def test_a07_suggestion_is_strict_auto_for_history_or_rulebook() -> None:
+def test_a07_suggestion_is_strict_auto_requires_accepted_guardrail() -> None:
     history_row = pd.Series(
         {
             "WithinTolerance": True,
@@ -170,10 +170,20 @@ def test_a07_suggestion_is_strict_auto_for_history_or_rulebook() -> None:
             "Score": 0.88,
         }
     )
+    accepted_row = pd.Series(
+        {
+            "WithinTolerance": True,
+            "SuggestionGuardrail": "accepted",
+            "HistoryAccounts": "",
+            "Explain": "basis=Endring | regel=kontonr | diff=0.00",
+            "Score": 0.91,
+        }
+    )
 
-    assert page_a07.a07_suggestion_is_strict_auto(history_row) is True
-    assert page_a07.a07_suggestion_is_strict_auto(heuristic_row) is True
+    assert page_a07.a07_suggestion_is_strict_auto(history_row) is False
+    assert page_a07.a07_suggestion_is_strict_auto(heuristic_row) is False
     assert page_a07.a07_suggestion_is_strict_auto(weak_row) is False
+    assert page_a07.a07_suggestion_is_strict_auto(accepted_row) is True
 
 
 def test_filter_control_statement_mvp_df_keeps_unclassified_rows_when_requested() -> None:

@@ -78,6 +78,7 @@ def draw_box(
     fill: str,
     accent: str = "#98A2B3",
     action_key: str | None = None,
+    dashed: bool = False,
 ) -> None:
     left = x - width / 2
     top = y - height / 2
@@ -87,7 +88,10 @@ def draw_box(
     if action_key:
         tags = ("chart-node", action_key)
     canvas.create_rectangle(left + 2, top + 3, right + 2, bottom + 3, fill="#E4E7EC", outline="", tags=tags)
-    canvas.create_rectangle(left, top, right, bottom, fill=fill, outline="#D0D5DD", width=1, tags=tags)
+    border_kwargs: dict[str, Any] = {"outline": "#D0D5DD", "width": 1, "tags": tags}
+    if dashed:
+        border_kwargs["dash"] = (3, 2)
+    canvas.create_rectangle(left, top, right, bottom, fill=fill, **border_kwargs)
     canvas.create_rectangle(left, top, right, top + 4, fill=accent, outline=accent, tags=tags)
     canvas.create_text(x, y - 6, text=title, font=("Segoe UI", 9, "bold"), width=width - 16, tags=tags)
     canvas.create_text(x, y + 12, text=subtitle, font=("Segoe UI", 8), width=width - 16, fill="#475467", tags=tags)
@@ -169,6 +173,31 @@ def on_chart_mousewheel(page, event) -> None:
         return
     factor = 1.1 if event.delta > 0 else 1 / 1.1
     page._chart_apply_zoom(factor, event.x, event.y)
+
+
+def on_chart_double_click(page, _event) -> None:
+    canvas = page._org_canvas
+    action_key = ""
+    for tag in canvas.gettags("current"):
+        if tag.startswith("node:"):
+            action_key = tag
+            break
+    if not action_key:
+        return
+    action = page._chart_node_actions.get(action_key)
+    if not action:
+        return
+    kind = (action.get("kind") or "").lower()
+    if kind not in {"owner", "indirect_owner", "indirect_person"}:
+        return
+    opener = getattr(page, "_open_owner_drilldown", None)
+    if not callable(opener):
+        return
+    opener(
+        orgnr=_safe_text(action.get("shareholder_orgnr")),
+        name=_safe_text(action.get("shareholder_name")),
+        lookup_year=_safe_text(action.get("lookup_year")),
+    )
 
 
 def update_chart_zoom_label(page) -> None:
@@ -422,6 +451,15 @@ def execute_chart_action(page, action: dict[str, Any]) -> None:
             owner_name=_safe_text(action.get("shareholder_name")),
         )
         return
+    if kind in {"indirect_owner", "indirect_person"}:
+        opener = getattr(page, "_open_owner_drilldown", None)
+        if callable(opener):
+            opener(
+                orgnr=_safe_text(action.get("shareholder_orgnr")),
+                name=_safe_text(action.get("shareholder_name")),
+                lookup_year=_safe_text(action.get("lookup_year")),
+            )
+        return
     if kind == "root":
         page._nb.select(0)
 
@@ -433,6 +471,12 @@ _BOX_W_LOGICAL = 172
 _BOX_H_LOGICAL = 56
 _COL_GAP = 28
 _ROW_GAP = 42
+
+# Indirekte eierkjede: hvor mange ledd over direkte eier vi henter.
+# 3 ledd over root holder kartet ryddig — Excel-kryssreferansen går dypere.
+_CHART_INDIRECT_MAX_DEPTH = 3
+# Smalere boks for indirekte ledd så flere får plass uten overlapp.
+_INDIRECT_BOX_W = 152
 
 
 def _sort_owners(owners: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -529,6 +573,184 @@ def _compute_default_layout(
     return positions
 
 
+# ── Indirekte eierkjede ─────────────────────────────────────────
+
+def _resolve_indirect_lookup_year(page) -> str:
+    """Velg samme register-år som overview-bygget bruker for direkte eiere.
+
+    Faller tilbake til klient-året hvis overview ikke har eksplisitt
+    ``owners_year_used``.
+    """
+    overview = getattr(page, "_overview", {}) or {}
+    return str(
+        overview.get("owners_year_used")
+        or getattr(page, "_year", "")
+        or ""
+    ).strip()
+
+
+def _build_indirect_entries(
+    page,
+    direct_owners: list[dict[str, Any]],
+    owner_entries: list[tuple[str, str, dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[str], str]:
+    """BFS oppover gjennom direkte holding-aksjonærer og bygg kart-noder.
+
+    Returnerer ``(entries, breaks, lookup_year)``:
+    - ``entries``: liste av dict per indirekte boks, med ``pos_key``,
+      ``parent_pos_key``, ``action_key``, ``depth``, ``row`` og en
+      ``is_break`` flagg for placeholder-bokser.
+    - ``breaks``: orgnrs der kjeden brytes (sub_owners var tom).
+    - ``lookup_year``: AR-året som ble brukt for oppslag.
+
+    Returnerer tomme lister hvis ar_store ikke kan importeres, hvis det
+    ikke finnes lookup_year, eller hvis det ikke finnes selskaps-eiere.
+    """
+    entries: list[dict[str, Any]] = []
+    breaks: list[str] = []
+    lookup_year = _resolve_indirect_lookup_year(page)
+    if not lookup_year:
+        return entries, breaks, ""
+
+    try:
+        import ar_store
+        from ar_ownership_chain import walk_indirect_chain
+    except Exception:
+        logger.debug("Indirekte eierkjede: ar_store/ar_ownership_chain ikke tilgjengelig", exc_info=True)
+        return entries, breaks, lookup_year
+
+    def _fetch(orgnr: str) -> list[dict[str, Any]]:
+        try:
+            return list(ar_store.list_company_owners(orgnr, lookup_year) or [])
+        except Exception:
+            logger.debug("list_company_owners feilet for %s/%s", orgnr, lookup_year, exc_info=True)
+            return []
+
+    chain_nodes, breaks = walk_indirect_chain(direct_owners, _fetch, _CHART_INDIRECT_MAX_DEPTH)
+    if not chain_nodes:
+        return entries, breaks, lookup_year
+
+    # orgnr → pos_key for direkte eiere (matcher pos_key i owner_entries).
+    parent_lookup: dict[str, str] = {}
+    for pos_key, _ak, row in owner_entries:
+        orgnr = _safe_text(row.get("shareholder_orgnr"))
+        if orgnr:
+            parent_lookup[orgnr] = pos_key
+
+    # Render sub_owners for hver chain_node. Sub_owners som er selskaper
+    # blir også egne BFS-noder lenger opp; dele pos_key sikrer at
+    # «forelder-koblingen» fra deres eiere stemmer overens.
+    next_action_idx = 0
+    for node in chain_nodes:
+        depth = int(node.get("depth") or 1)
+        n_orgnr = str(node.get("orgnr") or "")
+        sub_owners = node.get("sub_owners") or []
+
+        # Forelder-pos_key for denne BFS-nodens sub_owners-bokser.
+        if depth == 1:
+            n_box_pos = parent_lookup.get(n_orgnr, "")
+            if not n_box_pos:
+                # Direkte eier ble ikke registrert som boks (mangler orgnr i owner_entries).
+                continue
+        else:
+            n_box_pos = f"chain:{n_orgnr}"
+
+        if not sub_owners:
+            # Kjede brutt — placeholder over forelder-boksen.
+            next_action_idx += 1
+            entries.append({
+                "pos_key": f"chain_break:{n_orgnr or depth}",
+                "parent_pos_key": n_box_pos,
+                "action_key": f"node:indirect_break:{next_action_idx}",
+                "depth": depth + 1,
+                "row": {
+                    "shareholder_name": "Ikke i AR for året",
+                    "shareholder_orgnr": "",
+                    "shareholder_kind": "break",
+                    "ownership_pct": None,
+                },
+                "is_break": True,
+                "lookup_year": lookup_year,
+            })
+            continue
+
+        for sub in sub_owners:
+            s_orgnr = _safe_text(sub.get("shareholder_orgnr"))
+            s_name = _safe_text(sub.get("shareholder_name"))
+            s_kind = str(sub.get("shareholder_kind") or "").lower()
+            next_action_idx += 1
+
+            if s_kind not in {"person", "unknown"} and s_orgnr:
+                pos_key = f"chain:{s_orgnr}"
+                action_kind = "indirect_owner"
+            else:
+                # Personer eller ukjente uten orgnr — ikke videre rekursjon.
+                pos_key = f"chain_leaf:{n_orgnr}:{s_orgnr or s_name or next_action_idx}"
+                action_kind = "indirect_person"
+
+            action_key = f"node:indirect:{depth + 1}:{next_action_idx}"
+            entries.append({
+                "pos_key": pos_key,
+                "parent_pos_key": n_box_pos,
+                "action_key": action_key,
+                "depth": depth + 1,
+                "row": dict(sub),
+                "is_break": False,
+                "lookup_year": lookup_year,
+                "action": {
+                    "kind": action_kind,
+                    "shareholder_name": s_name,
+                    "shareholder_orgnr": s_orgnr,
+                    "lookup_year": lookup_year,
+                },
+            })
+
+            page._chart_node_keys[action_key] = pos_key
+            page._chart_node_actions[action_key] = entries[-1]["action"] if not entries[-1]["is_break"] else {}
+
+    return entries, breaks, lookup_year
+
+
+def _layout_indirect_entries(
+    page,
+    indirect_entries: list[dict[str, Any]],
+) -> None:
+    """Plasser indirekte bokser over sine forelder-bokser.
+
+    Sentrer barna horisontalt over forelder-boksen, med ``_INDIRECT_BOX_W +
+    _COL_GAP`` som kolonne-pitch. Hvis flere indirekte noder deler samme
+    forelder, fordeles de jevnt.
+
+    Hvis pos_key allerede har en posisjon (samme orgnr på flere veier
+    gjennom kjeden), beholdes første tildelte posisjon — det unngår at
+    duplikat-noder springer rundt.
+    """
+    row_pitch = _BOX_H_LOGICAL + _ROW_GAP
+    col_pitch = _INDIRECT_BOX_W + _COL_GAP
+
+    # Grupper per forelder per dybde for å beregne søsken-layout.
+    grouped: dict[tuple[str, int], list[str]] = {}
+    for entry in indirect_entries:
+        key = (entry["parent_pos_key"], entry["depth"])
+        grouped.setdefault(key, []).append(entry["pos_key"])
+
+    for (parent_pos_key, depth), pos_keys in grouped.items():
+        if parent_pos_key not in page._chart_node_centers:
+            continue
+        px, py = page._chart_node_centers[parent_pos_key]
+        n = len(pos_keys)
+        row_total_w = n * col_pitch
+        x0 = px - row_total_w / 2 + col_pitch / 2
+        # Stack hver indirekte rad ett _ROW_GAP høyere enn forrige.
+        # depth=2 (første indirekte rad) ligger ett ledd over forelder.
+        y = py - row_pitch
+        for i, pk in enumerate(pos_keys):
+            # First-write-wins: hvis pk allerede er plassert, ikke overskriv.
+            if pk in page._chart_node_centers:
+                continue
+            page._chart_node_centers[pk] = (x0 + i * col_pitch, y)
+
+
 # ── Rendering ───────────────────────────────────────────────────
 
 def refresh_org_chart(page) -> None:
@@ -610,6 +832,11 @@ def _build_model(page, saved: dict[str, list[float]]) -> None:
             "company_orgnr": orgnr,
         }
 
+    # Indirekte eierkjede over direkte holding-aksjonærer.
+    indirect_entries, indirect_breaks, indirect_lookup_year = _build_indirect_entries(
+        page, owners, owner_entries,
+    )
+
     try:
         viewport_w = page._org_canvas.winfo_width()
     except Exception:
@@ -623,8 +850,12 @@ def _build_model(page, saved: dict[str, list[float]]) -> None:
     # Merge: saved vinner over default.
     for pos_key, (x, y) in defaults.items():
         page._chart_node_centers[pos_key] = (x, y)
+
+    # Indirekte noder plasseres relativt til sine forelder-bokser.
+    _layout_indirect_entries(page, indirect_entries)
+
     for pos_key, coords in saved.items():
-        if pos_key in page._chart_node_centers or pos_key == root_pos_key or pos_key.startswith(("owner:", "child:")):
+        if pos_key in page._chart_node_centers or pos_key == root_pos_key or pos_key.startswith(("owner:", "child:", "chain:", "chain_leaf:", "chain_break:")):
             try:
                 page._chart_node_centers[pos_key] = (float(coords[0]), float(coords[1]))
             except (TypeError, ValueError, IndexError):
@@ -639,11 +870,22 @@ def _build_model(page, saved: dict[str, list[float]]) -> None:
         line_tag = f"edge:line:{pos_key}"
         lbl_tag = f"edge:lbl:{pos_key}"
         page._chart_edges.append((root_pos_key, pos_key, line_tag, lbl_tag))
+    for entry in indirect_entries:
+        pos_key = entry["pos_key"]
+        parent_pos_key = entry["parent_pos_key"]
+        # Edge-tag inkluderer parent for å være unik selv ved «diamant-eierskap»
+        # (samme orgnr som sub_owner av to forskjellige holdinger).
+        line_tag = f"edge:line:{pos_key}:{parent_pos_key}"
+        lbl_tag = f"edge:lbl:{pos_key}:{parent_pos_key}"
+        page._chart_edges.append((pos_key, parent_pos_key, line_tag, lbl_tag))
 
     page._chart_model_meta["root_pos_key"] = root_pos_key
     page._chart_model_meta["root_action_key"] = root_action_key
     page._chart_model_meta["owner_entries"] = owner_entries
     page._chart_model_meta["child_entries"] = child_entries
+    page._chart_model_meta["indirect_entries"] = indirect_entries
+    page._chart_model_meta["indirect_breaks"] = indirect_breaks
+    page._chart_model_meta["indirect_lookup_year"] = indirect_lookup_year
     page._chart_model_meta["saved"] = dict(saved)
 
 
@@ -743,6 +985,69 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
             text=f"{_fmt_pct(row.get('ownership_pct'))}%",
             font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
         )
+
+    # Indirekte eierkjede + kanter (over direkte eiere).
+    # Tegn hver pos_key-boks kun én gang (en holding kan ha flere foreldre);
+    # tegn alltid kanten fra (pos_key → parent_pos_key) per entry.
+    indirect_box_w = _INDIRECT_BOX_W * z
+    drawn_pos_keys: set[str] = set()
+    for entry in meta.get("indirect_entries", []):
+        pos_key = entry["pos_key"]
+        if pos_key not in page._chart_node_centers:
+            continue
+        elx, ely = page._chart_node_centers[pos_key]
+        ex, ey = elx * z, ely * z
+
+        row = entry.get("row") or {}
+        is_break = bool(entry.get("is_break"))
+        action_key = entry["action_key"]
+
+        if pos_key not in drawn_pos_keys:
+            drawn_pos_keys.add(pos_key)
+            if is_break:
+                year_label = entry.get("lookup_year") or page._year or ""
+                draw_box(
+                    page, canvas, ex, ey, indirect_box_w, box_h,
+                    title="Ikke i AR for året",
+                    subtitle=f"Kjeden brytes ({year_label})",
+                    fill="#FFF7E6", accent="#D08700",
+                    action_key=action_key,
+                    dashed=True,
+                )
+            else:
+                kind = (entry.get("action") or {}).get("kind", "indirect_owner")
+                is_person = kind == "indirect_person"
+                draw_box(
+                    page, canvas, ex, ey, indirect_box_w, box_h,
+                    title=_safe_text(row.get("shareholder_name")) or "Ukjent eier",
+                    subtitle=_safe_text(row.get("shareholder_orgnr"))
+                             or _safe_text(row.get("shareholder_kind")) or "-",
+                    fill="#FAF5FF" if not is_person else "#F4F0FF",
+                    accent="#7E5BEF" if not is_person else "#9F7AEA",
+                    action_key=action_key,
+                    dashed=True,
+                )
+
+        parent_pos_key = entry["parent_pos_key"]
+        if parent_pos_key in page._chart_node_centers:
+            plx, ply = page._chart_node_centers[parent_pos_key]
+            px, py = plx * z, ply * z
+            line_tag = f"edge:line:{pos_key}:{parent_pos_key}"
+            lbl_tag = f"edge:lbl:{pos_key}:{parent_pos_key}"
+            y1 = ey + box_h / 2
+            y2 = py - box_h / 2
+            canvas.create_line(
+                ex, y1, px, y2,
+                fill="#B0B8C8", width=1, dash=(3, 2),
+                tags=(line_tag,),
+            )
+            pct = row.get("ownership_pct")
+            if not is_break and pct is not None:
+                canvas.create_text(
+                    (ex + px) / 2, (y1 + y2) / 2,
+                    text=f"{_fmt_pct(pct)}%",
+                    font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
+                )
 
     # Sirkulært eierskap — les fra overview (beregnet i worker).
     cycles = page._overview.get("circular_ownership_cycles") or []

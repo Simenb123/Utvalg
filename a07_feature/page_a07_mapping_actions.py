@@ -66,6 +66,7 @@ from a07_feature.control.data import (
     build_control_selected_account_df,
     build_control_statement_accounts_df,
     build_control_statement_export_df,
+    build_global_auto_mapping_plan,
     build_history_comparison_df,
     build_mapping_history_details,
     build_rf1022_accounts_df,
@@ -106,6 +107,7 @@ from a07_feature.control.matching import (
     select_safe_history_codes,
     ui_suggestion_row_from_series,
 )
+from a07_feature.rule_learning import append_a07_rule_keywords
 from a07_feature.page_paths import (
     MATCHER_SETTINGS_DEFAULTS as _MATCHER_SETTINGS_DEFAULTS,
     _path_signature,
@@ -299,7 +301,7 @@ class A07PageMappingActionsMixin:
                 label = str(row.get("Navn") or "").strip() or rf1022_group_label(group_id) or group_id
                 choices.append((group_id, label))
                 seen.add(group_id)
-        for group_id in ("100_loenn_ol", "100_refusjon", "111_naturalytelser", "112_pensjon"):
+        for group_id in ("100_loenn_ol", "100_refusjon", "111_naturalytelser", "112_pensjon", "uavklart_rf1022"):
             if group_id in seen:
                 continue
             label = rf1022_group_label(group_id) or group_id
@@ -411,7 +413,10 @@ class A07PageMappingActionsMixin:
             if mapped_code in allowed_codes:
                 mapped_codes.append(mapped_code)
         if mapped_codes:
-            return max(sorted(set(mapped_codes)), key=mapped_codes.count)
+            unique_mapped_codes = sorted(set(mapped_codes))
+            if len(unique_mapped_codes) == 1:
+                return unique_mapped_codes[0]
+            return None
 
         suggestions_df = getattr(getattr(self, "workspace", None), "suggestions", None)
         if isinstance(suggestions_df, pd.DataFrame) and not suggestions_df.empty and account_keys:
@@ -423,8 +428,7 @@ class A07PageMappingActionsMixin:
                     code = str(row.get("Kode") or "").strip()
                     if code not in allowed_codes:
                         continue
-                    guardrail = str(row.get("SuggestionGuardrail") or "").strip().lower()
-                    if guardrail == "blocked":
+                    if not a07_suggestion_is_strict_auto(row):
                         continue
                     suggestion_accounts = _split_mapping_accounts(row.get("ForslagKontoer"))
                     if not suggestion_accounts:
@@ -451,15 +455,17 @@ class A07PageMappingActionsMixin:
             for keywords, code in _RF1022_GROUP_NAME_HINTS.get(group_s, ()):
                 if code not in allowed_codes:
                     continue
+                if code == "styrehonorarOgGodtgjoerelseVerv" and "honorar" in names_text:
+                    if not any(token in names_text for token in ("styre", "verv", "godtgj")):
+                        continue
                 if all(keyword in names_text for keyword in keywords):
                     return code
                 if any(keyword in names_text for keyword in keywords):
                     return code
 
-        default_code = _RF1022_GROUP_DEFAULT_CODES.get(group_s, "")
-        if default_code in allowed_codes:
-            return default_code
-        return allowed_codes[0]
+        if len(allowed_codes) == 1:
+            return allowed_codes[0]
+        return None
 
     def _assign_accounts_to_rf1022_group(
         self,
@@ -593,7 +599,55 @@ class A07PageMappingActionsMixin:
                     return candidates.copy()
             return pd.DataFrame()
 
-    def _rf1022_candidate_action_counts(self, candidates: pd.DataFrame | None) -> dict[str, int]:
+    def _rf1022_candidates_with_target_codes(self, candidates: pd.DataFrame | None) -> pd.DataFrame:
+        if candidates is None:
+            return pd.DataFrame()
+        work = candidates.copy()
+        if work.empty:
+            return work
+        if "Kode" not in work.columns:
+            work["Kode"] = ""
+        if "Konto" not in work.columns:
+            work["Konto"] = ""
+        if "Rf1022GroupId" not in work.columns:
+            work["Rf1022GroupId"] = ""
+        for idx, row in work.iterrows():
+            code = str(row.get("Kode") or "").strip()
+            if code:
+                continue
+            account = str(row.get("Konto") or "").strip()
+            group_id = str(row.get("Rf1022GroupId") or "").strip()
+            resolved = str(self._resolve_rf1022_target_code(group_id, [account]) or "").strip()
+            if resolved:
+                work.at[idx, "Kode"] = resolved
+        return work
+
+    def _build_global_auto_mapping_plan(self, candidates: pd.DataFrame | None = None) -> pd.DataFrame:
+        if candidates is None:
+            candidates = self._all_rf1022_candidate_df()
+        code_resolver = getattr(self, "_rf1022_candidates_with_target_codes", None)
+        if callable(code_resolver):
+            candidates = code_resolver(candidates)
+        else:
+            candidates = A07PageMappingActionsMixin._rf1022_candidates_with_target_codes(self, candidates)
+        if candidates is None or candidates.empty:
+            return pd.DataFrame()
+        try:
+            suggestions_df = self._ensure_suggestion_display_fields()
+        except Exception:
+            suggestions_df = pd.DataFrame()
+        return build_global_auto_mapping_plan(
+            candidates,
+            getattr(self, "control_gl_df", pd.DataFrame()),
+            suggestions_df,
+            dict(self._effective_mapping() or {}),
+            locked_codes=_locked_codes_for(self),
+            basis_col=getattr(getattr(self, "workspace", None), "basis_col", "Endring"),
+            rulebook=getattr(self, "effective_rulebook", None),
+        )
+
+    @staticmethod
+    def _global_auto_plan_action_counts(plan: pd.DataFrame | None) -> dict[str, int]:
         counts = {
             "safe": 0,
             "actionable": 0,
@@ -602,38 +656,25 @@ class A07PageMappingActionsMixin:
             "already": 0,
             "conflict": 0,
             "locked": 0,
+            "blocked": 0,
         }
-        if candidates is None or candidates.empty:
+        if plan is None or plan.empty or "Action" not in plan.columns:
             return counts
-        effective_mapping = dict(self._effective_mapping() or {})
-        planned_mapping = dict(effective_mapping)
-        for _, row in candidates.iterrows():
-            status = str(row.get("Forslagsstatus") or "").strip()
-            if status != "Trygt forslag":
-                counts["review"] += 1
-                continue
-            counts["safe"] += 1
-            account = str(row.get("Konto") or "").strip()
-            code = str(row.get("Kode") or "").strip()
-            if not code:
-                code = str(self._resolve_rf1022_target_code(row.get("Rf1022GroupId"), [account]) or "").strip()
-            if not account or not code:
-                counts["invalid"] += 1
-                continue
-            current_code = str(planned_mapping.get(account) or "").strip()
-            if current_code == code:
-                counts["already"] += 1
-                continue
-            if current_code and current_code != code:
-                counts["conflict"] += 1
-                continue
-            conflicts = _locked_mapping_conflicts_for(self, [account], target_code=code)
-            if conflicts:
-                counts["locked"] += 1
-                continue
-            planned_mapping[account] = code
-            counts["actionable"] += 1
+        actions = plan["Action"].fillna("").astype(str).str.strip()
+        counts["actionable"] = int((actions == "apply").sum())
+        counts["safe"] = counts["actionable"] + int((actions == "already").sum())
+        counts["review"] = int(actions.isin({"review", "blocked"}).sum())
+        counts["blocked"] = int((actions == "blocked").sum())
+        counts["invalid"] = int((actions == "invalid").sum())
+        counts["already"] = int((actions == "already").sum())
+        counts["conflict"] = int((actions == "conflict").sum())
+        counts["locked"] = int((actions == "locked").sum())
         return counts
+
+    def _rf1022_candidate_action_counts(self, candidates: pd.DataFrame | None) -> dict[str, int]:
+        return A07PageMappingActionsMixin._global_auto_plan_action_counts(
+            self._build_global_auto_mapping_plan(candidates)
+        )
 
     def _selected_rf1022_candidate_row(self) -> pd.Series | None:
         tree = getattr(self, "tree_control_suggestions", None)
@@ -668,44 +709,67 @@ class A07PageMappingActionsMixin:
         if not account or not code:
             self._notify_inline("Kandidaten mangler konto eller A07-kode.", focus_widget=self.tree_control_suggestions)
             return
-        self._assign_accounts_to_a07_code([account], code, source_label="RF-1022-forslag")
+        plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
+        try:
+            plan = plan_builder(pd.DataFrame([dict(row)])) if callable(plan_builder) else pd.DataFrame()
+        except Exception:
+            plan = pd.DataFrame()
+        if plan is None or plan.empty or "Action" not in plan.columns:
+            self._notify_inline("Kandidaten kunne ikke sikkerhetskontrolleres.", focus_widget=self.tree_control_suggestions)
+            return
+        plan_row = plan.iloc[0]
+        action = str(plan_row.get("Action") or "").strip()
+        if action != "apply":
+            status = str(plan_row.get("Status") or "Maa vurderes").strip()
+            reason = str(plan_row.get("Reason") or "").strip()
+            suffix = f": {reason}" if reason else "."
+            self._notify_inline(
+                f"Kandidaten kan ikke brukes automatisk ({status}){suffix}",
+                focus_widget=self.tree_control_suggestions,
+            )
+            return
+        checked_code = str(plan_row.get("Kode") or code).strip()
+        checked_account = str(plan_row.get("Konto") or account).strip()
+        self._assign_accounts_to_a07_code([checked_account], checked_code, source_label="RF-1022-forslag")
 
     def _apply_rf1022_candidate_suggestions(self) -> None:
         all_candidates = self._all_rf1022_candidate_df()
         if all_candidates.empty:
             self._notify_inline("Fant ingen trygge RF-1022-kandidater.", focus_widget=self.tree_control_suggestions)
             return
-        action_counter = getattr(self, "_rf1022_candidate_action_counts", None)
-        if callable(action_counter):
-            counts = action_counter(all_candidates)
+        plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
+        if callable(plan_builder):
+            plan = plan_builder(all_candidates)
         else:
-            counts = A07PageMappingActionsMixin._rf1022_candidate_action_counts(self, all_candidates)
-        candidates = all_candidates
-        if "Forslagsstatus" in candidates.columns:
-            candidates = candidates.loc[candidates["Forslagsstatus"].astype(str).str.strip() == "Trygt forslag"].copy()
-        if candidates.empty:
+            plan = A07PageMappingActionsMixin._build_global_auto_mapping_plan(self, all_candidates)
+        self.rf1022_auto_plan_df = plan
+        counts = A07PageMappingActionsMixin._global_auto_plan_action_counts(plan)
+        if plan is None or plan.empty:
             self._notify_inline("Fant ingen trygge RF-1022-kandidater.", focus_widget=self.tree_control_suggestions)
             return
 
-        effective_mapping = dict(self._effective_mapping() or {})
-        planned_mapping = dict(effective_mapping)
+        candidates = plan.loc[plan["Action"].astype(str).str.strip() == "apply"].copy()
+        if candidates.empty:
+            skipped = counts["invalid"] + counts["conflict"] + counts["locked"] + counts["blocked"]
+            self._notify_inline(
+                "Fant ingen nye RF-1022-kandidater som kunne brukes "
+                f"(hoppet over {skipped}, allerede {counts['already']}, "
+                f"laast/konflikt {counts['locked'] + counts['conflict']}, maa vurderes {counts['review']}).",
+                focus_widget=self.tree_control_suggestions,
+            )
+            return
+
         applied: list[tuple[str, str]] = []
         invalid = 0
         conflict = 0
         locked = 0
-        unchanged = 0
         for _, row in candidates.iterrows():
             account = str(row.get("Konto") or "").strip()
             code = str(row.get("Kode") or "").strip()
-            if not code:
-                code = str(self._resolve_rf1022_target_code(row.get("Rf1022GroupId"), [account]) or "").strip()
             if not account or not code:
                 invalid += 1
                 continue
-            current_code = str(planned_mapping.get(account) or "").strip()
-            if current_code == code:
-                unchanged += 1
-                continue
+            current_code = str((self._effective_mapping() or {}).get(account) or "").strip()
             if current_code and current_code != code:
                 conflict += 1
                 continue
@@ -714,13 +778,14 @@ class A07PageMappingActionsMixin:
                 locked += 1
                 continue
             apply_manual_mapping_choice(self.workspace.mapping, account, code)
-            planned_mapping[account] = code
             applied.append((account, code))
 
         if not applied:
+            skipped = invalid + conflict + locked + counts["blocked"]
             self._notify_inline(
                 "Fant ingen nye RF-1022-kandidater som kunne brukes "
-                f"(allerede {unchanged}, konflikt/last {conflict + locked}, ugyldig {invalid}, maa vurderes {counts['review']}).",
+                f"(hoppet over {skipped}, allerede {counts['already']}, "
+                f"laast/konflikt {conflict + locked}, maa vurderes {counts['review']}).",
                 focus_widget=self.tree_control_suggestions,
             )
             return
@@ -750,13 +815,13 @@ class A07PageMappingActionsMixin:
         suffix_parts: list[str] = []
         if applied_groups:
             suffix_parts.append(f"{applied_groups} post(er)")
-        skipped = invalid + conflict + locked
+        skipped = invalid + conflict + locked + counts["blocked"]
         if skipped:
-            suffix_parts.append(f"skippet {skipped}")
-        if unchanged:
-            suffix_parts.append(f"{unchanged} allerede koblet")
+            suffix_parts.append(f"hoppet over {skipped}")
+        if counts["already"]:
+            suffix_parts.append(f"{counts['already']} allerede koblet")
         if locked:
-            suffix_parts.append(f"{locked} last")
+            suffix_parts.append(f"{locked} laast")
         if conflict:
             suffix_parts.append(f"{conflict} konflikt")
         if counts["review"]:
@@ -764,10 +829,10 @@ class A07PageMappingActionsMixin:
         suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
         if autosaved:
             self.status_var.set(
-                f"Automatisk RF-1022-matching: brukte {len(applied)} sikre forslag{suffix} og lagret i klientmappen."
+                f"Trygg auto-matching: brukte {len(applied)} sikre forslag{suffix} og lagret i klientmappen."
             )
         else:
-            self.status_var.set(f"Automatisk RF-1022-matching: brukte {len(applied)} sikre forslag{suffix}.")
+            self.status_var.set(f"Trygg auto-matching: brukte {len(applied)} sikre forslag{suffix}.")
         self._select_primary_tab()
 
     def _focus_linked_code_for_selected_gl_account(self) -> None:
@@ -847,7 +912,9 @@ class A07PageMappingActionsMixin:
 
         try:
             autosaved = self._autosave_mapping()
-            if refresh == "all":
+            if refresh == "none":
+                pass
+            elif refresh == "all":
                 self._refresh_all()
             else:
                 selected_code_getter = getattr(self, "_selected_control_code", None)
@@ -856,16 +923,231 @@ class A07PageMappingActionsMixin:
                 except Exception:
                     focus_code = None
                 self._refresh_core(focus_code=focus_code)
-            self._focus_mapping_account(removed[0])
+            if refresh != "none":
+                self._focus_mapping_account(removed[0])
             count = len(removed)
             if autosaved:
                 self.status_var.set(f"{source_label} {count} konto(er) og lagret endringen.")
             else:
                 self.status_var.set(f"{source_label} {count} konto(er).")
-            self._select_primary_tab()
+            if refresh != "none":
+                self._select_primary_tab()
         except Exception as exc:
             messagebox.showerror("A07", f"Kunne ikke fjerne mapping fra konto:\n{exc}")
         return removed
+
+    def _control_account_name_lookup(self, accounts: Sequence[object]) -> dict[str, str]:
+        wanted = {str(account or "").strip() for account in accounts if str(account or "").strip()}
+        if not wanted:
+            return {}
+        out: dict[str, str] = {}
+        frames = (
+            getattr(self, "control_selected_accounts_df", None),
+            getattr(self, "control_gl_df", None),
+            getattr(self, "mapping_df", None),
+        )
+        for frame in frames:
+            if frame is None or getattr(frame, "empty", True):
+                continue
+            if "Konto" not in frame.columns or "Navn" not in frame.columns:
+                continue
+            work = frame.copy()
+            work["Konto"] = work["Konto"].fillna("").astype(str).str.strip()
+            for _, row in work.iterrows():
+                account = str(row.get("Konto") or "").strip()
+                if account not in wanted or account in out:
+                    continue
+                name = str(row.get("Navn") or "").strip()
+                if name:
+                    out[account] = name
+        return out
+
+    def _mapped_a07_code_for_account(self, account: object) -> str:
+        account_s = str(account or "").strip()
+        if not account_s:
+            return ""
+        effective_mapping_getter = getattr(self, "_effective_mapping", None)
+        if callable(effective_mapping_getter):
+            try:
+                code = str((effective_mapping_getter() or {}).get(account_s) or "").strip()
+                if code:
+                    return code
+            except Exception:
+                pass
+        workspace = getattr(self, "workspace", None)
+        mapping = getattr(workspace, "mapping", None) or {}
+        return str(mapping.get(account_s) or "").strip()
+
+    def _notify_a07_rule_learning_changed(self) -> None:
+        app = getattr(session, "APP", None)
+        for attr_name in ("page_admin", "page_saldobalanse", "page_analyse"):
+            other_page = getattr(app, attr_name, None)
+            if other_page is None or other_page is self:
+                continue
+            refresh = getattr(other_page, "refresh_from_session", None)
+            if callable(refresh):
+                try:
+                    refresh(session)
+                    continue
+                except TypeError:
+                    try:
+                        refresh()
+                        continue
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            refresh_plain = getattr(other_page, "refresh", None)
+            if callable(refresh_plain):
+                try:
+                    refresh_plain()
+                except Exception:
+                    pass
+        admin_page = getattr(app, "page_admin", None)
+        rulebook_editor = getattr(admin_page, "_rulebook_editor", None)
+        reload_editor = getattr(rulebook_editor, "reload", None)
+        if callable(reload_editor):
+            try:
+                reload_editor()
+            except Exception:
+                pass
+
+    def _learn_selected_control_account_names(
+        self,
+        *,
+        exclude: bool,
+        remove_mapping: bool = False,
+    ) -> None:
+        accounts_getter = getattr(self, "_selected_control_account_ids", None)
+        accounts = accounts_getter() if callable(accounts_getter) else []
+        accounts = [str(account or "").strip() for account in accounts if str(account or "").strip()]
+        if not accounts:
+            self._notify_inline(
+                "Velg en eller flere mappede kontoer nederst forst.",
+                focus_widget=getattr(self, "tree_control_accounts", None),
+            )
+            return
+
+        if remove_mapping:
+            conflicts = _locked_mapping_conflicts_for(self, accounts)
+            if _notify_locked_conflicts_for(self, conflicts, focus_widget=getattr(self, "tree_control_accounts", None)):
+                return
+
+        names = self._control_account_name_lookup(accounts)
+        entries: list[tuple[str, str]] = []
+        skipped = 0
+        for account in accounts:
+            code = self._mapped_a07_code_for_account(account)
+            name = names.get(account, "")
+            if not code or not name:
+                skipped += 1
+                continue
+            entries.append((code, name))
+
+        if not entries:
+            self._notify_inline(
+                "Fant ingen mappede kontoer med A07-kode og kontonavn aa laere av.",
+                focus_widget=getattr(self, "tree_control_accounts", None),
+            )
+            return
+
+        try:
+            batch_result = append_a07_rule_keywords(entries, exclude=exclude)
+        except Exception as exc:
+            messagebox.showerror("A07", f"Kunne ikke oppdatere A07-regler:\n{exc}")
+            return
+        learned = [(result.code, result.term, bool(result.changed)) for result in batch_result.results]
+
+        try:
+            payroll_classification.invalidate_runtime_caches()
+        except Exception:
+            pass
+
+        removed_count = 0
+        if remove_mapping:
+            remover = getattr(self, "_remove_mapping_accounts_checked", None)
+            removed = (
+                remover(
+                    accounts,
+                    focus_widget=getattr(self, "tree_control_accounts", None),
+                    refresh="none",
+                    source_label="Fjernet mapping fra",
+                )
+                if callable(remover)
+                else []
+            )
+            removed_count = len(removed)
+
+        try:
+            self._refresh_all()
+        except Exception:
+            self._refresh_core(focus_code=learned[0][0])
+        notify_admin = getattr(self, "_notify_a07_rule_learning_changed", None)
+        if callable(notify_admin):
+            try:
+                notify_admin()
+            except Exception:
+                pass
+
+        changed_count = sum(1 for _code, _name, changed in learned if changed)
+        action = "ekskludert fra" if exclude else "lagt til som alias for"
+        if remove_mapping:
+            self.status_var.set(
+                f"{changed_count} kontonavn {action} A07-regel, {removed_count} mapping(er) fjernet."
+            )
+        else:
+            self.status_var.set(f"{changed_count} kontonavn {action} A07-regel.")
+        if skipped:
+            self.status_var.set(f"{self.status_var.get()} Hoppet over {skipped}.")
+
+    def _append_selected_control_account_names_to_a07_alias(self) -> None:
+        self._learn_selected_control_account_names(exclude=False, remove_mapping=False)
+
+    def _exclude_selected_control_account_names_from_a07_code(self) -> None:
+        self._learn_selected_control_account_names(exclude=True, remove_mapping=False)
+
+    def _remove_selected_control_accounts_and_exclude_alias(self) -> None:
+        self._learn_selected_control_account_names(exclude=True, remove_mapping=True)
+
+    def _selected_control_account_learning_context(self) -> dict[str, object]:
+        accounts_getter = getattr(self, "_selected_control_account_ids", None)
+        try:
+            accounts = accounts_getter() if callable(accounts_getter) else []
+        except Exception:
+            accounts = []
+        accounts = [str(account or "").strip() for account in accounts if str(account or "").strip()]
+        if not accounts:
+            return {"enabled": False, "code_label": "A07-kode", "accounts": []}
+        name_lookup = getattr(self, "_control_account_name_lookup", None)
+        try:
+            names = name_lookup(accounts) if callable(name_lookup) else {}
+        except Exception:
+            names = {}
+        code_getter = getattr(self, "_mapped_a07_code_for_account", None)
+        pairs: list[tuple[str, str, str]] = []
+        codes: list[str] = []
+        for account in accounts:
+            try:
+                code = str(code_getter(account) if callable(code_getter) else "").strip()
+            except Exception:
+                code = ""
+            name = str((names or {}).get(account) or "").strip()
+            if code and name:
+                pairs.append((account, code, name))
+                if code not in codes:
+                    codes.append(code)
+        if len(codes) == 1:
+            code_label = codes[0]
+        elif len(codes) > 1:
+            code_label = "valgte A07-koder"
+        else:
+            code_label = "A07-kode"
+        return {
+            "enabled": bool(pairs),
+            "code_label": code_label,
+            "accounts": accounts,
+            "pairs": pairs,
+        }
 
     def _assign_selected_control_mapping(self) -> None:
         accounts = self._selected_control_gl_accounts()
@@ -1287,48 +1569,15 @@ class A07PageMappingActionsMixin:
 
         if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
             self._notify_inline(
-                "Last A07 og bruk aktiv saldobalanse for valgt klient/Ã¥r fÃ¸r du kjÃ¸rer Tryllestav.",
+                "Last A07 og bruk aktiv saldobalanse for valgt klient/år før du kjører trygg auto-matching.",
                 focus_widget=self,
             )
             return
 
         try:
-            selected_code = self._selected_control_code()
-            unresolved_before = unresolved_codes(self.a07_overview_df)
-            hist_codes, hist_accounts = self._apply_safe_history_mappings()
-            unresolved_after_history = unresolved_before
-            if hist_codes:
-                self._refresh_core(focus_code=selected_code)
-                unresolved_after_history = unresolved_codes(self.a07_overview_df)
-            suggestion_codes, suggestion_accounts, skipped_codes = self._apply_magic_wand_suggestions(
-                unresolved_after_history
-            )
-
-            total_codes = hist_codes + suggestion_codes
-            total_accounts = hist_accounts + suggestion_accounts
-            if total_codes == 0:
-                skipped_total = len(unresolved_before)
-                self._notify_inline(
-                    f"Tryllestav fant ingen trygge forslag. Skippet {skipped_total} uloste koder.",
-                    focus_widget=self.tree_a07,
-                )
-                return
-
-            autosaved = self._autosave_mapping()
-            self._refresh_core(focus_code=selected_code)
-            self._focus_control_code(selected_code)
-            skipped_total = max(skipped_codes, max(0, len(unresolved_before) - total_codes))
-            if autosaved:
-                self.status_var.set(
-                    f"Tryllestav brukte {total_codes} mappinger ({total_accounts} kontoer), skippet {skipped_total} koder uten trygg auto-match og lagret endringen."
-                )
-            else:
-                self.status_var.set(
-                    f"Tryllestav brukte {total_codes} mappinger ({total_accounts} kontoer) og skippet {skipped_total} koder uten trygg auto-match."
-                )
-            self._select_primary_tab()
+            self._apply_rf1022_candidate_suggestions()
         except Exception as exc:
-            messagebox.showerror("A07", f"Tryllestav kunne ikke fullfÃ¸re:\n{exc}")
+            messagebox.showerror("A07", f"Trygg auto-matching kunne ikke fullføre:\n{exc}")
 
     def _open_manual_mapping_clicked(self) -> None:
         if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
@@ -1393,6 +1642,20 @@ class A07PageMappingActionsMixin:
             code = str(row.get("Kode") or "").strip() or self._selected_control_code()
             if code in _locked_codes_for(self):
                 self._notify_inline("Valgt kode er låst. Lås opp før du bruker forslag.", focus_widget=self.tree_a07)
+                return
+            if code.startswith("A07_GROUP:"):
+                self._notify_inline(
+                    "A07-grupper er satt i avansert/legacy-modus og kan ikke brukes med trygg auto.",
+                    focus_widget=self.tree_control_suggestions,
+                )
+                return
+            if not a07_suggestion_is_strict_auto(row):
+                reason = str(row.get("SuggestionGuardrailReason") or "").strip()
+                suffix = f" ({reason})" if reason else ""
+                self._notify_inline(
+                    f"Valgt forslag er ikke trygt nok for automatisk bruk{suffix}. Bruk manuell/avansert mapping.",
+                    focus_widget=self.tree_control_suggestions,
+                )
                 return
             apply_suggestion_to_mapping(self.workspace.mapping, row)
             autosaved = self._autosave_mapping()
@@ -1485,46 +1748,7 @@ class A07PageMappingActionsMixin:
             messagebox.showerror("A07", f"Kunne ikke bruke sikre historikkmappinger:\n{exc}")
 
     def _apply_batch_suggestions_clicked(self) -> None:
-        selected_work_level = getattr(self, "_selected_control_work_level", None)
-        try:
-            work_level = selected_work_level() if callable(selected_work_level) else "a07"
-        except Exception:
-            work_level = "a07"
-        if work_level == "rf1022":
-            self._apply_rf1022_candidate_suggestions()
-            return
-
-        if self.workspace.suggestions is None or self.workspace.suggestions.empty:
-            self._notify_inline("Det finnes ingen forslag Ã¥ bruke.", focus_widget=self.tree_a07)
-            return
-
-        row_indexes = select_batch_suggestion_rows(
-            self.workspace.suggestions,
-            self._effective_mapping(),
-            min_score=0.85,
-            locked_codes=_locked_codes_for(self),
-        )
-        if not row_indexes:
-            self._notify_inline(
-                "Fant ingen sikre forslag. Batch-bruk krever treff innen toleranse og ingen konflikter.",
-                focus_widget=self.tree_control_suggestions,
-            )
-            return
-
-        try:
-            applied_codes, applied_accounts = self._apply_safe_suggestions()
-
-            autosaved = self._autosave_mapping()
-            self._refresh_core()
-            if autosaved:
-                self.status_var.set(
-                    f"Brukte {applied_codes} sikre forslag ({applied_accounts} kontoer) og lagret endringen."
-                )
-            else:
-                self.status_var.set(f"Brukte {applied_codes} sikre forslag ({applied_accounts} kontoer).")
-            self._select_primary_tab()
-        except Exception as exc:
-            messagebox.showerror("A07", f"Kunne ikke bruke sikre forslag:\n{exc}")
+        self._apply_rf1022_candidate_suggestions()
 
     def _remove_selected_mapping(self) -> None:
         selection = self.tree_mapping.selection()

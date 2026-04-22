@@ -86,14 +86,20 @@ def test_kilde_column_is_added():
         root.destroy()
 
 
+def _row(page, iid):
+    cols = list(page._tree["columns"])
+    values = page._tree.item(iid, "values")
+    return {col: values[i] for i, col in enumerate(cols)}
+
+
 def test_apply_filter_shows_auto_source_for_unconfirmed(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
         page._apply_filter()
-        values = page._tree.item("1", "values")
-        assert values[0] == "10"
-        assert values[1] == "Salgsinntekt"
-        assert values[2] == "auto"
+        row = _row(page, "1")
+        assert row["regnr"] == "10"
+        assert row["regnskapslinje"] == "Salgsinntekt"
+        assert row["kilde"] == "auto"
         assert "wp_auto" in page._tree.item("1", "tags")
     finally:
         root.destroy()
@@ -109,10 +115,10 @@ def test_apply_filter_shows_confirmed_source_and_tag(tmp_path, monkeypatch):
         )
         page._workpapers = store.load_workpapers("Acme AS", "2025")
         page._apply_filter()
-        values = page._tree.item("1", "values")
-        assert values[0] == "70"
-        assert values[1] == "Annen driftskostnad"
-        assert values[2] == "bekreftet"
+        row = _row(page, "1")
+        assert row["regnr"] == "70"
+        assert row["regnskapslinje"] == "Annen driftskostnad"
+        assert row["kilde"] == "bekreftet"
         assert "wp_confirmed" in page._tree.item("1", "tags")
     finally:
         root.destroy()
@@ -131,8 +137,7 @@ def test_on_confirm_current_persists_auto_match(tmp_path, monkeypatch):
         assert loaded[1].confirmed_regnr == "10"
         assert loaded[1].confirmed_regnskapslinje == "Salgsinntekt"
 
-        values = page._tree.item("1", "values")
-        assert values[2] == "bekreftet"
+        assert _row(page, "1")["kilde"] == "bekreftet"
     finally:
         root.destroy()
 
@@ -166,9 +171,9 @@ def test_on_clear_confirmation_removes_entry(tmp_path, monkeypatch):
         page._on_clear_confirmation()
 
         assert 2 not in store.load_workpapers("Acme AS", "2025")
-        values = page._tree.item("2", "values")
-        assert values[0] == "605"  # tilbake til auto-match
-        assert values[2] == "auto"
+        row = _row(page, "2")
+        assert row["regnr"] == "605"  # tilbake til auto-match
+        assert row["kilde"] == "auto"
     finally:
         root.destroy()
 

@@ -325,6 +325,24 @@
         2770,
         2785
       ]
+    },
+    "annet": {
+      "aliases": [
+        "naturalytelser",
+        "annen lønnsytelse",
+        "andre lønnsytelser",
+        "annen lønnsytelser"
+      ],
+      "exclude_aliases": [
+        "revisjon",
+        "revisjonshonorar",
+        "leie",
+        "leie maskiner",
+        "advokathonorar",
+        "rettshjelp"
+      ],
+      "account_ranges": [],
+      "boost_accounts": []
     }
   }
 }

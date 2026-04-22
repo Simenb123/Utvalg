@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import pandas as pd
 
@@ -29,6 +29,7 @@ from .matching import (
     best_suggestion_row_for_code,
     decorate_suggestions_for_display,
     evaluate_current_mapping_suspicion,
+    infer_semantic_family,
     safe_previous_accounts_for_code,
     ui_suggestion_row_from_series,
 )
@@ -37,7 +38,16 @@ from .basis import (
     control_gl_basis_column_for_account as _shared_control_gl_basis_column_for_account,
     normalize_gl_basis_column as _shared_normalize_gl_basis_column,
 )
+from .rf1022_bridge import (
+    RF1022_A07_BRIDGE as _RF1022_A07_BRIDGE,
+    RF1022_UNKNOWN_GROUP,
+    a07_group_member_codes,
+    resolve_a07_rf1022_group,
+    rf1022_group_a07_codes,
+)
 from .statement_source import build_current_control_statement_rows
+from ..rule_learning import evaluate_a07_rule_name_status
+from ..suggest.rulebook import load_rulebook
 from ..suggest.models import EXCLUDED_A07_CODES
 
 
@@ -53,6 +63,7 @@ _RF1022_POST_RULES = (
     (100, "Refusjon", {"100_refusjon"}),
     (111, "Naturalytelser", {"111_naturalytelser"}),
     (112, "Pensjon", {"112_pensjon"}),
+    (999, "Uavklart RF-1022", {"uavklart_rf1022"}),
     (100, "Lonn og trekk", {"Lonnskostnad", "Skyldig lonn", "Feriepenger", "Skyldig feriepenger", "Skattetrekk"}),
     (
         110,
@@ -68,33 +79,12 @@ _RF1022_POST_RULES = (
     (130, "Naturalytelser og styrehonorar", {"Naturalytelse", "Styrehonorar"}),
 )
 
-_RF1022_A07_BRIDGE: dict[str, tuple[str, ...]] = {
-    "100_loenn_ol": (
-        "fastloenn",
-        "timeloenn",
-        "overtidsgodtgjoerelse",
-        "feriepenger",
-        "trekkloennForFerie",
-        "styrehonorarOgGodtgjoerelseVerv",
-        "annet",
-    ),
-    "100_refusjon": (
-        "sumAvgiftsgrunnlagRefusjon",
-    ),
-    "111_naturalytelser": (
-        "elektroniskKommunikasjon",
-        "skattepliktigDelForsikringer",
-    ),
-    "112_pensjon": (
-        "tilskuddOgPremieTilPensjon",
-    ),
-}
-
 _RF1022_GROUP_LABELS: dict[str, str] = {
     "100_loenn_ol": "Post 100 Lonn o.l.",
     "100_refusjon": "Post 100 Refusjon",
     "111_naturalytelser": "Post 111 Naturalytelser",
     "112_pensjon": "Post 112 Pensjon",
+    "uavklart_rf1022": "Uavklart RF-1022",
 }
 
 _WORK_FAMILY_BY_GROUP = {
@@ -102,6 +92,7 @@ _WORK_FAMILY_BY_GROUP = {
     "100_refusjon": "refund",
     "111_naturalytelser": "natural",
     "112_pensjon": "pension",
+    "uavklart_rf1022": "unknown",
 }
 
 _CONTROL_COLUMNS = ("A07Post", "A07_Belop", "GL_Belop", "Diff")
@@ -127,9 +118,78 @@ _CONTROL_EXTRA_COLUMNS = (
     "Locked",
     "Hvorfor",
 )
-_CONTROL_GL_DATA_COLUMNS = ("Konto", "Navn", "IB", "Endring", "UB", "BelopAktiv", "Kol", "Kode", "Rf1022GroupId", "WorkFamily")
-_CONTROL_SELECTED_ACCOUNT_COLUMNS = ("Konto", "Navn", "IB", "Endring", "UB")
+_CONTROL_GL_DATA_COLUMNS = (
+    "Konto",
+    "Navn",
+    "IB",
+    "Endring",
+    "UB",
+    "BelopAktiv",
+    "Kol",
+    "Kode",
+    "Rf1022GroupId",
+    "AliasStatus",
+    "WorkFamily",
+    "MappingAuditStatus",
+    "MappingAuditReason",
+)
+_CONTROL_SELECTED_ACCOUNT_COLUMNS = (
+    "Konto",
+    "Navn",
+    "AliasStatus",
+    "MappingAuditStatus",
+    "MappingAuditReason",
+    "IB",
+    "Endring",
+    "UB",
+)
 _HISTORY_COLUMNS = ("Kode", "Navn", "AarKontoer", "HistorikkKontoer", "Status", "KanBrukes", "Merknad")
+_MAPPING_AUDIT_COLUMNS = (
+    "Konto",
+    "Navn",
+    "CurrentA07Code",
+    "CurrentRf1022GroupId",
+    "ExpectedRf1022GroupId",
+    "AliasStatus",
+    "Kol",
+    "Belop",
+    "Status",
+    "Reason",
+    "Evidence",
+)
+_MAPPING_REVIEW_COLUMNS = (
+    "Konto",
+    "Navn",
+    "Kode",
+    "Rf1022GroupId",
+    "ExpectedRf1022GroupId",
+    "AliasStatus",
+    "Kol",
+    "Belop",
+    "Kontroll",
+    "Hvorfor",
+    "Evidence",
+    "AnbefaltHandling",
+)
+_GLOBAL_AUTO_PLAN_COLUMNS = (
+    "Konto",
+    "Navn",
+    "Kode",
+    "Rf1022GroupId",
+    "Kol",
+    "Belop",
+    "Action",
+    "Status",
+    "Reason",
+)
+_MAPPING_AUDIT_STATUS_PRIORITY = {
+    "Feil": 0,
+    "Mistenkelig": 1,
+    "Uavklart": 2,
+    "Trygg": 3,
+    "": 4,
+}
+_MAPPING_REVIEW_CRITICAL_STATUSES = {"Feil", "Mistenkelig"}
 _CONTROL_STATEMENT_COLUMNS = _CANONICAL_CONTROL_STATEMENT_COLUMNS
 _RF1022_OVERVIEW_COLUMNS = ("GroupId", "Post", "Omraade", "Kontrollgruppe", "GL_Belop", "A07", "Diff", "Status", "AntallKontoer")
 _RF1022_ACCOUNT_COLUMNS = (
@@ -208,13 +268,6 @@ def _empty_rf1022_accounts_df() -> pd.DataFrame:
     return pd.DataFrame(columns=list(_RF1022_ACCOUNT_COLUMNS))
 
 
-def rf1022_group_a07_codes(group_id: object) -> tuple[str, ...]:
-    group_s = str(group_id or "").strip()
-    if not group_s:
-        return ()
-    return tuple(_RF1022_A07_BRIDGE.get(group_s, ()))
-
-
 def rf1022_group_label(group_id: object) -> str:
     group_s = str(group_id or "").strip()
     if not group_s:
@@ -223,13 +276,7 @@ def rf1022_group_label(group_id: object) -> str:
 
 
 def a07_code_rf1022_group(code: object) -> str:
-    code_s = str(code or "").strip()
-    if not code_s:
-        return ""
-    for group_id, codes in _RF1022_A07_BRIDGE.items():
-        if code_s in codes:
-            return group_id
-    return "100_loenn_ol"
+    return resolve_a07_rf1022_group(code)
 
 
 def work_family_for_rf1022_group(group_id: object) -> str:
@@ -632,41 +679,89 @@ def build_rf1022_statement_df(
     control_statement_df: pd.DataFrame | None,
     *,
     basis_col: str = "Endring",
+    a07_overview_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     control_statement_df = normalize_control_statement_df(control_statement_df)
-    if control_statement_df.empty:
+    a07_totals = _rf1022_a07_totals_from_overview(a07_overview_df)
+    if control_statement_df.empty and not a07_totals:
         return _empty_rf1022_overview_df()
 
     gl_col = basis_col if basis_col in control_statement_df.columns else "Endring"
-    rows: list[dict[str, object]] = []
+    rows_by_group: dict[str, dict[str, object]] = {}
     for _, row in control_statement_df.iterrows():
         group_id = str(row.get("Gruppe") or "").strip()
         label = str(row.get("Navn") or "").strip() or group_id
         if not group_id and not label:
             continue
         post_no, post_label = rf1022_post_for_group(group_id, label)
-        rows.append(
-            {
-                "GroupId": group_id or label,
-                "Post": str(post_no),
-                "Omraade": post_label,
-                "Kontrollgruppe": label,
-                "GL_Belop": row.get(gl_col),
-                "A07": row.get("A07"),
-                "Diff": row.get("Diff"),
-                "Status": row.get("Status"),
-                "AntallKontoer": row.get("AntallKontoer"),
-                "WorkFamily": work_family_for_rf1022_group(group_id or label),
-                "_post_sort": post_no,
-            }
-        )
+        key = group_id or label
+        gl_amount = _safe_float(row.get(gl_col)) or 0.0
+        a07_amount = a07_totals.get(key)
+        if a07_amount is None:
+            a07_amount = _safe_float(row.get("A07"))
+        diff_amount = (float(a07_amount) - gl_amount) if a07_amount is not None else row.get("Diff")
+        rows_by_group[key] = {
+            "GroupId": key,
+            "Post": str(post_no),
+            "Omraade": post_label,
+            "Kontrollgruppe": label,
+            "GL_Belop": gl_amount,
+            "A07": a07_amount,
+            "Diff": diff_amount,
+            "Status": row.get("Status"),
+            "AntallKontoer": row.get("AntallKontoer"),
+            "WorkFamily": work_family_for_rf1022_group(key),
+            "_post_sort": post_no,
+        }
 
-    if not rows:
+    for group_id, a07_amount in a07_totals.items():
+        if group_id in rows_by_group:
+            continue
+        post_no, post_label = rf1022_post_for_group(group_id, rf1022_group_label(group_id))
+        rows_by_group[group_id] = {
+            "GroupId": group_id,
+            "Post": str(post_no),
+            "Omraade": post_label,
+            "Kontrollgruppe": rf1022_group_label(group_id) or group_id,
+            "GL_Belop": 0.0,
+            "A07": a07_amount,
+            "Diff": a07_amount,
+            "Status": "Mangler GL",
+            "AntallKontoer": 0,
+            "WorkFamily": work_family_for_rf1022_group(group_id),
+            "_post_sort": post_no,
+        }
+
+    if not rows_by_group:
         return _empty_rf1022_overview_df()
 
-    view_df = pd.DataFrame(rows)
+    view_df = pd.DataFrame(rows_by_group.values())
     view_df = view_df.sort_values(by=["_post_sort", "Kontrollgruppe", "GroupId"], kind="stable")
     return view_df.drop(columns=["_post_sort"], errors="ignore").reset_index(drop=True)
+
+
+def _rf1022_a07_totals_from_overview(a07_overview_df: pd.DataFrame | None) -> dict[str, float]:
+    if a07_overview_df is None or a07_overview_df.empty:
+        return {}
+    if "Kode" not in a07_overview_df.columns:
+        return {}
+    value_col = "Belop" if "Belop" in a07_overview_df.columns else "A07_Belop"
+    if value_col not in a07_overview_df.columns:
+        return {}
+
+    totals: dict[str, float] = {}
+    for _, row in a07_overview_df.iterrows():
+        code = str(row.get("Kode") or "").strip()
+        if not code:
+            continue
+        group_id = a07_code_rf1022_group(code)
+        if not group_id:
+            continue
+        amount = _safe_float(row.get(value_col))
+        if amount is None:
+            continue
+        totals[group_id] = totals.get(group_id, 0.0) + float(amount)
+    return {group_id: amount for group_id, amount in totals.items() if abs(float(amount)) > 0.005}
 
 
 def build_rf1022_statement_summary(
@@ -1122,6 +1217,7 @@ def build_control_queue_df(
     gl_df: pd.DataFrame,
     code_profile_state: dict[str, dict[str, object]] | None = None,
     locked_codes: set[str] | None = None,
+    mapping_audit_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     if a07_overview_df is None or a07_overview_df.empty:
         return _empty_control_df()
@@ -1170,6 +1266,10 @@ def build_control_queue_df(
             gl_df=gl_df,
             profile_state=profile_state,
         )
+        audit_reasons = _mapping_audit_reasons_for_code(mapping_audit_df, code)
+        if audit_reasons:
+            current_mapping_suspicious = True
+            current_mapping_suspicious_reason = "; ".join(audit_reasons[:3])
         next_action = a07_control_status.control_next_action_label(
             reconcile_status,
             has_history=bool(history_accounts),
@@ -1346,11 +1446,19 @@ def build_control_gl_df(
     mapping: dict[str, str],
     *,
     basis_col: str = "Endring",
+    rulebook: object | None = None,
 ) -> pd.DataFrame:
     if gl_df is None or gl_df.empty:
         return pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
 
     mapping_clean = {str(account).strip(): str(code).strip() for account, code in (mapping or {}).items()}
+    if rulebook is None:
+        try:
+            effective_rulebook = load_rulebook(None)
+        except Exception:
+            effective_rulebook = {}
+    else:
+        effective_rulebook = rulebook
     rows: list[dict[str, object]] = []
     for _, row in gl_df.iterrows():
         konto = str(row.get("Konto") or "").strip()
@@ -1374,11 +1482,955 @@ def build_control_gl_df(
                 "Kol": value_column,
                 "Kode": mapped_code,
                 "Rf1022GroupId": rf1022_group_id,
+                "AliasStatus": evaluate_a07_rule_name_status(mapped_code, row.get("Navn"), effective_rulebook) if mapped_code else "",
                 "WorkFamily": work_family_for_rf1022_group(rf1022_group_id) if rf1022_group_id else "unknown",
             }
         )
 
     return pd.DataFrame(rows, columns=list(_CONTROL_GL_DATA_COLUMNS))
+
+
+def _normalize_audit_text(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    replacements = {
+        "ø": "o",
+        "æ": "ae",
+        "å": "a",
+        "Ã¸": "o",
+        "Ã¦": "ae",
+        "Ã¥": "a",
+        "ÃƒÂ¸": "o",
+        "ÃƒÂ¦": "ae",
+        "ÃƒÂ¥": "a",
+        "-": " ",
+        "_": " ",
+        "/": " ",
+        ",": " ",
+        ".": " ",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return " ".join(text.split())
+
+
+_AUDIT_NON_PAYROLL_SCOPE_TOKENS = (
+    "revisjon",
+    "regnskap",
+    "juridisk",
+    "advokat",
+    "husleie",
+    "leie",
+    "renhold",
+    "kontormaskin",
+    "maskin",
+    "datasystem",
+    "datautstyr",
+    "software",
+    "hardware",
+    "vedlikehold",
+    "service",
+    "kontor",
+    "frakt",
+    "transport",
+)
+_AUDIT_SPECIFIC_REFUND_TOKENS = (
+    "nav",
+    "sykepenger",
+    "sykepenge",
+    "foreldrepenger",
+    "foreldrepenge",
+    "svangerskapspenger",
+)
+_AUDIT_PAYROLL_TOKENS = (
+    "lonn",
+    "loenn",
+    "ferie",
+    "feriepenger",
+    "bonus",
+    "overtid",
+    "etterlonn",
+    "etterloenn",
+    "styre",
+    "styrehonorar",
+    "ansatt",
+    "ansatte",
+    "personalkost",
+    "godtgjoerelse",
+)
+_AUDIT_NATURAL_TOKENS = ("telefon", "mobil", "ekom", "kommunikasjon", "forsikring", "bil")
+_AUDIT_PENSION_TOKENS = ("pensjon", "otp", "premie")
+
+
+def _audit_account_text(account: object, name: object) -> str:
+    return _normalize_audit_text(f"{account or ''} {name or ''}")
+
+
+def _audit_is_non_payroll_scope(account: object, name: object) -> bool:
+    text = _audit_account_text(account, name)
+    if not text:
+        return False
+    if any(token in text for token in ("styrehonorar", "styre honorar", "godtgjoerelse verv")):
+        return False
+    return any(token in text for token in _AUDIT_NON_PAYROLL_SCOPE_TOKENS)
+
+
+def _audit_is_specific_refund(account: object, name: object) -> bool:
+    account_s = str(account or "").strip()
+    text = _audit_account_text(account, name)
+    return account_s == "5800" or any(token in text for token in _AUDIT_SPECIFIC_REFUND_TOKENS)
+
+
+def _audit_is_generic_refund(account: object, name: object) -> bool:
+    text = _audit_account_text(account, name)
+    return "refusjon" in text and not _audit_is_specific_refund(account, name)
+
+
+def _audit_expected_rf1022_group(account: object, name: object) -> str:
+    account_s = str(account or "").strip()
+    text = _audit_account_text(account, name)
+    if account_s in _RF1022_ACCRUAL_PAY_ACCOUNTS or any(token in text for token in ("feriepenger", "feriepengegjeld")):
+        return "100_loenn_ol"
+    if _audit_is_specific_refund(account_s, name) or _audit_is_generic_refund(account_s, name):
+        return "100_refusjon"
+    if any(token in text for token in _AUDIT_PENSION_TOKENS):
+        return "112_pensjon"
+    if any(token in text for token in _AUDIT_NATURAL_TOKENS):
+        return "111_naturalytelser"
+    if any(token in text for token in _AUDIT_PAYROLL_TOKENS):
+        return "100_loenn_ol"
+    return ""
+
+
+def _audit_suggestion_rows_for_account_code(
+    suggestions_df: pd.DataFrame | None,
+    *,
+    account: str,
+    code: str,
+) -> pd.DataFrame:
+    if suggestions_df is None or suggestions_df.empty:
+        return pd.DataFrame()
+    if "Kode" not in suggestions_df.columns or "ForslagKontoer" not in suggestions_df.columns:
+        return pd.DataFrame()
+    work = suggestions_df.copy()
+    code_values = work["Kode"].fillna("").astype(str).str.strip()
+    accepted_codes = {str(code or "").strip()}
+    group_members = set(a07_group_member_codes(code))
+    if group_members:
+        accepted_codes |= group_members
+    accepted_codes = {value for value in accepted_codes if value}
+    work = work.loc[code_values.isin(accepted_codes)].copy()
+    if work.empty:
+        return work
+
+    def _has_account(value: object) -> bool:
+        return account in set(_suggestion_account_tokens(value))
+
+    return work.loc[work["ForslagKontoer"].apply(_has_account)].copy()
+
+
+def _audit_evidence_for_mapping(
+    *,
+    account: str,
+    code: str,
+    name: object,
+    suggestions_df: pd.DataFrame | None,
+    mapping_previous: Mapping[str, str] | None,
+    profile_state: Mapping[str, object] | None,
+) -> set[str]:
+    evidence: set[str] = {"manual"}
+    previous_code = str((mapping_previous or {}).get(account) or "").strip()
+    if previous_code and previous_code == code:
+        evidence.add("historikk")
+    source = str((profile_state or {}).get("source") or "").strip().lower()
+    if source:
+        evidence.add(f"profil:{source}")
+
+    suggestion_rows = _audit_suggestion_rows_for_account_code(
+        suggestions_df,
+        account=account,
+        code=code,
+    )
+    for _, row in suggestion_rows.iterrows():
+        guardrail = _suggestion_text(row, "SuggestionGuardrail").lower()
+        if guardrail == "accepted":
+            evidence.add("accepted")
+        if _suggestion_flag(row, "WithinTolerance"):
+            evidence.add("belop")
+        if _suggestion_flag(row, "UsedRulebook"):
+            evidence.add("katalog")
+        if _suggestion_flag(row, "UsedUsage"):
+            evidence.add("kontobruk")
+        if _suggestion_text(row, "HitTokens"):
+            evidence.add("alias")
+        if _suggestion_flag(row, "UsedSpecialAdd") or "special_add" in _suggestion_text(row, "Explain").lower():
+            evidence.add("special_add")
+
+    if account in _RF1022_SPECIAL_ADD_ACCOUNTS.get(code, set()):
+        evidence.add("special_add")
+    return evidence
+
+
+def _audit_status_for_mapping(
+    *,
+    account: str,
+    name: object,
+    code: str,
+    current_group: str,
+    expected_group: str,
+    evidence: set[str],
+) -> tuple[str, str]:
+    if not code:
+        return "Uavklart", "Ingen A07-kobling."
+    excluded_codes = {str(item or "").strip().casefold() for item in EXCLUDED_A07_CODES}
+    if code.casefold() in excluded_codes:
+        return "Uavklart", "Teknisk/ekskludert A07-kode."
+    if a07_group_member_codes(code):
+        return "Uavklart", "A07-gruppe er legacy/avansert og regnes ikke som trygg kobling."
+    if current_group == RF1022_UNKNOWN_GROUP:
+        return "Uavklart", "A07-koden mangler avklart RF-1022-bro."
+
+    if current_group == "100_loenn_ol" and _audit_is_non_payroll_scope(account, name):
+        return "Feil", "Kontoen ser ut som drifts-/honorarkostnad utenfor A07-lonn."
+    if current_group == "100_refusjon" and _audit_is_generic_refund(account, name):
+        return "Mistenkelig", "Generisk refusjon uten NAV/sykepenger/foreldrepenger."
+    if expected_group and current_group and expected_group != current_group:
+        return "Feil", f"Forventet {expected_group}, men koblet til {current_group}."
+    if expected_group and not current_group:
+        return "Mistenkelig", f"Kontoen ser ut til aa hore til {expected_group}, men A07-koden mangler RF-1022-bro."
+    if current_group and not expected_group and _audit_is_non_payroll_scope(account, name):
+        return "Feil", "Kontoen ser ikke ut til aa hore hjemme i A07/RF-1022."
+
+    semantic_evidence = {"alias", "katalog", "kontobruk", "special_add", "accepted"}
+    has_semantic = bool(evidence & semantic_evidence)
+    has_amount = "belop" in evidence
+    if "special_add" in evidence:
+        return "Trygg", "Eksplisitt spesialregel for periodisering/balansepost."
+    if current_group and expected_group == current_group and (
+        has_semantic or any(token in _audit_account_text(account, name) for token in _AUDIT_PAYROLL_TOKENS + _AUDIT_NATURAL_TOKENS + _AUDIT_PENSION_TOKENS)
+    ):
+        return "Trygg", "Konto og RF-1022-gruppe peker samme faglige vei."
+    if has_amount and not has_semantic:
+        return "Mistenkelig", "Belop alene er ikke nok til trygg mapping."
+    if evidence <= {"manual", "historikk"} and "historikk" in evidence:
+        return "Mistenkelig", "Historikk alene er ikke nok til trygg mapping."
+    if current_group:
+        family = infer_semantic_family(f"{code} {name}")
+        if family:
+            return "Trygg", "Konto og A07-kode har samme fagfamilie."
+        return "Uavklart", "Koblingen mangler tydelig faglig evidens."
+    return "Uavklart", "Koblingen mangler RF-1022-gruppe."
+
+
+def build_mapping_audit_df(
+    gl_df: pd.DataFrame | None,
+    mapping_current: Mapping[str, str] | None,
+    *,
+    suggestions_df: pd.DataFrame | None = None,
+    mapping_previous: Mapping[str, str] | None = None,
+    code_profile_state: Mapping[str, Mapping[str, object]] | None = None,
+    basis_col: str = "Endring",
+    include_unmapped: bool = False,
+    rulebook: object | None = None,
+) -> pd.DataFrame:
+    if gl_df is None or gl_df.empty:
+        return pd.DataFrame(columns=list(_MAPPING_AUDIT_COLUMNS))
+
+    mapping_clean = {
+        str(account).strip(): str(code).strip()
+        for account, code in (mapping_current or {}).items()
+        if str(account).strip()
+    }
+    gl_work = gl_df.copy()
+    if "Konto" not in gl_work.columns:
+        return pd.DataFrame(columns=list(_MAPPING_AUDIT_COLUMNS))
+    gl_work["Konto"] = gl_work["Konto"].astype(str).str.strip()
+    gl_work = gl_work.drop_duplicates(subset=["Konto"])
+    gl_by_account = {str(row.get("Konto") or "").strip(): row for _, row in gl_work.iterrows()}
+    if rulebook is None:
+        try:
+            effective_rulebook = load_rulebook(None)
+        except Exception:
+            effective_rulebook = {}
+    else:
+        effective_rulebook = rulebook
+
+    account_order = list(gl_by_account)
+    if not include_unmapped:
+        account_order = [account for account in account_order if str(mapping_clean.get(account) or "").strip()]
+
+    rows: list[dict[str, object]] = []
+    for account in account_order:
+        row = gl_by_account.get(account)
+        if row is None:
+            continue
+        name = row.get("Navn")
+        code = str(mapping_clean.get(account) or "").strip()
+        value_column = control_gl_basis_column_for_account(account, name, requested_basis=basis_col)
+        current_group = a07_code_rf1022_group(code) if code else ""
+        expected_group = _audit_expected_rf1022_group(account, name)
+        evidence = _audit_evidence_for_mapping(
+            account=account,
+            code=code,
+            name=name,
+            suggestions_df=suggestions_df,
+            mapping_previous=mapping_previous,
+            profile_state=(code_profile_state or {}).get(code, {}) if code else {},
+        )
+        status, reason = _audit_status_for_mapping(
+            account=account,
+            name=name,
+            code=code,
+            current_group=current_group,
+            expected_group=expected_group,
+            evidence=evidence,
+        )
+        alias_status = evaluate_a07_rule_name_status(code, name, effective_rulebook) if code else ""
+        if alias_status == "Ekskludert" and status == "Trygg":
+            status = "Mistenkelig"
+            reason = (
+                f"{reason} Kontonavn er ekskludert for A07-koden."
+                if reason
+                else "Kontonavn er ekskludert for A07-koden."
+            )
+        rows.append(
+            {
+                "Konto": account,
+                "Navn": name,
+                "CurrentA07Code": code,
+                "CurrentRf1022GroupId": current_group,
+                "ExpectedRf1022GroupId": expected_group,
+                "AliasStatus": alias_status,
+                "Kol": value_column,
+                "Belop": row.get(value_column),
+                "Status": status,
+                "Reason": reason,
+                "Evidence": ", ".join(sorted(evidence)),
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(columns=list(_MAPPING_AUDIT_COLUMNS))
+    return pd.DataFrame(rows, columns=list(_MAPPING_AUDIT_COLUMNS)).reset_index(drop=True)
+
+
+def sort_mapping_rows_by_audit_status(mapping_df: pd.DataFrame | None) -> pd.DataFrame:
+    if mapping_df is None:
+        return pd.DataFrame()
+    work = mapping_df.copy()
+    if work.empty:
+        return work.reset_index(drop=True)
+    status_column = (
+        "Status"
+        if "Status" in work.columns
+        else "MappingAuditStatus"
+        if "MappingAuditStatus" in work.columns
+        else "Kontroll"
+        if "Kontroll" in work.columns
+        else ""
+    )
+    if not status_column:
+        return work.reset_index(drop=True)
+    status_values = work[status_column].fillna("").astype(str).str.strip()
+    work["_audit_status_order"] = status_values.map(_MAPPING_AUDIT_STATUS_PRIORITY).fillna(4).astype(int)
+    work["_audit_original_order"] = range(len(work.index))
+    sort_columns = ["_audit_status_order", "_audit_original_order"]
+    work = work.sort_values(by=sort_columns, kind="stable")
+    return work.drop(columns=["_audit_status_order", "_audit_original_order"], errors="ignore").reset_index(drop=True)
+
+
+def filter_mapping_rows_by_audit_status(
+    mapping_df: pd.DataFrame | None,
+    filter_key: object,
+) -> pd.DataFrame:
+    if mapping_df is None:
+        return pd.DataFrame()
+    work = sort_mapping_rows_by_audit_status(mapping_df)
+    key = str(filter_key or "alle").strip().casefold()
+    label_aliases = {
+        "kritisk": "kritiske",
+        "critical": "kritiske",
+        "alle": "alle",
+        "all": "alle",
+        "feil": "feil",
+        "error": "feil",
+        "mistenkelig": "mistenkelige",
+        "mistenkelige": "mistenkelige",
+        "suspicious": "mistenkelige",
+        "uavklart": "uavklarte",
+        "uavklarte": "uavklarte",
+        "trygg": "trygge",
+        "trygge": "trygge",
+        "safe": "trygge",
+    }
+    key = label_aliases.get(key, key)
+    status_sets = {
+        "kritiske": {"Feil", "Mistenkelig"},
+        "alle": None,
+        "feil": {"Feil"},
+        "mistenkelige": {"Mistenkelig"},
+        "uavklarte": {"Uavklart"},
+        "trygge": {"Trygg"},
+    }
+    wanted = status_sets.get(key)
+    status_column = (
+        "Status"
+        if "Status" in work.columns
+        else "MappingAuditStatus"
+        if "MappingAuditStatus" in work.columns
+        else "Kontroll"
+        if "Kontroll" in work.columns
+        else ""
+    )
+    if wanted is None or not status_column:
+        return work.reset_index(drop=True)
+    statuses = work[status_column].fillna("").astype(str).str.strip()
+    return work.loc[statuses.isin(wanted)].reset_index(drop=True)
+
+
+def _mapping_review_text(row: pd.Series | Mapping[str, object], column: str) -> str:
+    try:
+        value = row.get(column, "")
+    except Exception:
+        value = ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return str(value or "").strip()
+
+
+def _mapping_review_status_column(mapping_df: pd.DataFrame | None) -> str:
+    if mapping_df is None:
+        return ""
+    for column in ("Kontroll", "Status", "MappingAuditStatus"):
+        if column in mapping_df.columns:
+            return column
+    return ""
+
+
+def _mapping_review_action(status: str, reason: str, alias_status: str) -> str:
+    status_s = str(status or "").strip()
+    reason_s = str(reason or "").strip()
+    alias_s = str(alias_status or "").strip()
+    reason_cf = reason_s.casefold()
+    if status_s == "Feil":
+        if "utenfor" in reason_cf or "out-of-scope" in reason_cf:
+            return "Fjern mapping og ekskluder navn"
+        if alias_s == "Ekskludert":
+            return "Fjern mapping eller endre A07-kode"
+        return "Rydd mapping"
+    if status_s == "Mistenkelig":
+        if alias_s == "Ekskludert":
+            return "Fjern mapping eller oppdater regel"
+        return "Vurder manuelt"
+    if status_s == "Uavklart":
+        return "Avklar A07/RF-1022"
+    if status_s == "Trygg":
+        return "Ingen handling"
+    return "Vurder"
+
+
+def _mapping_review_normalized_rows(mapping_df: pd.DataFrame | None) -> list[dict[str, object]]:
+    if mapping_df is None or mapping_df.empty:
+        return []
+    status_column = _mapping_review_status_column(mapping_df)
+    reason_column = "Hvorfor" if "Hvorfor" in mapping_df.columns else "Reason" if "Reason" in mapping_df.columns else "MappingAuditReason"
+    rows: list[dict[str, object]] = []
+    for _, row in mapping_df.iterrows():
+        status = _mapping_review_text(row, status_column)
+        reason = _mapping_review_text(row, reason_column)
+        alias_status = _mapping_review_text(row, "AliasStatus")
+        if alias_status == "Ekskludert" and status == "Trygg":
+            status = "Mistenkelig"
+            reason = (
+                f"{reason} Kontonavn er ekskludert for A07-koden."
+                if reason
+                else "Kontonavn er ekskludert for A07-koden."
+            )
+        code = _mapping_review_text(row, "Kode") or _mapping_review_text(row, "CurrentA07Code")
+        rf_group = _mapping_review_text(row, "Rf1022GroupId") or _mapping_review_text(row, "CurrentRf1022GroupId")
+        rows.append(
+            {
+                "Konto": _mapping_review_text(row, "Konto"),
+                "Navn": _mapping_review_text(row, "Navn"),
+                "Kode": code,
+                "Rf1022GroupId": rf_group,
+                "ExpectedRf1022GroupId": _mapping_review_text(row, "ExpectedRf1022GroupId"),
+                "AliasStatus": alias_status,
+                "Kol": _mapping_review_text(row, "Kol"),
+                "Belop": row.get("Belop", row.get("BelopAktiv", "")) if hasattr(row, "get") else "",
+                "Kontroll": status,
+                "Hvorfor": reason,
+                "Evidence": _mapping_review_text(row, "Evidence"),
+                "AnbefaltHandling": _mapping_review_action(status, reason, alias_status),
+            }
+        )
+    return rows
+
+
+def build_mapping_review_df(
+    mapping_audit_df: pd.DataFrame | None,
+    control_gl_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Build a runtime review model for saved A07 mappings.
+
+    The review model is deliberately derived data. It must not be persisted as a
+    new mapping format; it gives the UI one prioritized truth for cleanup.
+    """
+
+    rows = _mapping_review_normalized_rows(mapping_audit_df)
+    if control_gl_df is not None and not control_gl_df.empty and rows:
+        gl_work = control_gl_df.copy()
+        if "Konto" in gl_work.columns:
+            gl_work["Konto"] = gl_work["Konto"].fillna("").astype(str).str.strip()
+            gl_lookup = gl_work.drop_duplicates(subset=["Konto"]).set_index("Konto", drop=False)
+            for review_row in rows:
+                account = str(review_row.get("Konto") or "").strip()
+                if not account or account not in gl_lookup.index:
+                    continue
+                gl_row = gl_lookup.loc[account]
+                for column in ("Navn", "Kol", "AliasStatus"):
+                    if not str(review_row.get(column) or "").strip():
+                        review_row[column] = gl_row.get(column, "")
+                if not str(review_row.get("Belop") or "").strip():
+                    value_column = str(review_row.get("Kol") or "").strip()
+                    if value_column and value_column in gl_row.index:
+                        review_row["Belop"] = gl_row.get(value_column, "")
+    if not rows:
+        return pd.DataFrame(columns=list(_MAPPING_REVIEW_COLUMNS))
+    return sort_mapping_rows_by_audit_status(
+        pd.DataFrame(rows, columns=list(_MAPPING_REVIEW_COLUMNS))
+    ).reset_index(drop=True)
+
+
+def build_mapping_review_summary(mapping_review_df: pd.DataFrame | None) -> dict[str, int]:
+    if mapping_review_df is None or mapping_review_df.empty:
+        return {"total": 0, "kritiske": 0, "feil": 0, "mistenkelige": 0, "uavklarte": 0, "trygge": 0}
+    status_column = _mapping_review_status_column(mapping_review_df)
+    if not status_column:
+        return {"total": int(len(mapping_review_df.index)), "kritiske": 0, "feil": 0, "mistenkelige": 0, "uavklarte": 0, "trygge": 0}
+    statuses = mapping_review_df[status_column].fillna("").astype(str).str.strip()
+    feil = int((statuses == "Feil").sum())
+    mistenkelige = int((statuses == "Mistenkelig").sum())
+    uavklarte = int((statuses == "Uavklart").sum())
+    trygge = int((statuses == "Trygg").sum())
+    return {
+        "total": int(len(mapping_review_df.index)),
+        "kritiske": feil + mistenkelige,
+        "feil": feil,
+        "mistenkelige": mistenkelige,
+        "uavklarte": uavklarte,
+        "trygge": trygge,
+    }
+
+
+def build_mapping_review_summary_text(mapping_review_df: pd.DataFrame | None) -> str:
+    summary = build_mapping_review_summary(mapping_review_df)
+    if not summary["total"]:
+        return "Ingen koblinger i visningen."
+    parts = [f"{summary['total']} koblinger"]
+    if summary["feil"]:
+        parts.append(f"{summary['feil']} feil")
+    if summary["mistenkelige"]:
+        parts.append(f"{summary['mistenkelige']} mistenkelige")
+    if summary["uavklarte"]:
+        parts.append(f"{summary['uavklarte']} uavklarte")
+    if summary["trygge"]:
+        parts.append(f"{summary['trygge']} trygge")
+    return " | ".join(parts)
+
+
+def next_mapping_review_problem_account(
+    mapping_review_df: pd.DataFrame | None,
+    current_account: object | None = None,
+) -> str:
+    if mapping_review_df is None or mapping_review_df.empty or "Konto" not in mapping_review_df.columns:
+        return ""
+    status_column = _mapping_review_status_column(mapping_review_df)
+    if not status_column:
+        return ""
+    work = sort_mapping_rows_by_audit_status(mapping_review_df)
+    statuses = work[status_column].fillna("").astype(str).str.strip()
+    problems = work.loc[statuses.isin(_MAPPING_REVIEW_CRITICAL_STATUSES)].copy()
+    if problems.empty:
+        return ""
+    accounts = [str(account or "").strip() for account in problems["Konto"].tolist()]
+    accounts = [account for account in accounts if account]
+    if not accounts:
+        return ""
+    current = str(current_account or "").strip()
+    if current in accounts:
+        return accounts[(accounts.index(current) + 1) % len(accounts)]
+    return accounts[0]
+
+
+def apply_mapping_audit_to_control_gl_df(
+    control_gl_df: pd.DataFrame | None,
+    mapping_audit_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    if control_gl_df is None:
+        return pd.DataFrame(columns=list(_CONTROL_GL_DATA_COLUMNS))
+    work = control_gl_df.copy()
+    if work.empty or mapping_audit_df is None or mapping_audit_df.empty or "Konto" not in work.columns:
+        for column in ("AliasStatus", "MappingAuditStatus", "MappingAuditReason"):
+            if column not in work.columns:
+                work[column] = ""
+        return work.reindex(columns=list(_CONTROL_GL_DATA_COLUMNS), fill_value="")
+    audit = mapping_audit_df.copy()
+    audit["Konto"] = audit["Konto"].fillna("").astype(str).str.strip()
+    audit = audit.drop_duplicates(subset=["Konto"])
+    for column in ("AliasStatus", "Status", "Reason"):
+        if column not in audit.columns:
+            audit[column] = ""
+    audit_lookup = audit.set_index("Konto", drop=False)
+    work["Konto"] = work["Konto"].fillna("").astype(str).str.strip()
+    work["AliasStatus"] = work["Konto"].map(audit_lookup["AliasStatus"]).fillna("")
+    work["MappingAuditStatus"] = work["Konto"].map(audit_lookup["Status"]).fillna("")
+    work["MappingAuditReason"] = work["Konto"].map(audit_lookup["Reason"]).fillna("")
+    return work.reindex(columns=list(_CONTROL_GL_DATA_COLUMNS), fill_value="")
+
+
+def apply_mapping_audit_to_mapping_df(
+    mapping_df: pd.DataFrame | None,
+    mapping_audit_df: pd.DataFrame | None,
+) -> pd.DataFrame:
+    if mapping_df is None:
+        return pd.DataFrame(columns=["Konto", "Navn", "Kode", "Rf1022GroupId", "AliasStatus", "Kol", "Status", "Reason"])
+    work = mapping_df.copy()
+    for column in ("Rf1022GroupId", "AliasStatus", "Kol", "Status", "Reason"):
+        if column not in work.columns:
+            work[column] = ""
+    if work.empty or mapping_audit_df is None or mapping_audit_df.empty or "Konto" not in work.columns:
+        return work
+    audit = mapping_audit_df.copy()
+    audit["Konto"] = audit["Konto"].fillna("").astype(str).str.strip()
+    audit = audit.drop_duplicates(subset=["Konto"])
+    for column in ("CurrentRf1022GroupId", "AliasStatus", "Kol", "Status", "Reason"):
+        if column not in audit.columns:
+            audit[column] = ""
+    audit_lookup = audit.set_index("Konto", drop=False)
+    work["Konto"] = work["Konto"].fillna("").astype(str).str.strip()
+    work["Rf1022GroupId"] = work["Konto"].map(audit_lookup["CurrentRf1022GroupId"]).fillna("")
+    work["AliasStatus"] = work["Konto"].map(audit_lookup["AliasStatus"]).fillna("")
+    work["Kol"] = work["Konto"].map(audit_lookup["Kol"]).fillna("")
+    work["Status"] = work["Konto"].map(audit_lookup["Status"]).fillna("")
+    work["Reason"] = work["Konto"].map(audit_lookup["Reason"]).fillna("")
+    return sort_mapping_rows_by_audit_status(work)
+
+
+def _global_auto_empty_plan() -> pd.DataFrame:
+    return pd.DataFrame(columns=list(_GLOBAL_AUTO_PLAN_COLUMNS))
+
+
+def _global_auto_row_text(row: pd.Series | Mapping[str, object], column: str) -> str:
+    getter = getattr(row, "get", None)
+    if not callable(getter):
+        return ""
+    try:
+        value = getter(column)
+    except Exception:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return str(value or "").strip()
+
+
+def _global_auto_row_value(row: pd.Series | Mapping[str, object], column: str) -> object:
+    getter = getattr(row, "get", None)
+    if not callable(getter):
+        return ""
+    try:
+        return getter(column)
+    except Exception:
+        return ""
+
+
+def _global_auto_candidate_has_semantic_support(row: pd.Series | Mapping[str, object]) -> bool:
+    if _global_auto_row_text(row, "Matchgrunnlag"):
+        return True
+    if _global_auto_row_text(row, "HitTokens"):
+        return True
+    if _global_auto_row_text(row, "AnchorSignals"):
+        return True
+    for column in ("UsedRulebook", "UsedUsage", "UsedSpecialAdd"):
+        value = _global_auto_row_value(row, column)
+        try:
+            if pd.isna(value):
+                continue
+        except Exception:
+            pass
+        if isinstance(value, str):
+            if value.strip().casefold() in {"1", "true", "ja", "yes"}:
+                return True
+        elif bool(value):
+            return True
+    return False
+
+
+def _global_auto_candidate_has_amount_support(row: pd.Series | Mapping[str, object]) -> bool:
+    if _global_auto_row_text(row, "Belopsgrunnlag"):
+        return True
+    amount_evidence = _global_auto_row_text(row, "AmountEvidence").casefold()
+    if amount_evidence in {"exact", "within_tolerance"}:
+        return True
+    value = _global_auto_row_value(row, "WithinTolerance")
+    try:
+        if pd.isna(value):
+            return False
+    except Exception:
+        pass
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "ja", "yes"}
+    return bool(value)
+
+
+def _global_auto_candidate_is_strict(row: pd.Series | Mapping[str, object]) -> bool:
+    if not _global_auto_candidate_has_semantic_support(row):
+        return False
+    if not _global_auto_candidate_has_amount_support(row):
+        return False
+    status = _global_auto_row_text(row, "Forslagsstatus")
+    if status == "Trygt forslag":
+        return True
+    guardrail = _global_auto_row_text(row, "SuggestionGuardrail").casefold()
+    return guardrail == "accepted"
+
+
+def _global_auto_candidate_suggestion_df(
+    *,
+    account: str,
+    code: str,
+    row: pd.Series | Mapping[str, object],
+    strict: bool,
+) -> pd.DataFrame:
+    match_basis = _global_auto_row_text(row, "Matchgrunnlag")
+    amount_basis = _global_auto_row_text(row, "Belopsgrunnlag")
+    has_amount = bool(amount_basis) or _global_auto_candidate_has_amount_support(row)
+    return pd.DataFrame(
+        [
+            {
+                "Kode": code,
+                "ForslagKontoer": account,
+                "WithinTolerance": bool(has_amount),
+                "SuggestionGuardrail": "accepted" if strict else "review",
+                "UsedRulebook": bool(match_basis),
+                "UsedUsage": "kontobruk" in match_basis.casefold(),
+                "UsedSpecialAdd": "special" in match_basis.casefold() or "spesial" in match_basis.casefold(),
+                "HitTokens": match_basis,
+                "Explain": match_basis,
+            }
+        ]
+    )
+
+
+def _global_auto_gl_row_df(
+    *,
+    account: str,
+    row: pd.Series | Mapping[str, object],
+    gl_by_account: Mapping[str, pd.Series],
+    basis_col: str,
+) -> pd.DataFrame:
+    gl_row = gl_by_account.get(account)
+    if gl_row is not None:
+        return pd.DataFrame([dict(gl_row)])
+
+    name = _global_auto_row_text(row, "Navn")
+    amount = _global_auto_row_value(row, "BelopAktiv")
+    if amount in ("", None):
+        amount = _global_auto_row_value(row, "Belop")
+    value_column = control_gl_basis_column_for_account(account, name, requested_basis=basis_col)
+    data = {
+        "Konto": account,
+        "Navn": name,
+        "IB": 0.0,
+        "Endring": 0.0,
+        "UB": 0.0,
+        "BelopAktiv": amount,
+        "Kol": value_column,
+    }
+    data[value_column] = amount
+    return pd.DataFrame([data])
+
+
+def build_global_auto_mapping_plan(
+    candidates_df: pd.DataFrame | None,
+    gl_df: pd.DataFrame | None,
+    suggestions_df: pd.DataFrame | None,
+    mapping_current: Mapping[str, str] | None,
+    *,
+    locked_codes: set[str] | None = None,
+    basis_col: str = "Endring",
+    rulebook: object | None = None,
+) -> pd.DataFrame:
+    if candidates_df is None or candidates_df.empty:
+        return _global_auto_empty_plan()
+
+    gl_by_account: dict[str, pd.Series] = {}
+    if gl_df is not None and not gl_df.empty and "Konto" in gl_df.columns:
+        gl_work = gl_df.copy()
+        gl_work["Konto"] = gl_work["Konto"].fillna("").astype(str).str.strip()
+        for _, gl_row in gl_work.iterrows():
+            account = str(gl_row.get("Konto") or "").strip()
+            if account and account not in gl_by_account:
+                gl_by_account[account] = gl_row
+
+    planned_mapping = {
+        str(account).strip(): str(code).strip()
+        for account, code in (mapping_current or {}).items()
+        if str(account).strip()
+    }
+    locked = {str(code).strip() for code in (locked_codes or set()) if str(code).strip()}
+    rows: list[dict[str, object]] = []
+
+    for _, row in candidates_df.iterrows():
+        account = _global_auto_row_text(row, "Konto")
+        code = _global_auto_row_text(row, "Kode")
+        group_id = _global_auto_row_text(row, "Rf1022GroupId")
+        if not code and group_id:
+            group_codes = rf1022_group_a07_codes(group_id)
+            if len(group_codes) == 1:
+                code = group_codes[0]
+        name = _global_auto_row_text(row, "Navn")
+        strict = _global_auto_candidate_is_strict(row)
+        action = "review"
+        status = "Maa vurderes"
+        reason = "Kandidaten er ikke strict-auto."
+        kol = str(_global_auto_row_value(row, "Kol") or "").strip()
+        belop = _global_auto_row_value(row, "Belop")
+        if belop in ("", None):
+            belop = _global_auto_row_value(row, "BelopAktiv")
+
+        if not account or not code:
+            action = "invalid"
+            status = "Ugyldig"
+            reason = "Kandidaten mangler konto eller A07-kode."
+        elif a07_group_member_codes(code):
+            action = "review"
+            status = "Uavklart/Gruppe"
+            reason = "A07-grupper er legacy/avansert og brukes ikke i trygg auto."
+        elif not strict:
+            action = "review"
+            status = "Maa vurderes"
+            reason = "Kandidaten er ikke godkjent som trygt forslag."
+        elif account not in gl_by_account:
+            action = "invalid"
+            status = "Ugyldig"
+            reason = "Kontoen finnes ikke i aktiv GL."
+        else:
+            current_code = str(planned_mapping.get(account) or "").strip()
+            resolved_group = a07_code_rf1022_group(code)
+            if current_code == code:
+                action = "already"
+                status = "Allerede koblet"
+                reason = "Kontoen er allerede koblet til samme A07-kode."
+            elif current_code and current_code != code:
+                action = "conflict"
+                status = "Konflikt"
+                reason = f"Kontoen er allerede koblet til {current_code}."
+            elif code in locked:
+                action = "locked"
+                status = "Laast"
+                reason = f"A07-koden {code} er laast."
+            elif resolved_group == RF1022_UNKNOWN_GROUP:
+                action = "review"
+                status = "Uavklart"
+                reason = "A07-koden mangler avklart RF-1022-bro."
+            elif group_id and group_id != resolved_group:
+                action = "blocked"
+                status = "Feil"
+                reason = f"Kandidaten peker til {group_id}, men A07-koden peker til {resolved_group}."
+            else:
+                gl_row_df = _global_auto_gl_row_df(
+                    account=account,
+                    row=row,
+                    gl_by_account=gl_by_account,
+                    basis_col=basis_col,
+                )
+                synthetic_suggestion = _global_auto_candidate_suggestion_df(
+                    account=account,
+                    code=code,
+                    row=row,
+                    strict=strict,
+                )
+                support_suggestions = synthetic_suggestion
+                if suggestions_df is not None and not suggestions_df.empty:
+                    support_suggestions = pd.concat(
+                        [suggestions_df, synthetic_suggestion],
+                        ignore_index=True,
+                        sort=False,
+                    )
+                audit_df = build_mapping_audit_df(
+                    gl_row_df,
+                    {account: code},
+                    suggestions_df=support_suggestions,
+                    basis_col=basis_col,
+                    rulebook=rulebook,
+                )
+                if audit_df.empty:
+                    action = "review"
+                    status = "Uavklart"
+                    reason = "Kunne ikke kontrollere simulert mapping."
+                else:
+                    audit_row = audit_df.iloc[0]
+                    audit_status = str(audit_row.get("Status") or "").strip()
+                    audit_reason = str(audit_row.get("Reason") or "").strip()
+                    kol = str(audit_row.get("Kol") or kol or "").strip()
+                    belop = audit_row.get("Belop")
+                    if audit_status == "Trygg":
+                        action = "apply"
+                        status = "Trygg"
+                        reason = audit_reason or "Simulert mapping er trygg."
+                        planned_mapping[account] = code
+                    else:
+                        action = "review" if audit_status in {"Mistenkelig", "Uavklart"} else "blocked"
+                        status = audit_status or "Maa vurderes"
+                        reason = audit_reason or "Simulert mapping er ikke trygg."
+
+        rows.append(
+            {
+                "Konto": account,
+                "Navn": name,
+                "Kode": code,
+                "Rf1022GroupId": group_id or a07_code_rf1022_group(code),
+                "Kol": kol,
+                "Belop": belop,
+                "Action": action,
+                "Status": status,
+                "Reason": reason,
+            }
+        )
+
+    if not rows:
+        return _global_auto_empty_plan()
+    return pd.DataFrame(rows, columns=list(_GLOBAL_AUTO_PLAN_COLUMNS)).reset_index(drop=True)
+
+
+def _mapping_audit_reasons_for_code(
+    mapping_audit_df: pd.DataFrame | None,
+    code: object,
+) -> list[str]:
+    code_s = str(code or "").strip()
+    if not code_s or mapping_audit_df is None or mapping_audit_df.empty:
+        return []
+    if "CurrentA07Code" not in mapping_audit_df.columns or "Status" not in mapping_audit_df.columns:
+        return []
+    work = mapping_audit_df.copy()
+    code_values = work["CurrentA07Code"].fillna("").astype(str).str.strip()
+    status_values = work["Status"].fillna("").astype(str).str.strip()
+    bad = work.loc[(code_values == code_s) & status_values.isin({"Mistenkelig", "Feil"})]
+    reasons: list[str] = []
+    for _, row in bad.iterrows():
+        account = str(row.get("Konto") or "").strip()
+        reason = str(row.get("Reason") or "").strip()
+        if account and reason:
+            reasons.append(f"{account}: {reason}")
+        elif reason:
+            reasons.append(reason)
+    return reasons
 
 
 def build_control_selected_account_df(
@@ -1630,7 +2682,9 @@ def build_rf1022_candidate_df(
     rows_by_account: dict[str, dict[str, object]] = {}
     for _, row in suggestions_df.iterrows():
         code = str(row.get("Kode") or "").strip()
-        if not code or code not in allowed_codes or a07_code_rf1022_group(code) != group_s:
+        if a07_group_member_codes(code):
+            continue
+        if not code or a07_code_rf1022_group(code) != group_s:
             continue
         if _suggestion_text(row, "SuggestionGuardrail").lower() == "blocked":
             continue
@@ -1762,7 +2816,7 @@ def filter_control_gl_df(
     search_s = str(search_text or "").strip().casefold()
     if search_s:
         haystack = pd.Series("", index=filtered.index, dtype="object")
-        for column in ("Konto", "Navn", "Kode"):
+        for column in ("Konto", "Navn", "Kode", "AliasStatus", "MappingAuditStatus", "MappingAuditReason"):
             if column in filtered.columns:
                 haystack = haystack.str.cat(filtered[column].fillna("").astype(str), sep=" ")
         filtered = filtered.loc[haystack.str.casefold().str.contains(search_s, regex=False)].copy()
@@ -1796,9 +2850,60 @@ def filter_suggestions_for_rf1022_group(
         return suggestions_df.reset_index(drop=True)
     allowed_codes = set(rf1022_group_a07_codes(group_s))
     if not allowed_codes:
-        return suggestions_df.reset_index(drop=True)
+        return _empty_suggestions_df()
     codes = suggestions_df["Kode"].fillna("").astype(str).str.strip()
-    return suggestions_df.loc[codes.isin(allowed_codes)].reset_index(drop=True)
+    mask = codes.apply(lambda code: a07_code_rf1022_group(code) == group_s)
+    return suggestions_df.loc[mask].reset_index(drop=True)
+
+
+def preferred_rf1022_overview_group(
+    rf1022_df: pd.DataFrame | None,
+    available_groups: Sequence[object] | None = None,
+    *,
+    preferred_group: object | None = None,
+) -> str | None:
+    """Pick the most useful RF-1022 row for initial focus."""
+    available_list = [
+        str(group_id or "").strip()
+        for group_id in (available_groups or [])
+        if str(group_id or "").strip()
+    ]
+    available = set(available_list)
+    preferred = str(preferred_group or "").strip()
+    if preferred and (not available or preferred in available):
+        return preferred
+    if rf1022_df is None or rf1022_df.empty or "GroupId" not in rf1022_df.columns:
+        return available_list[0] if available_list else None
+
+    work = rf1022_df.copy()
+    work["GroupId"] = work["GroupId"].fillna("").astype(str).str.strip()
+    if available:
+        work = work.loc[work["GroupId"].isin(available)].copy()
+    if work.empty:
+        return available_list[0] if available_list else None
+
+    unknown_rows = work.loc[work["GroupId"] == RF1022_UNKNOWN_GROUP].copy()
+    if not unknown_rows.empty:
+        amount_series = pd.Series(0.0, index=unknown_rows.index)
+        for column in ("A07", "A07_Belop", "Diff", "GL_Belop"):
+            if column in unknown_rows.columns:
+                amount_series = amount_series.combine(
+                    pd.to_numeric(unknown_rows[column], errors="coerce").fillna(0.0).abs(),
+                    max,
+                )
+        if bool((amount_series > 0.005).any()):
+            return RF1022_UNKNOWN_GROUP
+
+    if "Diff" in work.columns:
+        diff_abs = pd.to_numeric(work["Diff"], errors="coerce").fillna(0.0).abs()
+        if bool((diff_abs > 0.005).any()):
+            return str(work.loc[diff_abs.idxmax(), "GroupId"] or "").strip() or None
+
+    for _, row in work.iterrows():
+        group_id = str(row.get("GroupId") or "").strip()
+        if group_id:
+            return group_id
+    return available_list[0] if available_list else None
 
 
 def _family_tag_from_name(family: object, *, suspicious: bool = False) -> str:
@@ -1810,8 +2915,42 @@ def _family_tag_from_name(family: object, *, suspicious: bool = False) -> str:
     return "family_unknown"
 
 
+def _status_tag_from_values(*values: object) -> str | None:
+    tokens = {str(value or "").strip().casefold() for value in values if str(value or "").strip()}
+    if tokens & {"feil", "mistenkelig", "mistenkelig kobling", "blocked", "konflikt"}:
+        return "family_warning"
+    if tokens & {
+        "uavklart",
+        "uavklart rf-1022",
+        "uavklart_rf1022",
+        "maa vurderes",
+        "må vurderes",
+        "maa avklares",
+        "må avklares",
+        "kontroller kobling",
+        "har forslag",
+        "har historikk",
+        "forslag",
+        "historikk",
+        "review",
+    }:
+        return "suggestion_review"
+    if tokens & {"trygg", "ferdig", "trygt forslag", "accepted"}:
+        return "suggestion_ok"
+    return None
+
+
 def control_family_tree_tag(row: pd.Series) -> str:
-    suspicious = bool(row.get("CurrentMappingSuspicious", False)) or str(row.get("GuidetStatus") or "").strip() == "Mistenkelig kobling"
+    status_tag = _status_tag_from_values(
+        row.get("MappingAuditStatus"),
+        row.get("GuidetStatus"),
+        row.get("Arbeidsstatus"),
+        row.get("Status"),
+        row.get("Rf1022GroupId"),
+    )
+    if status_tag is not None:
+        return status_tag
+    suspicious = bool(row.get("CurrentMappingSuspicious", False))
     family = str(row.get("WorkFamily") or "").strip()
     if not family:
         family = work_family_for_a07_code(row.get("Kode"))
@@ -1819,6 +2958,11 @@ def control_family_tree_tag(row: pd.Series) -> str:
 
 
 def rf1022_overview_tree_tag(row: pd.Series) -> str:
+    if str(row.get("GroupId") or "").strip() == RF1022_UNKNOWN_GROUP:
+        return "suggestion_review"
+    status_tag = _status_tag_from_values(row.get("Status"), row.get("Kontroll"))
+    if status_tag is not None:
+        return status_tag
     family = str(row.get("WorkFamily") or "").strip()
     if not family:
         family = work_family_for_rf1022_group(row.get("GroupId"))
@@ -1826,28 +2970,14 @@ def rf1022_overview_tree_tag(row: pd.Series) -> str:
 
 
 def control_gl_family_tree_tag(row: pd.Series) -> str:
+    status_tag = _status_tag_from_values(row.get("MappingAuditStatus"), row.get("Kontroll"), row.get("Status"))
+    if status_tag is not None:
+        return status_tag
     mapped_code = str(row.get("Kode") or "").strip()
     if not mapped_code:
         return "family_unknown"
     family = str(row.get("WorkFamily") or "").strip() or work_family_for_a07_code(mapped_code)
     return _family_tag_from_name(family)
-
-
-def control_queue_tree_tag(row: pd.Series) -> str:
-    try:
-        diff_value = pd.to_numeric(row.get("Diff"), errors="coerce")
-    except Exception:
-        diff_value = float("nan")
-    if pd.notna(diff_value):
-        if abs(float(diff_value)) <= 0.005:
-            return "control_done"
-        return "control_manual"
-    status_s = str(row.get("Arbeidsstatus") or row.get("Status") or "").strip()
-    if status_s in {"Forslag", "Historikk"}:
-        return "control_review"
-    if status_s in {"Ulost", "UlÃ¸st", "Manuell"} or status_s:
-        return "control_manual"
-    return "control_default"
 
 
 def control_gl_tree_tag(row: pd.Series, selected_code: str | None, suggested_accounts: Sequence[object] | None = None) -> str:
@@ -1856,29 +2986,6 @@ def control_gl_tree_tag(row: pd.Series, selected_code: str | None, suggested_acc
     if not mapped_code:
         return "control_gl_unmapped"
     return "control_gl_mapped"
-
-
-def suggestion_tree_tag(row: pd.Series) -> str:
-    try:
-        explain = str(row.get("Explain", "") or "").lower()
-        has_history = bool(str(row.get("HistoryAccounts", "") or "").strip())
-        score = float(row.get("Score") or 0.0)
-        visual_strict_auto = bool(row.get("WithinTolerance", False)) and (has_history or ("regel=" in explain and score >= 0.9))
-    except Exception:
-        visual_strict_auto = False
-    if visual_strict_auto:
-        return "suggestion_ok"
-    try:
-        within = bool(row.get("WithinTolerance", False))
-    except Exception:
-        within = False
-    try:
-        score = float(row.get("Score") or 0.0)
-    except Exception:
-        score = 0.0
-    if within or score >= 0.8:
-        return "suggestion_review"
-    return "suggestion_default"
 
 
 def reconcile_tree_tag(row: pd.Series) -> str:
@@ -1943,17 +3050,7 @@ def a07_suggestion_is_strict_auto(row: pd.Series | dict[str, object]) -> bool:
         if not _flag(getter("WithinTolerance", False)):
             return False
         guardrail = _text(getter("SuggestionGuardrail", "")).lower()
-        if guardrail:
-            return guardrail == "accepted"
-        if _text(getter("HistoryAccounts", "")):
-            return True
-        if _flag(getter("UsedHistory", False)):
-            return True
-        if _flag(getter("UsedRulebook", False)):
-            return True
-        explain = _text(getter("Explain", "")).lower()
-        score = float(getter("Score", 0.0) or 0.0)
-        return "regel=" in explain and score >= 0.9
+        return guardrail == "accepted"
     except Exception:
         return False
 
@@ -1997,6 +3094,19 @@ def select_magic_wand_suggestion_rows(
 
 
 def control_queue_tree_tag(row: pd.Series) -> str:
+    status_tag = _status_tag_from_values(
+        row.get("MappingAuditStatus"),
+        row.get("GuidetStatus"),
+        row.get("Arbeidsstatus"),
+        row.get("Status"),
+        row.get("Rf1022GroupId"),
+    )
+    if status_tag == "suggestion_ok":
+        return "control_done"
+    if status_tag == "suggestion_review":
+        return "control_review"
+    if status_tag == "family_warning":
+        return "control_manual"
     try:
         diff_value = pd.to_numeric(row.get("Diff"), errors="coerce")
     except Exception:
@@ -2027,6 +3137,11 @@ def control_queue_tree_tag(row: pd.Series) -> str:
 
 
 def suggestion_tree_tag(row: pd.Series) -> str:
+    status_tag = _status_tag_from_values(row.get("Forslagsstatus"), row.get("Status"), row.get("SuggestionGuardrail"))
+    if status_tag == "family_warning":
+        return "suggestion_review"
+    if status_tag in {"suggestion_ok", "suggestion_review"}:
+        return status_tag
     guardrail = str(row.get("SuggestionGuardrail") or "").strip().lower()
     if guardrail == "accepted":
         return "suggestion_ok"

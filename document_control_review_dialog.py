@@ -44,6 +44,12 @@ from document_engine.engine import (
     build_validation_messages,
     normalize_bilag_key,
 )
+from document_engine.format_utils import (
+    amount_search_variants,
+    normalize_orgnr,
+    orgnr_matches,
+    parse_amount_flexible,
+)
 from document_engine.models import DocumentFacts, VoucherContext
 
 
@@ -107,6 +113,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._year           = year
         self._current_index  = 0
         self._last_segments: list[Any] | None = None   # segments from most recent analysis
+        self._last_raw_text_excerpt: str = ""           # raw text from most recent analysis (persisted on save)
         self._bilagsprint_pages: set[int] = set()       # 1-based page numbers that are bilagsprint
 
         # Per-result mutable state
@@ -211,11 +218,12 @@ class DocumentControlReviewDialog(tk.Toplevel):
 
         nav = ttk.Frame(header)
         nav.grid(row=0, column=3, sticky="e")
-        ttk.Button(nav, text="◄",               command=self._go_prev,        width=3).pack(side=tk.LEFT, padx=(0, 2))
-        ttk.Button(nav, text="►",               command=self._go_next,        width=3).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(nav, text="Lagre",            command=self._save_current            ).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(nav, text="Lagre og neste ►", command=self._save_and_next         ).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(nav, text="Lukk",            command=self.destroy                 ).pack(side=tk.LEFT)
+        # PDF controls (page nav + zoom) are populated by _build_pdf_pane once
+        # the preview widget exists — they live here so the canvas gets the
+        # full vertical space of the PDF pane.
+        self._pdf_toolbar_slot = ttk.Frame(nav)
+        self._pdf_toolbar_slot.pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Button(nav, text="Lukk", command=self.destroy).pack(side=tk.LEFT)
 
         # ── Row 1: Three-pane body (resizable) ──────────────────────────
         body = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
@@ -276,14 +284,20 @@ class DocumentControlReviewDialog(tk.Toplevel):
         # Outer container — stretches with PanedWindow sash
         outer = ttk.Frame(parent, padding=(0, 0, 8, 0))
         outer.grid(row=0, column=0, sticky="nsew")
-        outer.rowconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)  # canvas row expands
         outer.columnconfigure(0, weight=1)
+
+        # ── Fixed action bar above the field list ────────────────────────
+        action_bar = ttk.Frame(outer)
+        action_bar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        ttk.Button(action_bar, text="◄ Forrige bilag", command=self._go_prev).pack(side=tk.LEFT)
+        ttk.Button(action_bar, text="Neste bilag ►",    command=self._go_next).pack(side=tk.LEFT, padx=(6, 0))
 
         # ── Scrollable canvas for comparison fields ───────────────────────
         _canvas = tk.Canvas(outer, highlightthickness=0, bd=0)
-        _canvas.grid(row=0, column=0, sticky="nsew")
+        _canvas.grid(row=1, column=0, sticky="nsew")
         _vsb = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=_canvas.yview)
-        _vsb.grid(row=0, column=1, sticky="ns")
+        _vsb.grid(row=1, column=1, sticky="ns")
         _canvas.configure(yscrollcommand=_vsb.set)
 
         # Inner frame holds all the field widgets
@@ -305,7 +319,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
 
         # ── File bar (collapsed by default — click ► to expand) ──────────
         file_bar = ttk.Frame(outer)
-        file_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        file_bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(2, 0))
         file_bar.columnconfigure(1, weight=1)
 
         self._file_detail = ttk.Frame(file_bar)
@@ -417,7 +431,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._txt_avvik = tk.Text(inner, height=3, wrap="word",
                                   state="disabled", background="#fff8f8",
                                   relief="flat", width=40)
-        self._txt_avvik.grid(row=avvik_r, column=1, columnspan=4,
+        self._txt_avvik.grid(row=avvik_r, column=1, columnspan=3,
                              sticky="ew", pady=(0, 3))
         self._txt_avvik.bind("<MouseWheel>", _on_wheel)
 
@@ -426,16 +440,15 @@ class DocumentControlReviewDialog(tk.Toplevel):
         ttk.Label(inner, text="Notater", width=16, anchor="nw").grid(
             row=notes_r, column=0, sticky="nw", padx=(4, 8), pady=(0, 1))
         self._txt_notes = tk.Text(inner, height=3, wrap="word", width=40)
-        self._txt_notes.grid(row=notes_r, column=1, columnspan=4,
+        self._txt_notes.grid(row=notes_r, column=1, columnspan=3,
                              sticky="ew", pady=(0, 3))
         self._txt_notes.bind("<MouseWheel>", _on_wheel)
 
-        # ── Save buttons (below fields, easy to reach) ──────────────────
-        save_r = notes_r + 1
-        save_bar = ttk.Frame(inner)
-        save_bar.grid(row=save_r, column=1, columnspan=4, sticky="ew", pady=(6, 2))
-        ttk.Button(save_bar, text="Lagre",            command=self._save_current).pack(side="left", padx=(0, 6))
-        ttk.Button(save_bar, text="Lagre og neste ►", command=self._save_and_next).pack(side="left")
+        # Tall Lagre-button alongside Avvik/Notater — close to the fields
+        # the user is editing, no scrolling or mouse trip needed.
+        ttk.Button(inner, text="Lagre", command=self._save_current).grid(
+            row=avvik_r, column=4, columnspan=2, rowspan=2,
+            sticky="nsew", padx=(6, 4), pady=(0, 3))
 
     def _build_pdf_pane(self, parent: ttk.Frame) -> None:
         parent.rowconfigure(0, weight=1)
@@ -445,8 +458,19 @@ class DocumentControlReviewDialog(tk.Toplevel):
         right.rowconfigure(0, weight=1)
         right.columnconfigure(0, weight=1)
 
-        self._preview = DocumentPreviewFrame(right)
+        # show_toolbar=False — page/zoom controls live in the header strip so
+        # the canvas gets the full vertical space of the pane.
+        self._preview = DocumentPreviewFrame(right, show_toolbar=False)
         self._preview.grid(row=0, column=0, sticky="nsew")
+
+        slot = getattr(self, "_pdf_toolbar_slot", None)
+        if slot is not None:
+            ttk.Button(slot, text="◄", command=self._preview.show_previous_page, width=3).pack(side=tk.LEFT)
+            ttk.Label(slot, textvariable=self._preview.var_page, width=7, anchor="center").pack(side=tk.LEFT, padx=2)
+            ttk.Button(slot, text="►", command=self._preview.show_next_page, width=3).pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Button(slot, text="−", command=self._preview.zoom_out, width=2).pack(side=tk.LEFT)
+            ttk.Button(slot, text="+", command=self._preview.zoom_in, width=2).pack(side=tk.LEFT)
+            ttk.Button(slot, text="Tilpass", command=self._preview.fit_to_width, width=7).pack(side=tk.LEFT, padx=(4, 0))
 
     # ------------------------------------------------------------------
     # List management
@@ -538,6 +562,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._field_hits = {}
         self._field_hit_index = {}
         self._pinned_fields.clear()
+        self._last_raw_text_excerpt = ""  # reset per bilag; _auto_analyse re-populates
         self._update_page_labels()
         self._update_saved_indicators()
         self._preview.set_highlight(None)
@@ -558,13 +583,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._var_file_path.set(file_path)
         self._preview.load_file(file_path if file_path and Path(file_path).exists() else None)
         # Load segments for coordinate-based learning when user saves
-        self._last_segments = None
-        if file_path and Path(file_path).exists():
-            try:
-                from document_engine.engine import extract_text_from_file as _etf
-                self._last_segments = (_etf(Path(file_path)).segments or None)
-            except Exception:
-                pass
+        self._reload_segments_for(file_path)
         # Detect bilagsprint pages FIRST (synchronously) — must happen before
         # any search or restore so that bilagsprint filtering is available.
         if file_path and Path(file_path).exists():
@@ -578,6 +597,34 @@ class DocumentControlReviewDialog(tk.Toplevel):
         # Auto-analyse to populate page badges and field evidence
         if file_path and Path(file_path).exists():
             self.after(200, lambda fp=file_path, i=idx: self._auto_analyse(fp, i))
+
+    def _reload_segments_for(self, path: str | None) -> None:
+        """Re-extract PDF segments + raw text into ``self._last_*`` for *path*.
+
+        Every code path that changes which document is displayed (bilag
+        navigation, manual file selection, reanalyse) MUST route through
+        this helper. Otherwise a subsequent save would learn against the
+        segments of the previously displayed document — and saving without
+        first running ``Les oppl.`` would send an empty ``raw_text_excerpt``.
+        """
+        self._last_segments = None
+        self._last_raw_text_excerpt = ""
+        if not path:
+            return
+        p = Path(path)
+        if not p.exists():
+            return
+        try:
+            from document_engine.engine import extract_text_from_file as _etf
+            result = _etf(p)
+            self._last_segments = result.segments or None
+            # analyze_document truncates the raw text at 4000 chars before
+            # exposing it as raw_text_excerpt; mirror that here so saves made
+            # without re-running full analysis persist a comparable excerpt.
+            raw_text = getattr(result, "text", "") or ""
+            self._last_raw_text_excerpt = raw_text[:4000]
+        except Exception:
+            pass
 
     def _sort_hits(self, raw_hits: list[tuple]) -> list[tuple]:
         """Sort a hit list so bilagsprint (Tripletex cover) pages come last.
@@ -706,7 +753,15 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._update_page_label_for(key)
             return
 
-        raw_hits = self._preview.search_all_pages(val)
+        # Formatted amounts and org numbers rarely match the stored value
+        # literally (PDF may show "1,175.00" while the field holds
+        # "1175,00", or "NO 965 004 211 MVA" vs "965004211"). Try variants
+        # until one yields hits, so trefflenker still work.
+        raw_hits: list[tuple[int, tuple[float, float, float, float]]] = []
+        for variant in _pdf_search_variants(key, val):
+            raw_hits = self._preview.search_all_pages(variant)
+            if raw_hits:
+                break
         hits = self._sort_hits(raw_hits)
         old_hits = self._field_hits.get(key, [])
         self._field_hits[key] = hits
@@ -836,18 +891,19 @@ class DocumentControlReviewDialog(tk.Toplevel):
             page_str = f" s.{saved_ev[key]['page']}" if has_pos else ""
             if not disk_val:
                 lbl.configure(text="", fg="#b0b0b0", font=("Segoe UI", 7))
-            elif disk_val == gui_val:
-                lbl.configure(
-                    text=f"Lagret{page_str}: {disk_val[:20]}",
-                    fg="#1a7a1a",
-                    font=("Segoe UI", 7, "underline") if has_pos else ("Segoe UI", 7),
-                )
-            else:
-                lbl.configure(
-                    text=f"Lagret{page_str}: {disk_val[:20]}",
-                    fg="#cc6600",
-                    font=("Segoe UI", 7, "underline") if has_pos else ("Segoe UI", 7),
-                )
+                continue
+            # Consider equivalent values (e.g. "1 175,00" vs "1,175.00" or
+            # "NO 965 004 211 MVA" vs "965004211") as a match so the saved
+            # indicator goes green on format differences.
+            equivalent = disk_val == gui_val or (
+                bool(gui_val) and _field_matches(key, disk_val, gui_val)
+            )
+            color = "#1a7a1a" if equivalent else "#cc6600"
+            lbl.configure(
+                text=f"Lagret{page_str}: {disk_val[:20]}",
+                fg=color,
+                font=("Segoe UI", 7, "underline") if has_pos else ("Segoe UI", 7),
+            )
 
     def _goto_saved_position(self, key: str) -> None:
         """Navigate PDF viewer to the saved position for this field."""
@@ -969,7 +1025,7 @@ class DocumentControlReviewDialog(tk.Toplevel):
                 file_path=file_path,
                 field_values=fields,
                 validation_messages=real_avvik,
-                raw_text_excerpt="",
+                raw_text_excerpt=self._last_raw_text_excerpt,
                 notes=notes,
                 segments=self._last_segments,
                 field_hit_indices=dict(self._field_hit_index),
@@ -1119,6 +1175,9 @@ class DocumentControlReviewDialog(tk.Toplevel):
         idx = self._current_index
         self._results[idx] = _replace_extracted_path(self._results[idx], path)
         self._preview.load_file(path)
+        # Reload segments AND raw text so saving without a follow-up "Les oppl."
+        # still persists the correct excerpt/coordinates for the new file.
+        self._reload_segments_for(path)
 
     def _auto_analyse(self, file_path: str, expected_idx: int) -> None:
         """Run analysis silently on bilag load to populate page badges.
@@ -1141,6 +1200,14 @@ class DocumentControlReviewDialog(tk.Toplevel):
         # Guard: user may have navigated away during analysis
         if self._current_index != expected_idx:
             return
+        # Capture extracted raw text AND segments from the analysis itself, so
+        # that saving learns against the same geometry analyze_document chose
+        # (important after a redo-OCR swap — a fresh _reload_segments_for call
+        # would pick the native extraction again, not the redo result).
+        self._last_raw_text_excerpt = analysis.raw_text_excerpt or ""
+        analysis_segments = getattr(analysis, "segments", None)
+        if analysis_segments:
+            self._last_segments = list(analysis_segments)
         # Merge analysis evidence but preserve existing entries that have bbox
         # (e.g. restored from disk or user-confirmed positions)
         new_evidence = dict(analysis.field_evidence or {})
@@ -1228,6 +1295,15 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self.configure(cursor="")
             self._var_status_bar.set("")
 
+        # Capture raw text AND segments from the analysis itself, so saving
+        # learns against the same geometry analyze_document chose. Only fall
+        # back to an independent re-extraction if the analysis happens not to
+        # expose segments (older code path, or XML input).
+        self._last_raw_text_excerpt = analysis.raw_text_excerpt or ""
+        analysis_segments = getattr(analysis, "segments", None)
+        if analysis_segments:
+            self._last_segments = list(analysis_segments)
+
         fields   = analysis.fields or {}
         new_state = {key: fields.get(key, "") for key, _ in FIELD_DEFS}
         self._pdf_state[idx] = new_state
@@ -1254,14 +1330,11 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._field_hit_index[key] = 0
         self._update_page_labels()
 
-        # Store segments for coordinate-based learning on next save
-        self._last_segments = None
-        try:
-            from document_engine.engine import extract_text_from_file
-            result = extract_text_from_file(Path(file_path))
-            self._last_segments = result.segments or None
-        except Exception:
-            pass
+        # Only fall back to an independent re-extraction if the analysis did
+        # not expose segments — otherwise we'd overwrite the redo-OCR geometry
+        # with the native extraction.
+        if not analysis_segments:
+            self._reload_segments_for(file_path)
 
         real_avvik = [m for m in (analysis.validation_messages or []) if _is_real_avvik(m)]
         self._avvik_state[idx] = real_avvik
@@ -1615,7 +1688,7 @@ def _norm_date(text: str) -> str:
 
 def _norm_orgnr(text: str) -> str:
     """Normalise org number by stripping all non-digits."""
-    return re.sub(r"\D", "", text or "")
+    return normalize_orgnr(text)
 
 
 def _field_matches(key: str, hb_val: str, pdf_val: str) -> bool:
@@ -1634,16 +1707,14 @@ def _field_matches(key: str, hb_val: str, pdf_val: str) -> bool:
         pdf_n = _parse_amount(pdf)
         if hb_n is None or pdf_n is None:
             return False
-        # Toleranse: maks 1 kr eller 0.1% — strengt nok for revisjon
         return abs(hb_n - pdf_n) <= max(1.0, abs(hb_n) * 0.001)
 
     if key in _DATE_KEYS:
         return _norm_date(hb) == _norm_date(pdf)
 
     if key in _ORGNR_KEYS:
-        return _norm_orgnr(hb) == _norm_orgnr(pdf)
+        return orgnr_matches(hb, pdf)
 
-    # Text comparison: exact, substring, or significant token overlap
     h = hb.lower()
     p = pdf.lower()
     if h == p or h in p or p in h:
@@ -1656,18 +1727,48 @@ def _field_matches(key: str, hb_val: str, pdf_val: str) -> bool:
 
 
 def _parse_amount(text: str) -> float | None:
-    text = str(text or "").strip().replace("\u00a0", "").replace(" ", "")
-    text = re.sub(r"[^\d,.\-]+", "", text)
-    if not text:
-        return None
-    if text.count(",") > 1 and "." not in text:
-        text = text.replace(",", "")
-    elif "," in text:
-        text = text.replace(".", "").replace(",", ".")
-    try:
-        return float(text)
-    except Exception:
-        return None
+    return parse_amount_flexible(text)
+
+
+def _pdf_search_variants(key: str, value: str) -> list[str]:
+    """Return alternative text variants to search the PDF for *value*.
+
+    The direct value is always first. Amount fields defer to
+    :func:`document_engine.format_utils.amount_search_variants` (Norwegian
+    and international number forms, full-decimal before bare integer).
+    Org.nr. fields expand into digits-only, space-grouped, and
+    ``NO .. MVA`` variants.
+    """
+    value = (value or "").strip()
+    if not value:
+        return []
+    variants: list[str] = [value]
+
+    def _add(v: str) -> None:
+        v = v.strip()
+        if v and v not in variants:
+            variants.append(v)
+
+    if key in _AMOUNT_KEYS:
+        for variant in amount_search_variants(value):
+            _add(variant)
+        return variants
+
+    if key in _ORGNR_KEYS:
+        digits = _norm_orgnr(value)
+        if len(digits) == 9:
+            spaced = f"{digits[:3]} {digits[3:6]} {digits[6:]}"
+            _add(digits)
+            _add(spaced)
+            _add(f"NO {spaced}")
+            _add(f"NO{spaced}")
+            _add(f"NO {spaced} MVA")
+            _add(f"NO{digits}MVA")
+        else:
+            _add(digits)
+        return variants
+
+    return variants
 
 
 def _replace_extracted_path(r: BatchDocumentResult, path: str) -> BatchDocumentResult:

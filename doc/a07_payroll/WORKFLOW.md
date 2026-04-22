@@ -1,54 +1,84 @@
 # A07 Lonn Workflow
 
-Denne workflow-beskrivelsen dokumenterer hvordan A07-lonnsporet faktisk er satt
-opp i dag, ikke hvordan vi ideelt sett onsker at det skal se ut etter UX-redning.
+Dette dokumentet beskriver dagens praktiske A07-flyt i Utvalg. A07-sporet er
+ikke lenger bare en migreringsmal: det er en aktiv arbeidsflate for trygg
+avstemming av A07/A-melding mot saldobalanse, A07-koder og RF-1022.
 
 ## Hovedflyt
 
 ```text
 A07-kilde
-  -> A07 parser / grouped A07 data
-  -> forslag og matching
-  -> eksisterende koblinger / historikk
-  -> kontrollko
-  -> kontroll / RF-1022 / lonnsflagg
-  -> saldobalanse-handoff ved behov
+  -> parser og grupperte A07-belop
+  -> aktiv saldobalanse
+  -> forslag med guardrails
+  -> RF-1022-kontrollflate
+  -> trygge koblinger eller manuell vurdering
 ```
 
-## Praktisk arbeidsflyt i dag
+## Praktisk Arbeidsflyt
 
 1. Last A07-kilde.
-2. Les inn eller bygg opp gjeldende mapping mellom GL-konto og A07-kode.
-3. Kjor forslag/matching mot GL-grunnlaget.
-4. Bygg kontrollkoen for A07-koder.
-5. For valgt kode:
-   - se forslag
-   - se historikk
-   - se koblede kontoer
-   - se kontroll / RF-1022
-6. Hvis kode eller konto krever videre lonnsklassifisering, send brukeren til
-   saldobalanse-sporet.
+2. Oppdater mot aktiv saldobalanse for valgt klient og ar.
+3. Bruk RF-1022 som primaer kontrollflate.
+4. Se lokale kandidater i `Forslag` for valgt RF-1022-post eller A07-kode.
+5. Kjor `Kjor automatisk matching` for globale, trygge kandidater.
+6. Kontroller `Koblinger` og eventuelle `Maa vurderes`-poster.
+7. Rydd feil eller gamle koblinger med hoyreklikk, Delete eller avansert mapping.
 
-## Viktig realitet i dagens UI
+## Dagens Hovedflate
 
-Dagens A07-side blander flere spor samtidig:
+A07-hovedflaten er bevisst roet ned. Nederste omrade viser bare:
 
-- eksisterende koblinger
-- matchingforslag
-- historikk
-- RF-1022 / lonnskontroll
+- `Forslag`: RF-1022- eller A07-kandidater for valgt arbeidsnivaa.
+- `Koblinger`: kontoene som er koblet til valgt post/kode.
 
-Dette er viktig kontekst for senere UX-redning. Fase 1 dokumenterer bare
-strukturen rundt dette; den rydder ikke brukerflyten.
+Kontrolloppstilling, historikk og umappede detaljer er fortsatt tilgjengelige via
+verktoy, compat-flater eller guidede handlinger, men de skal ikke dominere
+hovedarbeidsflaten.
 
-## Nar matching er kjort
+## Matchingprinsipp
 
-Matching blir bygd i refreshflyten for A07 og dekorert for visning for kontroll-
-og forslagspaneler. Det betyr at A07 ofte har kjort forslag selv om brukerflaten
-ikke leder brukeren tydelig til forslagsporet.
+Automatikk skal feile lukket:
 
-## Nar saldobalanse tar over
+- Belop alene er ikke nok.
+- Historikk alene er ikke nok for nye trygge forslag.
+- RF-1022-kandidater ma ha riktig gruppe, faglig/aliasstotte og egen
+  belopsstotte.
+- Eksisterende darlige koblinger slettes ikke automatisk, men flagges som
+  mistenkelige og gjores enkle a rydde.
+- A07-koder er matchingnivaet. RF-1022 brukes som aggregert kontrollvisning.
+- Nye A07-laeringer skrives til A07-regelbok, ikke til legacy konseptaliaser.
 
-Saldobalanse er fortsatt stedet der endelig lonnsklassifisering, RF-1022-post og
-flagg kan maatte ryddes. A07 identifiserer behovet, men fullforer ikke alltid
-hele klassifiseringen alene.
+Eksempler som skal beskyttes:
+
+- `2940 Skyldig feriepenger` bruker periodiserings-/balansegrunnlag og skal ikke
+  forsvinne fra feriepenger-kandidater.
+- `6701 Honorar revisjon` skal ikke kobles til lonn/`annet` pa belop alene.
+- `5890 Annen refusjon` skal ikke vaere trygg refusjon uten NAV/sykepenger/
+  foreldrepenger eller annen separat evidens.
+
+## Nar Saldobalanse Tar Over
+
+Saldobalanse brukes nar selve konto-/profilklassifiseringen ma ryddes:
+
+- A07-kode
+- RF-1022-post
+- lonnsflagg
+- mistenkelig lagret profil
+
+A07 skal vise kontrollbehovet tydelig, men saldobalanse er fortsatt riktig sted
+for bredere konto- og profilrydding.
+
+## Laering Fra Kontonavn
+
+Nederste `Koblinger`-liste i A07 har hoyreklikkvalg for aa laere av en konto:
+
+- `Legg navn til A07-alias`: legger kontonavnet til valgt/mappet A07-kodes
+  `keywords`.
+- `Ekskluder navn fra A07-kode`: legger kontonavnet til A07-kodens
+  `exclude_keywords`.
+- `Fjern mapping og ekskluder navn`: fjerner koblingen via checked remove-service
+  og legger samtidig kontonavnet til `exclude_keywords`.
+
+Dette er ment for aapenbare feil, for eksempel naar en konto er koblet til en
+A07-kode fordi navnet eller belopet ga et for svakt treff.

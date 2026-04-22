@@ -11,6 +11,7 @@ from .control.data import (
     CONTROL_STATEMENT_VIEW_UNCLASSIFIED,
     control_statement_view_requires_unclassified,
 )
+from .control.rf1022_bridge import RF1022_A07_BRIDGE as _RF1022_A07_BRIDGE
 
 
 _A07_DIAGNOSTICS_ENABLED = True
@@ -41,10 +42,12 @@ _CONTROL_RF1022_COLUMNS = (
 
 _CONTROL_GL_COLUMNS = (
     ("Konto", "Konto", 80, "w"),
-    ("Navn", "Navn", 280, "w"),
+    ("Navn", "Navn", 240, "w"),
     ("Rf1022GroupId", "RF-1022", 135, "w"),
     ("Kode", "A07-kode", 155, "w"),
+    ("AliasStatus", "Alias", 85, "w"),
     ("Kol", "Kol", 70, "w"),
+    ("MappingAuditStatus", "Kontroll", 100, "w"),
     ("IB", "IB", 110, "e"),
     ("Endring", "Endring", 120, "e"),
     ("UB", "UB", 110, "e"),
@@ -60,12 +63,18 @@ _CONTROL_GL_DATA_COLUMNS = (
     "Kol",
     "Kode",
     "Rf1022GroupId",
+    "AliasStatus",
     "WorkFamily",
+    "MappingAuditStatus",
+    "MappingAuditReason",
 )
 
 _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
     ("Konto", "Konto", 90, "w"),
     ("Navn", "Navn", 260, "w"),
+    ("AliasStatus", "Alias", 85, "w"),
+    ("MappingAuditStatus", "Kontroll", 110, "w"),
+    ("MappingAuditReason", "Hvorfor", 320, "w"),
     ("IB", "IB", 110, "e"),
     ("Endring", "Endring", 120, "e"),
     ("UB", "UB", 110, "e"),
@@ -116,6 +125,17 @@ _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL = {
 _CONTROL_GL_SCOPE_ALIASES = {
     "relevante": "koblede",
 }
+
+_MAPPING_FILTER_LABELS = {
+    "alle": "Alle",
+    "kritiske": "Kritiske",
+    "feil": "Feil",
+    "mistenkelige": "Mistenkelige",
+    "uavklarte": "Uavklarte",
+    "trygge": "Trygge",
+}
+
+_MAPPING_FILTER_KEYS = ("alle", "kritiske", "feil", "mistenkelige", "uavklarte", "trygge")
 
 _CONTROL_ALTERNATIVE_MODE_LABELS = {
     "suggestions": "Beste forslag",
@@ -184,8 +204,13 @@ _RECONCILE_COLUMNS = (
 
 _MAPPING_COLUMNS = (
     ("Konto", "Konto", 110, "w"),
-    ("Navn", "Navn", 260, "w"),
+    ("Navn", "Navn", 240, "w"),
     ("Kode", "Kode", 180, "w"),
+    ("Rf1022GroupId", "RF-1022", 140, "w"),
+    ("AliasStatus", "Alias", 90, "w"),
+    ("Kol", "Kol", 70, "w"),
+    ("Status", "Kontroll", 110, "w"),
+    ("Reason", "Hvorfor", 340, "w"),
 )
 
 _UNMAPPED_COLUMNS = (
@@ -232,28 +257,6 @@ _CONTROL_WORK_LEVEL_LABELS = {
     "a07": "A07",
 }
 
-_RF1022_A07_BRIDGE = {
-    "100_loenn_ol": (
-        "fastloenn",
-        "timeloenn",
-        "overtidsgodtgjoerelse",
-        "feriepenger",
-        "trekkloennForFerie",
-        "styrehonorarOgGodtgjoerelseVerv",
-        "annet",
-    ),
-    "100_refusjon": (
-        "sumAvgiftsgrunnlagRefusjon",
-    ),
-    "111_naturalytelser": (
-        "elektroniskKommunikasjon",
-        "skattepliktigDelForsikringer",
-    ),
-    "112_pensjon": (
-        "tilskuddOgPremieTilPensjon",
-    ),
-}
-
 _RF1022_ACCOUNT_COLUMNS = (
     ("Post", "Post", 150, "w"),
     ("Konto", "Kontonr", 90, "w"),
@@ -272,6 +275,7 @@ _RF1022_POST_RULES = (
     (100, "Refusjon", {"100_refusjon"}),
     (111, "Naturalytelser", {"111_naturalytelser"}),
     (112, "Pensjon", {"112_pensjon"}),
+    (999, "Uavklart RF-1022", {"uavklart_rf1022"}),
     (
         100,
         "Lonn og trekk",
@@ -300,12 +304,13 @@ _A07_FILTER_LABELS = {
     "ekskludert": "Ekskludert",
 }
 
-# Guided standardvisning viser bare arbeidsko, alle og ferdige i filteret,
+# Guided standardvisning viser arbeidsko, mistenkelige, alle og ferdige i filteret,
 # men vi beholder resten av noklene for compat i status-/filterlogikken.
-_CONTROL_PRIMARY_VIEW_KEYS = ("neste", "alle", "ferdig")
+_CONTROL_PRIMARY_VIEW_KEYS = ("neste", "mistenkelig", "alle", "ferdig")
 
 _CONTROL_VIEW_LABELS = {
     "neste": "Arbeidskø",
+    "mistenkelig": "Mistenkelige",
     "ulost": "Må avklares",
     "forslag": "Trygge forslag",
     "historikk": "Historikk",
@@ -316,6 +321,7 @@ _CONTROL_VIEW_LABELS = {
 
 _CONTROL_VIEW_LABELS = {
     "neste": "Arbeidsko",
+    "mistenkelig": "Mistenkelige",
     "ulost": "Maa avklares",
     "forslag": "Har forslag",
     "historikk": "Historikk",
@@ -395,6 +401,8 @@ __all__ = [
     "_CONTROL_WORK_LEVEL_LABELS",
     "_GROUP_COLUMNS",
     "_HISTORY_COLUMNS",
+    "_MAPPING_FILTER_KEYS",
+    "_MAPPING_FILTER_LABELS",
     "_MAPPING_COLUMNS",
     "_MATCHER_SETTINGS_DEFAULTS",
     "_NUMERIC_COLUMNS_THREE_DECIMALS",

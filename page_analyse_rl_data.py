@@ -141,6 +141,36 @@ def load_sb_for_session() -> Optional[pd.DataFrame]:
         return None
 
 
+def load_rl_amounts() -> dict[int, float]:
+    """Returner ``{regnr: UB}`` aggregert fra aktiv SB for gjeldende session.
+
+    Tom dict hvis SB eller RL-config mangler. Brukes av andre faner som
+    bare trenger beløp per regnskapslinje (f.eks. Handlinger) og ikke vil
+    bygge full pivot.
+    """
+    sb_df = load_sb_for_session()
+    if sb_df is None or sb_df.empty:
+        return {}
+    intervals, regnskapslinjer = load_rl_config()
+    if intervals is None or regnskapslinjer is None:
+        return {}
+    try:
+        from page_analyse_rl_pivot import _aggregate_sb_to_regnr
+        agg = _aggregate_sb_to_regnr(sb_df, intervals, regnskapslinjer=regnskapslinjer)
+    except Exception as exc:
+        log.debug("load_rl_amounts: aggregering feilet: %s", exc)
+        return {}
+    if agg is None or agg.empty or "regnr" not in agg.columns or "UB" not in agg.columns:
+        return {}
+    out: dict[int, float] = {}
+    for _, row in agg.iterrows():
+        try:
+            out[int(row["regnr"])] = float(row["UB"])
+        except Exception:
+            continue
+    return out
+
+
 def _resolve_analysis_sb_views(*, page: Any) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Returner (grunnlag, AO-justert, effektiv) SB for Analyse."""
     base_sb_df = getattr(page, "_rl_sb_df", None)

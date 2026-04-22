@@ -32,6 +32,11 @@ This fits the current repo style better than a full `features/` namespace and av
 
 ## A07 Lonn Phase 1 Direction
 
+For current product status, working principles, and the near-term goal for A07
+matching/RF-1022 work, start with:
+
+- `doc/a07_payroll/STATUS_AND_GOAL.md`
+
 For A07-lonn follow-up work, phase 1 establishes a dedicated documentation set and
 target namespace structure without moving runtime files yet.
 

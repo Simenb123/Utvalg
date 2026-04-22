@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from a07_feature.control.data import a07_suggestion_is_strict_auto, build_rf1022_candidate_df
+from a07_feature.control.data import (
+    a07_suggestion_is_strict_auto,
+    build_global_auto_mapping_plan,
+    build_rf1022_candidate_df,
+)
 from a07_feature.control_matching import (
     best_suggestion_row_for_code,
     build_control_suggestion_summary,
@@ -320,6 +324,60 @@ def test_generic_refund_is_review_not_strict_auto() -> None:
     assert not a07_suggestion_is_strict_auto(generic)
     assert specific["SuggestionGuardrail"] == "accepted"
     assert a07_suggestion_is_strict_auto(specific)
+
+
+def test_strict_auto_requires_explicit_accepted_guardrail() -> None:
+    assert a07_suggestion_is_strict_auto({"WithinTolerance": True, "SuggestionGuardrail": "accepted"})
+    assert not a07_suggestion_is_strict_auto({"WithinTolerance": True})
+    assert not a07_suggestion_is_strict_auto({"WithinTolerance": True, "SuggestionGuardrail": "review"})
+    assert not a07_suggestion_is_strict_auto({"WithinTolerance": False, "SuggestionGuardrail": "accepted"})
+
+
+def test_global_auto_plan_keeps_a07_groups_in_review() -> None:
+    candidates_df = pd.DataFrame(
+        [
+            {
+                "Konto": "5000",
+                "Navn": "Lonn til ansatte",
+                "Kode": "A07_GROUP:fastloenn+timeloenn",
+                "Rf1022GroupId": "100_loenn_ol",
+                "Belop": 1000.0,
+                "Kol": "UB",
+                "Forslagsstatus": "Trygt forslag",
+                "SuggestionGuardrail": "accepted",
+                "WithinTolerance": True,
+            }
+        ]
+    )
+    gl_df = pd.DataFrame([{"Konto": "5000", "Navn": "Lonn til ansatte", "UB": 1000.0, "Endring": 1000.0}])
+
+    out = build_global_auto_mapping_plan(candidates_df, gl_df, pd.DataFrame(), {})
+
+    assert out.iloc[0]["Action"] == "review"
+    assert out.iloc[0]["Status"] == "Uavklart/Gruppe"
+
+
+def test_rf1022_candidates_skip_a07_group_codes() -> None:
+    control_gl_df = pd.DataFrame(
+        [{"Konto": "5000", "Navn": "Lonn til ansatte", "Endring": 1000.0, "BelopAktiv": 1000.0}]
+    )
+    suggestions_df = pd.DataFrame(
+        [
+            {
+                "Kode": "A07_GROUP:fastloenn+timeloenn",
+                "ForslagKontoer": "5000",
+                "WithinTolerance": True,
+                "AmountEvidence": "exact",
+                "SuggestionGuardrail": "accepted",
+                "UsedRulebook": True,
+                "HitTokens": "lonn",
+            }
+        ]
+    )
+
+    out = build_rf1022_candidate_df(control_gl_df, suggestions_df, "100_loenn_ol")
+
+    assert out.empty
 
 
 def test_rf1022_combo_amount_does_not_make_each_account_safe() -> None:

@@ -290,7 +290,11 @@ def preview_target_from_ub_evidence(
 
 
 class DocumentPreviewFrame(ttk.Frame):
-    def __init__(self, master: tk.Misc) -> None:
+    def __init__(self, master: tk.Misc, *, show_toolbar: bool = True) -> None:
+        """*show_toolbar* can be disabled by callers that render page/zoom
+        controls elsewhere (e.g. the review dialog moves them to its
+        header strip so the PDF canvas gets more vertical space).
+        ``var_page`` and the control methods remain available regardless."""
         super().__init__(master)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -316,16 +320,17 @@ class DocumentPreviewFrame(ttk.Frame):
         self.var_page = tk.StringVar(value="0 / 0")
         self.var_status = tk.StringVar(value="Velg et dokument for å vise forhåndsvisning.")
 
-        toolbar = ttk.Frame(self)
-        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 2))
-        toolbar.columnconfigure(4, weight=1)
+        if show_toolbar:
+            toolbar = ttk.Frame(self)
+            toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+            toolbar.columnconfigure(4, weight=1)
 
-        ttk.Button(toolbar, text="◄", command=self.show_previous_page, width=3).grid(row=0, column=0)
-        ttk.Label(toolbar, textvariable=self.var_page, width=7, anchor="center").grid(row=0, column=1, padx=2)
-        ttk.Button(toolbar, text="►", command=self.show_next_page, width=3).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(toolbar, text="−", command=self.zoom_out, width=2).grid(row=0, column=3)
-        ttk.Button(toolbar, text="+", command=self.zoom_in, width=2).grid(row=0, column=4)
-        ttk.Button(toolbar, text="Tilpass", command=self.fit_to_width, width=7).grid(row=0, column=5, padx=(4, 0))
+            ttk.Button(toolbar, text="◄", command=self.show_previous_page, width=3).grid(row=0, column=0)
+            ttk.Label(toolbar, textvariable=self.var_page, width=7, anchor="center").grid(row=0, column=1, padx=2)
+            ttk.Button(toolbar, text="►", command=self.show_next_page, width=3).grid(row=0, column=2, padx=(0, 8))
+            ttk.Button(toolbar, text="−", command=self.zoom_out, width=2).grid(row=0, column=3)
+            ttk.Button(toolbar, text="+", command=self.zoom_in, width=2).grid(row=0, column=4)
+            ttk.Button(toolbar, text="Tilpass", command=self.fit_to_width, width=7).grid(row=0, column=5, padx=(4, 0))
 
         canvas_frame = ttk.Frame(self)
         canvas_frame.grid(row=1, column=0, sticky="nsew")

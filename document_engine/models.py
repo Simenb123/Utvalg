@@ -162,6 +162,12 @@ class DocumentAnalysisResult:
     validation_messages: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     profile_status: str = "none"
+    # Runtime-only: the TextSegment list that backed the selected text
+    # extraction. Exposed so callers (review dialog) can learn against the
+    # same geometry analyze_document actually used — including after a
+    # redo-OCR swap. Intentionally typed as list[Any] and excluded from
+    # to_dict() to avoid coupling persisted JSON to internal engine types.
+    segments: list[Any] = field(default_factory=list)
 
     @property
     def fields(self) -> dict[str, str]:

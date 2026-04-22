@@ -44,6 +44,27 @@ def test_build_gl_selection_status_message_handles_multi_select_without_conflict
     assert out == "2 kontoer er valgt og er koblet til fastloenn."
 
 
+def test_build_gl_selection_status_message_surfaces_mapping_audit_reason() -> None:
+    control_gl_df = pd.DataFrame(
+        [
+            {
+                "Konto": "6701",
+                "Kode": "annet",
+                "MappingAuditStatus": "Feil",
+                "MappingAuditReason": "Kontoen ser ut som drifts-/honorarkostnad utenfor A07-lonn.",
+            },
+        ]
+    )
+
+    out = build_gl_selection_status_message(
+        control_gl_df=control_gl_df,
+        account="6701",
+        selected_accounts=["6701"],
+    )
+
+    assert out == "Konto 6701 har feil A07-kobling: Kontoen ser ut som drifts-/honorarkostnad utenfor A07-lonn."
+
+
 def test_build_control_panel_state_marks_saldobalanse_follow_up_cleanly() -> None:
     linked_accounts_df = pd.DataFrame([{"Konto": "5945", "Navn": "Pensjonsforsikring", "Endring": 690556.0}])
 

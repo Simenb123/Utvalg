@@ -8,6 +8,11 @@ import classification_workspace
 
 
 def _normalize_work_label(value: object) -> str:
+    try:
+        if pd.isna(value):
+            value = ""
+    except Exception:
+        pass
     label = str(value or "").strip()
     replacements = {
         "Ulost": "Ulost",
@@ -23,6 +28,11 @@ def _normalize_work_label(value: object) -> str:
 
 
 def _normalize_guided_status(value: object, *, row: pd.Series | None = None) -> str:
+    try:
+        if pd.isna(value):
+            value = ""
+    except Exception:
+        pass
     status = str(value or "").strip()
     mapping = {
         "Ulost": "Maa avklares",
@@ -210,6 +220,8 @@ def filter_control_queue_df(control_df: pd.DataFrame, view_key: str | None) -> p
     )
     if view_s in {"", "neste"}:
         mask = statuses != "Ferdig"
+    elif view_s in {"mistenkelig", "mistenkelige"}:
+        mask = statuses == "Mistenkelig kobling"
     elif view_s == "ferdig":
         mask = statuses == "Ferdig"
     elif view_s == "alle":

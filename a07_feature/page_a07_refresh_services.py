@@ -20,15 +20,20 @@ from a07_feature import (
 )
 from a07_feature.control.data import (
     CONTROL_STATEMENT_VIEW_PAYROLL,
+    apply_mapping_audit_to_control_gl_df,
+    apply_mapping_audit_to_mapping_df,
     build_a07_overview_df,
     build_control_gl_df,
     build_control_queue_df,
     build_control_statement_export_df,
     build_history_comparison_df,
+    build_mapping_audit_df,
+    build_mapping_review_df,
     build_rf1022_statement_df,
     filter_control_statement_df,
 )
 from a07_feature.control.matching import decorate_suggestions_for_display
+from a07_feature.suggest.rulebook import load_rulebook
 from a07_feature.page_paths import (
     build_groups_df,
     build_suggest_config,
@@ -174,6 +179,10 @@ def build_core_refresh_payload(
     load_code_profile_state,
 ) -> dict[str, object]:
     matcher_settings = load_matcher_settings()
+    try:
+        effective_rulebook = load_rulebook(str(rulebook_path) if rulebook_path else None)
+    except Exception:
+        effective_rulebook = None
     grouped_a07_df, membership = build_grouped_a07_df(source_a07_df, groups)
     effective_mapping = apply_groups_to_mapping(mapping, membership)
     effective_previous_mapping = apply_groups_to_mapping(previous_mapping, membership)
@@ -181,12 +190,7 @@ def build_core_refresh_payload(
 
     suggestions = _empty_suggestions_df()
     reconcile_df = _empty_reconcile_df()
-    mapping_df = mapping_to_assigned_df(
-        mapping=effective_mapping,
-        gl_df=gl_df,
-        include_empty=False,
-        basis_col=basis_col,
-    ).reset_index(drop=True)
+    mapping_df = _empty_mapping_df()
     unmapped_df = _empty_unmapped_df()
     if not grouped_a07_df.empty and not gl_df.empty:
         suggestions = suggest_mapping_candidates(
@@ -215,11 +219,33 @@ def build_core_refresh_payload(
         ).reset_index(drop=True)
     code_profile_state = load_code_profile_state(client, year, effective_mapping, gl_df=gl_df)
 
-    control_gl_df = build_control_gl_df(
+    mapping_audit_df = build_mapping_audit_df(
         gl_df,
         effective_mapping,
+        suggestions_df=suggestions,
+        mapping_previous=effective_previous_mapping,
+        code_profile_state=code_profile_state,
+        basis_col=basis_col,
+        rulebook=effective_rulebook,
+    ).reset_index(drop=True)
+    mapping_df = mapping_to_assigned_df(
+        mapping=effective_mapping,
+        gl_df=gl_df,
+        include_empty=False,
         basis_col=basis_col,
     ).reset_index(drop=True)
+    mapping_df = apply_mapping_audit_to_mapping_df(mapping_df, mapping_audit_df).reset_index(drop=True)
+
+    control_gl_df = apply_mapping_audit_to_control_gl_df(
+        build_control_gl_df(
+            gl_df,
+            effective_mapping,
+            basis_col=basis_col,
+            rulebook=effective_rulebook,
+        ),
+        mapping_audit_df,
+    ).reset_index(drop=True)
+    mapping_review_df = build_mapping_review_df(mapping_audit_df, control_gl_df).reset_index(drop=True)
     a07_overview_df = build_a07_overview_df(grouped_a07_df, reconcile_df)
     control_df = build_control_queue_df(
         a07_overview_df,
@@ -229,6 +255,7 @@ def build_core_refresh_payload(
         gl_df=gl_df,
         code_profile_state=code_profile_state,
         locked_codes=locks,
+        mapping_audit_df=mapping_audit_df,
     ).reset_index(drop=True)
     groups_df = build_groups_df(groups, locked_codes=locks).reset_index(drop=True)
     control_statement_base_df = build_control_statement_export_df(
@@ -245,6 +272,7 @@ def build_core_refresh_payload(
     rf1022_overview_df = build_rf1022_statement_df(
         control_statement_df,
         basis_col=basis_col,
+        a07_overview_df=a07_overview_df,
     )
 
     return {
@@ -260,6 +288,8 @@ def build_core_refresh_payload(
         "suggestions": suggestions,
         "reconcile_df": reconcile_df,
         "mapping_df": mapping_df,
+        "mapping_audit_df": mapping_audit_df,
+        "mapping_review_df": mapping_review_df,
         "unmapped_df": unmapped_df,
         "control_gl_df": control_gl_df,
         "a07_overview_df": a07_overview_df,
@@ -268,6 +298,7 @@ def build_core_refresh_payload(
         "control_statement_base_df": control_statement_base_df,
         "control_statement_df": control_statement_df,
         "rf1022_overview_df": rf1022_overview_df,
+        "effective_rulebook": effective_rulebook,
     }
 
 

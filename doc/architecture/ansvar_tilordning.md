@@ -1,9 +1,13 @@
 # Ansvar og tilordning — problembeskrivelse
 
-**Status:** Åpen problemstilling, ikke løst.
-**Sist oppdatert:** 2026-04-19
+**Status:** Delvis løst (retning C valgt 2026-04-21). Ansvar på selve
+handlingen lever nå i [action_assignment_store.py](../../action_assignment_store.py).
+Konto-/RL-ansvar er uendret. Aggregeringsspørsmålene under «Åpne
+spørsmål» gjenstår.
+**Sist oppdatert:** 2026-04-21
 **Relaterte moduler:**
 [action_link_dialog.py](../../action_link_dialog.py),
+[action_assignment_store.py](../../action_assignment_store.py),
 [regnskap_client_overrides.py](../../regnskap_client_overrides.py),
 [page_revisjonshandlinger.py](../../page_revisjonshandlinger.py),
 [team_config.py](../../team_config.py)
@@ -76,14 +80,44 @@ multiselect + høyreklikk-tilordning på handlingsfanen. Konklusjonen
 i den runden var å _ikke_ bygge noe nå, men dokumentere problemet
 og ta en helhetlig beslutning senere.
 
-## Åpne spørsmål å ta stilling til før implementering
+## Valgt retning (2026-04-21): C — handling-ansvar lagt på toppen
+
+Brukeren ba om multiselect + tilordning. Vi valgte retning C fra
+listen over: behold dagens konto-/RL-ansvar uendret, og legg
+handling-ansvar som et separat felt.
+
+**Hva som finnes nå:**
+
+- [action_assignment_store.py](../../action_assignment_store.py) lagrer
+  `{action_key: initials}` i `years/<YYYY>/handlinger/assignments.json`.
+  `action_key` matcher iid'en i tabellen — `str(action_id)` for CRM,
+  `"L:<id>"` for lokale handlinger. Samme lager dekker begge kilder.
+- [page_revisjonshandlinger.py](../../page_revisjonshandlinger.py) har:
+  - `selectmode="extended"` på treet (multiselect via Ctrl/Shift-klikk).
+  - Ny **Ansvarlig**-kolonne ved siden av eksisterende **Tilordnet**.
+  - Høyreklikk-meny som lister teammedlemmer fra `team_config.py`. Setter
+    valgt initial på alle valgte rader via `assignment_store.set_many`.
+  - «Fjern ansvarlig» rydder samme felt.
+
+**Hvorfor to kolonner i stedet for å slå sammen:**
+Aggregert tilordning fra konto-/RL-koblinger og direkte handling-ansvar
+er to forskjellige spørsmål. Å gjemme den ene bak den andre ville
+skjult nyansen brukeren beskrev som rotete i utgangspunktet. Når
+brukeren har levd med to-kolonne-løsningen en stund, kan vi vurdere
+å kollapse til én med tydelig kilde-indikator.
+
+## Åpne spørsmål som fortsatt gjenstår
+
+(Disse ble ikke besvart av retning C — den la kun til handling-ansvar.)
 
 - Skal konto-ansvar kunne settes uavhengig av handling-kobling?
 - Hvis ja: hvor i UI-et setter man det? (Analyse-fanen? Egen dialog?
   Høyreklikk på konto?)
 - Hva er forholdet mellom konto-ansvar og RL-ansvar når samme
   person eier flere kontoer i en RL?
-- Skal Tilordnet-kolonnen i handlingsfanen vise direkte tilordning,
-  aggregert tilordning, eller begge (to kolonner)?
+- (Avgjort 2026-04-21: handlingsfanen viser begge — Ansvarlig-kolonne
+  for direkte handling-ansvar, Tilordnet-kolonne for aggregert
+  konto-/RL-ansvar. Vurder kollaps til én kolonne hvis to-kolonne-løsningen
+  føles overflødig etter en periode i bruk.)
 - Hvordan rapporterer vi "hvem har ansvar for hva" på tvers av en
   klient uten å dobbelttelle?

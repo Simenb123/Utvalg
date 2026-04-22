@@ -11,6 +11,7 @@ from a07_feature import (
     suggest_mapping_candidates,
     suggest_mappings,
 )
+from a07_feature.page_paths import build_suggest_config
 
 
 def test_suggest_excludes_aga_and_ignores_mapping_to_excluded_codes():
@@ -121,6 +122,50 @@ def test_suggest_mappings_filters_irrelevant_accounts_and_keeps_columns_stable()
     bonus = df[df["Kode"] == "bonus"].iloc[0]
     assert bonus["ForslagKontoer"] == "5090"
     assert bonus["GL_Sum"] == 50_000
+
+
+def test_build_suggest_config_lets_rule_basis_override_ui_fallback(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        """
+{
+  "aliases": {
+    "lonn": ["wages"]
+  },
+  "rules": {
+    "fastloenn": {
+      "label": "Fastlonn",
+      "basis": "UB",
+      "allowed_ranges": ["5000"],
+      "keywords": ["lonn"]
+    }
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    a07 = pd.DataFrame([{"Kode": "fastloenn", "Navn": "Fastlonn", "Belop": 1000.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Wages", "Endring": 0.0, "UB": 1000.0},
+            {"Konto": "6000", "Navn": "Wages out of scope", "Endring": 1000.0, "UB": 1000.0},
+        ]
+    )
+    cfg = build_suggest_config(
+        rulebook_path,
+        {"tolerance_abs": 1.0, "tolerance_rel": 0.001, "max_combo": 1},
+        basis_col="Endring",
+    )
+
+    df = suggest_mapping_candidates(a07, gl, mapping_existing={}, config=cfg)
+
+    row = df.loc[df["Kode"] == "fastloenn"].iloc[0]
+    assert cfg.basis_strategy == "per_code"
+    assert row["Basis"] == "UB"
+    assert row["ForslagKontoer"] == "5000"
+    assert bool(row["UsedRulebook"]) is True
+    assert bool(row["WithinTolerance"]) is True
+    assert "wages" in str(row["HitTokens"]).casefold()
 
 
 def test_suggest_residual_only_matches_remaining_amount():

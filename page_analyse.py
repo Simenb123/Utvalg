@@ -845,6 +845,10 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             self._refresh_transactions_view()
         except Exception:
             pass
+        try:
+            self._refresh_nokkeltall_view()
+        except Exception:
+            pass
 
     def _open_tilleggsposteringer(self) -> None:
         """Åpne dialog for tilleggsposteringer."""

@@ -300,18 +300,25 @@ def open_matcher_admin(
 
     ttk.Label(
         form,
-        text="Special add\nFormat: konto | basis | weight",
+        text="Ekskluder noekkelord\nKomma eller en per linje",
     ).grid(row=8, column=0, sticky="nw", pady=(0, 4))
+    exclude_keywords_text = tk.Text(form, height=4, width=60)
+    exclude_keywords_text.grid(row=8, column=1, sticky="ew", pady=(0, 4))
+
+    ttk.Label(
+        form,
+        text="Special add\nFormat: konto | basis | weight",
+    ).grid(row=9, column=0, sticky="nw", pady=(0, 4))
     special_text = tk.Text(form, height=5, width=60)
-    special_text.grid(row=8, column=1, sticky="ew", pady=(0, 4))
+    special_text.grid(row=9, column=1, sticky="ew", pady=(0, 4))
 
     ttk.Label(
         form,
         text="Aliaser\nFormat: noekkel = alias1, alias2",
-    ).grid(row=9, column=0, sticky="nw", pady=(8, 4))
+    ).grid(row=10, column=0, sticky="nw", pady=(8, 4))
     aliases_text = tk.Text(form, height=8, width=60)
-    aliases_text.grid(row=9, column=1, sticky="nsew", pady=(8, 4))
-    form.rowconfigure(9, weight=1)
+    aliases_text.grid(row=10, column=1, sticky="nsew", pady=(8, 4))
+    form.rowconfigure(10, weight=1)
 
     settings_form = ttk.Frame(tab_settings, padding=10)
     settings_form.pack(fill="both", expand=True)
@@ -405,6 +412,7 @@ def open_matcher_admin(
         expected_sign_var.set(values["expected_sign"])
         _write_text(allowed_text, values["allowed_ranges"])
         _write_text(keywords_text, values["keywords"])
+        _write_text(exclude_keywords_text, values.get("exclude_keywords", ""))
         _write_text(special_text, values["special_add"])
         status_var.set(f"Redigerer regel for {code_s or 'ny kode'}.")
 
@@ -449,6 +457,7 @@ def open_matcher_admin(
                     "category": category_var.get(),
                     "allowed_ranges": _read_text(allowed_text),
                     "keywords": _read_text(keywords_text),
+                    "exclude_keywords": _read_text(exclude_keywords_text),
                     "boost_accounts": boost_var.get(),
                     "basis": basis_var.get(),
                     "expected_sign": expected_sign_var.get(),
@@ -493,6 +502,7 @@ def open_matcher_admin(
                 str(expected_sign_var.get() or "").strip(),
                 _read_text(allowed_text),
                 _read_text(keywords_text),
+                _read_text(exclude_keywords_text),
                 _read_text(special_text),
             ]
         )

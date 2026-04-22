@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any
 
+import action_assignment_store as assignment_store
 import action_library
 import action_workpaper_store as workpaper_store
 import workpaper_library
@@ -35,7 +36,10 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._local_assignments: dict[int, str] = {}  # action_id → "SB" / "SB, TN"
         self._local_link_counts: dict[int, int] = {}  # action_id → antall lokale koblinger
         self._workpapers: dict[int, ActionWorkpaper] = {}  # action_id → bekreftelse
+        self._assignments: dict[str, str] = {}  # action_key → ansvarlig (initialer)
         self._rl_list: list[Any] = []  # cache av RegnskapslinjeInfo for dropdown
+        self._rl_amounts: dict[int, float] = {}  # regnr → UB for inneværende år
+        self._rl_scope: dict[str, str] = {}  # regnr (str) → "inn"/"ut"/"" (manuell override)
         self._analyse_page: Any = None  # settes av ui_main via set_analyse_page
 
         self.var_status = tk.StringVar(value="Last inn klient for å se revisjonshandlinger.")
@@ -45,6 +49,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         self.var_filter_regnr = tk.StringVar(value="Alle")
         self.var_filter_origin = tk.StringVar(value="Alle")
         self.var_search = tk.StringVar()
+        self.var_show_rl_gaps = tk.BooleanVar(value=False)
 
         self._build_ui()
 
@@ -120,38 +125,57 @@ class RevisjonshandlingerPage(ttk.Frame):
         ent_search.pack(side="left", padx=(2, 0))
         ent_search.bind("<KeyRelease>", lambda _: self._apply_filter())
 
+        ttk.Checkbutton(
+            filt,
+            text="Vis RL uten handling",
+            variable=self.var_show_rl_gaps,
+            command=self._apply_filter,
+        ).pack(side="left", padx=(12, 0))
+
         # ── Treeview ──
         tree_frame = ttk.Frame(self)
         tree_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(4, 0))
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        cols = ("opprinnelse", "regnr", "regnskapslinje", "kilde", "omraade", "type", "handling", "timing",
-                "eier", "tilordnet", "status", "frist")
-        self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="browse")
+        cols = ("opprinnelse", "regnr", "regnskapslinje", "belop", "scope", "kilde", "omraade", "type",
+                "handling", "timing", "eier", "ansvarlig", "tilordnet", "status", "frist")
+        self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended")
 
-        self._tree.heading("opprinnelse", text="Opprinnelse")
-        self._tree.heading("regnr", text="Regnr")
-        self._tree.heading("regnskapslinje", text="Regnskapslinje")
-        self._tree.heading("kilde", text="Kilde")
-        self._tree.heading("omraade", text="Område")
-        self._tree.heading("type", text="Type")
-        self._tree.heading("handling", text="Handling")
-        self._tree.heading("timing", text="Timing")
-        self._tree.heading("eier", text="Eier (CRM)")
-        self._tree.heading("tilordnet", text="Tilordnet")
-        self._tree.heading("status", text="Status")
-        self._tree.heading("frist", text="Frist")
+        self._heading_labels = {
+            "opprinnelse": "Opprinnelse",
+            "regnr": "Regnr",
+            "regnskapslinje": "Regnskapslinje",
+            "belop": "Beløp",
+            "scope": "Scope",
+            "kilde": "Kilde",
+            "omraade": "Område",
+            "type": "Type",
+            "handling": "Handling",
+            "timing": "Timing",
+            "eier": "Eier (CRM)",
+            "ansvarlig": "Ansvarlig",
+            "tilordnet": "Tilordnet",
+            "status": "Status",
+            "frist": "Frist",
+        }
+        for _col, _label in self._heading_labels.items():
+            self._tree.heading(_col, text=_label,
+                               command=lambda c=_col: self._on_heading_click(c))
+        self._sort_state: tuple[str, bool] | None = None
 
         self._tree.column("opprinnelse", width=80, minwidth=60, anchor="center")
         self._tree.column("regnr", width=50, minwidth=40)
         self._tree.column("regnskapslinje", width=180, minwidth=100)
+        self._tree.column("belop", width=110, minwidth=80, anchor="e")
+        self._tree.column("scope", width=55, minwidth=40, anchor="center")
         self._tree.column("kilde", width=90, minwidth=70, anchor="center")
         self._tree.column("omraade", width=150, minwidth=80)
         self._tree.column("type", width=90, minwidth=60)
         self._tree.column("handling", width=300, minwidth=150)
         self._tree.column("timing", width=80, minwidth=50)
         self._tree.column("eier", width=130, minwidth=80)
+        self._tree.column("ansvarlig", width=80, minwidth=60, anchor="center")
         self._tree.column("tilordnet", width=80, minwidth=60, anchor="center")
         self._tree.column("status", width=100, minwidth=60)
         self._tree.column("frist", width=90, minwidth=70)
@@ -160,6 +184,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         self._tree.tag_configure("wp_auto", background="#FFFFFF")
         self._tree.tag_configure("wp_unmatched", background="#FFF4DD")
         self._tree.tag_configure("wp_local", background="#EEF2FF")
+        self._tree.tag_configure("rl_gap", background="#FAFAFA", foreground="#888888")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=yscroll.set)
@@ -168,6 +193,7 @@ class RevisjonshandlingerPage(ttk.Frame):
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
         self._tree.bind("<Double-1>", self._on_double_click)
+        self._tree.bind("<Button-3>", self._on_tree_right_click)
 
         # ── Detail panel ──
         detail = ttk.LabelFrame(self, text="Detaljer", padding=6)
@@ -175,8 +201,23 @@ class RevisjonshandlingerPage(ttk.Frame):
         detail.columnconfigure(0, weight=1)
 
         self._detail_var = tk.StringVar(value="")
-        self._detail_label = ttk.Label(detail, textvariable=self._detail_var, wraplength=900, anchor="w", justify="left")
-        self._detail_label.grid(row=0, column=0, sticky="w")
+        self._detail_text = tk.Text(
+            detail, height=6, wrap="word", relief="flat",
+            background="#FFFFFF", borderwidth=0, highlightthickness=0,
+        )
+        self._detail_text.configure(state="disabled")
+        detail_scroll = ttk.Scrollbar(detail, orient="vertical", command=self._detail_text.yview)
+        self._detail_text.configure(yscrollcommand=detail_scroll.set)
+        self._detail_text.grid(row=0, column=0, sticky="nsew")
+        detail_scroll.grid(row=0, column=1, sticky="ns")
+
+        def _sync_detail(*_args: object) -> None:
+            self._detail_text.configure(state="normal")
+            self._detail_text.delete("1.0", "end")
+            self._detail_text.insert("1.0", self._detail_var.get())
+            self._detail_text.configure(state="disabled")
+
+        self._detail_var.trace_add("write", _sync_detail)
 
     # ------------------------------------------------------------------
     # Data loading
@@ -225,7 +266,10 @@ class RevisjonshandlingerPage(ttk.Frame):
             self._engagement = None
             self._match_by_action_id = {}
             self._workpapers = {}
+            self._assignments = {}
             self._rl_list = []
+            self._rl_amounts = {}
+            self._rl_scope = {}
             self._detail_var.set("")
             if self._local_lib:
                 self._cb_area.configure(values=["Alle"] + sorted({a.omraade for a in self._local_lib if a.omraade}))
@@ -273,6 +317,15 @@ class RevisjonshandlingerPage(ttk.Frame):
         # Load local assignments (konto- og RL-koblinger per action_id)
         self._load_local_assignments()
 
+        # Load direct handling-ansvar (per action_key)
+        try:
+            self._assignments = assignment_store.load_assignments(self._client, self._year)
+        except Exception:
+            self._assignments = {}
+
+        # Beløp per regnr (fra aktiv SB) + scoping-overstyringer
+        self._reload_rl_context()
+
         # Update filter dropdowns
         areas = sorted({a.area_name for a in self._actions if a.area_name} |
                        {a.omraade for a in self._local_lib if a.omraade})
@@ -294,6 +347,54 @@ class RevisjonshandlingerPage(ttk.Frame):
         eng = result.engagement
         label = f"{eng.client_name} ({eng.client_number}) — {eng.engagement_name} — {n} handlinger ({matched} matchet)"
         self.var_status.set(label)
+
+    def _reload_rl_context(self) -> None:
+        """Last beløp per regnskapslinje + scoping-overstyringer for året."""
+        self._rl_amounts = {}
+        self._rl_scope = {}
+        if not self._client or not self._year:
+            return
+        try:
+            import page_analyse_rl_data as _rl_data
+            self._rl_amounts = _rl_data.load_rl_amounts() or {}
+        except Exception:
+            self._rl_amounts = {}
+        try:
+            import scoping_store
+            overrides = scoping_store.load_overrides(self._client, self._year) or {}
+        except Exception:
+            overrides = {}
+        for regnr_key, entry in overrides.items():
+            try:
+                scope = str((entry or {}).get("scoping") or "").strip().lower()
+            except Exception:
+                scope = ""
+            if scope in ("inn", "ut"):
+                self._rl_scope[str(regnr_key).strip()] = scope
+
+    def _format_amount(self, regnr: str) -> str:
+        if not regnr:
+            return ""
+        try:
+            value = self._rl_amounts.get(int(regnr))
+        except Exception:
+            return ""
+        if value is None:
+            return ""
+        try:
+            return f"{value:,.0f}".replace(",", " ")
+        except Exception:
+            return str(value)
+
+    def _format_scope(self, regnr: str) -> str:
+        if not regnr:
+            return ""
+        scope = self._rl_scope.get(str(regnr).strip(), "")
+        if scope == "inn":
+            return "✓"
+        if scope == "ut":
+            return "–"
+        return ""
 
     def _load_local_assignments(self) -> None:
         """Samle ``assigned_to`` per action_id fra konto- og RL-koblinger."""
@@ -369,21 +470,38 @@ class RevisjonshandlingerPage(ttk.Frame):
         search = self.var_search.get().strip().lower()
 
         shown = 0
+        covered_regnr: set[str] = set()
         # CRM-handlinger
         if origin_filter in ("Alle", "CRM"):
-            shown += self._render_crm_rows(type_filter, status_filter, area_filter, regnr_filter, search)
+            shown += self._render_crm_rows(
+                type_filter, status_filter, area_filter, regnr_filter, search,
+                covered=covered_regnr,
+            )
         # Lokale handlinger
         if origin_filter in ("Alle", "Lokal"):
-            shown += self._render_local_rows(type_filter, status_filter, area_filter, regnr_filter, search)
+            shown += self._render_local_rows(
+                type_filter, status_filter, area_filter, regnr_filter, search,
+                covered=covered_regnr,
+            )
+
+        # RL uten handling (toggle på)
+        gap_rows = 0
+        if self.var_show_rl_gaps.get():
+            gap_rows = self._render_rl_gap_rows(covered_regnr)
 
         # Update status with filter count if different from total
         total = len(self._actions) + len(self._local_lib)
         if shown != total and self._engagement:
+            extra = f"  +{gap_rows} RL uten handling" if gap_rows else ""
             self.var_status.set(
-                f"{self._engagement.client_name} — viser {shown} av {total} handlinger"
+                f"{self._engagement.client_name} — viser {shown} av {total} handlinger{extra}"
             )
 
-    def _render_crm_rows(self, type_filter, status_filter, area_filter, regnr_filter, search) -> int:
+        if self._sort_state is not None:
+            self._reorder_tree(*self._sort_state)
+
+    def _render_crm_rows(self, type_filter, status_filter, area_filter, regnr_filter, search,
+                         *, covered: set[str] | None = None) -> int:
         shown = 0
         for a in self._actions:
             if type_filter != "Alle" and a.action_type != type_filter:
@@ -413,6 +531,7 @@ class RevisjonshandlingerPage(ttk.Frame):
 
             status_display = a.status or ""
             tilordnet = self._local_assignments.get(a.action_id, "")
+            ansvarlig = self._assignments.get(str(a.action_id), "")
             kilde_label = {
                 "confirmed": "bekreftet",
                 "auto": "auto",
@@ -425,20 +544,26 @@ class RevisjonshandlingerPage(ttk.Frame):
                 "CRM",
                 regnr,
                 rl_name,
+                self._format_amount(regnr),
+                self._format_scope(regnr),
                 kilde_label,
                 a.area_name,
                 a.action_type,
                 a.procedure_name,
                 a.timing,
                 a.owner,
+                ansvarlig,
                 tilordnet,
                 status_display,
                 a.due_date,
             ), tags=(tag,))
+            if covered is not None and regnr:
+                covered.add(str(regnr).strip())
             shown += 1
         return shown
 
-    def _render_local_rows(self, type_filter, status_filter, area_filter, regnr_filter, search) -> int:
+    def _render_local_rows(self, type_filter, status_filter, area_filter, regnr_filter, search,
+                           *, covered: set[str] | None = None) -> int:
         shown = 0
         for item in self._local_lib:
             if type_filter != "Alle" and item.type != type_filter:
@@ -455,22 +580,109 @@ class RevisjonshandlingerPage(ttk.Frame):
                     continue
             if search and search not in item.navn.lower() and search not in item.omraade.lower():
                 continue
-            self._tree.insert("", "end", iid=f"L:{item.id}", values=(
+            iid = f"L:{item.id}"
+            ansvarlig = self._assignments.get(iid, "")
+            self._tree.insert("", "end", iid=iid, values=(
                 "Lokal",
                 item.default_regnr,
                 "",
+                self._format_amount(item.default_regnr),
+                self._format_scope(item.default_regnr),
                 "",
                 item.omraade,
                 item.type,
                 item.navn,
                 "",
                 "",
+                ansvarlig,
                 "",
                 "",
                 "",
             ), tags=("wp_local",))
+            if covered is not None and item.default_regnr:
+                covered.add(str(item.default_regnr).strip())
             shown += 1
         return shown
+
+    def _render_rl_gap_rows(self, covered: set[str]) -> int:
+        """Vis RL-er som ikke er truffet av noen filtrert handling."""
+        if not self._rl_list:
+            return 0
+        regnr_filter = self.var_filter_regnr.get()
+        search = self.var_search.get().strip().lower()
+
+        # Hopp over rader som ikke matcher regnr-filteret hvis aktivt.
+        filter_nr = ""
+        if regnr_filter not in ("", "Alle", "Uten match"):
+            filter_nr = regnr_filter.split()[0] if regnr_filter else ""
+
+        added = 0
+        seen: set[str] = set()
+        for rl in self._rl_list:
+            nr = str(getattr(rl, "nr", "") or "").strip()
+            name = str(getattr(rl, "regnskapslinje", "") or "")
+            if not nr or nr in covered or nr in seen:
+                continue
+            seen.add(nr)
+            if filter_nr and nr != filter_nr:
+                continue
+            if search and search not in name.lower() and search not in nr.lower():
+                continue
+            iid = f"RL:{nr}"
+            self._tree.insert("", "end", iid=iid, values=(
+                "—",            # opprinnelse
+                nr,
+                name,
+                self._format_amount(nr),
+                self._format_scope(nr),
+                "",             # kilde
+                "",             # omraade
+                "",             # type
+                "(ingen handling — dobbeltklikk for å koble)",
+                "",             # timing
+                "",             # eier
+                "",             # ansvarlig
+                "",             # tilordnet
+                "",             # status
+                "",             # frist
+            ), tags=("rl_gap",))
+            added += 1
+        return added
+
+    _NUMERIC_SORT_COLS = {"regnr", "belop"}
+
+    def _on_heading_click(self, col: str) -> None:
+        state = self._sort_state
+        descending = bool(state and state[0] == col and not state[1])
+        self._sort_state = (col, descending)
+        self._update_sort_arrows(col, descending)
+        self._reorder_tree(col, descending)
+
+    def _update_sort_arrows(self, sort_col: str, descending: bool) -> None:
+        arrow = " ↓" if descending else " ↑"
+        for col, label in self._heading_labels.items():
+            self._tree.heading(col, text=label + (arrow if col == sort_col else ""))
+
+    def _reorder_tree(self, col: str, descending: bool) -> None:
+        children = self._tree.get_children("")
+        regular = [iid for iid in children if not iid.startswith("RL:")]
+        gaps = [iid for iid in children if iid.startswith("RL:")]
+
+        empty_sentinel = float("-inf") if descending else float("inf")
+
+        def key(iid: str):
+            val = self._tree.set(iid, col)
+            if col in self._NUMERIC_SORT_COLS:
+                try:
+                    return float(str(val).replace(" ", "").replace(",", "."))
+                except (ValueError, AttributeError):
+                    return empty_sentinel
+            return (val or "").lower() if isinstance(val, str) else (val or "")
+
+        regular.sort(key=key, reverse=descending)
+        gaps.sort(key=key, reverse=descending)
+        for idx, iid in enumerate(regular + gaps):
+            self._tree.move(iid, "", idx)
 
     def _on_select(self, _event: tk.Event | None = None) -> None:
         sel = self._tree.selection()
@@ -479,7 +691,35 @@ class RevisjonshandlingerPage(ttk.Frame):
             self._update_action_buttons()
             return
 
+        if len(sel) > 1:
+            self._detail_var.set(
+                f"{len(sel)} handlinger valgt. Høyreklikk for å tilordne ansvarlig."
+            )
+            self._update_action_buttons()
+            return
+
         iid = sel[0]
+        if iid.startswith("RL:"):
+            nr = iid[3:]
+            name = next(
+                (str(getattr(rl, "regnskapslinje", "") or "") for rl in self._rl_list
+                 if str(getattr(rl, "nr", "") or "").strip() == nr),
+                "",
+            )
+            beløp = self._format_amount(nr)
+            scope = self._format_scope(nr) or "(ikke satt)"
+            lines = [
+                f"Regnskapslinje {nr} {name}",
+                f"Beløp: {beløp}" if beløp else "Beløp: (ikke tilgjengelig)",
+                f"Scope: {scope}",
+                "",
+                "Ingen handling koblet til denne regnskapslinjen.",
+                "Dobbeltklikk for å åpne kobling-dialog.",
+            ]
+            self._detail_var.set("\n".join(lines))
+            self._update_action_buttons()
+            return
+
         if iid.startswith("L:"):
             item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
             if item is None:
@@ -535,6 +775,9 @@ class RevisjonshandlingerPage(ttk.Frame):
 
         if action.owner:
             lines.append(f"Eier (CRM): {action.owner}")
+        ansvarlig = self._assignments.get(str(action.action_id), "")
+        if ansvarlig:
+            lines.append(f"Ansvarlig: {ansvarlig}")
         tilordnet = self._local_assignments.get(action.action_id, "")
         if tilordnet:
             n_links = self._local_link_counts.get(action.action_id, 0)
@@ -566,6 +809,23 @@ class RevisjonshandlingerPage(ttk.Frame):
 
         def _state(enabled: bool) -> str:
             return "normal" if enabled else "disabled"
+
+        # Multiselect: knappene jobber på én rad om gangen — deaktiver dem
+        # når mer enn én er valgt. Tilordn-ansvarlig (høyreklikk) håndterer
+        # bulk-handlinger separat.
+        if len(sel) > 1:
+            self._btn_confirm.configure(state="disabled")
+            self._btn_override.configure(state="disabled")
+            self._btn_clear.configure(state="disabled")
+            self._btn_run_wp.configure(state="disabled")
+            return
+
+        if iid.startswith("RL:"):
+            self._btn_confirm.configure(state="disabled")
+            self._btn_override.configure(state="disabled")
+            self._btn_clear.configure(state="disabled")
+            self._btn_run_wp.configure(state="disabled")
+            return
 
         if iid.startswith("L:"):
             # Lokale handlinger støtter ikke bekreftelse/overstyring mot CRM workpaper-store
@@ -856,13 +1116,108 @@ class RevisjonshandlingerPage(ttk.Frame):
             _store.register_artifact(self._client, self._year, artifact)  # type: ignore[arg-type]
 
     # ------------------------------------------------------------------
+    # Right-click → tilordne ansvarlig
+
+    def _on_tree_right_click(self, event: tk.Event) -> None:
+        if not self._client or not self._year:
+            return
+        row = self._tree.identify_row(event.y)
+        if row and row not in self._tree.selection():
+            self._tree.selection_set(row)
+        # RL-gap-rader (iid "RL:..." ) skal ikke tilordnes en ansvarlig.
+        sel = tuple(s for s in self._tree.selection() if not s.startswith("RL:"))
+        if not sel:
+            return
+
+        try:
+            import team_config as _tc
+            members = _tc.list_team_members()
+        except Exception:
+            members = []
+
+        menu = tk.Menu(self, tearoff=False)
+        n = len(sel)
+        title = f"Tilordne ansvarlig ({n} valgt)" if n > 1 else "Tilordne ansvarlig"
+        menu.add_command(label=title, state="disabled")
+        menu.add_separator()
+        if not members:
+            menu.add_command(label="Ingen team-medlemmer i config/team.json", state="disabled")
+        else:
+            for m in members:
+                initials = str(m.get("initials") or "").strip().upper()
+                full = str(m.get("full_name") or "").strip()
+                if not initials:
+                    continue
+                label = f"{initials} – {full}" if full else initials
+                menu.add_command(
+                    label=label,
+                    command=lambda v=initials, keys=sel: self._assign_to(keys, v),
+                )
+        menu.add_separator()
+        menu.add_command(
+            label="Fjern ansvarlig",
+            command=lambda keys=sel: self._assign_to(keys, ""),
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _assign_to(self, action_keys: tuple[str, ...], initials: str) -> None:
+        if not self._client or not self._year or not action_keys:
+            return
+        try:
+            self._assignments = assignment_store.set_many(
+                self._client, self._year, list(action_keys), initials,
+            )
+        except Exception as exc:
+            messagebox.showerror("Tilordne ansvarlig", str(exc), parent=self)
+            return
+        self._apply_filter()
+        try:
+            existing = [k for k in action_keys if self._tree.exists(k)]
+            if existing:
+                self._tree.selection_set(*existing)
+                self._on_select()
+        except Exception:
+            self._update_action_buttons()
+
+    # ------------------------------------------------------------------
     # Detalj-popup
 
     def _on_double_click(self, _evt: Any = None) -> None:
         sel = self._tree.selection()
         if not sel:
             return
-        self._open_detail_dialog(sel[0])
+        iid = sel[0]
+        if iid.startswith("RL:"):
+            self._open_link_dialog_for_rl(iid[3:])
+            return
+        self._open_detail_dialog(iid)
+
+    def _open_link_dialog_for_rl(self, regnr: str) -> None:
+        regnr = (regnr or "").strip()
+        if not regnr or not self._client or not self._year:
+            return
+        rl_name = ""
+        for rl in self._rl_list:
+            if str(getattr(rl, "nr", "") or "").strip() == regnr:
+                rl_name = str(getattr(rl, "regnskapslinje", "") or "")
+                break
+        try:
+            from action_link_dialog import open_action_link_dialog
+        except Exception as exc:
+            messagebox.showerror("Koble handling", str(exc), parent=self)
+            return
+        open_action_link_dialog(
+            parent=self,
+            client=self._client,
+            year=self._year,
+            kind="rl",
+            entity_key=regnr,
+            entity_label=f"{regnr} {rl_name}".strip(),
+            on_saved=self._refresh,
+        )
 
     def _open_detail_dialog(self, iid: str) -> None:
         from page_revisjonshandlinger_detail import ActionDetailDialog

@@ -201,12 +201,17 @@ class A07PageSelectionMixin:
 
     def _selected_rf1022_group(self) -> str | None:
         work_level = self._selected_control_work_level()
+        valid_groups: set[str] = set()
         if work_level == "rf1022":
+            try:
+                valid_groups = {str(value).strip() for value in self.tree_a07.get_children()}
+            except Exception:
+                valid_groups = set()
             try:
                 focused_group = str(self.tree_a07.focus() or "").strip()
             except Exception:
                 focused_group = ""
-            if focused_group:
+            if focused_group and (not valid_groups or focused_group in valid_groups):
                 self._selected_rf1022_group_id = focused_group
                 return focused_group
             try:
@@ -215,12 +220,14 @@ class A07PageSelectionMixin:
                 selection = ()
             if selection:
                 selected_group = str(selection[0] or "").strip()
-                if selected_group:
+                if selected_group and (not valid_groups or selected_group in valid_groups):
                     self._selected_rf1022_group_id = selected_group
                     return selected_group
         stored_group = str(getattr(self, "_selected_rf1022_group_id", "") or "").strip()
-        if stored_group:
+        if work_level == "rf1022" and stored_group and (not valid_groups or stored_group in valid_groups):
             return stored_group
+        if work_level != "rf1022":
+            return None
         code = str(getattr(getattr(self, "workspace", None), "selected_code", None) or "").strip()
         if not code:
             return None
@@ -271,6 +278,15 @@ class A07PageSelectionMixin:
             self._selected_rf1022_group_id = str(group_id or "").strip() or None
         else:
             self.workspace.selected_code = self._selected_control_code()
+        invalidate = getattr(self, "_invalidate_control_support", None)
+        if callable(invalidate):
+            invalidate("work-level", rerender=False)
+        elif bool(getattr(self, "_control_details_visible", False)):
+            self._support_requested = True
+            loaded_tabs = getattr(self, "_loaded_support_tabs", None)
+            if isinstance(loaded_tabs, set):
+                loaded_tabs.discard("suggestions")
+                loaded_tabs.discard("mapping")
         sync_work_level_ui = getattr(self, "_sync_control_work_level_ui", None)
         if callable(sync_work_level_ui):
             sync_work_level_ui()
@@ -378,6 +394,12 @@ class A07PageSelectionMixin:
             work_level = selected_work_level() if callable(selected_work_level) else "a07"
         except Exception:
             work_level = "a07"
+        if bool(getattr(self, "_control_details_visible", False)):
+            self._support_requested = True
+        loaded_tabs = getattr(self, "_loaded_support_tabs", None)
+        if isinstance(loaded_tabs, set):
+            loaded_tabs.discard("suggestions")
+            loaded_tabs.discard("mapping")
         if work_level == "rf1022":
             return "suggestions"
         row = self._selected_control_row()
@@ -480,6 +502,9 @@ class A07PageSelectionMixin:
             selected_group = self._selected_rf1022_group()
             self._selected_rf1022_group_id = str(selected_group or "").strip() or None
             self.workspace.selected_code = self._selected_control_code()
+            invalidate = getattr(self, "_invalidate_control_support", None)
+            if callable(invalidate):
+                invalidate("rf-selection", rerender=False)
             self._update_history_details_from_selection()
             try:
                 A07PageSelectionMixin._update_selected_code_status_message(self)
@@ -512,6 +537,9 @@ class A07PageSelectionMixin:
                 sync_groups_panel_visibility()
             return
         self.workspace.selected_code = self._selected_control_code()
+        invalidate = getattr(self, "_invalidate_control_support", None)
+        if callable(invalidate):
+            invalidate("a07-selection", rerender=False)
         self._update_history_details_from_selection()
         try:
             A07PageSelectionMixin._update_selected_code_status_message(self)
@@ -597,7 +625,7 @@ class A07PageSelectionMixin:
         key = self._tree_selection_key(tree)
         return bool(key) and key in self._suppressed_tree_select_keys
 
-    def _set_tree_selection(self, tree: ttk.Treeview, target: str | None) -> bool:
+    def _set_tree_selection(self, tree: ttk.Treeview, target: str | None, *, reveal: bool = True) -> bool:
         target_s = str(target or "").strip()
         if not target_s:
             return False
@@ -609,7 +637,8 @@ class A07PageSelectionMixin:
         try:
             tree.selection_set(target_s)
             tree.focus(target_s)
-            tree.see(target_s)
+            if reveal:
+                tree.see(target_s)
             try:
                 self.after_idle(lambda t=tree: self._release_tree_selection_suppression(t))
             except Exception:
@@ -688,12 +717,30 @@ class A07PageSelectionMixin:
                 row = self._selected_suggestion_row_from_tree(self.tree_control_suggestions)
             except Exception:
                 row = None
-            best_button = getattr(self, "btn_control_best", None)
-            if best_button is not None:
-                try:
-                    best_button.state(["!disabled"] if row is not None else ["disabled"])
-                except Exception:
-                    pass
+            update_buttons = getattr(self, "_update_a07_action_button_state", None)
+            if callable(update_buttons):
+                update_buttons()
+            else:
+                can_apply = False
+                if row is not None:
+                    plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
+                    if callable(plan_builder):
+                        try:
+                            plan = plan_builder(pd.DataFrame([dict(row)]))
+                            if plan is not None and not plan.empty and "Action" in plan.columns:
+                                can_apply = bool(
+                                    (plan["Action"].fillna("").astype(str).str.strip() == "apply").any()
+                                )
+                        except Exception:
+                            can_apply = False
+                    else:
+                        can_apply = str(row.get("Forslagsstatus") or "").strip() == "Trygt forslag"
+                best_button = getattr(self, "btn_control_best", None)
+                if best_button is not None:
+                    try:
+                        best_button.state(["!disabled"] if can_apply else ["disabled"])
+                    except Exception:
+                        pass
             if row is not None:
                 try:
                     self.suggestion_details_var.set(
@@ -744,6 +791,9 @@ class A07PageSelectionMixin:
                     ),
                 )
         self._update_history_details_from_selection()
+        update_buttons = getattr(self, "_update_a07_action_button_state", None)
+        if callable(update_buttons):
+            update_buttons()
 
     def _on_a07_filter_changed(self) -> None:
         self.a07_filter_var.set(self._selected_a07_filter())

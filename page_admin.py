@@ -150,7 +150,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
 
         self._aliases_editor = _AliasEditor(
             notebook,
-            title="Konseptaliaser",
+            title="Konseptaliaser (avansert/legacy)",
             loader=self._load_aliases_document,
             saver=self._save_aliases_document,
             on_saved=self._notify_rule_change,
@@ -164,7 +164,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         )
         self._rulebook_editor = _RulebookEditor(
             notebook,
-            title="A07-regler",
+            title="A07-regler og alias",
             loader=self._load_rulebook_document,
             saver=self._save_rulebook_document,
             on_saved=self._notify_rule_change,
@@ -204,7 +204,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         except Exception:
             self._brreg_mapping_editor = None  # type: ignore[assignment]
         self._preview_tab = ttk.Frame(notebook)
-        notebook.add(self._aliases_editor, text="Konseptaliaser")
+        notebook.add(self._aliases_editor, text="Konseptaliaser (legacy)")
         notebook.add(self._detail_class_editor, text="Kontoklassifisering")
         notebook.add(self._rulebook_editor, text="A07-regler")
         notebook.add(self._catalog_editor, text="RF-1022 og flagg")
@@ -259,6 +259,23 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
                 self._status_var.set(
                     "Admin er klar. Preview/Test lastes når fanen åpnes."
                 )
+
+    def show_a07_rulebook(self) -> None:
+        notebook = getattr(self, "_notebook", None)
+        rulebook_editor = getattr(self, "_rulebook_editor", None)
+        if notebook is not None and rulebook_editor is not None:
+            try:
+                notebook.select(rulebook_editor)
+            except Exception:
+                pass
+        reload_editor = getattr(rulebook_editor, "reload", None)
+        if callable(reload_editor):
+            try:
+                reload_editor()
+            except Exception:
+                pass
+        if self._status_var is not None:
+            self._status_var.set("A07-regler er primaer flate for A07-aliaser, ekskluderinger og basis.")
 
     def _is_preview_tab_active(self) -> bool:
         notebook = getattr(self, "_notebook", None)

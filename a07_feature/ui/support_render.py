@@ -11,14 +11,18 @@ from ..control.data import (
     build_rf1022_candidate_df_for_groups,
     build_control_statement_accounts_df,
     build_mapping_history_details,
+    build_mapping_review_summary,
+    build_mapping_review_summary_text,
+    RF1022_UNKNOWN_GROUP,
     filter_control_queue_by_rf1022_group,
     filter_control_visible_codes_df,
+    filter_mapping_rows_by_audit_status,
     filter_suggestions_df,
-    filter_suggestions_for_rf1022_group,
     control_family_tree_tag,
     control_gl_family_tree_tag,
     rf1022_group_label,
     rf1022_candidate_tree_tag,
+    next_mapping_review_problem_account,
     suggestion_tree_tag,
     unresolved_codes,
 )
@@ -35,6 +39,7 @@ from ..page_a07_constants import (
     _CONTROL_SELECTED_ACCOUNT_COLUMNS,
     _CONTROL_STATEMENT_COLUMNS,
     _CONTROL_SUGGESTION_COLUMNS,
+    _MAPPING_FILTER_LABELS,
     _RF1022_CANDIDATE_COLUMNS,
     _GROUP_COLUMNS,
     _HISTORY_COLUMNS,
@@ -49,6 +54,335 @@ from ..page_paths import default_a07_source_path, suggest_default_mapping_path
 
 
 class A07PageSupportRenderMixin:
+    def _mapping_filter_key_from_label(self, value: object) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return "alle"
+        raw_cf = raw.casefold()
+        for key, label in _MAPPING_FILTER_LABELS.items():
+            if raw_cf in {str(key).casefold(), str(label).casefold()}:
+                return key
+        return "alle"
+
+    def _selected_mapping_filter_key(self) -> str:
+        widget = getattr(self, "mapping_filter_widget", None)
+        if widget is not None:
+            try:
+                value = widget.get()
+            except Exception:
+                value = ""
+            key = self._mapping_filter_key_from_label(value)
+            if key:
+                return key
+        var = getattr(self, "mapping_filter_var", None)
+        try:
+            return self._mapping_filter_key_from_label(var.get() if var is not None else "alle")
+        except Exception:
+            return "alle"
+
+    def _support_tab_context_key(self, tab_key: str | None = None) -> tuple[object, ...]:
+        key = str(tab_key or self._active_support_tab_key() or "").strip()
+        try:
+            work_level = self._selected_control_work_level()
+        except Exception:
+            work_level = "rf1022"
+        try:
+            rf_group = self._selected_rf1022_group() if work_level == "rf1022" else ""
+        except Exception:
+            rf_group = ""
+        try:
+            selected_code = self._selected_control_code()
+        except Exception:
+            selected_code = ""
+        try:
+            mapping_filter = self._selected_mapping_filter_key() if key == "mapping" else ""
+        except Exception:
+            mapping_filter = ""
+        try:
+            suggestion_scope = self._selected_suggestion_scope() if key == "suggestions" else ""
+        except Exception:
+            suggestion_scope = ""
+        return (
+            key,
+            work_level,
+            str(rf_group or "").strip(),
+            str(selected_code or "").strip(),
+            str(mapping_filter or "").strip(),
+            str(suggestion_scope or "").strip(),
+        )
+
+    def _invalidate_control_support(self, reason: str = "", *, rerender: bool = True) -> None:
+        if bool(getattr(self, "_control_details_visible", False)):
+            self._support_requested = True
+        loaded_tabs = getattr(self, "_loaded_support_tabs", None)
+        if isinstance(loaded_tabs, set):
+            loaded_tabs.clear()
+        context_keys = getattr(self, "_loaded_support_context_keys", None)
+        if isinstance(context_keys, dict):
+            context_keys.clear()
+        else:
+            self._loaded_support_context_keys = {}
+        try:
+            self._diag(f"invalidate control support reason={reason}")
+        except Exception:
+            pass
+        if not rerender or not bool(getattr(self, "_control_details_visible", False)):
+            return
+        if bool(getattr(self, "_support_views_ready", False)):
+            try:
+                self._render_active_support_tab(force=True)
+            except Exception:
+                pass
+        else:
+            schedule = getattr(self, "_schedule_support_refresh", None)
+            if callable(schedule):
+                try:
+                    schedule()
+                except Exception:
+                    pass
+
+    def _update_a07_action_button_state(self) -> None:
+        best_enabled = False
+        batch_enabled = False
+        try:
+            work_level = self._selected_control_work_level()
+        except Exception:
+            work_level = "a07"
+
+        row = None
+        tree = getattr(self, "tree_control_suggestions", None)
+        if tree is not None:
+            try:
+                row = self._selected_suggestion_row_from_tree(tree)
+            except Exception:
+                row = None
+
+        if row is not None:
+            if work_level == "rf1022":
+                plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
+                if callable(plan_builder):
+                    try:
+                        plan = plan_builder(pd.DataFrame([dict(row)]))
+                        if plan is not None and not plan.empty and "Action" in plan.columns:
+                            best_enabled = bool(
+                                (plan["Action"].fillna("").astype(str).str.strip() == "apply").any()
+                            )
+                    except Exception:
+                        best_enabled = False
+            else:
+                try:
+                    code = str(row.get("Kode") or "").strip()
+                except Exception:
+                    code = ""
+                try:
+                    locked = set(self._locked_codes())
+                except Exception:
+                    locked = set()
+                best_enabled = (
+                    bool(code)
+                    and not code.startswith("A07_GROUP:")
+                    and code not in locked
+                    and a07_suggestion_is_strict_auto(row)
+                )
+
+        plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
+        if callable(plan_builder):
+            try:
+                plan = plan_builder()
+                if plan is not None and not plan.empty and "Action" in plan.columns:
+                    batch_enabled = bool(
+                        (plan["Action"].fillna("").astype(str).str.strip() == "apply").any()
+                    )
+            except Exception:
+                batch_enabled = False
+
+        best_button = getattr(self, "btn_control_best", None)
+        if best_button is not None:
+            try:
+                best_button.configure(text="Bruk trygg kandidat")
+                best_button.state(["!disabled"] if best_enabled else ["disabled"])
+            except Exception:
+                pass
+        batch_button = getattr(self, "btn_control_batch_suggestions", None)
+        if batch_button is not None:
+            try:
+                batch_button.configure(text="Kjør trygg auto-matching")
+                batch_button.state(["!disabled"] if batch_enabled else ["disabled"])
+            except Exception:
+                pass
+
+    def _on_mapping_filter_changed(self, _event: object | None = None) -> None:
+        self._mapping_filter_user_selected = True
+        key = self._selected_mapping_filter_key()
+        self._set_mapping_filter_key(key)
+        self._invalidate_control_support("mapping-filter", rerender=True)
+
+    def _set_mapping_filter_key(self, key: object) -> None:
+        key_s = str(key or "alle").strip().casefold()
+        if key_s not in _MAPPING_FILTER_LABELS:
+            key_s = "alle"
+        label = _MAPPING_FILTER_LABELS.get(key_s, _MAPPING_FILTER_LABELS["alle"])
+        try:
+            self.mapping_filter_var.set(key_s)
+        except Exception:
+            pass
+        try:
+            self.mapping_filter_label_var.set(label)
+        except Exception:
+            pass
+        widget = getattr(self, "mapping_filter_widget", None)
+        if widget is not None:
+            try:
+                widget.set(label)
+            except Exception:
+                pass
+
+    def _maybe_default_mapping_filter_to_critical(self, accounts_df: pd.DataFrame | None) -> None:
+        if bool(getattr(self, "_mapping_filter_user_selected", False)):
+            return
+        current_key = self._selected_mapping_filter_key()
+        summary = build_mapping_review_summary(accounts_df)
+        if current_key == "kritiske" and summary.get("kritiske", 0) == 0:
+            self._set_mapping_filter_key("alle")
+            return
+        if current_key != "alle":
+            return
+        if summary.get("kritiske", 0) > 0:
+            self._set_mapping_filter_key("kritiske")
+
+    def _control_accounts_summary_text(self, accounts_df: pd.DataFrame, summary_label: object) -> str:
+        base = build_control_accounts_summary(
+            accounts_df,
+            summary_label,
+            basis_col=getattr(getattr(self, "workspace", None), "basis_col", "Endring"),
+        )
+        review = build_mapping_review_summary_text(accounts_df)
+        if review and not review.startswith("Ingen koblinger"):
+            return f"{base} | {review}"
+        return base
+
+    def _rf1022_overview_diff_abs(self, group_id: object) -> float:
+        group_s = str(group_id or "").strip()
+        overview_df = getattr(self, "rf1022_overview_df", None)
+        if not group_s or not isinstance(overview_df, pd.DataFrame) or overview_df.empty:
+            return 0.0
+        try:
+            matches = overview_df.loc[overview_df["GroupId"].fillna("").astype(str).str.strip() == group_s]
+        except Exception:
+            return 0.0
+        if matches.empty:
+            return 0.0
+        try:
+            return float(pd.to_numeric(pd.Series([matches.iloc[0].get("Diff")]), errors="coerce").fillna(0.0).iloc[0])
+        except Exception:
+            return 0.0
+
+    def _should_default_rf1022_to_mapping(self, group_id: object, accounts_df: pd.DataFrame | None) -> bool:
+        group_s = str(group_id or "").strip()
+        if not group_s or group_s == RF1022_UNKNOWN_GROUP:
+            return False
+        candidates = getattr(self, "rf1022_candidate_df", None)
+        has_candidates = isinstance(candidates, pd.DataFrame) and not candidates.empty
+        if has_candidates:
+            return False
+        has_accounts = isinstance(accounts_df, pd.DataFrame) and not accounts_df.empty
+        return has_accounts or abs(self._rf1022_overview_diff_abs(group_s)) > 0.005
+
+    def _refresh_unresolved_rf1022_suggestions(self, group_id: object) -> None:
+        codes_df = filter_control_queue_by_rf1022_group(
+            filter_control_visible_codes_df(getattr(self, "control_df", None)),
+            group_id,
+        )
+        self.rf1022_candidate_df = pd.DataFrame(columns=[c[0] for c in _RF1022_CANDIDATE_COLUMNS])
+        self._reconfigure_tree_columns(self.tree_control_suggestions, _CONTROL_COLUMNS)
+        self._fill_tree(
+            self.tree_control_suggestions,
+            codes_df,
+            _CONTROL_COLUMNS,
+            iid_column="Kode",
+            row_tag_fn=control_family_tree_tag,
+        )
+        tree_suggestions = getattr(self, "tree_suggestions", None)
+        if tree_suggestions is not None:
+            self._fill_tree(
+                tree_suggestions,
+                pd.DataFrame(columns=[c[0] for c in _SUGGESTION_COLUMNS]),
+                _SUGGESTION_COLUMNS,
+            )
+        count = int(len(codes_df.index)) if isinstance(codes_df, pd.DataFrame) else 0
+        self.control_suggestion_summary_var.set(
+            f"Uavklart RF-1022 | {count} A07-koder maa avklares | trygg auto er deaktivert"
+        )
+        self.control_suggestion_effect_var.set("")
+        self.suggestion_details_var.set("")
+        for button_name in ("btn_control_best", "btn_control_batch_suggestions"):
+            button = getattr(self, button_name, None)
+            if button is not None:
+                try:
+                    if button_name == "btn_control_best":
+                        button.configure(text="Bruk trygg kandidat")
+                    else:
+                        button.configure(text="Kjør trygg auto-matching")
+                    button.state(["disabled"])
+                except Exception:
+                    pass
+
+    def _update_mapping_review_buttons(self) -> None:
+        button = getattr(self, "btn_next_mapping_problem", None)
+        if button is None:
+            return
+        summary = build_mapping_review_summary(getattr(self, "control_selected_accounts_df", None))
+        try:
+            button.state(["!disabled"] if summary.get("kritiske", 0) else ["disabled"])
+        except Exception:
+            pass
+
+    def _focus_next_control_account_problem(self) -> None:
+        tree = getattr(self, "tree_control_accounts", None)
+        if tree is None:
+            return
+        try:
+            current_selection = tree.selection()
+            current_account = str(current_selection[0]).strip() if current_selection else ""
+        except Exception:
+            current_account = ""
+        target = next_mapping_review_problem_account(
+            getattr(self, "control_selected_accounts_df", None),
+            current_account,
+        )
+        status_var = getattr(self, "status_var", None)
+        if not target:
+            try:
+                status_var.set("Ingen kritiske koblinger i gjeldende visning.")
+            except Exception:
+                pass
+            return
+        try:
+            children = tree.get_children()
+        except Exception:
+            children = ()
+        if target not in children:
+            return
+        if self._set_tree_selection(tree, target):
+            try:
+                tree.focus_set()
+            except Exception:
+                pass
+            try:
+                status_var.set(f"Neste problem: konto {target}.")
+            except Exception:
+                pass
+
+    def _filter_visible_mapping_accounts_df(self, accounts_df: pd.DataFrame | None) -> pd.DataFrame:
+        columns = [c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]
+        if accounts_df is None:
+            return pd.DataFrame(columns=columns)
+        work = accounts_df.copy()
+        if work.empty:
+            return pd.DataFrame(columns=columns)
+        work = filter_mapping_rows_by_audit_status(work, self._selected_mapping_filter_key())
+        return work.reindex(columns=columns, fill_value="").reset_index(drop=True)
+
     def _refresh_suggestions_tree(self) -> None:
         work_level = self._selected_control_work_level()
         current_selection = self.tree_control_suggestions.selection()
@@ -57,6 +391,9 @@ class A07PageSupportRenderMixin:
         suggestions_actions = getattr(self, "control_suggestions_actions", None)
         if work_level == "rf1022":
             selected_group = self._selected_rf1022_group()
+            if str(selected_group or "").strip() == RF1022_UNKNOWN_GROUP:
+                self._refresh_unresolved_rf1022_suggestions(selected_group)
+                return
             suggestions_df = self._ensure_suggestion_display_fields()
             filtered = build_rf1022_candidate_df(
                 self.control_gl_df,
@@ -101,14 +438,14 @@ class A07PageSupportRenderMixin:
             best_button = getattr(self, "btn_control_best", None)
             if best_button is not None:
                 try:
-                    best_button.configure(text="Bruk kandidat")
-                    best_button.state(["!disabled"] if selected_id and count else ["disabled"])
+                    best_button.configure(text="Bruk trygg kandidat")
+                    best_button.state(["disabled"])
                 except Exception:
                     pass
             batch_button = getattr(self, "btn_control_batch_suggestions", None)
             if batch_button is not None:
                 try:
-                    batch_button.configure(text="Kjør automatisk matching")
+                    batch_button.configure(text="Kjør trygg auto-matching")
                     batch_button.state(["!disabled"] if actionable_count else ["disabled"])
                 except Exception:
                     pass
@@ -143,6 +480,7 @@ class A07PageSupportRenderMixin:
                 )
             self.control_suggestion_effect_var.set("")
             self.suggestion_details_var.set("")
+            self._update_a07_action_button_state()
             return
 
         if suggestions_actions is not None:
@@ -154,13 +492,13 @@ class A07PageSupportRenderMixin:
         best_button = getattr(self, "btn_control_best", None)
         if best_button is not None:
             try:
-                best_button.configure(text="Bruk forslag")
+                best_button.configure(text="Bruk trygg kandidat")
             except Exception:
                 pass
         batch_button = getattr(self, "btn_control_batch_suggestions", None)
         if batch_button is not None:
             try:
-                batch_button.configure(text="Bruk sikre forslag")
+                batch_button.configure(text="Kjør trygg auto-matching")
             except Exception:
                 pass
         suggestions_df = self._ensure_suggestion_display_fields()
@@ -170,8 +508,6 @@ class A07PageSupportRenderMixin:
             selected_code=selected_code,
             unresolved_code_values=unresolved_codes(self.a07_overview_df),
         )
-        selected_group = self._selected_rf1022_group()
-        filtered = filter_suggestions_for_rf1022_group(filtered, selected_group)
         self._reconfigure_tree_columns(self.tree_control_suggestions, _CONTROL_SUGGESTION_COLUMNS)
         self._fill_tree(
             self.tree_control_suggestions,
@@ -203,10 +539,20 @@ class A07PageSupportRenderMixin:
                 pass
             if self._selected_control_alternative_mode() == "suggestions":
                 self.control_alternative_summary_var.set(str(self.control_suggestion_summary_var.get() or "").strip())
+            self._update_a07_action_button_state()
             return
 
-        target = selected_id if selected_id and selected_id in children else children[0]
-        self._set_tree_selection(self.tree_control_suggestions, target)
+        target = selected_id if selected_id and selected_id in children else ""
+        if target:
+            try:
+                self._set_tree_selection(self.tree_control_suggestions, target, reveal=False)
+            except TypeError:
+                self._set_tree_selection(self.tree_control_suggestions, target)
+        else:
+            try:
+                self.tree_control_suggestions.selection_remove(self.tree_control_suggestions.selection())
+            except Exception:
+                pass
         selected_row = self._selected_suggestion_row_from_tree(self.tree_control_suggestions)
         self.control_suggestion_summary_var.set(
             build_control_suggestion_summary(selected_code, filtered, selected_row)
@@ -221,15 +567,20 @@ class A07PageSupportRenderMixin:
         try:
             batch_button = getattr(self, "btn_control_batch_suggestions", None)
             if batch_button is not None:
-                has_strict_candidate = any(a07_suggestion_is_strict_auto(row) for _, row in filtered.iterrows())
-                if selected_code and selected_code not in self._locked_codes() and has_strict_candidate:
-                    batch_button.state(["!disabled"])
-                else:
-                    batch_button.state(["disabled"])
+                action_counter = getattr(self, "_rf1022_candidate_action_counts", None)
+                all_candidate_getter = getattr(self, "_all_rf1022_candidate_df", None)
+                actionable_count = 0
+                if callable(action_counter) and callable(all_candidate_getter):
+                    try:
+                        actionable_count = int(action_counter(all_candidate_getter()).get("actionable", 0))
+                    except Exception:
+                        actionable_count = 0
+                batch_button.state(["!disabled"] if actionable_count else ["disabled"])
         except Exception:
             pass
         if self._selected_control_alternative_mode() == "suggestions":
             self.control_alternative_summary_var.set(str(self.control_suggestion_summary_var.get() or "").strip())
+        self._update_a07_action_button_state()
 
     def _refresh_control_support_trees(self) -> None:
         active_tab = self._active_support_tab_key()
@@ -278,12 +629,12 @@ class A07PageSupportRenderMixin:
         if tree_control_accounts is None:
             self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
             self.control_accounts_summary_var.set(
-                build_control_accounts_summary(
+                self._control_accounts_summary_text(
                     self.control_selected_accounts_df,
                     self._selected_code_from_tree(self.tree_a07),
-                    basis_col=self.workspace.basis_col,
                 )
             )
+            self._update_mapping_review_buttons()
             return
         selected_account = None
         try:
@@ -300,7 +651,10 @@ class A07PageSupportRenderMixin:
                 self.control_statement_df,
                 selected_group,
             )
-            self.control_selected_accounts_df = accounts_df
+            if active_tab == "suggestions" and self._should_default_rf1022_to_mapping(selected_group, accounts_df):
+                self._select_support_tab_key("mapping", force_render=False)
+            self._maybe_default_mapping_filter_to_critical(accounts_df)
+            self.control_selected_accounts_df = self._filter_visible_mapping_accounts_df(accounts_df)
             summary_label = rf1022_group_label(selected_group) or "valgt RF-1022-post"
         else:
             if self.control_gl_df is not None and not self.control_gl_df.empty and selected_code:
@@ -312,20 +666,19 @@ class A07PageSupportRenderMixin:
                         columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]
                     )
                 else:
-                    self.control_selected_accounts_df = selected_accounts[
-                        [c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]
-                    ].reset_index(drop=True)
+                    self._maybe_default_mapping_filter_to_critical(selected_accounts)
+                    self.control_selected_accounts_df = self._filter_visible_mapping_accounts_df(selected_accounts)
             else:
                 self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
             summary_label = selected_code
 
         self.control_accounts_summary_var.set(
-            build_control_accounts_summary(
+            self._control_accounts_summary_text(
                 self.control_selected_accounts_df,
                 summary_label,
-                basis_col=self.workspace.basis_col,
             )
         )
+        self._update_mapping_review_buttons()
         self._fill_tree(
             tree_control_accounts,
             self.control_selected_accounts_df,
@@ -343,14 +696,21 @@ class A07PageSupportRenderMixin:
             except Exception:
                 mapping_children = ()
             if current_mapping_id and current_mapping_id in mapping_children:
-                self._set_tree_selection(tree_mapping, current_mapping_id)
+                try:
+                    self._set_tree_selection(tree_mapping, current_mapping_id, reveal=False)
+                except TypeError:
+                    self._set_tree_selection(tree_mapping, current_mapping_id)
         children = tree_control_accounts.get_children()
         target_account = (
             selected_account
             or self._selected_control_gl_account()
         )
         if work_level != "rf1022" and target_account and target_account in children:
-            self._set_tree_selection(tree_control_accounts, target_account)
+            try:
+                self._set_tree_selection(tree_control_accounts, target_account, reveal=False)
+            except TypeError:
+                self._set_tree_selection(tree_control_accounts, target_account)
+        self._update_a07_action_button_state()
 
     def _active_support_tab_key(self) -> str | None:
         if not bool(getattr(self, "_control_details_visible", False)):
@@ -395,11 +755,21 @@ class A07PageSupportRenderMixin:
         if not tab_key:
             return
         self._refresh_groups_tree()
-        if not force and tab_key in self._loaded_support_tabs:
+        context_key = self._support_tab_context_key(tab_key)
+        loaded_context_keys = getattr(self, "_loaded_support_context_keys", None)
+        if not isinstance(loaded_context_keys, dict):
+            loaded_context_keys = {}
+            self._loaded_support_context_keys = loaded_context_keys
+        if (
+            not force
+            and tab_key in self._loaded_support_tabs
+            and loaded_context_keys.get(tab_key) == context_key
+        ):
             return
 
         def _mark_loaded(current_key: str = tab_key) -> None:
             self._loaded_support_tabs.add(current_key)
+            self._loaded_support_context_keys[current_key] = self._support_tab_context_key(current_key)
 
         if tab_key == "history":
             self._fill_tree_chunked(
@@ -799,27 +1169,17 @@ class A07PageSupportRenderMixin:
                 visible=(action_target not in {"suggestions", "history", "control_statement", "none"}),
             )
             if best_button is not None:
-                if panel_state.best_suggestion_within_tolerance and code not in self._locked_codes():
-                    best_button.state(["!disabled"])
-                else:
-                    best_button.state(["disabled"])
+                best_button.configure(text="Bruk trygg kandidat")
             if history_button is not None:
                 if panel_state.has_history:
                     history_button.state(["!disabled"])
                 else:
                     history_button.state(["disabled"])
             if batch_button is not None:
-                if (
-                    code
-                    and code not in self._locked_codes()
-                    and best_row is not None
-                    and a07_suggestion_is_strict_auto(best_row)
-                ):
-                    batch_button.state(["!disabled"])
-                else:
-                    batch_button.state(["disabled"])
+                batch_button.configure(text="Kjør trygg auto-matching")
         except Exception:
             pass
+        self._update_a07_action_button_state()
         sync_control_panel_visibility = getattr(self, "_sync_control_panel_visibility", None)
         if callable(sync_control_panel_visibility):
             sync_control_panel_visibility()

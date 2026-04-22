@@ -62,7 +62,7 @@ class _RulebookEditor(ttk.Frame):  # type: ignore[misc]
 
         ttk.Label(
             self,
-            text="Vedlikehold A07-reglenes basis, intervaller og scoring uten å redigere rå JSON. Selve synonymene/ordlistene håndteres i fanen Konseptaliaser.",
+            text="Primær flate for A07-regler: aliaser, ekskluderinger, intervaller, basis, scoring og special_add. Konseptaliaser er kun avansert kompatibilitet.",
             style="Muted.TLabel",
             padding=(8, 0, 8, 4),
         ).grid(row=1, column=0, sticky="ew")
@@ -209,7 +209,7 @@ class _RulebookEditor(ttk.Frame):  # type: ignore[misc]
         if self._rule_var is not None:
             self._rule_var.set(rule_id)
         if self._label_var is not None:
-            self._label_var.set(_clean_text(payload.get("label")))
+            self._label_var.set(_clean_text(payload.get("label")) or rule_id)
         if self._category_var is not None:
             self._category_var.set(_clean_text(payload.get("category")))
         if self._basis_var is not None:
@@ -300,20 +300,23 @@ class _RulebookEditor(ttk.Frame):  # type: ignore[misc]
             pass
         for rule_id, payload in sorted(self._rules().items(), key=lambda item: item[0].casefold()):
             label = _clean_text(payload.get("label"))
+            label_display = label or rule_id
             ranges_preview = ", ".join(_string_list(payload.get("allowed_ranges"))[:2])
             basis = _clean_text(payload.get("basis"))
             haystack = " ".join(
                 [
                     rule_id,
-                    label,
+                    label_display,
                     ranges_preview,
                     ", ".join(_string_list(payload.get("keywords"))[:3]),
+                    ", ".join(_string_list(payload.get("exclude_keywords"))[:5]),
+                    ", ".join(str(value) for value in _int_list(payload.get("boost_accounts"))[:5]),
                 ]
             ).casefold()
             if search_text and search_text not in haystack:
                 continue
             try:
-                tree.insert("", "end", iid=rule_id, values=(rule_id, label, ranges_preview, basis))
+                tree.insert("", "end", iid=rule_id, values=(rule_id, label_display, ranges_preview, basis))
             except Exception:
                 continue
         if selected and tree.exists(selected):

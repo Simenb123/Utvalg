@@ -18,6 +18,7 @@ from document_control_app_service import (
     save_document_review,
 )
 from document_engine.engine import normalize_bilag_key
+from document_engine.format_utils import parse_amount_flexible
 
 
 # ---------------------------------------------------------------------------
@@ -274,16 +275,4 @@ def _accounting_amounts(df: pd.DataFrame, bilag_key: str) -> tuple[float, float]
 
 
 def _parse_amount(text: str) -> float | None:
-    text = str(text or "").strip()
-    if not text:
-        return None
-    text = text.replace("\u00a0", " ").replace(" ", "")
-    text = re.sub(r"[^\d,.\-]+", "", text)
-    if text.count(",") > 1 and "." not in text:
-        text = text.replace(",", "")
-    elif "," in text:
-        text = text.replace(".", "").replace(",", ".")
-    try:
-        return float(text)
-    except Exception:
-        return None
+    return parse_amount_flexible(text)

@@ -11,6 +11,10 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
+from .format_utils import (
+    normalize_amount_text as _format_normalize_amount_text,
+    parse_amount_flexible as _format_parse_amount,
+)
 from .models import DocumentAnalysisResult, DocumentFacts, FieldEvidence, SupplierProfile, VoucherContext
 from .profiles import apply_supplier_profile, match_supplier_profile
 
@@ -55,15 +59,42 @@ _PDF_TEXT_THRESHOLD = 40
 
 _AMOUNT_PATTERNS = [
     re.compile(
-        rf"(?is)\b(?:bel[øo]p\s+å\s+betale|sum\s+å\s+betale|amount\s+due|invoice\s+total|total\s+amount|payable\s+amount|til\s+betaling)\b"
-        rf"[^0-9\-]{{0,80}}({_NUMBER_FRAGMENT})"
+        rf"(?is)\b(?:"
+        rf"totalt\s+[åa]\s+betale"
+        rf"|sum\s+[åa]\s+betale"
+        rf"|bel[øo]p\s+[åa]\s+betale"
+        rf"|amount\s+due"
+        rf"|invoice\s+total"
+        rf"|total\s+amount"
+        rf"|payable\s+amount"
+        rf"|til\s+betaling"
+        rf"|[åa]\s+betale"
+        rf")\b[^0-9\-]{{0,80}}({_NUMBER_FRAGMENT})"
     ),
     re.compile(rf"(?is)\b(?:sum|total)\b[^0-9\-]{{0,40}}({_NUMBER_FRAGMENT})"),
 ]
 _SUBTOTAL_PATTERNS = [
-    re.compile(rf"(?is)\b(?:sum\s+eks(?:l|kl)\.?\s*mva|subtotal|netto|net\s+amount|tax\s+exclusive\s+amount)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
+    re.compile(
+        rf"(?is)\b(?:"
+        rf"sum\s+eks(?:l|kl)\.?\s*mva"
+        rf"|(?:bel[øo]p|sum)\s+eks(?:k?l)?\.?\s*mva"
+        rf"|eks(?:k?l)?\.?\s*mva"
+        rf"|subtotal"
+        rf"|netto(?:bel[øo]p)?"
+        rf"|net\s+amount"
+        rf"|tax\s+exclusive\s+amount"
+        rf")\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"
+    ),
 ]
 _VAT_PATTERNS = [
+    # Explicit "MVA beløp" / "merverdiavgift beløp" labels — strongest signal
+    re.compile(
+        rf"(?is)\b(?:"
+        rf"totalt\s+mva\s*bel[øo]p"
+        rf"|mva[\s\-]*bel[øo]p"
+        rf"|merverdiavgift\s*bel[øo]p"
+        rf")\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"
+    ),
     # Specific VAT-amount labels — allow wider context
     re.compile(rf"(?is)\b(?:merverdiavgift|tax\s+amount|vat\s+amount)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
     # "mva:" or "vat:" immediately followed by the amount (colon/space only)
@@ -176,6 +207,11 @@ class TextSegment:
     source: str
     page: int | None = None
     bbox: tuple[float, float, float, float] | None = None
+    # Optional per-token span info (char_start, char_end_exclusive, word_bbox).
+    # char offsets index into ``text``. Only populated by extractors that have
+    # word-level geometry (currently ``pdf_text_fitz_words``); other sources
+    # leave this empty so callers must fall back to ``bbox``.
+    word_spans: list[tuple[int, int, tuple[float, float, float, float]]] = field(default_factory=list)
 
 
 @dataclass
@@ -232,6 +268,7 @@ def analyze_document(
     field_evidence: dict[str, FieldEvidence] = {}
     profile_status = "none"
 
+    selected_segments: list[TextSegment] = []
     if ext == ".xml":
         raw_text = path.read_text(encoding="utf-8", errors="ignore")
         facts, field_evidence = extract_invoice_fields_from_xml(raw_text)
@@ -262,8 +299,72 @@ def analyze_document(
             )
             metadata.update(profile_metadata)
 
+        # Amount-inconsistency-driven redo-OCR: if all three amounts were
+        # extracted but ``subtotal + vat ≠ total`` and the native text layer
+        # is weak (or the deviation is large), try a forced re-OCR once.
+        if ext == ".pdf" and _should_redo_ocr_for_amounts(field_evidence, extracted):
+            extracted_redo = extract_text_from_file(path, force_ocr_redo=True)
+            # Surface the diagnostic whether or not we ultimately use the redo
+            # result, so the caller/UI can tell "we wanted a redo but ocrmypdf
+            # was unavailable" apart from "we didn't try".
+            if extracted_redo.metadata.get("ocr_redo_requested_but_missing"):
+                metadata["ocr_redo_requested_but_missing"] = True
+            redo_ran = any(
+                isinstance(c, dict) and c.get("source") == "pdf_ocrmypdf_redo"
+                for c in (extracted_redo.metadata.get("candidate_sources") or [])
+            )
+            if redo_ran:
+                raw_text_redo = extracted_redo.text
+                facts_redo, evidence_redo = extract_invoice_fields_from_text(
+                    raw_text_redo,
+                    segments=extracted_redo.segments,
+                    source_hint=extracted_redo.source,
+                )
+                if profiles:
+                    (facts_redo, evidence_redo,
+                     profile_status_redo, profile_metadata_redo) = _apply_supplier_profile_learning(
+                        facts_redo,
+                        evidence_redo,
+                        raw_text_redo,
+                        profiles,
+                        segments=extracted_redo.segments,
+                        source_hint=extracted_redo.source,
+                    )
+                else:
+                    profile_status_redo = profile_status
+                    profile_metadata_redo = {}
+                if _is_redo_extraction_better(evidence_redo, field_evidence):
+                    extracted = extracted_redo
+                    raw_text = raw_text_redo
+                    facts = facts_redo
+                    field_evidence = evidence_redo
+                    profile_status = profile_status_redo
+                    metadata = {
+                        "file_name": path.name,
+                        "file_size": path.stat().st_size,
+                    }
+                    metadata.update(extracted.metadata)
+                    metadata["ocr_used"] = extracted.ocr_used
+                    if profile_metadata_redo:
+                        metadata.update(profile_metadata_redo)
+                    source = extracted.source
+                    metadata["ocr_redo_triggered_by"] = "amount_mismatch"
+                else:
+                    metadata["ocr_redo_attempted"] = True
+                    metadata["ocr_redo_chosen"] = False
+
+    self_consistent = _validate_amount_self_consistency(field_evidence)
+    if self_consistent is not None:
+        metadata["amount_self_consistent"] = self_consistent
+
     validation_messages = build_validation_messages(facts, voucher_context, field_evidence=field_evidence)
     raw_text_excerpt = raw_text[:4000] if raw_text else ""
+
+    # Expose the segments that backed the selected extraction. Callers such
+    # as the review dialog rely on this to learn hints against the SAME text
+    # geometry analyze_document chose (important after a redo-OCR swap).
+    if ext != ".xml":
+        selected_segments = list(extracted.segments or [])
 
     return DocumentAnalysisResult(
         file_path=str(path),
@@ -275,10 +376,15 @@ def analyze_document(
         validation_messages=validation_messages,
         metadata=metadata,
         profile_status=profile_status,
+        segments=selected_segments,
     )
 
 
-def extract_text_from_file(path: Path) -> ExtractedTextResult:
+def extract_text_from_file(
+    path: Path,
+    *,
+    force_ocr_redo: bool = False,
+) -> ExtractedTextResult:
     ext = path.suffix.lower()
     if ext == ".txt":
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -294,7 +400,7 @@ def extract_text_from_file(path: Path) -> ExtractedTextResult:
             segments=[segment],
         )
     if ext == ".pdf":
-        return _extract_text_from_pdf(path)
+        return _extract_text_from_pdf(path, force_ocr_redo=force_ocr_redo)
     if ext in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}:
         text = _ocr_image(path)
         segment = TextSegment(text=text, source="image_ocr", page=1)
@@ -341,6 +447,8 @@ def extract_invoice_fields_from_text(
         if evidence is not None:
             evidence_map[field_name] = evidence
 
+    _apply_joint_amount_selection(evidence_map, text, ordered_segments, source_hint)
+
     facts = DocumentFacts.from_mapping(
         {fn: ev.normalized_value for fn, ev in evidence_map.items() if ev.normalized_value}
     )
@@ -386,6 +494,10 @@ def extract_invoice_fields_from_text_with_hints(
         )
         if evidence is not None:
             evidence_map[field_name] = evidence
+
+    _apply_joint_amount_selection(
+        evidence_map, text, ordered_segments, source_hint, profile_hints=hints,
+    )
 
     facts = DocumentFacts.from_mapping(
         {field_name: evidence.normalized_value for field_name, evidence in evidence_map.items() if evidence.normalized_value}
@@ -496,6 +608,19 @@ def build_validation_messages(
             f"{label} {getattr(facts, field_name)} {'matcher minst én regnskapslinje' if matched else 'ble ikke direkte matchet mot en enkelt regnskapslinje'}."
         )
 
+    # Internal consistency: subtotal + vat ≈ total. Only reported when all
+    # three amounts are present AND they disagree — a silent pass is fine.
+    total_ev = evidence_map.get("total_amount")
+    if total_ev is not None and total_ev.metadata.get("self_consistent") is False:
+        st = _parse_amount(getattr(facts, "subtotal_amount", ""))
+        vt = _parse_amount(getattr(facts, "vat_amount", ""))
+        tt = _parse_amount(getattr(facts, "total_amount", ""))
+        if st is not None and vt is not None and tt is not None:
+            messages.append(
+                f"Intern beløpssjekk: {st:,.2f} + {vt:,.2f} = {st + vt:,.2f}, "
+                f"men total er {tt:,.2f} — dette er inkonsistent."
+            )
+
     if facts.invoice_date:
         matched = facts.invoice_date in set(voucher_context.dates)
         _mark_validation(evidence_map.get("invoice_date"), matched, "Fakturadato ble kontrollert mot bilagsdatoer.")
@@ -508,16 +633,27 @@ def build_validation_messages(
     return messages
 
 
-def _extract_text_from_pdf(path: Path) -> ExtractedTextResult:
+def _extract_text_from_pdf(
+    path: Path,
+    *,
+    force_ocr_redo: bool = False,
+) -> ExtractedTextResult:
     page_count = _count_pdf_pages(path)
     candidates: list[_TextCandidate] = []
 
     _append_candidate(candidates, "pdf_text_pypdf", _extract_pdf_text_with_pypdf(path), False)
     _append_candidate(candidates, "pdf_text_pdfplumber", _extract_pdf_text_with_pdfplumber(path), False)
+    _append_candidate(candidates, "pdf_text_fitz_words", _extract_pdf_text_with_fitz_words(path), False)
     _append_candidate(candidates, "pdf_text_fitz_blocks", _extract_pdf_text_with_fitz_blocks(path), False)
     _append_candidate(candidates, "pdf_text_fitz", _extract_pdf_text_with_fitz(path), False)
     _append_candidate(candidates, "pdf_ocrmypdf", _ocr_pdf_with_ocrmypdf(path), True)
     _append_candidate(candidates, "pdf_ocr_fitz", _ocr_pdf_with_fitz(path), True)
+    if force_ocr_redo:
+        # Caller (analyze_document) detected an amount inconsistency and
+        # wants a re-OCR pass even when the native score is high enough that
+        # the low-score fallback below would not have fired.
+        _append_candidate(candidates, "pdf_ocrmypdf_redo",
+                          _ocr_pdf_with_ocrmypdf(path, mode="redo"), True)
 
     if not candidates:
         return ExtractedTextResult(
@@ -535,28 +671,67 @@ def _extract_text_from_pdf(path: Path) -> ExtractedTextResult:
         )
 
     best = max(candidates, key=lambda candidate: candidate.score)
+    # Prefer fitz_words over fitz_blocks when they're close — words has
+    # tight value-bbox which is critical for profile-hint bbox matching.
+    if best.source == "pdf_text_fitz_blocks":
+        words_cand = next((c for c in candidates if c.source == "pdf_text_fitz_words"), None)
+        if words_cand is not None and words_cand.score >= best.score - 5.0:
+            best = words_cand
+
+    # If every native/OCR candidate is weak, re-OCR over the existing text
+    # layer. A scanned invoice that was pre-OCRed with a low-quality
+    # engine (e.g. a Tripletex cover page) otherwise keeps its bad text
+    # forever since --skip-text leaves it alone. Skip this when the caller
+    # already requested a forced redo (candidate is already present).
+    already_redone = any(c.source == "pdf_ocrmypdf_redo" for c in candidates)
+    if not already_redone and best.score < _OCR_REDO_SCORE_THRESHOLD:
+        _append_candidate(candidates, "pdf_ocrmypdf_redo",
+                          _ocr_pdf_with_ocrmypdf(path, mode="redo"), True)
+        best = max(candidates, key=lambda candidate: candidate.score)
+
+    # When the caller explicitly asked for a redo, return the redo candidate
+    # if ocrmypdf actually produced one — even if another extractor happens to
+    # score higher. The caller has specific reasons to want the redo result
+    # (typically: native amounts are inconsistent and native is what we just
+    # got), so scoring-based selection would defeat the purpose.
+    redo_requested_but_missing = False
+    if force_ocr_redo:
+        redo_cand = next(
+            (c for c in candidates if c.source == "pdf_ocrmypdf_redo"),
+            None,
+        )
+        if redo_cand is not None:
+            best = redo_cand
+        else:
+            # ocrmypdf not available or subprocess failed — caller asked for a
+            # redo but we couldn't deliver one. Flag so analyze_document can
+            # surface this in metadata instead of silently falling back.
+            redo_requested_but_missing = True
+    metadata: dict[str, Any] = {
+        "page_count": page_count,
+        "candidate_count": len(candidates),
+        "candidate_sources": [
+            {
+                "source": candidate.source,
+                "score": round(candidate.score, 2),
+                "ocr_used": candidate.ocr_used,
+                "char_count": len(candidate.text.strip()),
+                "segment_count": len(candidate.segments),
+            }
+            for candidate in sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
+        ],
+        "selected_score": round(best.score, 2),
+        "text_char_count": len(best.text.strip()),
+        "line_count": len(_extract_candidate_lines(best.text, max_lines=200)),
+        **best.metadata,
+    }
+    if redo_requested_but_missing:
+        metadata["ocr_redo_requested_but_missing"] = True
     return ExtractedTextResult(
         text=best.text,
         source=best.source,
         ocr_used=best.ocr_used,
-        metadata={
-            "page_count": page_count,
-            "candidate_count": len(candidates),
-            "candidate_sources": [
-                {
-                    "source": candidate.source,
-                    "score": round(candidate.score, 2),
-                    "ocr_used": candidate.ocr_used,
-                    "char_count": len(candidate.text.strip()),
-                    "segment_count": len(candidate.segments),
-                }
-                for candidate in sorted(candidates, key=lambda candidate: candidate.score, reverse=True)
-            ],
-            "selected_score": round(best.score, 2),
-            "text_char_count": len(best.text.strip()),
-            "line_count": len(_extract_candidate_lines(best.text, max_lines=200)),
-            **best.metadata,
-        },
+        metadata=metadata,
         segments=best.segments,
     )
 
@@ -573,7 +748,7 @@ def _append_candidate(candidates: list[_TextCandidate], source: str, result: tup
             ocr_used=ocr_used,
             score=_score_text_candidate(normalized),
             segments=segments,
-            metadata={"ocr_engine": "ocrmypdf" if source == "pdf_ocrmypdf" else ("pytesseract" if ocr_used else "text_layer")},
+            metadata={"ocr_engine": "ocrmypdf" if source.startswith("pdf_ocrmypdf") else ("pytesseract" if ocr_used else "text_layer")},
         )
     )
 
@@ -707,6 +882,176 @@ def _extract_pdf_text_with_fitz_blocks(path: Path) -> tuple[str, list[TextSegmen
     return "\n".join(segment.text for segment in segments), segments
 
 
+_VALUE_CLUSTER_TOKEN_RE = re.compile(r"\d")
+_VALUE_CLUSTER_CURRENCY = {"NOK", "USD", "EUR", "SEK", "DKK", "GBP", "kr", "KR"}
+
+# Gap-splitting thresholds for wide table-style rows. A row like
+#   "Beløp  800,00      MVA  200,00      Total  1000,00"
+# has multiple label+value zones on one y-baseline; treating it as one
+# segment makes bbox-based matching useless because every amount shares the
+# same wide bbox. When the row spans most of the page AND has ≥ one gap of
+# _GAP_SPLIT_MIN_GAP_PT points, we additionally emit one segment per chunk
+# so each amount can be matched with a bbox tight to its own zone.
+_GAP_SPLIT_MIN_GAP_PT = 40.0
+_GAP_SPLIT_MIN_LINE_WIDTH_FRAC = 0.70
+
+
+def _build_word_segment(
+    chunk_words: list[tuple],
+    page_index: int,
+) -> TextSegment | None:
+    """Build a TextSegment from an ordered list of fitz word-records.
+
+    Word records are ``(x0, y0, x1, y1, text, block, line, word)``; only the
+    first five entries are used here. Returns None when the chunk has no
+    non-empty tokens.
+    """
+    parts: list[str] = []
+    spans: list[tuple[int, int, tuple[float, float, float, float]]] = []
+    cursor = 0
+    for w in chunk_words:
+        token = str(w[4])
+        if not token:
+            continue
+        if parts:
+            parts.append(" ")
+            cursor += 1
+        start = cursor
+        parts.append(token)
+        cursor += len(token)
+        try:
+            bbox = (float(w[0]), float(w[1]), float(w[2]), float(w[3]))
+        except (TypeError, ValueError):
+            continue
+        spans.append((start, cursor, bbox))
+    text = "".join(parts).strip()
+    if not text:
+        return None
+
+    # Line-level bbox fallback: tightened around trailing numeric cluster.
+    # Callers that know the exact regex match range should prefer word_spans.
+    cluster_start = len(chunk_words)
+    for i in range(len(chunk_words) - 1, -1, -1):
+        token = str(chunk_words[i][4])
+        if (_VALUE_CLUSTER_TOKEN_RE.search(token)
+            or token in {",", ".", "-"}
+            or token in _VALUE_CLUSTER_CURRENCY):
+            cluster_start = i
+        else:
+            break
+    cluster = (chunk_words[cluster_start:]
+               if cluster_start < len(chunk_words) else chunk_words)
+    bbox = (
+        min(float(w[0]) for w in cluster),
+        min(float(w[1]) for w in cluster),
+        max(float(w[2]) for w in cluster),
+        max(float(w[3]) for w in cluster),
+    )
+    return TextSegment(
+        text=text,
+        source="pdf_text_fitz_words",
+        page=page_index,
+        bbox=bbox,
+        word_spans=spans,
+    )
+
+
+def _split_line_by_gaps(
+    line_words: list[tuple],
+    page_width: float,
+) -> list[list[tuple]]:
+    """Split a y-line into label/value chunks when wide with large x-gaps.
+
+    Returns a list of chunks. When no splitting applies (narrow row, single
+    word, no large gap, or no chunk contains a digit), returns a
+    single-element list containing the input unchanged.
+    """
+    if len(line_words) < 2:
+        return [line_words]
+    line_x0 = min(float(w[0]) for w in line_words)
+    line_x1 = max(float(w[2]) for w in line_words)
+    line_width = line_x1 - line_x0
+    if page_width <= 0 or line_width < _GAP_SPLIT_MIN_LINE_WIDTH_FRAC * page_width:
+        return [line_words]
+    chunks: list[list[tuple]] = [[line_words[0]]]
+    for i in range(1, len(line_words)):
+        prev_x1 = float(line_words[i - 1][2])
+        cur_x0 = float(line_words[i][0])
+        if (cur_x0 - prev_x1) > _GAP_SPLIT_MIN_GAP_PT:
+            chunks.append([])
+        chunks[-1].append(line_words[i])
+    if len(chunks) == 1:
+        return [line_words]
+    if not any(
+        any(_VALUE_CLUSTER_TOKEN_RE.search(str(w[4])) for w in chunk)
+        for chunk in chunks
+    ):
+        # No chunk carries a number — splitting serves no amount-matching
+        # purpose (and could hurt label-hint matching). Skip.
+        return [line_words]
+    return chunks
+
+
+def _extract_pdf_text_with_fitz_words(path: Path) -> tuple[str, list[TextSegment]]:
+    """Per-line segments with bbox tightened around the trailing numeric
+    cluster, plus gap-split chunks for wide table-style rows.
+
+    Narrow rows (e.g. ``Til betaling 1 000,00 NOK``) become a single
+    segment whose ``text`` is the full line (so label-hint matching still
+    works) and whose ``bbox`` is tight around the trailing value cluster.
+
+    Wide rows (e.g. ``Beløp 800,00   MVA 200,00   Total 1000,00``) are
+    emitted as chunk-segments first, followed by the full-row segment as a
+    fallback. Chunks get the lower ``segment_index`` so
+    ``_first_match_evidence`` prefers their tight bbox over the full row
+    when an amount regex matches inside a chunk.
+    """
+    try:
+        import fitz
+    except Exception:
+        return "", []
+
+    segments: list[TextSegment] = []
+    try:
+        with fitz.open(str(path)) as doc:
+            for page_index, page in enumerate(doc, start=1):
+                try:
+                    page_width = float(page.rect.width)
+                except Exception:
+                    page_width = 0.0
+                words = page.get_text("words") or []
+                if not words:
+                    continue
+                # Group by visual y-midpoint (in 2pt buckets) so words placed
+                # on the same physical row but in different PDF blocks
+                # (table columns, multi-column layouts) still cluster as one
+                # line.
+                lines: dict[int, list[tuple]] = {}
+                for w in words:
+                    if len(w) < 5:
+                        continue
+                    try:
+                        y_mid = (float(w[1]) + float(w[3])) / 2.0
+                    except (TypeError, ValueError):
+                        continue
+                    bucket = int(round(y_mid / 2.0))
+                    lines.setdefault(bucket, []).append(w)
+                for key in sorted(lines.keys()):
+                    line_words = sorted(lines[key], key=lambda w: float(w[0]))
+                    chunks = _split_line_by_gaps(line_words, page_width)
+                    if len(chunks) > 1:
+                        for chunk in chunks:
+                            seg = _build_word_segment(chunk, page_index)
+                            if seg is not None:
+                                segments.append(seg)
+                    full_seg = _build_word_segment(line_words, page_index)
+                    if full_seg is not None:
+                        segments.append(full_seg)
+    except Exception:
+        return "", []
+    return "\n".join(segment.text for segment in segments), segments
+
+
 def _extract_pdf_text_with_fitz(path: Path) -> tuple[str, list[TextSegment]]:
     try:
         import fitz
@@ -725,9 +1070,25 @@ def _extract_pdf_text_with_fitz(path: Path) -> tuple[str, list[TextSegment]]:
     return "\n".join(segment.text for segment in segments), segments
 
 
-def _ocr_pdf_with_ocrmypdf(path: Path) -> tuple[str, list[TextSegment]]:
+_OCR_REDO_SCORE_THRESHOLD = 30.0
+
+
+def _ocr_pdf_with_ocrmypdf(path: Path, *, mode: str = "skip") -> tuple[str, list[TextSegment]]:
+    """Run ocrmypdf against *path* and re-extract text from the output.
+
+    ``mode``:
+        ``"skip"``  — pass ``--skip-text`` (default). Only OCRs pages that
+                      don't already have a text layer.
+        ``"redo"``  — pass ``--redo-ocr``. Re-runs OCR over pages with
+                      existing (often low-quality) text layers. Used as a
+                      fallback when the native extractors all produced a
+                      weak result.
+    """
     if shutil.which("ocrmypdf") is None:
         return "", []
+
+    flag = "--redo-ocr" if mode == "redo" else "--skip-text"
+    source_tag = "pdf_ocrmypdf_redo" if mode == "redo" else "pdf_ocrmypdf"
 
     temp_dir = Path(tempfile.mkdtemp(prefix="utvalg_doc_ocr_"))
     out_pdf = temp_dir / "ocr.pdf"
@@ -735,7 +1096,7 @@ def _ocr_pdf_with_ocrmypdf(path: Path) -> tuple[str, list[TextSegment]]:
         subprocess.run(
             [
                 "ocrmypdf",
-                "--skip-text",
+                flag,
                 "--deskew",
                 "--quiet",
                 "--language",
@@ -747,7 +1108,10 @@ def _ocr_pdf_with_ocrmypdf(path: Path) -> tuple[str, list[TextSegment]]:
             timeout=180,
             capture_output=True,
         )
+        # fitz_words first: keeps word_spans + tight per-row bbox after redo
+        # OCR, so profile-hint geometry stays precise on OCR-rescued PDFs.
         for extractor in (
+            _extract_pdf_text_with_fitz_words,
             _extract_pdf_text_with_pypdf,
             _extract_pdf_text_with_pdfplumber,
             _extract_pdf_text_with_fitz_blocks,
@@ -756,7 +1120,13 @@ def _ocr_pdf_with_ocrmypdf(path: Path) -> tuple[str, list[TextSegment]]:
             text, segments = extractor(out_pdf)
             if len(text.strip()) >= _PDF_TEXT_THRESHOLD:
                 remapped = [
-                    TextSegment(text=segment.text, source="pdf_ocrmypdf", page=segment.page, bbox=segment.bbox)
+                    TextSegment(
+                        text=segment.text,
+                        source=source_tag,
+                        page=segment.page,
+                        bbox=segment.bbox,
+                        word_spans=list(segment.word_spans or []),
+                    )
                     for segment in segments
                 ]
                 return text, remapped
@@ -931,7 +1301,61 @@ def _extract_supplier_evidence(text: str, segments: list[TextSegment], source_hi
     return None
 
 
-def _first_match_evidence(
+def _bbox_for_match_span(
+    segment: TextSegment,
+    match: re.Match[str],
+) -> tuple[float, float, float, float] | None:
+    """Return a bbox tight around ``match.group(1)`` using ``word_spans``.
+
+    When a line has several amounts on the same row (``Sum 800  MVA 200
+    Total 1000``), line-level bbox is useless for distinguishing fields.
+    This walks the segment's word-span table and unions the word bboxes
+    whose char-ranges overlap the regex match. Returns ``None`` when the
+    segment lacks word-span info — callers should fall back to
+    ``segment.bbox`` in that case.
+    """
+    spans = segment.word_spans or []
+    if not spans:
+        return None
+    span = match.span(1) if match.groups() else match.span()
+    m_start, m_end = span
+    if m_start < 0 or m_end <= m_start:
+        # Group didn't participate in the match — fall back to whole match.
+        m_start, m_end = match.span()
+        if m_start < 0 or m_end <= m_start:
+            return None
+    hits: list[tuple[float, float, float, float]] = []
+    for s_start, s_end, bbox in spans:
+        if s_end <= m_start or s_start >= m_end:
+            continue
+        hits.append(bbox)
+    if not hits:
+        return None
+    x0 = min(b[0] for b in hits)
+    y0 = min(b[1] for b in hits)
+    x1 = max(b[2] for b in hits)
+    y1 = max(b[3] for b in hits)
+    return (x0, y0, x1, y1)
+
+
+def _match_is_percentage(segment_text: str, match: re.Match[str]) -> bool:
+    """Return True when the captured number is immediately followed by ``%``.
+
+    Prevents rate values like ``25.00%`` or ``25 %`` from being harvested as
+    monetary amounts. Looks at the first non-whitespace character after the
+    end of capture group 1 (or the match as a whole when no group exists).
+    """
+    try:
+        end = match.end(1) if match.groups() else match.end()
+    except (IndexError, re.error):
+        end = match.end()
+    if end < 0:
+        return False
+    tail = segment_text[end:end + 8]
+    return tail.lstrip().startswith("%")
+
+
+def _collect_ranked_candidates(
     field_name: str,
     patterns: list[re.Pattern[str]] | tuple[re.Pattern[str], ...],
     text: str,
@@ -941,8 +1365,15 @@ def _first_match_evidence(
     source_hint: str,
     *,
     profile_hints: list[dict[str, Any]] | None = None,
-) -> FieldEvidence | None:
+) -> list[tuple[float, FieldEvidence]]:
+    """Return all field-match candidates sorted by rank (highest first).
+
+    Amount fields additionally reject percentage tails via
+    :func:`_match_is_percentage` so a rate like ``25.00%`` can never become
+    ``vat_amount``.
+    """
     candidates: list[tuple[float, FieldEvidence]] = []
+    is_amount_field = field_name in _AMOUNT_FIELDS
     for segment_index, segment in enumerate(segments or [TextSegment(text=text, source=source_hint)]):
         # Skip bilagsprint segments entirely — these are accounting-system
         # printouts (Tripletex cover pages) and should never provide field values.
@@ -954,6 +1385,9 @@ def _first_match_evidence(
                 normalized = normalizer(raw_value)
                 if not normalized:
                     continue
+                if is_amount_field and _match_is_percentage(segment.text, match):
+                    continue
+                match_bbox = _bbox_for_match_span(segment, match) or segment.bbox
                 evidence = FieldEvidence(
                     field_name=field_name,
                     normalized_value=normalized,
@@ -961,7 +1395,7 @@ def _first_match_evidence(
                     source=segment.source or source_hint,
                     confidence=score,
                     page=segment.page,
-                    bbox=segment.bbox,
+                    bbox=match_bbox,
                 )
                 rank = _score_field_match(
                     field_name, evidence,
@@ -971,9 +1405,26 @@ def _first_match_evidence(
                     segment_text=segment.text,
                 )
                 candidates.append((rank, evidence))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda item: item[0])[1]
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates
+
+
+def _first_match_evidence(
+    field_name: str,
+    patterns: list[re.Pattern[str]] | tuple[re.Pattern[str], ...],
+    text: str,
+    segments: list[TextSegment],
+    normalizer,
+    score: float,
+    source_hint: str,
+    *,
+    profile_hints: list[dict[str, Any]] | None = None,
+) -> FieldEvidence | None:
+    candidates = _collect_ranked_candidates(
+        field_name, patterns, text, segments, normalizer, score, source_hint,
+        profile_hints=profile_hints,
+    )
+    return candidates[0][1] if candidates else None
 
 
 def _score_field_match(
@@ -1026,13 +1477,16 @@ def _profile_hint_boost(
 ) -> float:
     """Return a score bonus when this candidate matches a learned profile hint.
 
-    Scoring:
+    Scoring (before weighting):
         page match only          → +150
-        label match only         → +200 (weighted by hint count, up to +350)
+        label match only         → +200
         page + label match       → +500
+        page + bbox near         → +400
         page + label + bbox near → +700 (strongest — exact position confirmed)
 
-    All bonuses are weighted by confirmation count (saturates at 3 saves).
+    All bonuses are weighted by confirmation count; weight saturates at
+    count=3 (weight=1.0) so a profile with 20 saves does not drown out the
+    generic pattern ranking.
     """
     if not hints:
         return 0.0
@@ -1045,7 +1499,7 @@ def _profile_hint_boost(
         hint_label: str       = str(hint.get("label", "") or "").lower().strip()
         hint_bbox             = hint.get("bbox")
         hint_count: int       = max(1, int(hint.get("count", 1) or 1))
-        weight = min(hint_count / 3.0, 2.0)   # saturates at 3 confirmed saves
+        weight = min(hint_count / 3.0, 1.0)   # saturates at 3 confirmed saves
 
         page_match  = (hint_page is not None and evidence.page is not None
                        and evidence.page == hint_page)
@@ -1246,74 +1700,256 @@ def _normalize_date_text(value: str) -> str:
 
 
 def _normalize_amount_text(value: str) -> str:
-    number = _parse_amount(value)
-    if number is None:
-        return ""
-    return f"{number:.2f}"
+    return _format_normalize_amount_text(value)
 
 
 def _parse_amount(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        if pd.isna(value):
-            return None
-        return float(value)
-    text = str(value).strip()
-    if not text:
-        return None
-    text = text.replace("\u00a0", " ")
-    text = re.sub(r"[^\d,.\- ]+", "", text)
-    text = text.replace(" ", "")
+    return _format_parse_amount(value)
 
-    has_comma = "," in text
-    has_dot = "." in text
 
-    if has_comma and has_dot:
-        # Both separators present — the LAST one is the decimal separator.
-        last_comma = text.rfind(",")
-        last_dot = text.rfind(".")
-        if last_comma > last_dot:
-            # Norwegian: 1.990,00 → comma is decimal
-            text = text.replace(".", "").replace(",", ".")
-        else:
-            # English: 1,990.00 → dot is decimal
-            text = text.replace(",", "")
-    elif has_comma:
-        if text.count(",") > 1:
-            # Multiple commas, all thousands: 1,000,000
-            text = text.replace(",", "")
-        else:
-            # Single comma — check if it looks like thousands (e.g. 1,990)
-            parts = text.split(",")
-            if len(parts[1]) == 3 and len(parts[0]) <= 3:
-                # Thousands separator: 1,990 → 1990
-                text = text.replace(",", "")
-            else:
-                # Decimal: 798,31 or 59,00
-                text = text.replace(",", ".")
-    elif has_dot:
-        if text.count(".") > 1:
-            # Multiple dots, all thousands: 1.000.000
-            text = text.replace(".", "")
-        else:
-            # Single dot — check if it looks like thousands (e.g. 1.990)
-            parts = text.split(".")
-            if len(parts[1]) == 3 and len(parts[0]) <= 3:
-                # Thousands separator: 1.990 → 1990
-                text = text.replace(".", "")
-            # else: decimal dot, keep as-is (e.g. 0.50, 1990.00)
+_AMOUNT_SELF_CONSISTENCY_TOLERANCE = 1.0
 
-    try:
-        return float(text)
-    except Exception:
+# Guard rails for the amount-driven redo-OCR fallback:
+#  - don't bother re-OCR'ing a PDF whose text layer is already strong enough
+#    that the mismatch is more likely a parsing issue than an OCR issue,
+#  - unless the deviation is so large (absolute or relative) that the
+#    correct value must have been mis-read.
+_OCR_REDO_AMOUNT_SCORE_GATE = 60.0
+_OCR_REDO_AMOUNT_ABS_THRESHOLD = 100.0
+_OCR_REDO_AMOUNT_REL_THRESHOLD = 0.10  # 10 % of total
+
+
+def _amounts_self_consistent(
+    evidence_map: dict[str, FieldEvidence],
+    *,
+    tolerance: float = _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
+) -> bool | None:
+    """Pure predicate mirror of :func:`_validate_amount_self_consistency`.
+
+    Returns True/False when all three amounts are present and parseable,
+    None when the check cannot be run. Does NOT mutate evidences.
+    """
+    st = _parse_amount(_ev_value(evidence_map.get("subtotal_amount")))
+    vt = _parse_amount(_ev_value(evidence_map.get("vat_amount")))
+    tt = _parse_amount(_ev_value(evidence_map.get("total_amount")))
+    if st is None or vt is None or tt is None:
         return None
+    return abs((st + vt) - tt) <= tolerance
+
+
+def _should_redo_ocr_for_amounts(
+    evidence_map: dict[str, FieldEvidence],
+    extracted: ExtractedTextResult,
+) -> bool:
+    """Decide whether amount-inconsistency is worth a redo-OCR round."""
+    # Already retried in the low-score fallback → don't loop.
+    cand_sources = extracted.metadata.get("candidate_sources") or []
+    for cand in cand_sources:
+        if isinstance(cand, dict) and cand.get("source") == "pdf_ocrmypdf_redo":
+            return False
+    st = _parse_amount(_ev_value(evidence_map.get("subtotal_amount")))
+    vt = _parse_amount(_ev_value(evidence_map.get("vat_amount")))
+    tt = _parse_amount(_ev_value(evidence_map.get("total_amount")))
+    if st is None or vt is None or tt is None:
+        return False
+    deviation = abs((st + vt) - tt)
+    if deviation <= _AMOUNT_SELF_CONSISTENCY_TOLERANCE:
+        return False
+    selected_score = float(extracted.metadata.get("selected_score", 0.0) or 0.0)
+    if selected_score < _OCR_REDO_AMOUNT_SCORE_GATE:
+        return True
+    # Score looks healthy but numbers don't add up — only trust OCR as the
+    # culprit when the gap is materially large.
+    if deviation >= _OCR_REDO_AMOUNT_ABS_THRESHOLD:
+        return True
+    if abs(tt) > 0 and deviation / abs(tt) >= _OCR_REDO_AMOUNT_REL_THRESHOLD:
+        return True
+    return False
+
+
+def _is_redo_extraction_better(
+    new_evidence: dict[str, FieldEvidence],
+    old_evidence: dict[str, FieldEvidence],
+) -> bool:
+    """Prefer redo-OCR only when it genuinely improves the amounts.
+
+    Rules:
+      * redo consistent, old inconsistent → use redo
+      * redo consistent, old unknown      → use redo (redo filled a missing
+        field and stayed consistent)
+      * redo inconsistent                 → never promote over old
+    """
+    new_verdict = _amounts_self_consistent(new_evidence)
+    old_verdict = _amounts_self_consistent(old_evidence)
+    if new_verdict is True and old_verdict is False:
+        return True
+    if new_verdict is True and old_verdict is None:
+        return True
+    return False
+
+
+def _validate_amount_self_consistency(
+    evidence_map: dict[str, FieldEvidence],
+    *,
+    tolerance: float = _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
+) -> bool | None:
+    """Cross-check ``subtotal + vat ≈ total`` inside the invoice itself.
+
+    Sets ``metadata["self_consistent"]`` (True|False) on all three amount
+    evidences when all three are present. Does NOT mutate the values — we
+    only flag so downstream logic (and the UI) can decide whether to demote
+    confidence or warn the user. Returns the verdict, or None if the check
+    could not run (a field was missing / unparseable).
+    """
+    st = _parse_amount(_ev_value(evidence_map.get("subtotal_amount")))
+    vt = _parse_amount(_ev_value(evidence_map.get("vat_amount")))
+    tt = _parse_amount(_ev_value(evidence_map.get("total_amount")))
+    if st is None or vt is None or tt is None:
+        return None
+    consistent = abs((st + vt) - tt) <= tolerance
+    note_snippet = f"Intern kontroll: {st:.2f} + {vt:.2f} = {st + vt:.2f} vs total {tt:.2f}"
+    for fname in ("subtotal_amount", "vat_amount", "total_amount"):
+        ev = evidence_map.get(fname)
+        if ev is None:
+            continue
+        ev.metadata["self_consistent"] = consistent
+        if not consistent:
+            existing = (ev.validation_note or "").strip()
+            suffix = f"[Avvik — {note_snippet}]"
+            ev.validation_note = f"{existing} {suffix}".strip() if existing else suffix
+    return consistent
+
+
+def _select_self_consistent_amounts(
+    sub_cands: list[tuple[float, FieldEvidence]],
+    vat_cands: list[tuple[float, FieldEvidence]],
+    tot_cands: list[tuple[float, FieldEvidence]],
+    *,
+    top_k: int = 6,
+    tolerance: float = _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
+) -> tuple[FieldEvidence, FieldEvidence, FieldEvidence] | None:
+    """Pick a ``(subtotal, vat, total)`` triple where ``s + v ≈ t`` holds.
+
+    Takes the top-K ranked candidates per field (deduplicated by parsed
+    numeric value — same amount at different bboxes collapses to one entry),
+    enumerates all combinations, and returns the consistent combination with
+    the lowest rank-position sum. Lower position = higher-ranked individual
+    candidate, so hint-boosted values still win when a consistent combo
+    exists. Returns ``None`` when no consistent triple can be formed.
+    """
+    def _dedupe(cands: list[tuple[float, FieldEvidence]]) -> list[tuple[int, float, FieldEvidence]]:
+        seen: set[str] = set()
+        out: list[tuple[int, float, FieldEvidence]] = []
+        for rank, ev in cands:
+            parsed = _parse_amount(ev.normalized_value)
+            if parsed is None:
+                continue
+            key = f"{parsed:.4f}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((len(out), rank, ev))
+            if len(out) >= top_k:
+                break
+        return out
+
+    sub_top = _dedupe(sub_cands)
+    vat_top = _dedupe(vat_cands)
+    tot_top = _dedupe(tot_cands)
+    if not (sub_top and vat_top and tot_top):
+        return None
+
+    best_key: tuple[int, float] | None = None
+    best: tuple[FieldEvidence, FieldEvidence, FieldEvidence] | None = None
+    for si, s_rank, s_ev in sub_top:
+        s_val = _parse_amount(s_ev.normalized_value)
+        if s_val is None:
+            continue
+        for vi, v_rank, v_ev in vat_top:
+            v_val = _parse_amount(v_ev.normalized_value)
+            if v_val is None:
+                continue
+            for ti, t_rank, t_ev in tot_top:
+                t_val = _parse_amount(t_ev.normalized_value)
+                if t_val is None:
+                    continue
+                if abs((s_val + v_val) - t_val) > tolerance:
+                    continue
+                idx_sum = si + vi + ti
+                rank_sum = s_rank + v_rank + t_rank
+                key = (idx_sum, -rank_sum)
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best = (s_ev, v_ev, t_ev)
+    return best
+
+
+def _apply_joint_amount_selection(
+    evidence_map: dict[str, FieldEvidence],
+    text: str,
+    segments: list[TextSegment],
+    source_hint: str,
+    *,
+    profile_hints: dict[str, list[dict[str, Any]]] | None = None,
+) -> None:
+    """Override independently-picked amounts with a self-consistent triple.
+
+    Runs after per-field selection. Exits early when any of the three fields
+    is missing or when the picked amounts already satisfy ``s + v ≈ t``.
+    Otherwise it gathers top-K candidates per field and picks the consistent
+    combination (see :func:`_select_self_consistent_amounts`). Each swapped
+    evidence is tagged with ``metadata["selected_by"] = "joint_amount_ranking"``.
+    """
+    if not all(k in evidence_map for k in ("subtotal_amount", "vat_amount", "total_amount")):
+        return
+    if _amounts_self_consistent(evidence_map) is True:
+        return
+
+    hints = profile_hints or {}
+    sub_cands = _collect_ranked_candidates(
+        "subtotal_amount", _SUBTOTAL_PATTERNS, text, segments,
+        _normalize_amount_text, 0.8, source_hint,
+        profile_hints=hints.get("subtotal_amount"),
+    )
+    vat_cands = _collect_ranked_candidates(
+        "vat_amount", _VAT_PATTERNS, text, segments,
+        _normalize_amount_text, 0.8, source_hint,
+        profile_hints=hints.get("vat_amount"),
+    )
+    tot_cands = _collect_ranked_candidates(
+        "total_amount", _AMOUNT_PATTERNS, text, segments,
+        _normalize_amount_text, 0.86, source_hint,
+        profile_hints=hints.get("total_amount"),
+    )
+    selection = _select_self_consistent_amounts(sub_cands, vat_cands, tot_cands)
+    if selection is None:
+        return
+    sub_ev, vat_ev, tot_ev = selection
+    for fname, new_ev in (
+        ("subtotal_amount", sub_ev),
+        ("vat_amount", vat_ev),
+        ("total_amount", tot_ev),
+    ):
+        old_ev = evidence_map.get(fname)
+        if old_ev is None or old_ev.normalized_value != new_ev.normalized_value:
+            new_ev.metadata = dict(new_ev.metadata or {})
+            new_ev.metadata["selected_by"] = "joint_amount_ranking"
+            evidence_map[fname] = new_ev
+
+
+def _ev_value(evidence: FieldEvidence | None) -> str:
+    if evidence is None:
+        return ""
+    return evidence.normalized_value or evidence.raw_value or ""
 
 
 def _local_name(tag: str) -> str:
     if "}" in tag:
         return tag.rsplit("}", 1)[1]
     return tag
+
+
+_AMOUNT_FIELDS = frozenset({"subtotal_amount", "vat_amount", "total_amount"})
 
 
 def _apply_supplier_profile_learning(
@@ -1328,6 +1964,12 @@ def _apply_supplier_profile_learning(
     profile, match_score = match_supplier_profile(profiles, facts.as_dict(), raw_text)
     if profile is None:
         return facts, field_evidence, "none", {}
+
+    # Aggregated cross-supplier profile — labels like "til betaling" leak
+    # across unrelated vendors, so we must not let its hints boost amount
+    # fields. Vendor identity is the only reliable signal for amounts.
+    from .profiles import GLOBAL_PROFILE_KEY
+    is_global_profile = (profile.profile_key == GLOBAL_PROFILE_KEY)
 
     # ── Re-run field extraction with profile hints if hints exist ─────────
     # This allows the engine to boost candidates on the learned page/label,
@@ -1345,6 +1987,9 @@ def _apply_supplier_profile_learning(
                 continue
             # Re-score all candidates for this field using hints
             if field_name not in _FIELD_PATTERNS:
+                continue
+            if is_global_profile and field_name in _AMOUNT_FIELDS:
+                # Amount labels are too vendor-specific to share across suppliers.
                 continue
             patterns, normalizer, base_score = _FIELD_PATTERNS[field_name]
             new_evidence = _first_match_evidence(

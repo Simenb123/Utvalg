@@ -296,6 +296,10 @@ class A07PageRefreshStateMixin:
         self._support_views_dirty = True
         self._history_compare_ready = False
         self._loaded_support_tabs.clear()
+        try:
+            self._loaded_support_context_keys.clear()
+        except Exception:
+            self._loaded_support_context_keys = {}
         self.workspace.a07_df = _empty_a07_df()
         self.workspace.source_a07_df = _empty_a07_df()
         self.a07_overview_df = _empty_a07_df()
@@ -308,11 +312,14 @@ class A07PageRefreshStateMixin:
         self.workspace.mapping = {}
         self.workspace.groups = {}
         self.workspace.locks = set()
+        self.effective_rulebook = None
         self.workspace.membership = {}
         self.workspace.project_meta = {}
         self.workspace.suggestions = _empty_suggestions_df()
         self.reconcile_df = _empty_reconcile_df()
         self.mapping_df = _empty_mapping_df()
+        self.mapping_audit_df = pd.DataFrame()
+        self.mapping_review_df = pd.DataFrame()
         self.unmapped_df = _empty_unmapped_df()
         self.history_compare_df = _empty_history_df()
         self.control_statement_base_df = _empty_control_statement_df()

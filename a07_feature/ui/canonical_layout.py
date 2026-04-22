@@ -21,6 +21,7 @@ from ..page_a07_constants import (
     _GROUP_COLUMNS,
     _HISTORY_COLUMNS,
     _MAPPING_COLUMNS,
+    _MAPPING_FILTER_LABELS,
     _RECONCILE_COLUMNS,
     _SUGGESTION_COLUMNS,
     _UNMAPPED_COLUMNS,
@@ -73,9 +74,9 @@ class A07PageCanonicalUiMixin:
         tools_menu.add_command(label="Lagre mapping", command=self._save_mapping_clicked)
         tools_menu.add_command(label="Vis mappinger", command=self._open_mapping_overview)
         tools_menu.add_command(label="Last regelsett", command=self._load_rulebook_clicked)
-        tools_menu.add_command(label="Matcher-admin", command=self._open_matcher_admin)
+        tools_menu.add_command(label="A07-regler...", command=self._open_a07_rulebook_admin)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Bruk automatiske treff...", command=self._magic_match_clicked)
+        tools_menu.add_command(label="Kjør trygg auto-matching...", command=self._magic_match_clicked)
         tools_btn["menu"] = tools_menu
         tools_btn.pack(side="left", padx=(12, 0))
         ttk.Label(
@@ -194,6 +195,7 @@ class A07PageCanonicalUiMixin:
         control_gl_scope.set(initial_gl_scope_labels["alle"])
         control_gl_scope.bind("<<ComboboxSelected>>", lambda _event: self._on_control_gl_scope_changed())
         self.tree_control_gl = self._build_tree_tab(control_gl_panel, _CONTROL_GL_COLUMNS)
+        self.tree_control_gl.configure(selectmode="extended")
         self._configure_tree_tags(
             self.tree_control_gl,
             {
@@ -207,6 +209,8 @@ class A07PageCanonicalUiMixin:
                 "family_pension": ("BG_SAND", "TEXT_PRIMARY"),
                 "family_unknown": ("BG_DATA", "TEXT_PRIMARY"),
                 "family_warning": ("NEG_SOFT", "NEG_TEXT"),
+                "suggestion_ok": ("POS_SOFT", "POS_TEXT"),
+                "suggestion_review": ("WARN_SOFT", "WARN_TEXT"),
                 "drop_target": ("WARN_SOFT", "TEXT_PRIMARY"),
             },
         )
@@ -281,6 +285,8 @@ class A07PageCanonicalUiMixin:
                 "family_pension": ("BG_SAND", "TEXT_PRIMARY"),
                 "family_unknown": ("BG_DATA", "TEXT_PRIMARY"),
                 "family_warning": ("NEG_SOFT", "NEG_TEXT"),
+                "suggestion_ok": ("POS_SOFT", "POS_TEXT"),
+                "suggestion_review": ("WARN_SOFT", "WARN_TEXT"),
             },
         )
 
@@ -370,15 +376,20 @@ class A07PageCanonicalUiMixin:
         suggestions_actions = ttk.Frame(self.tab_suggestions, padding=(8, 8, 8, 4))
         suggestions_actions.pack(fill="x")
         self.control_suggestions_actions = suggestions_actions
+        ttk.Label(
+            suggestions_actions,
+            textvariable=self.control_suggestion_summary_var,
+            style="Muted.TLabel",
+        ).pack(side="left", fill="x", expand=True)
         self.btn_control_batch_suggestions = ttk.Button(
             suggestions_actions,
-            text="Bruk sikre forslag",
+            text="Kjør trygg auto-matching",
             command=self._apply_batch_suggestions_clicked,
         )
         self.btn_control_batch_suggestions.pack(side="right", padx=(6, 0))
         self.btn_control_best = ttk.Button(
             suggestions_actions,
-            text="Bruk forslag",
+            text="Bruk trygg kandidat",
             command=self._apply_selected_suggestion,
         )
         self.btn_control_best.pack(side="right")
@@ -399,6 +410,8 @@ class A07PageCanonicalUiMixin:
                 "family_pension": ("BG_SAND", "TEXT_PRIMARY"),
                 "family_unknown": ("BG_DATA", "TEXT_PRIMARY"),
                 "family_warning": ("NEG_SOFT", "NEG_TEXT"),
+                "suggestion_ok": ("POS_SOFT", "POS_TEXT"),
+                "suggestion_review": ("WARN_SOFT", "WARN_TEXT"),
             },
         )
 
@@ -418,8 +431,32 @@ class A07PageCanonicalUiMixin:
         control_accounts_panel.pack(fill="both", expand=True, padx=8, pady=(8, 8))
         self.control_accounts_panel = control_accounts_panel
         self.btn_control_remove_accounts = None
+        mapping_filter_bar = ttk.Frame(control_accounts_panel)
+        mapping_filter_bar.pack(fill="x", pady=(0, 4))
+        ttk.Label(mapping_filter_bar, text="Vis:").pack(side="left", padx=(0, 4))
+        self.mapping_filter_widget = ttk.Combobox(
+            mapping_filter_bar,
+            textvariable=self.mapping_filter_label_var,
+            values=list(_MAPPING_FILTER_LABELS.values()),
+            width=14,
+            state="readonly",
+        )
+        self.mapping_filter_widget.pack(side="left")
+        self.mapping_filter_widget.bind("<<ComboboxSelected>>", self._on_mapping_filter_changed, add="+")
+        self.btn_next_mapping_problem = ttk.Button(
+            mapping_filter_bar,
+            text="Neste problem",
+            command=self._focus_next_control_account_problem,
+        )
+        self.btn_next_mapping_problem.pack(side="left", padx=(8, 0))
+        self.btn_next_mapping_problem.state(["disabled"])
+        ttk.Label(
+            mapping_filter_bar,
+            textvariable=self.control_accounts_summary_var,
+            style="Muted.TLabel",
+        ).pack(side="left", fill="x", expand=True, padx=(12, 0))
         self.tree_control_accounts = self._build_tree_tab(control_accounts_panel, _CONTROL_SELECTED_ACCOUNT_COLUMNS)
-        self.tree_control_accounts.configure(height=6)
+        self.tree_control_accounts.configure(height=6, selectmode="extended")
         self._configure_tree_tags(
             self.tree_control_accounts,
             {
@@ -429,6 +466,8 @@ class A07PageCanonicalUiMixin:
                 "family_pension": ("BG_SAND", "TEXT_PRIMARY"),
                 "family_unknown": ("BG_DATA", "TEXT_PRIMARY"),
                 "family_warning": ("NEG_SOFT", "NEG_TEXT"),
+                "suggestion_ok": ("POS_SOFT", "POS_TEXT"),
+                "suggestion_review": ("WARN_SOFT", "WARN_TEXT"),
             },
         )
 
@@ -538,7 +577,10 @@ class A07PageCanonicalUiMixin:
         self.tree_suggestions.bind("<Double-1>", lambda _event: self._apply_selected_suggestion())
         self.tree_suggestions.bind("<Return>", lambda _event: self._apply_selected_suggestion())
         self.tree_suggestions.bind("<<TreeviewSelect>>", lambda _event: self._on_suggestion_selected())
-        self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._focus_selected_control_account_in_gl())
+        self.tree_control_accounts.bind(
+            "<<TreeviewSelect>>",
+            lambda _event: self._focus_selected_control_account_in_gl(allow_multi=False),
+        )
         self.tree_control_accounts.bind("<Double-1>", lambda _event: self._open_manual_mapping_clicked())
         self.tree_control_accounts.bind("<Delete>", lambda _event: self._remove_selected_control_accounts())
         self.tree_control_accounts.bind("<Button-3>", self._show_control_accounts_context_menu, add="+")

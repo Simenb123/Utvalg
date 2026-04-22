@@ -455,7 +455,29 @@ class A07PageProjectActionsMixin:
     def _open_mapping_overview(self) -> None:
         open_mapping_overview(self, _MAPPING_COLUMNS)
 
+    def _open_a07_rulebook_admin(self) -> None:
+        app = getattr(session, "APP", None)
+        admin_page = getattr(app, "page_admin", None)
+        notebook = getattr(app, "nb", None)
+        if admin_page is not None and notebook is not None:
+            try:
+                notebook.select(admin_page)
+            except Exception:
+                pass
+            show_rulebook = getattr(admin_page, "show_a07_rulebook", None)
+            if callable(show_rulebook):
+                try:
+                    show_rulebook()
+                    self.status_var.set("Åpnet Admin > A07-regler.")
+                    return
+                except Exception:
+                    pass
+        self._open_matcher_admin()
+
     def _open_matcher_admin(self) -> None:
+        self._open_legacy_matcher_admin()
+
+    def _open_legacy_matcher_admin(self) -> None:
         open_matcher_admin(
             self,
             matcher_settings_defaults=_MATCHER_SETTINGS_DEFAULTS,

@@ -111,3 +111,21 @@ def test_include_ao_change_uses_adjustment_refresh(monkeypatch) -> None:
     page_analyse.AnalysePage._on_include_ao_changed(page)
 
     assert called["n"] == 1
+
+
+def test_adjustment_refresh_includes_nokkeltall_view(monkeypatch) -> None:
+    """ÅO-toggle må også refreshe nøkkeltall-visningen, ikke bare pivot/detaljer/transaksjoner."""
+    import page_analyse
+
+    page = page_analyse.AnalysePage.__new__(page_analyse.AnalysePage)
+    calls: list[str] = []
+
+    monkeypatch.setattr(page, "_refresh_pivot", lambda: calls.append("pivot"), raising=False)
+    monkeypatch.setattr(page, "_refresh_detail_panel", lambda: calls.append("detail"), raising=False)
+    monkeypatch.setattr(page, "_refresh_transactions_view", lambda: calls.append("tx"), raising=False)
+    monkeypatch.setattr(page, "_refresh_nokkeltall_view", lambda: calls.append("nk"), raising=False)
+
+    page_analyse.AnalysePage._refresh_analysis_views_after_adjustment_change(page)
+
+    assert "nk" in calls
+    assert calls == ["pivot", "detail", "tx", "nk"]

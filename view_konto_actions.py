@@ -14,6 +14,7 @@ Design:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Optional
 
 import os
@@ -21,44 +22,76 @@ import sys
 import subprocess
 
 
+log = logging.getLogger(__name__)
+
+
 def _resolve_client_materiality_amount() -> Optional[float]:
     """Slå opp gjeldende klient/år sin valgte utvalgsterskel (arbeidsvesentlighet).
 
     Returnerer ``None`` hvis klient/år mangler, modulen ikke finnes, eller
     beløpet ikke er satt. Feil fanges stille — eksport skal aldri avbrytes
-    fordi arbeidsvesentlighet ikke kan slås opp.
+    fordi arbeidsvesentlighet ikke kan slås opp. Logger kort grunn på INFO-nivå
+    slik at brukeren kan se i konsollet hvorfor cellen i Excel ikke ble fylt.
     """
 
     try:
         import session  # type: ignore
         import materiality_store  # type: ignore
-    except Exception:
+    except Exception as e:
+        log.info("Vesentlighet ikke lest: import feilet (%s)", e)
         return None
 
     client = getattr(session, "client", None)
     year = getattr(session, "year", None)
     if not client or not year:
+        log.info(
+            "Vesentlighet ikke lest: session.client=%r session.year=%r",
+            client, year,
+        )
         return None
 
     try:
         state = materiality_store.load_state(str(client), str(year))
-    except Exception:
+    except Exception as e:
+        log.info("Vesentlighet ikke lest: load_state feilet (%s)", e)
         return None
 
     active = state.get("active_materiality") if isinstance(state, dict) else None
     preferred_key = state.get("selection_threshold_key") if isinstance(state, dict) else None
 
+    if active is None:
+        log.info(
+            "Vesentlighet ikke lest: ingen aktiv vesentlighet for %s/%s "
+            "(åpne Vesentlighet-fanen og lagre en aktiv beregning).",
+            client, year,
+        )
+        return None
+
     try:
-        _, amount = materiality_store.resolve_selection_threshold(active, preferred_key)
-    except Exception:
+        key, amount = materiality_store.resolve_selection_threshold(active, preferred_key)
+    except Exception as e:
+        log.info("Vesentlighet ikke lest: resolve feilet (%s)", e)
         return None
 
     if amount is None:
+        log.info(
+            "Vesentlighet ikke lest: aktiv vesentlighet finnes, men "
+            "valgt terskel (%s) er ikke satt eller manuell.",
+            preferred_key,
+        )
         return None
+
     try:
-        return float(amount)
-    except Exception:
+        result = float(amount)
+    except Exception as e:
+        log.info("Vesentlighet ikke lest: cast til float feilet (%s)", e)
         return None
+
+    log.info(
+        "Vesentlighet brukt i motpost-eksport: %s = %s for %s/%s",
+        key, result, client, year,
+    )
+    return result
 
 
 def on_select_motkonto(view: Any, *, konto_str_fn: Callable[[Any], str]) -> None:

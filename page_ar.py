@@ -403,6 +403,7 @@ class ARPage(ttk.Frame):
         canvas.bind("<B1-Motion>", self._on_chart_drag)
         canvas.bind("<ButtonRelease-1>", self._on_chart_release)
         canvas.bind("<MouseWheel>", self._on_chart_mousewheel)
+        canvas.bind("<Double-Button-1>", self._on_chart_double_click)
         self._org_canvas = canvas
 
     def _update_owned_action_state(self, row: dict[str, Any] | None = None) -> None:
@@ -1547,6 +1548,27 @@ class ARPage(ttk.Frame):
 
     def _on_chart_mousewheel(self, event) -> None:
         page_ar_chart.on_chart_mousewheel(self, event)
+
+    def _on_chart_double_click(self, event) -> None:
+        page_ar_chart.on_chart_double_click(self, event)
+
+    def _open_owner_drilldown(
+        self,
+        *,
+        orgnr: str = "",
+        name: str = "",
+        lookup_year: str = "",
+    ) -> None:
+        if not orgnr:
+            return
+        if not lookup_year:
+            overview = self._overview if isinstance(self._overview, dict) else {}
+            lookup_year = str(overview.get("owners_year_used") or self._year or "")
+        import page_ar_drilldown
+        dlg = page_ar_drilldown._OwnerDrilldownDialog(
+            self, orgnr=orgnr, name=name, lookup_year=lookup_year,
+        )
+        dlg.show()
 
     def _update_chart_zoom_label(self) -> None:
         page_ar_chart.update_chart_zoom_label(self)

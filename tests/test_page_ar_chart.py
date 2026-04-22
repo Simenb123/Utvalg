@@ -742,3 +742,173 @@ def test_brreg_worker_propagates_exception_via_apply_result() -> None:
     # apply_result ble kalt (via after()-stub) og skrev feil-status
     page.var_brreg_status.set.assert_any_call("Feil ved henting: nettverk nede")
     assert "111111111" not in page._brreg_loading
+
+
+# ─── Indirekte eierkjede i org-kart ────────────────────────────────────────
+
+def test_build_model_includes_indirect_nodes() -> None:
+    """_build_model skal hente sub_owners for direkte holding-aksjonærer
+    via list_company_owners og legge dem til som indirekte noder + kanter
+    i kart-modellen.
+    """
+    import page_ar_chart as chart
+
+    page = _make_page()
+    page._org_canvas = MagicMock()
+    page._org_canvas.winfo_width.return_value = 800
+    page._overview = {
+        "client_orgnr": "111000111",
+        "owners": [
+            {
+                "shareholder_orgnr": "999111222",
+                "shareholder_name": "Holding AS",
+                "shareholder_kind": "company",
+                "ownership_pct": 100.0,
+            },
+        ],
+        "owned_companies": [],
+        "owners_year_used": "2024",
+    }
+
+    def fake_list_company_owners(orgnr, year):
+        if orgnr == "999111222":
+            return [
+                {
+                    "shareholder_orgnr": "888222333",
+                    "shareholder_name": "Topp Holding AS",
+                    "shareholder_kind": "company",
+                    "ownership_pct": 100.0,
+                },
+                {
+                    "shareholder_orgnr": "",
+                    "shareholder_name": "Ola Nordmann",
+                    "shareholder_kind": "person",
+                    "ownership_pct": 0.0,
+                },
+            ]
+        if orgnr == "888222333":
+            return [
+                {
+                    "shareholder_orgnr": "",
+                    "shareholder_name": "Kari Nordmann",
+                    "shareholder_kind": "person",
+                    "ownership_pct": 100.0,
+                },
+            ]
+        return []
+
+    with patch("ar_store.list_company_owners", side_effect=fake_list_company_owners):
+        chart._build_model(page, saved={})
+
+    meta = page._chart_model_meta
+    indirect_entries = meta.get("indirect_entries") or []
+    assert meta.get("indirect_lookup_year") == "2024"
+
+    # Forventet: én indirekte selskapsboks (Topp Holding) under direkte eier,
+    # én person-boks (Ola) under direkte eier, og én person-boks (Kari) under
+    # Topp Holding. Eventuelle dypere nivåer forventes ikke (BFS stoppet).
+    kinds = [(e["row"].get("shareholder_kind"), e["row"].get("shareholder_name")) for e in indirect_entries]
+    assert ("company", "Topp Holding AS") in kinds
+    assert ("person", "Ola Nordmann") in kinds
+    assert ("person", "Kari Nordmann") in kinds
+
+    # Action-routing: de selskapsbokser skal være registrert som
+    # "indirect_owner", personer som "indirect_person".
+    actions = page._chart_node_actions
+    indirect_owner_actions = [
+        a for a in actions.values()
+        if (a or {}).get("kind") == "indirect_owner"
+    ]
+    indirect_person_actions = [
+        a for a in actions.values()
+        if (a or {}).get("kind") == "indirect_person"
+    ]
+    assert any(a.get("shareholder_orgnr") == "888222333" for a in indirect_owner_actions)
+    assert len(indirect_person_actions) >= 2  # Ola + Kari
+
+    # Edges: en kant skal koble indirekte selskaps-boks til sin direkte
+    # eier-boks, og en annen skal koble person-leaf til Topp Holding.
+    edge_pairs = {(child, parent) for (child, parent, _line, _lbl) in page._chart_edges}
+    assert ("chain:888222333", "owner:999111222") in edge_pairs
+    assert any(
+        child.startswith("chain_leaf:888222333:") and parent == "chain:888222333"
+        for (child, parent) in edge_pairs
+    )
+
+
+def test_build_model_records_chain_break_when_owners_empty() -> None:
+    """Hvis list_company_owners returnerer tom liste, registreres en
+    placeholder i indirect_entries og orgnr loggføres i indirect_breaks.
+    """
+    import page_ar_chart as chart
+
+    page = _make_page()
+    page._org_canvas = MagicMock()
+    page._org_canvas.winfo_width.return_value = 800
+    page._overview = {
+        "client_orgnr": "111000111",
+        "owners": [
+            {
+                "shareholder_orgnr": "777666555",
+                "shareholder_name": "Holding Uten Data AS",
+                "shareholder_kind": "company",
+                "ownership_pct": 100.0,
+            },
+        ],
+        "owned_companies": [],
+        "owners_year_used": "2024",
+    }
+
+    with patch("ar_store.list_company_owners", return_value=[]):
+        chart._build_model(page, saved={})
+
+    meta = page._chart_model_meta
+    breaks = meta.get("indirect_breaks") or []
+    assert "777666555" in breaks
+    placeholders = [
+        e for e in (meta.get("indirect_entries") or [])
+        if e.get("is_break")
+    ]
+    assert any(e["pos_key"] == "chain_break:777666555" for e in placeholders)
+
+
+def test_chart_double_click_on_indirect_owner_opens_drilldown() -> None:
+    """Dobbeltklikk på en indirekte boks skal åpne eierkjede-drilldown."""
+    import page_ar_chart as chart
+
+    page = _make_page()
+    canvas = MagicMock()
+    canvas.gettags.return_value = ("node:indirect:2:5", "chart-node")
+    page._org_canvas = canvas
+    page._chart_node_actions = {
+        "node:indirect:2:5": {
+            "kind": "indirect_owner",
+            "shareholder_orgnr": "888222333",
+            "shareholder_name": "Topp Holding AS",
+            "lookup_year": "2024",
+        },
+    }
+    page._open_owner_drilldown = MagicMock()
+
+    chart.on_chart_double_click(page, SimpleNamespace(x=10, y=10))
+
+    page._open_owner_drilldown.assert_called_once_with(
+        orgnr="888222333",
+        name="Topp Holding AS",
+        lookup_year="2024",
+    )
+
+
+def test_chart_double_click_on_unknown_node_is_noop() -> None:
+    import page_ar_chart as chart
+
+    page = _make_page()
+    canvas = MagicMock()
+    canvas.gettags.return_value = ("background",)
+    page._org_canvas = canvas
+    page._chart_node_actions = {}
+    page._open_owner_drilldown = MagicMock()
+
+    chart.on_chart_double_click(page, SimpleNamespace(x=10, y=10))
+
+    page._open_owner_drilldown.assert_not_called()

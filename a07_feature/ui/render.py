@@ -7,9 +7,9 @@ from ..control.data import (
     control_family_tree_tag,
     control_gl_family_tree_tag,
     filter_control_gl_df,
-    filter_control_queue_by_rf1022_group,
     filter_control_search_df,
     filter_control_visible_codes_df,
+    preferred_rf1022_overview_group,
     rf1022_overview_tree_tag,
 )
 from ..page_a07_constants import _CONTROL_COLUMNS, _CONTROL_GL_COLUMNS, _CONTROL_RF1022_COLUMNS, _CONTROL_VIEW_LABELS
@@ -33,9 +33,7 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
                 row_tag_fn=rf1022_overview_tree_tag,
             )
         else:
-            selected_group = self._selected_rf1022_group()
             filtered = filter_control_visible_codes_df(self.control_df)
-            filtered = filter_control_queue_by_rf1022_group(filtered, selected_group)
             filtered = a07_control_status.filter_control_queue_df(filtered, self._selected_a07_filter())
             filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
             if (
@@ -67,7 +65,11 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
             return
 
         if work_level == "rf1022":
-            target = current_selection if current_selection and current_selection in children else children[0]
+            target = preferred_rf1022_overview_group(
+                filtered,
+                children,
+                preferred_group=current_selection,
+            ) or children[0]
             self._selected_rf1022_group_id = str(target or "").strip() or None
         else:
             target = current_selection if current_selection and current_selection in children else children[0]
@@ -83,9 +85,7 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
             iid_column = "GroupId"
             row_tag_fn = rf1022_overview_tree_tag
         else:
-            selected_group = self._selected_rf1022_group()
             filtered = filter_control_visible_codes_df(self.control_df)
-            filtered = filter_control_queue_by_rf1022_group(filtered, selected_group)
             filtered = a07_control_status.filter_control_queue_df(filtered, self._selected_a07_filter())
             filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
             if (
@@ -112,7 +112,14 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
             if not bool(getattr(self, "_refresh_in_progress", False)):
                 children = self.tree_a07.get_children()
                 if children:
-                    target = current_selection if current_selection and current_selection in children else children[0]
+                    if work_level == "rf1022":
+                        target = preferred_rf1022_overview_group(
+                            filtered,
+                            children,
+                            preferred_group=current_selection,
+                        ) or children[0]
+                    else:
+                        target = current_selection if current_selection and current_selection in children else children[0]
                     if work_level == "rf1022":
                         self._selected_rf1022_group_id = str(target or "").strip() or None
                     self._set_tree_selection(self.tree_a07, target)

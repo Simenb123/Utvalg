@@ -28,7 +28,12 @@ log = logging.getLogger(__name__)
 def _merge_fjor(rl_df: pd.DataFrame, page) -> pd.DataFrame:
     """Merge UB_fjor/Endring_fjor/Endring_pct fra pivot inn i rl_df."""
     pivot_df = getattr(page, "_pivot_df_last", None)
-    if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
+    if (
+        isinstance(pivot_df, pd.DataFrame)
+        and "UB_fjor" in pivot_df.columns
+        and "regnr" in pivot_df.columns
+        and "regnr" in rl_df.columns
+    ):
         rl_df = rl_df.copy()
         for col in ("UB_fjor", "Endring_fjor", "Endring_pct"):
             if col in pivot_df.columns and col not in rl_df.columns:

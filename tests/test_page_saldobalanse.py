@@ -337,6 +337,7 @@ def test_build_saldobalanse_df_adds_payroll_columns_and_filters(monkeypatch) -> 
     assert "Post 100" in row_5000["RF-1022-post"]
     assert "Post 100" in row_5000["RF-1022-forslag"]
     assert row_5000["RF-1022 OK"] == "✓"
+    assert row_5000["Kol"] == "UB"
     assert row_5000["Lønnsstatus"] == "Manuell"
     assert "A07:" in row_5000["Matchgrunnlag"]
     assert row_5210["A07-kode"] == ""
@@ -346,6 +347,7 @@ def test_build_saldobalanse_df_adds_payroll_columns_and_filters(monkeypatch) -> 
         assert row_5210["RF-1022-post"] == ""
         assert "Post 111" in row_5210["RF-1022-forslag"]
         assert row_5210["RF-1022 OK"] == ""
+        assert row_5210["Kol"] == "UB"
         assert "Naturalytelse" in row_5210["Flagg-forslag"]
         assert row_5210["Lønnsstatus"] == "Forslag"
         assert "A07: konto-intervall" in row_5210["Matchgrunnlag"]
@@ -353,6 +355,34 @@ def test_build_saldobalanse_df_adds_payroll_columns_and_filters(monkeypatch) -> 
         assert "Flagg:" in row_5210["Matchgrunnlag"]
     assert row_5210["Problem"] != ""
     assert only_suggested["Konto"].tolist() == ["5210"]
+
+
+def test_build_saldobalanse_df_adds_kol_for_balance_and_profit_loss(monkeypatch) -> None:
+    import page_saldobalanse
+    import saldobalanse_payload
+
+    analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["2940", "3000"], "Belop": [1.0, 2.0]}))
+    sb = _make_sb(
+        konto=["2940", "3000"],
+        navn=["Skyldig feriepenger", "Salgsinntekt"],
+        ib=[-743491.69, 0.0],
+        ub=[-747698.87, -17095891.74],
+        netto=[-4207.18, -17095891.74],
+    )
+
+    monkeypatch.setattr(saldobalanse_payload, "_resolve_sb_views", lambda _page: (sb, sb, sb))
+    monkeypatch.setattr(saldobalanse_payload, "_load_mapping_issues", lambda _page: [])
+    monkeypatch.setattr(saldobalanse_payload, "_load_group_mapping", lambda _client: {})
+    monkeypatch.setattr(page_saldobalanse.session, "client", "Testklient", raising=False)
+    monkeypatch.setattr(page_saldobalanse.session, "year", "2025", raising=False)
+
+    df = page_saldobalanse.build_saldobalanse_df(
+        analyse_page=analyse_page,
+        include_payroll=False,
+    )
+
+    assert df.loc[df["Konto"] == "2940", "Kol"].iloc[0] == "Endring"
+    assert df.loc[df["Konto"] == "3000", "Kol"].iloc[0] == "UB"
 
 
 def test_focus_payroll_accounts_switches_to_payroll_preset_and_selects_account() -> None:
@@ -1623,9 +1653,19 @@ def test_append_selected_account_name_to_rf1022_alias_updates_list_document_and_
 
 def test_append_selected_account_name_to_a07_alias_refreshes_after_save(monkeypatch) -> None:
     import page_saldobalanse
+    import saldobalanse_actions
     import saldobalanse_payload
 
     calls: list[str] = []
+    learned: list[tuple[str, str, bool]] = []
+    monkeypatch.setattr(
+        saldobalanse_actions,
+        "append_a07_rule_keyword",
+        lambda code, term, exclude=False: (
+            learned.append((code, term, exclude)),
+            SimpleNamespace(path=Path("global_full_a07_rulebook.json")),
+        )[1],
+    )
     monkeypatch.setattr(
         page_saldobalanse.classification_config,
         "load_alias_library_document",
@@ -1661,7 +1701,9 @@ def test_append_selected_account_name_to_a07_alias_refreshes_after_save(monkeypa
     page_saldobalanse.SaldobalansePage._append_selected_account_name_to_a07_alias(dummy, "fastloenn")
 
     assert calls == ["invalidate", "refresh"]
+    assert learned == [("fastloenn", "LÃ¸nn til ansatte", False)]
     assert "A07-alias" in statuses[-1]
+    assert "global_full_a07_rulebook.json" in statuses[-1]
 
 
 def test_export_current_view_to_excel_uses_visible_columns_and_selected_sheet(monkeypatch, tmp_path) -> None:

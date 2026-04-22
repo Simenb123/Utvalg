@@ -420,6 +420,56 @@ class TestMultiLevelIndirect:
         )
         assert matches == []
 
+    def test_indirect_chain_three_levels(self) -> None:
+        """Eierkjede med 3 holding-ledd over klient krever max_depth >= 3.
+
+        Klient ← H1 ← H2 ← H3 ← person.
+        Direkte H1 er depth=1; sub_owners-sjekk på depth=3 finner personen.
+        Med depth=2 skal vi IKKE finne match (regresjonstest for tidligere
+        for-restriktiv default). Med depth=5 (ny default for build_klientinfo_workpaper)
+        skal vi finne den.
+        """
+        owners = [{
+            "shareholder_name": "H1 HOLDING AS",
+            "shareholder_orgnr": "111",
+            "shareholder_kind": "company",
+            "ownership_pct": 100.0,
+        }]
+        roller = [{"rolle": "Daglig leder", "rolle_kode": "DAGL",
+                   "navn": "Indirekte Eier", "fodselsdato": ""}]
+
+        def _lookup(orgnr: str) -> list[dict]:
+            mapping = {
+                "111": [{"shareholder_name": "H2 HOLDING AS",
+                         "shareholder_orgnr": "222",
+                         "shareholder_kind": "company", "ownership_pct": 100.0}],
+                "222": [{"shareholder_name": "H3 HOLDING AS",
+                         "shareholder_orgnr": "333",
+                         "shareholder_kind": "company", "ownership_pct": 100.0}],
+                "333": [{"shareholder_name": "Indirekte Eier",
+                         "shareholder_kind": "person", "ownership_pct": 80.0}],
+            }
+            return mapping.get(orgnr, [])
+
+        # depth=2 er for grunt — personen er 4 hopp fra klient, krever depth>=3.
+        shallow = build_cross_matches(
+            owners, roller, indirect_owners_fn=_lookup, max_indirect_depth=2,
+        )
+        assert shallow == []
+
+        deep = build_cross_matches(
+            owners, roller, indirect_owners_fn=_lookup, max_indirect_depth=5,
+        )
+        assert len(deep) == 1
+        m = deep[0]
+        assert m.match_type == "indirect"
+        assert m.shareholder_name == "Indirekte Eier"
+        # 80% × 100% × 100% × 100% = 80%
+        assert m.ownership_pct == pytest.approx(80.0)
+        # Eierkjeden skal nevnes i notatet
+        assert "H1 HOLDING AS" in m.notat
+        assert "H2 HOLDING AS" in m.notat or "H3 HOLDING AS" in m.notat
+
     def test_cycle_guard_does_not_loop_forever(self) -> None:
         owners = [{"shareholder_name": "A AS", "shareholder_orgnr": "A",
                    "shareholder_kind": "company", "ownership_pct": 100.0}]

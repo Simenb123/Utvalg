@@ -98,10 +98,19 @@ def export_klientinfo_workpaper(page) -> None:
 
     def _indirect_owners(orgnr: str) -> list[dict]:
         try:
-            return list(ar_store.list_company_owners(orgnr, lookup_year) or [])
+            rows = list(ar_store.list_company_owners(orgnr, lookup_year) or [])
         except Exception:
-            log.debug("list_company_owners feilet for %s/%s", orgnr, lookup_year, exc_info=True)
+            log.warning(
+                "list_company_owners feilet for %s/%s", orgnr, lookup_year, exc_info=True,
+            )
             return []
+        if not rows:
+            log.info(
+                "Indirekte eierskap: ingen treff for orgnr=%s i AR-året %s "
+                "— kjeden brytes her (ikke importert?).",
+                orgnr, lookup_year,
+            )
+        return rows
 
     wb = workpaper_klientinfo.build_klientinfo_workpaper(
         client=client,

@@ -42,3 +42,29 @@ def test_prepare_regnskapsoppstilling_export_data_builds_rl_and_transactions(mon
     assert payload["rl_df"].loc[0, "regnr"] == 10
     assert not payload["transactions_df"].empty
     assert set(payload["transactions_df"]["Konto"].astype(str)) == {"1000"}
+
+
+def test_prepare_export_calls_resolve_sb_views_with_keyword_arg(monkeypatch) -> None:
+    """Regresjonsvern: _resolve_analysis_sb_views er keyword-only (def f(*, page)),
+    så den MÅ kalles med page=page. Hvis noen skriver det om til positional,
+    kastes TypeError som før ble stille svelget — og sb_df falt da tilbake til
+    base SB uten ÅO-justering. Det ga feil tall i nøkkeltallsrapporten.
+    """
+    import page_analyse_export
+    import page_analyse_rl
+
+    captured: dict[str, object] = {}
+
+    def _fake_resolve(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        # Returner tuple som matcher faktisk signatur
+        base = pd.DataFrame({"konto": ["1000"], "ib": [0.0], "ub": [0.0]})
+        return base, base, base
+
+    monkeypatch.setattr(page_analyse_rl, "_resolve_analysis_sb_views", _fake_resolve)
+
+    page_analyse_export.prepare_regnskapsoppstilling_export_data(page=_DummyPage())
+
+    assert captured["args"] == ()
+    assert "page" in captured["kwargs"]

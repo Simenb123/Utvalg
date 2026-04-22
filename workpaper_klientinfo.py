@@ -24,6 +24,7 @@ from typing import Any, Callable, Iterable, Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+from ar_ownership_chain import walk_indirect_chain
 from workpaper_forside import build_forside_sheet
 
 
@@ -226,95 +227,56 @@ def build_cross_matches(
 
     # Indirekte match: BFS nedover (fra klient) gjennom selskaps-aksjonærer.
     if indirect_owners_fn is not None and max_indirect_depth >= 1:
-        visited: set[str] = set()
-        # Kø av (orgnr, chain_of_(name,pct), depth). chain holdes som liste for
-        # naturlig-språk-rendering.
-        queue: list[dict[str, Any]] = []
-        for owner in owners_list:
-            kind = str(owner.get("shareholder_kind") or "").lower()
-            if kind in {"person", "unknown"}:
-                continue
-            orgnr = str(owner.get("shareholder_orgnr") or "").strip()
-            if not orgnr:
-                continue
-            holding_name = str(owner.get("shareholder_name") or "")
-            holding_pct = float(owner.get("ownership_pct") or 0.0)
-            queue.append({
-                "orgnr": orgnr,
-                "chain": [(holding_name, holding_pct)],
-                "depth": 1,
-            })
+        chain_nodes, _breaks = walk_indirect_chain(
+            owners_list, indirect_owners_fn, max_indirect_depth,
+        )
 
-        while queue:
-            node = queue.pop(0)
-            if node["orgnr"] in visited:
-                continue
-            visited.add(node["orgnr"])
-
-            try:
-                sub_owners = indirect_owners_fn(node["orgnr"]) or []
-            except Exception:
-                sub_owners = []
-
-            for sub in sub_owners:
+        for node in chain_nodes:
+            for sub in node["sub_owners"]:
                 sub_name = str(sub.get("shareholder_name") or "")
                 sub_key = normalize_person_name(sub_name)
+                if not sub_key or sub_key not in role_index:
+                    continue
+
                 sub_pct = float(sub.get("ownership_pct") or 0.0)
+                role_entries = role_index[sub_key]
+                roles = [r.get("rolle", "") for r in role_entries if r.get("rolle")]
+                confidence, warn = _match_role_confidence(
+                    role_entries, owner_birth_year(sub)
+                )
 
-                # Match rolleinnehaver?
-                if sub_key and sub_key in role_index:
-                    role_entries = role_index[sub_key]
-                    roles = [r.get("rolle", "") for r in role_entries if r.get("rolle")]
-                    confidence, warn = _match_role_confidence(
-                        role_entries, owner_birth_year(sub)
+                # Effektiv pct = produkt av alle pct i kjeden × sub_pct / 100^n
+                effective = sub_pct
+                for _, pct_step in node["chain"]:
+                    effective = effective * pct_step / 100.0
+
+                immediate_holding = node["chain"][-1][0]
+                chain_str = " → ".join(
+                    f"{nm} ({_fmt_pct(p)})" for nm, p in node["chain"]
+                )
+                notat = (
+                    f"Eier {_fmt_pct(sub_pct)} av {immediate_holding}, "
+                    f"som eier {_fmt_pct(node['chain'][0][1])} av klienten. "
+                    f"Effektiv indirekte eierandel: {_fmt_pct(effective)}."
+                )
+                if len(node["chain"]) > 1:
+                    notat = f"{notat} Eierkjede: klient ← {chain_str}."
+                if warn:
+                    notat = f"{notat} {warn}"
+
+                matches.append(
+                    CrossMatch(
+                        shareholder_name=sub_name,
+                        shareholder_orgnr=str(sub.get("shareholder_orgnr") or ""),
+                        shareholder_kind=str(sub.get("shareholder_kind") or ""),
+                        ownership_pct=effective,
+                        roles=roles,
+                        match_confidence=confidence,
+                        notat=notat,
+                        match_type="indirect",
+                        via=immediate_holding,
                     )
-
-                    # Effektiv pct = produkt av alle pct i kjeden × sub_pct / 100^n
-                    effective = sub_pct
-                    for _, pct_step in node["chain"]:
-                        effective = effective * pct_step / 100.0
-
-                    immediate_holding = node["chain"][-1][0]
-                    chain_str = " → ".join(
-                        f"{nm} ({_fmt_pct(p)})" for nm, p in node["chain"]
-                    )
-                    notat = (
-                        f"Eier {_fmt_pct(sub_pct)} av {immediate_holding}, "
-                        f"som eier {_fmt_pct(node['chain'][0][1])} av klienten. "
-                        f"Effektiv indirekte eierandel: {_fmt_pct(effective)}."
-                    )
-                    if len(node["chain"]) > 1:
-                        notat = f"{notat} Eierkjede: klient ← {chain_str}."
-                    if warn:
-                        notat = f"{notat} {warn}"
-
-                    matches.append(
-                        CrossMatch(
-                            shareholder_name=sub_name,
-                            shareholder_orgnr=str(sub.get("shareholder_orgnr") or ""),
-                            shareholder_kind=str(sub.get("shareholder_kind") or ""),
-                            ownership_pct=effective,
-                            roles=roles,
-                            match_confidence=confidence,
-                            notat=notat,
-                            match_type="indirect",
-                            via=immediate_holding,
-                        )
-                    )
-
-                # Rekurser inn i sub-selskap hvis innenfor dybdegrensen
-                sub_kind = str(sub.get("shareholder_kind") or "").lower()
-                if (
-                    sub_kind not in {"person", "unknown"}
-                    and node["depth"] < max_indirect_depth
-                ):
-                    sub_orgnr = str(sub.get("shareholder_orgnr") or "").strip()
-                    if sub_orgnr and sub_orgnr not in visited:
-                        queue.append({
-                            "orgnr": sub_orgnr,
-                            "chain": node["chain"] + [(sub_name, sub_pct)],
-                            "depth": node["depth"] + 1,
-                        })
+                )
 
     # Direct først, så indirect. Innenfor hver: synkende pct.
     matches.sort(
@@ -390,7 +352,7 @@ def build_klientinfo_workpaper(
     matches = build_cross_matches(
         owners, roller,
         indirect_owners_fn=indirect_owners_fn,
-        max_indirect_depth=2,
+        max_indirect_depth=5,
     )
     _build_kryssreferanse_sheet(wb, matches=matches, client=client, year=year)
     _build_eide_sheet(wb, owned_companies=owned_companies, client=client, year=year)

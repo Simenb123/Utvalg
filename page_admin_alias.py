@@ -62,7 +62,7 @@ class _AliasEditor(ttk.Frame):  # type: ignore[misc]
 
         ttk.Label(
             self,
-            text="Vedlikehold delte alias-konsepter som brukes av A07- og RF-1022-forslag. Endringene påvirker regler og forslag, ikke lagrede klientprofiler.",
+            text="Avansert kompatibilitetslag for delte alias-konsepter. Nye A07-aliaser og ekskluderinger skal normalt vedlikeholdes i fanen A07-regler.",
             style="Muted.TLabel",
             padding=(8, 0, 8, 4),
         ).grid(row=1, column=0, sticky="ew")

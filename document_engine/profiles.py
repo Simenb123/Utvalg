@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from .format_utils import amount_value_markers, normalize_orgnr
 from .models import PROFILE_SCHEMA_VERSION, SupplierProfile
 
 
@@ -406,20 +407,13 @@ def _value_markers(field_name: str, value: str) -> list[str]:
     if not value:
         return []
 
-    # Normalize NBSP → regular space. Segment lines pass through
-    # `_candidate_lines` which collapses \s+ (including \u00a0) to " ",
-    # so markers containing NBSP never match. Without this, amounts
-    # like "183\u00a0592,50" produced by PDF extraction fail to learn.
-    value = value.replace("\u00a0", " ")
+    value = value.replace(" ", " ")
+
+    if field_name.endswith("_amount"):
+        return amount_value_markers(value)
 
     markers = {value}
-    if field_name.endswith("_amount"):
-        compact = value.replace(" ", "")
-        markers.add(compact)
-        markers.add(compact.replace(".", ","))
-        markers.add(_format_amount_marker(compact))
-        markers.add(_format_amount_marker(compact.replace(".", ",")))
-    elif field_name.endswith("_date"):
+    if field_name.endswith("_date"):
         markers.add(value.replace(".", "-"))
         markers.add(value.replace(".", "/"))
         parts = value.split(".")
@@ -509,7 +503,7 @@ def _group_thousands(number_text: str) -> str:
 
 
 def _digits_only(value: str) -> str:
-    return re.sub(r"\D+", "", value or "")
+    return normalize_orgnr(value)
 
 
 def _normalize_line_for_hint_match(value: str) -> str:

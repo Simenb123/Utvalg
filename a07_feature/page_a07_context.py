@@ -99,6 +99,8 @@ from a07_feature.control.matching import (
     select_safe_history_codes,
     ui_suggestion_row_from_series,
 )
+from a07_feature.rule_learning import evaluate_a07_rule_name_status
+from a07_feature.suggest.rulebook import load_rulebook
 from a07_feature.page_paths import (
     MATCHER_SETTINGS_DEFAULTS as _MATCHER_SETTINGS_DEFAULTS,
     _path_signature,
@@ -627,7 +629,19 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
             if not suggestion_accounts:
                 return work.iloc[0:0].copy().reset_index(drop=True)
             account_values = work.get("Konto", pd.Series("", index=work.index)).fillna("").astype(str).str.strip()
-            return work.loc[account_values.isin(suggestion_accounts)].reset_index(drop=True)
+            out = work.loc[account_values.isin(suggestion_accounts)].copy()
+            if code and "AliasStatus" in out.columns:
+                effective_rulebook = getattr(self, "effective_rulebook", None)
+                if effective_rulebook is None:
+                    try:
+                        effective_rulebook = load_rulebook(str(getattr(self, "rulebook_path", "") or "") or None)
+                    except Exception:
+                        effective_rulebook = {}
+                out["AliasStatus"] = out.apply(
+                    lambda row: evaluate_a07_rule_name_status(code, row.get("Navn"), effective_rulebook),
+                    axis=1,
+                )
+            return out.reset_index(drop=True)
 
         return work.iloc[0:0].copy().reset_index(drop=True)
 

@@ -25,6 +25,7 @@ import payroll_classification
 import session
 from a07_feature import build_account_usage_features
 from a07_feature import page_control_data as control_data
+from a07_feature.control.basis import control_gl_basis_column_for_account
 from analyse_mapping_service import UnmappedAccountIssue
 
 
@@ -44,6 +45,7 @@ ALL_COLUMNS = (
     "RF-1022-post",
     "RF-1022-forslag",
     "RF-1022 OK",
+    "Kol",
     "Lønnsflagg",
     "Flagg-forslag",
     "Lønnsstatus",
@@ -125,6 +127,7 @@ COLUMN_WIDTHS = {
     "Lønnsflagg": 220,
     "RF-1022-forslag": 170,
     "RF-1022 OK": 80,
+    "Kol": 70,
     "Flagg-forslag": 220,
     "Lønnsstatus": 110,
     "Matchgrunnlag": 260,
@@ -183,6 +186,7 @@ COLUMN_PRESETS = {
         "IB",
         "Endring",
         "UB",
+        "Kol",
         "A07-kode",
         "A07-forslag",
         "A07 OK",
@@ -196,6 +200,7 @@ COLUMN_PRESETS = {
         "Kontonavn",
         "Endring",
         "UB",
+        "Kol",
         "A07-kode",
         "A07-forslag",
         "RF-1022-post",
@@ -1059,6 +1064,14 @@ def _build_decorated_base_payload(
     merged["IB"] = pd.to_numeric(merged.get("IB_effective"), errors="coerce").fillna(0.0)
     merged["Endring"] = pd.to_numeric(merged.get("Endring_effective"), errors="coerce").fillna(0.0)
     merged["UB"] = pd.to_numeric(merged.get("UB_effective"), errors="coerce").fillna(0.0)
+    merged["Kol"] = merged.apply(
+        lambda row: control_gl_basis_column_for_account(
+            row.get("Konto"),
+            row.get("Kontonavn"),
+            requested_basis="Endring",
+        ),
+        axis=1,
+    )
     merged["UB før ÅO"] = pd.to_numeric(merged.get("UB_base"), errors="coerce").fillna(merged["UB"])
     merged["UB etter ÅO"] = pd.to_numeric(merged.get("UB_adjusted"), errors="coerce").fillna(merged["UB"])
     merged["Tilleggspostering"] = merged["UB etter ÅO"] - merged["UB før ÅO"]

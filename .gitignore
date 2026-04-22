@@ -54,6 +54,9 @@ temp_*.xlsx
 tmp_*.txt
 tmp_*.xlsx
 
+# Dry-run output fra scripts/relearn_document_profiles.py
+relearn_dryrun.json
+
 # OS cruft
 Thumbs.db
 Desktop.ini

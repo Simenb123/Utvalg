@@ -11,6 +11,7 @@ import pandas as pd
 from document_engine.engine import analyze_document as engine_analyze_document
 from document_engine.engine import normalize_bilag_key
 from document_engine.finder import build_search_terms, suggest_documents
+from document_engine.format_utils import parse_amount_flexible
 from document_engine.models import DocumentAnalysisResult, SupplierProfile, VoucherContext
 from document_control_store import (
     LocalJsonProfileRepository,
@@ -481,23 +482,4 @@ def _normalize_date_text(value: str) -> str:
 
 
 def _parse_amount(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        if pd.isna(value):
-            return None
-        return float(value)
-    text = str(value).strip()
-    if not text:
-        return None
-    text = text.replace("\u00a0", " ")
-    text = re.sub(r"[^\d,.\- ]+", "", text)
-    text = text.replace(" ", "")
-    if text.count(",") > 1 and "." not in text:
-        text = text.replace(",", "")
-    elif "," in text:
-        text = text.replace(".", "").replace(",", ".")
-    try:
-        return float(text)
-    except Exception:
-        return None
+    return parse_amount_flexible(value)

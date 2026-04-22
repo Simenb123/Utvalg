@@ -662,7 +662,7 @@ def build_suggest_config(
         top_suggestions_per_code=int(settings["top_suggestions_per_code"]),
         historical_account_boost=float(settings["historical_account_boost"]),
         historical_combo_boost=float(settings["historical_combo_boost"]),
-        basis_strategy="fixed" if basis_col else "per_code",
+        basis_strategy="per_code",
         basis=str(basis_col or "Endring"),
     )
 
@@ -677,6 +677,7 @@ def build_rule_form_values(code: str, raw_rule: object) -> dict[str, str]:
         "category": str(rule.get("category") or "").strip(),
         "allowed_ranges": _format_editor_ranges(rule.get("allowed_ranges", [])),
         "keywords": _format_editor_list(rule.get("keywords", [])),
+        "exclude_keywords": _format_editor_list(rule.get("exclude_keywords", [])),
         "boost_accounts": _format_editor_list(rule.get("boost_accounts", [])),
         "basis": basis,
         "expected_sign": "" if expected_sign in (None, "") else str(expected_sign),
@@ -706,6 +707,7 @@ def build_rule_payload(
     _set_or_remove("category", str(form_values.get("category") or "").strip())
     _set_or_remove("allowed_ranges", _editor_list_items(form_values.get("allowed_ranges")))
     _set_or_remove("keywords", _editor_list_items(form_values.get("keywords")))
+    _set_or_remove("exclude_keywords", _editor_list_items(form_values.get("exclude_keywords")))
     _set_or_remove("boost_accounts", _parse_editor_ints(form_values.get("boost_accounts")))
     _set_or_remove("special_add", _parse_special_add_editor(form_values.get("special_add")))
 
