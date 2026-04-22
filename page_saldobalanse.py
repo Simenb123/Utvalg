@@ -21,6 +21,8 @@ import saldobalanse_columns
 import saldobalanse_detail_panel
 import saldobalanse_payroll_mode
 import session
+
+from src.shared.columns_vocabulary import active_year_from_session, heading
 from a07_feature import build_account_usage_features
 from a07_feature import page_control_data as control_data
 from analyse_mapping_service import UnmappedAccountIssue
@@ -168,10 +170,23 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
 
     def refresh_from_session(self, session_obj: Any = None, **_kw: object) -> None:
         SaldobalansePage._invalidate_payload_cache(self)
+        # Oppdater tree-headings med nytt aktivt år
+        self._apply_vocabulary_labels()
         try:
             self.after(100, self.refresh)
         except Exception:
             self.refresh()
+
+    def _apply_vocabulary_labels(self) -> None:
+        """Oppdater tree-headings med aktivt år fra felles vokabular.
+        Brukes på saldo-kolonner (IB, UB, Endring, …); fane-spesifikke
+        kolonne-IDs returneres uendret av heading()."""
+        try:
+            yr = active_year_from_session()
+            for col in ALL_COLUMNS:
+                self._tree.heading(col, text=heading(col, year=yr))
+        except Exception:
+            pass
 
     def _is_payroll_mode(self) -> bool:
         return saldobalanse_payroll_mode.is_payroll_mode(self)
@@ -334,6 +349,10 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
 
         self._tree = ttk.Treeview(tree_frame, columns=ALL_COLUMNS, show="headings", selectmode="extended")
         self._tree.grid(row=0, column=0, sticky="nsew")
+        # Heading-text hentes via felles vokabular: kjente IDs (IB, UB,
+        # Endring, ...) får dynamisk år-formattering, ukjente returneres
+        # uendret (heading() har innebygd fallback).
+        _yr = active_year_from_session()
         for col in ALL_COLUMNS:
             anchor = "e" if col in NUMERIC_COLUMNS else "w"
             stretch = col in {
@@ -346,7 +365,7 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
                 "Matchgrunnlag",
                 "Problem",
             }
-            self._tree.heading(col, text=col)
+            self._tree.heading(col, text=heading(col, year=_yr))
             self._tree.column(col, width=COLUMN_WIDTHS.get(col, 110), minwidth=50, stretch=stretch, anchor=anchor)
 
         try:
@@ -1574,14 +1593,7 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
                     label=item_label,
                     command=lambda value=code: self._append_selected_account_to_a07_boost(value),
                 )
-            rf1022_alias_menu = tk.Menu(alias_menu, tearoff=0)
-            for group_id, label in payroll_classification.payroll_group_options(self._profile_catalog):
-                rf1022_alias_menu.add_command(
-                    label=label,
-                    command=lambda value=group_id: self._append_selected_account_name_to_rf1022_alias(value),
-                )
             alias_menu.add_cascade(label="Kontonavn -> A07-alias", menu=a07_alias_menu)
-            alias_menu.add_cascade(label="Kontonavn -> RF-1022-alias", menu=rf1022_alias_menu)
             alias_menu.add_separator()
             alias_menu.add_cascade(label="Konto -> prioriter A07-kode (avansert)", menu=a07_boost_menu)
             menu.add_cascade(label="Lær av denne raden", menu=alias_menu)
