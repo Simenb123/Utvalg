@@ -6,7 +6,7 @@ direkte den nye, delte funksjonen.
 
 Format-konvensjon (etter "alltid år"-oppdatering):
     Rene verdier (UB, IB, HB, UB_fjor) → 4-sifret år, f.eks. "UB 2025".
-    Endrings-kolonner                  → 2-sifret år, f.eks. "Endr UB 25/24".
+    Endrings-kolonner                  → Δ-prefiks + 2-sifret år, f.eks. "Δ UB 25/24".
 """
 
 from __future__ import annotations
@@ -62,17 +62,17 @@ def test_brreg_with_year_renders_brreg_year() -> None:
 # ---------------------------------------------------------------------------
 
 def test_endring_with_year_is_periode_diff_2digit() -> None:
-    """Endring (periode) → 'Endr UB-IB <yy>'"""
-    assert heading("Endring", year=2025) == "Endr UB-IB 25"
+    """Endring (periode) → 'Δ UB-IB <yy>'"""
+    assert heading("Endring", year=2025) == "Δ UB-IB 25"
 
 
 def test_endring_fjor_with_year_is_yoy_2digit() -> None:
-    """Endring_fjor (år-over-år) → 'Endr UB <yy>/<yy-1>'"""
-    assert heading("Endring_fjor", year=2025) == "Endr UB 25/24"
+    """Endring_fjor (år-over-år) → 'Δ UB <yy>/<yy-1>'"""
+    assert heading("Endring_fjor", year=2025) == "Δ UB 25/24"
 
 
 def test_endring_pct_with_year_is_pct_yoy_2digit() -> None:
-    assert heading("Endring_pct", year=2025) == "Endr % 25/24"
+    assert heading("Endring_pct", year=2025) == "Δ % 25/24"
 
 
 def test_endring_columns_have_distinct_labels_with_year() -> None:
@@ -85,15 +85,15 @@ def test_endring_columns_have_distinct_labels_with_year() -> None:
 
 def test_endring_century_rollover_uses_two_digits_correctly() -> None:
     """Verifiser at år 2099/2100-overgang gir riktig 2-sifret format."""
-    assert heading("Endring_fjor", year=2100) == "Endr UB 00/99"
-    assert heading("Endring", year=2099) == "Endr UB-IB 99"
+    assert heading("Endring_fjor", year=2100) == "Δ UB 00/99"
+    assert heading("Endring", year=2099) == "Δ UB-IB 99"
 
 
 def test_endring_without_year_falls_back_to_static_labels() -> None:
     """Uten år: bruk fallback-labels (kompakt og lesbar)."""
-    assert heading("Endring") == "Endr UB-IB"
-    assert heading("Endring_fjor") == "Endring"
-    assert heading("Endring_pct") == "Endring %"
+    assert heading("Endring") == "Δ UB-IB"
+    assert heading("Endring_fjor") == "Δ UB"
+    assert heading("Endring_pct") == "Δ %"
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +130,6 @@ def test_old_alias_in_page_analyse_columns_still_works() -> None:
     assert _cols.analysis_heading("UB", year=2025) == "UB 2025"
     assert _cols.analysis_heading("UB_fjor", year=2025) == "UB 2024"
     assert _cols.analysis_heading("IB", year=2025) == "IB 2025"
-    assert _cols.analysis_heading("Endring", year=2025) == "Endr UB-IB 25"
+    assert _cols.analysis_heading("Endring", year=2025) == "Δ UB-IB 25"
     # Den gamle dict-en re-eksporteres også
     assert _cols._ANALYSIS_HEADINGS_STATIC is LABELS_STATIC

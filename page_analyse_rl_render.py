@@ -43,15 +43,15 @@ RL_PIVOT_HEADINGS = (
     "Regnskapslinje",
     "",                       # OK — ikke relevant for regnskapslinjer
     "IB",                     # heading("IB")
-    "Endr UB-IB",             # heading("Endring")
+    "Δ UB-IB",                # heading("Endring")
     "UB",                     # heading("UB")
     "Tilleggspostering",      # heading("AO_belop")
     "UB før ÅO",              # heading("UB_for_ao")
     "UB etter ÅO",            # heading("UB_etter_ao")
     "Antall",                 # heading("Antall")
     "UB i fjor",              # heading("UB_fjor")
-    "Endring",                # heading("Endring_fjor")
-    "Endring %",              # heading("Endring_pct")
+    "Δ UB",                   # heading("Endring_fjor")
+    "Δ %",                    # heading("Endring_pct")
     "BRREG",                  # heading("BRREG")
     "Avvik mot BRREG",        # heading("Avvik_brreg")
     "Avvik % mot BRREG",      # heading("Avvik_brreg_pct")

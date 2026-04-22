@@ -34,7 +34,7 @@ lokal year-getter kan sende inn det.
   entydige i Excel-eksporter og dokumenter (eks. "UB 2025").
 - **Endringskolonner vises med 2-sifret år** for å spare plass — operandene
   i navnet (UB-IB, UB) gjør at det fremdeles er entydig hva som er trukket
-  fra hva (eks. "Endr UB 25/24").
+  fra hva (eks. "Δ UB 25/24").
 - Excel-eksport bruker samme labels som GUI.
 
 ## Kanoniske ID-er
@@ -52,9 +52,9 @@ lokal year-getter kan sende inn det.
 | `UB` (eller `Sum`) | "UB 2025" | "UB" | Utgående saldo (SB) |
 | `UB_fjor` | "UB 2024" | "UB i fjor" | UB forrige regnskapsår (SB) |
 | `HB` | "HB 2025" | "HB" | HB-aggregat (sum transaksjoner i HB) |
-| `Endring` | "Endr UB-IB 25" | "Endr UB-IB" | Periode-bevegelse, UB − IB |
-| `Endring_fjor` | "Endr UB 25/24" | "Endring" | År-over-år, UB − UB_fjor |
-| `Endring_pct` | "Endr % 25/24" | "Endring %" | Prosentvis YoY-endring |
+| `Endring` | "Δ UB-IB 25" | "Δ UB-IB" | Periode-bevegelse, UB − IB |
+| `Endring_fjor` | "Δ UB 25/24" | "Endring" | År-over-år, UB − UB_fjor |
+| `Endring_pct` | "Δ % 25/24" | "Endring %" | Prosentvis YoY-endring |
 | `Antall` | "Antall" | "Antall" | Antall transaksjoner |
 | `Antall_bilag` | "Antall bilag" | "Antall bilag" | Antall unike bilag |
 | `AO_belop` | "Tilleggspostering" | "Tilleggspostering" | Sum tilleggsposteringer (ÅO) |
@@ -70,9 +70,9 @@ To kolonner med "Endring" i navnet er ofte forvirrende. Skillet er bevisst,
 og labels gjør operandene eksplisitte:
 
 - **`Endring`** = periode-bevegelse innenfor samme år: `UB − IB`.
-  Vises som *"Endr UB-IB 25"* — operandene er entydig hva som er trukket fra hva.
+  Vises som *"Δ UB-IB 25"* — operandene er entydig hva som er trukket fra hva.
 - **`Endring_fjor`** = år-over-år sammenligning: `UB − UB_fjor`.
-  Vises som *"Endr UB 25/24"* — UB i 2025 minus UB i 2024.
+  Vises som *"Δ UB 25/24"* — UB i 2025 minus UB i 2024.
 
 Bruk riktig ID — å forveksle dem gir tall som ser like ut men betyr
 forskjellige ting (særlig for IB-saldoer, der `UB − IB` og `UB − UB_fjor`

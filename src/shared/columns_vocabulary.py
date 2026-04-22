@@ -35,9 +35,9 @@ LABELS_STATIC: dict[str, str] = {
     # for endringskolonner. Se heading() for full formattering.
     "IB":             "IB",
     "HB":             "HB",                  # HB-aggregat (sum transaksjoner i HB)
-    "Endring":        "Endr UB-IB",          # periode-bevegelse (UB - IB)
-    "Endring_fjor":   "Endring",             # år-over-år (UB - UB_fjor)
-    "Endring_pct":    "Endring %",
+    "Endring":        "Δ UB-IB",         # periode-bevegelse (UB - IB)
+    "Endring_fjor":   "Δ UB",            # år-over-år (UB - UB_fjor)
+    "Endring_pct":    "Δ %",
     "Antall":         "Antall",
     "Antall_bilag":   "Antall bilag",
 
@@ -63,9 +63,9 @@ def heading(
 
     Formatkonvensjon:
         - Rene verdier   → 4-sifret år: "UB 2025", "IB 2025", "HB 2025"
-        - Endringer      → 2-sifret år: "Endr UB 25/24", "Endr UB-IB 25"
-                           Endringer er entydige om hvilke verdier som er
-                           subtrahert fra hverandre.
+        - Endringer      → Δ-prefiks + 2-sifret år: "Δ UB 25/24", "Δ UB-IB 25"
+                           Δ er kompakt og signaliserer visuelt at kolonnen
+                           er en beregnet differanse, ikke en råverdi.
 
     Spesielle behandlinger:
         - ``Sum`` / ``UB``    → ``UB <år>`` når år kjent, ellers ``UB``.
@@ -73,9 +73,9 @@ def heading(
         - ``IB``              → ``IB <år>`` når år kjent, ellers ``IB``.
         - ``HB``              → ``HB <år>`` når år kjent, ellers ``HB``.
         - ``BRREG``           → ``BRREG <år>`` når brreg_year kjent.
-        - ``Endring``         → ``Endr UB-IB <yy>`` (periode, UB minus IB).
-        - ``Endring_fjor``    → ``Endr UB <yy>/<yy-1>`` (år-over-år).
-        - ``Endring_pct``     → ``Endr % <yy>/<yy-1>``.
+        - ``Endring``         → ``Δ UB-IB <yy>`` (periode, UB minus IB).
+        - ``Endring_fjor``    → ``Δ UB <yy>/<yy-1>`` (år-over-år).
+        - ``Endring_pct``     → ``Δ % <yy>/<yy-1>``.
 
     Øvrige IDs slås opp i ``LABELS_STATIC``; ukjente returneres uendret.
     """
@@ -91,16 +91,16 @@ def heading(
     if col_id == "BRREG":
         return f"BRREG {brreg_year}" if brreg_year is not None else "BRREG"
 
-    # Endringskolonner (2-sifret år for kompakt visning)
+    # Endringskolonner (Δ-prefiks + 2-sifret år)
     if year is not None:
         yy = year % 100
         py = (year - 1) % 100
         if col_id == "Endring":
-            return f"Endr UB-IB {yy:02d}"
+            return f"Δ UB-IB {yy:02d}"
         if col_id == "Endring_fjor":
-            return f"Endr UB {yy:02d}/{py:02d}"
+            return f"Δ UB {yy:02d}/{py:02d}"
         if col_id == "Endring_pct":
-            return f"Endr % {yy:02d}/{py:02d}"
+            return f"Δ % {yy:02d}/{py:02d}"
 
     return LABELS_STATIC.get(col_id, col_id)
 
