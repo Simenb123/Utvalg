@@ -37,7 +37,7 @@ LABELS_STATIC: dict[str, str] = {
     "HB":             "HB",                  # HB-aggregat (sum transaksjoner i HB)
     "Endring":        "Δ UB-IB",         # periode-bevegelse (UB - IB)
     "Endring_fjor":   "Δ UB",            # år-over-år (UB - UB_fjor)
-    "Endring_pct":    "Δ %",
+    "Endring_pct":    "Δ % UB",          # år-over-år, prosentvis
     "Antall":         "Antall",
     "Antall_bilag":   "Antall bilag",
 
@@ -75,7 +75,7 @@ def heading(
         - ``BRREG``           → ``BRREG <år>`` når brreg_year kjent.
         - ``Endring``         → ``Δ UB-IB <yy>`` (periode, UB minus IB).
         - ``Endring_fjor``    → ``Δ UB <yy>/<yy-1>`` (år-over-år).
-        - ``Endring_pct``     → ``Δ % <yy>/<yy-1>``.
+        - ``Endring_pct``     → ``Δ % UB <yy>/<yy-1>``.
 
     Øvrige IDs slås opp i ``LABELS_STATIC``; ukjente returneres uendret.
     """
@@ -100,7 +100,7 @@ def heading(
         if col_id == "Endring_fjor":
             return f"Δ UB {yy:02d}/{py:02d}"
         if col_id == "Endring_pct":
-            return f"Δ % {yy:02d}/{py:02d}"
+            return f"Δ % UB {yy:02d}/{py:02d}"
 
     return LABELS_STATIC.get(col_id, col_id)
 

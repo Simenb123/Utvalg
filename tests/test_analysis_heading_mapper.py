@@ -25,13 +25,13 @@ def test_fallback_labels_without_year():
 def test_year_over_year_labels_with_year_use_compact_endr_format():
     # Med år: 2-sifret endringsformat
     assert _cols.analysis_heading("Endring_fjor", year=2025) == "Δ UB 25/24"
-    assert _cols.analysis_heading("Endring_pct", year=2025) == "Δ % 25/24"
+    assert _cols.analysis_heading("Endring_pct", year=2025) == "Δ % UB 25/24"
 
 
 def test_year_over_year_labels_without_year_fall_back_to_static():
     # Uten år: kortere fallback-labels (fortsatt Δ-prefiks)
     assert _cols.analysis_heading("Endring_fjor") == "Δ UB"
-    assert _cols.analysis_heading("Endring_pct") == "Δ %"
+    assert _cols.analysis_heading("Endring_pct") == "Δ % UB"
 
 
 def test_period_activity_label():

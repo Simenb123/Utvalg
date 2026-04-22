@@ -51,7 +51,7 @@ RL_PIVOT_HEADINGS = (
     "Antall",                 # heading("Antall")
     "UB i fjor",              # heading("UB_fjor")
     "Δ UB",                   # heading("Endring_fjor")
-    "Δ %",                    # heading("Endring_pct")
+    "Δ % UB",                 # heading("Endring_pct")
     "BRREG",                  # heading("BRREG")
     "Avvik mot BRREG",        # heading("Avvik_brreg")
     "Avvik % mot BRREG",      # heading("Avvik_brreg_pct")

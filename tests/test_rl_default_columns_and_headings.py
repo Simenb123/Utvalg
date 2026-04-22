@@ -223,7 +223,7 @@ def test_update_pivot_headings_substitutes_active_year(monkeypatch) -> None:
     # Med år: kompakt 2-sifret endringsformat
     assert page._pivot_tree.headings["Endring"] == "Δ UB-IB 25"
     assert page._pivot_tree.headings["Endring_fjor"] == "Δ UB 25/24"
-    assert page._pivot_tree.headings["Endring_pct"] == "Δ % 25/24"
+    assert page._pivot_tree.headings["Endring_pct"] == "Δ % UB 25/24"
 
 
 def test_update_pivot_headings_falls_back_when_year_missing(monkeypatch) -> None:
@@ -274,7 +274,7 @@ def test_update_pivot_headings_sb_konto_injects_active_year(monkeypatch) -> None
     assert page._pivot_tree.headings["Sum"] == "UB 2025"
     assert page._pivot_tree.headings["UB_fjor"] == "UB 2024"
     assert page._pivot_tree.headings["Endring_fjor"] == "Δ UB 25/24"
-    assert page._pivot_tree.headings["Endring_pct"] == "Δ % 25/24"
+    assert page._pivot_tree.headings["Endring_pct"] == "Δ % UB 25/24"
     assert page._pivot_tree.headings["Antall"] == "Antall"
 
 
@@ -307,7 +307,7 @@ def test_rl_headings_with_year_helper() -> None:
     assert headings[4] == "Δ UB-IB 25"
     assert headings[9] == "Antall"
     assert headings[11] == "Δ UB 25/24"
-    assert headings[12] == "Δ % 25/24"
+    assert headings[12] == "Δ % UB 25/24"
 
 
 def test_rl_headings_with_year_none_returns_static() -> None:

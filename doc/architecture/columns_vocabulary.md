@@ -54,7 +54,7 @@ lokal year-getter kan sende inn det.
 | `HB` | "HB 2025" | "HB" | HB-aggregat (sum transaksjoner i HB) |
 | `Endring` | "Δ UB-IB 25" | "Δ UB-IB" | Periode-bevegelse, UB − IB |
 | `Endring_fjor` | "Δ UB 25/24" | "Endring" | År-over-år, UB − UB_fjor |
-| `Endring_pct` | "Δ % 25/24" | "Endring %" | Prosentvis YoY-endring |
+| `Endring_pct` | "Δ % UB 25/24" | "Δ % UB" | Prosentvis YoY-endring |
 | `Antall` | "Antall" | "Antall" | Antall transaksjoner |
 | `Antall_bilag` | "Antall bilag" | "Antall bilag" | Antall unike bilag |
 | `AO_belop` | "Tilleggspostering" | "Tilleggspostering" | Sum tilleggsposteringer (ÅO) |

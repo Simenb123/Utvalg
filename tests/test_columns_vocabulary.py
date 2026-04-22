@@ -72,7 +72,7 @@ def test_endring_fjor_with_year_is_yoy_2digit() -> None:
 
 
 def test_endring_pct_with_year_is_pct_yoy_2digit() -> None:
-    assert heading("Endring_pct", year=2025) == "Δ % 25/24"
+    assert heading("Endring_pct", year=2025) == "Δ % UB 25/24"
 
 
 def test_endring_columns_have_distinct_labels_with_year() -> None:
@@ -93,7 +93,7 @@ def test_endring_without_year_falls_back_to_static_labels() -> None:
     """Uten år: bruk fallback-labels (kompakt og lesbar)."""
     assert heading("Endring") == "Δ UB-IB"
     assert heading("Endring_fjor") == "Δ UB"
-    assert heading("Endring_pct") == "Δ %"
+    assert heading("Endring_pct") == "Δ % UB"
 
 
 # ---------------------------------------------------------------------------
