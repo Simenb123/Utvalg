@@ -242,10 +242,11 @@ def _show_sb_header_menu(*, page: Any, tree: Any, event: Any) -> None:
         return
     try:
         import page_analyse_columns as _cols
+        import page_analyse_sb as _ps
     except Exception:
         return
 
-    default_order = list(SB_COLS)
+    default_order = list(_ps.SB_COLS)
     current_order = list(getattr(page, "_sb_cols_order", default_order))
     current_visible = list(getattr(page, "_sb_cols_visible", default_order))
     pinned = set(_cols.SB_PINNED_COLS)
@@ -271,7 +272,7 @@ def _show_sb_header_menu(*, page: Any, tree: Any, event: Any) -> None:
         try:
             heading = _cols.analysis_heading(col, year=year)
         except Exception:
-            heading = _SB_COL_HEADINGS.get(col, col)
+            heading = _ps._SB_COL_HEADINGS.get(col, col)
         is_visible = col in current_visible
         is_pinned = col in pinned
         label = f"\u2713 {heading}" if is_visible else f"   {heading}"
