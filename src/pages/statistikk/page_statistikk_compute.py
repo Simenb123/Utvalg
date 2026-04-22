@@ -17,6 +17,8 @@ from typing import Optional
 
 import pandas as pd
 
+from src.shared.columns_vocabulary import active_year_from_session, heading
+
 log = logging.getLogger(__name__)
 
 _AMT_FMT = "#,##0.00;[Red]-#,##0.00"
@@ -260,14 +262,18 @@ def _compute_kontoer(
     ib_map: dict[str, float] = {}
     ub_map: dict[str, float] = {}
     sb_navn: dict[str, str] = {}
-    ib_label = "IB"
+    # IB-kolonnen viser enten årets IB eller fjorårs UB avhengig av hva
+    # som er tilgjengelig. Vi holder kanonisk ID + år her, og lar
+    # heading() formatere — dette sikrer global label-konsistens.
+    _yr = active_year_from_session()
+    ib_col_id = "IB"
 
     sb_prev = getattr(page, "_rl_sb_prev_df", None)
     if sb_prev is not None and not sb_prev.empty and "konto" in sb_prev.columns:
         for _, r in sb_prev.iterrows():
             k = str(r["konto"])
             ib_map[k] = _safe_float(r.get("ub"))   # fjorår UB = årets IB
-        ib_label = "UB fjor"
+        ib_col_id = "UB_fjor"
 
     try:
         sb = page._get_effective_sb_df()  # type: ignore[union-attr]
@@ -285,7 +291,9 @@ def _compute_kontoer(
                 if nav:
                     sb_navn[k] = nav
         if fallback_ib:
-            ib_label = "IB"
+            ib_col_id = "IB"
+
+    ib_label = heading(ib_col_id, year=_yr)
 
     # --- Supplér med SB-kontoer i RL-range som mangler transaksjoner ---
     if ranges:

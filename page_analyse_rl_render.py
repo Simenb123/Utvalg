@@ -16,6 +16,8 @@ import pandas as pd
 
 import formatting
 
+from src.shared.columns_vocabulary import heading as _vocab_heading
+
 from page_analyse_rl_data import (
     _load_current_client_account_overrides,
     _resolve_analysis_sb_views,
@@ -32,25 +34,27 @@ from page_analyse_rl_pivot import (
 log = logging.getLogger("app")
 
 # Kolonnenavn brukt i treeview (vises som headings i RL-modus).
-# Interne kolonne-IDer er uendret — kun brukerrettet label endres. "Sum" og
-# "UB_fjor" får årstall injisert i update_pivot_headings når aktivt år er kjent.
+# Interne kolonne-IDer er uendret — kun brukerrettet label endres.
+# Labels formatteres dynamisk via felles vokabular (heading()) i
+# update_pivot_headings/_rl_headings_with_year. Konstanten under er
+# "uten år"-fallback som speiler heading()-output når year=None.
 RL_PIVOT_HEADINGS = (
     "Nr",
     "Regnskapslinje",
-    "",               # OK — ikke relevant for regnskapslinjer
-    "IB",
-    "Bevegelse i år",
-    "UB",
-    "Tilleggspostering",
-    "UB før ÅO",
-    "UB etter ÅO",
-    "Antall",
-    "UB i fjor",
-    "Endring",
-    "Endring %",
-    "BRREG",
-    "Avvik mot BRREG",
-    "Avvik % mot BRREG",
+    "",                       # OK — ikke relevant for regnskapslinjer
+    "IB",                     # heading("IB")
+    "Endr UB-IB",             # heading("Endring")
+    "UB",                     # heading("UB")
+    "Tilleggspostering",      # heading("AO_belop")
+    "UB før ÅO",              # heading("UB_for_ao")
+    "UB etter ÅO",            # heading("UB_etter_ao")
+    "Antall",                 # heading("Antall")
+    "UB i fjor",              # heading("UB_fjor")
+    "Endring",                # heading("Endring_fjor")
+    "Endring %",              # heading("Endring_pct")
+    "BRREG",                  # heading("BRREG")
+    "Avvik mot BRREG",        # heading("Avvik_brreg")
+    "Avvik % mot BRREG",      # heading("Avvik_brreg_pct")
 )
 # Standard konto-modus headings (for å tilbakestille)
 KONTO_PIVOT_HEADINGS = (
@@ -104,44 +108,57 @@ def _rl_headings_with_year(
     brreg_year: Optional[int] = None,
     fjor_source: Optional[str] = None,
 ) -> tuple[str, ...]:
-    """Bygg RL-headings med årstall injisert i UB- og BRREG-kolonnene.
+    """Bygg RL-headings via felles vokabular (heading()).
 
     Når ``fjor_source == "brreg"`` får UB-fjor-kolonnen suffikset
     ``(BRREG)`` som diskret kildeindikasjon.
+
+    Indekser matcher kolonne-rekkefølgen i RL-pivot_tree:
+        0=Nr, 1=Regnskapslinje, 2=OK(blank for RL), 3=IB, 4=Endring,
+        5=Sum/UB, 6=AO_belop, 7=UB_for_ao, 8=UB_etter_ao, 9=Antall,
+        10=UB_fjor, 11=Endring_fjor, 12=Endring_pct,
+        13=BRREG, 14=Avvik_brreg, 15=Avvik_brreg_pct
     """
-    headings = list(RL_PIVOT_HEADINGS)
-    if year is not None:
-        # Index 5 = "Sum" (UB aktivt år), index 10 = "UB_fjor" (UB i fjor)
-        headings[5] = f"UB {year}"
-        fjor_label = f"UB {year - 1}"
-        if fjor_source == "brreg":
-            fjor_label = f"{fjor_label} (BRREG)"
-        headings[10] = fjor_label
-    if brreg_year is not None:
-        # Index 13 = BRREG-kolonnen
-        headings[13] = f"BRREG {brreg_year}"
+    headings = [
+        "Nr",
+        "Regnskapslinje",
+        "",                                                 # OK — ikke relevant for RL
+        _vocab_heading("IB", year=year),
+        _vocab_heading("Endring", year=year),
+        _vocab_heading("UB", year=year),
+        _vocab_heading("AO_belop"),
+        _vocab_heading("UB_for_ao"),
+        _vocab_heading("UB_etter_ao"),
+        _vocab_heading("Antall"),
+        _vocab_heading("UB_fjor", year=year),
+        _vocab_heading("Endring_fjor", year=year),
+        _vocab_heading("Endring_pct", year=year),
+        _vocab_heading("BRREG", brreg_year=brreg_year),
+        _vocab_heading("Avvik_brreg"),
+        _vocab_heading("Avvik_brreg_pct"),
+    ]
+    if fjor_source == "brreg":
+        headings[10] = f"{headings[10]} (BRREG)"
     return tuple(headings)
 
 
 def _sb_konto_headings_with_year(year: Optional[int]) -> tuple[str, ...]:
-    """SB-konto headings: Konto/Kontonavn + UB <år>, UB <år-1>, Endring, Endring %."""
-    ub_label = f"UB {year}" if year is not None else "UB"
-    ub_fjor_label = f"UB {year - 1}" if year is not None else "UB i fjor"
+    """SB-konto headings via felles vokabular."""
     return (
         "Konto",
         "Kontonavn",
-        "OK",               # OK-markering per konto
-        "",                 # IB
-        "Bevegelse i år",   # fallback-Endring (vises uten fjorsdata)
-        ub_label,           # Sum = UB aktivt år
-        "",                 # AO_belop
-        "",                 # UB_for_ao
-        "",                 # UB_etter_ao
-        "Antall",
-        ub_fjor_label,      # UB_fjor
-        "Endring",          # Endring_fjor
-        "Endring %",        # Endring_pct
-        "", "", "",         # BRREG, Avvik_brreg, Avvik_brreg_pct
+        "OK",
+        "",                                                 # IB ikke vist
+        _vocab_heading("Endring", year=year),               # Bevegelse fallback
+        _vocab_heading("UB", year=year),                    # Sum = UB aktivt år
+        "",                                                 # AO_belop
+        "",                                                 # UB_for_ao
+        "",                                                 # UB_etter_ao
+        _vocab_heading("Antall"),
+        _vocab_heading("UB_fjor", year=year),
+        _vocab_heading("Endring_fjor", year=year),
+        _vocab_heading("Endring_pct", year=year),
+        "", "", "",                                         # BRREG, Avvik_brreg, Avvik_brreg_pct
     )
 
 

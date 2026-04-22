@@ -57,8 +57,15 @@ def test_compute_kontoer_inkluderer_sb_kontoer_uten_bevegelse() -> None:
     assert label == "IB"
 
 
-def test_compute_kontoer_bruker_sb_prev_som_ib() -> None:
-    """Når sb_prev finnes skal UB fjor brukes som IB-kolonnen."""
+def test_compute_kontoer_bruker_sb_prev_som_ib(monkeypatch) -> None:
+    """Når sb_prev finnes skal UB fjor brukes som IB-kolonnen.
+
+    Label-formatet styres nå av felles vokabular: UB_fjor → "UB <år-1>"
+    når session.year er satt, ellers fallback "UB i fjor".
+    """
+    import session as _session
+    monkeypatch.setattr(_session, "year", "2025", raising=False)
+
     from src.pages.statistikk import page_statistikk
 
     sb_df = pd.DataFrame([{"konto": "3000", "kontonavn": "Salg", "ib": 0.0, "ub": -100.0}])
@@ -69,7 +76,7 @@ def test_compute_kontoer_bruker_sb_prev_som_ib() -> None:
     page = _fake_page(sb_df=sb_df, sb_prev_df=sb_prev)
     grp, label = page_statistikk._compute_kontoer(df_rl, page, ranges=[(3000, 3099)])
 
-    assert label == "UB fjor"
+    assert label == "UB 2024"
     rad = grp[grp["Konto"] == "3000"].iloc[0]
     assert float(rad["IB"]) == -50.0
 

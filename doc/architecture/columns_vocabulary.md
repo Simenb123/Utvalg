@@ -28,40 +28,51 @@ label = heading("Endring_fjor")          # → "Endring"
 `session.year` og returnerer int eller None. Faner som allerede har en
 lokal year-getter kan sende inn det.
 
+## Format-konvensjon
+
+- **Rene verdier (UB, IB, HB, UB_fjor) vises med 4-sifret år** for å være
+  entydige i Excel-eksporter og dokumenter (eks. "UB 2025").
+- **Endringskolonner vises med 2-sifret år** for å spare plass — operandene
+  i navnet (UB-IB, UB) gjør at det fremdeles er entydig hva som er trukket
+  fra hva (eks. "Endr UB 25/24").
+- Excel-eksport bruker samme labels som GUI.
+
 ## Kanoniske ID-er
 
-| Intern ID | Brukerlabel | Semantikk |
-|---|---|---|
-| `Konto` | "Konto" | Kontonummer |
-| `Kontonavn` | "Kontonavn" | Kontotekst |
-| `OK` | "OK" | OK-flagg (ferdigrevidert) |
-| `OK_av` | "OK av" | Hvem som markerte OK |
-| `OK_dato` | "OK dato" | Når markert OK |
-| `Vedlegg` | "Vedlegg" | Vedlagte filer |
-| `Gruppe` | "Gruppe" | Konto-grupperings-tag |
-| `IB` | "IB" | Inngående saldo |
-| `UB` (eller `Sum`) | "UB \<år\>" | Utgående saldo, år injiseres dynamisk |
-| `UB_fjor` | "UB \<år-1\>" eller "UB i fjor" | UB forrige regnskapsår |
-| `Endring` | "Bevegelse i år" | Periode-bevegelse, UB − IB |
-| `Endring_fjor` | "Endring" | År-over-år, UB − UB_fjor |
-| `Endring_pct` | "Endring %" | Prosentvis YoY-endring |
-| `Antall` | "Antall" | Antall transaksjoner |
-| `Antall_bilag` | "Antall bilag" | Antall unike bilag |
-| `AO_belop` | "Tilleggspostering" | Sum tilleggsposteringer (ÅO) |
-| `UB_for_ao` | "UB før ÅO" | UB uten tilleggsposteringer |
-| `UB_etter_ao` | "UB etter ÅO" | UB inkludert tilleggsposteringer |
-| `BRREG` | "BRREG \<år\>" eller "BRREG" | BRREG-tall, år injiseres |
-| `Avvik_brreg` | "Avvik mot BRREG" | Differanse mot BRREG |
-| `Avvik_brreg_pct` | "Avvik % mot BRREG" | Prosentvis avvik mot BRREG |
+| Intern ID | Brukerlabel (med år=2025) | Brukerlabel (uten år) | Semantikk |
+|---|---|---|---|
+| `Konto` | "Konto" | "Konto" | Kontonummer |
+| `Kontonavn` | "Kontonavn" | "Kontonavn" | Kontotekst |
+| `OK` | "OK" | "OK" | OK-flagg (ferdigrevidert) |
+| `OK_av` | "OK av" | "OK av" | Hvem som markerte OK |
+| `OK_dato` | "OK dato" | "OK dato" | Når markert OK |
+| `Vedlegg` | "Vedlegg" | "Vedlegg" | Vedlagte filer |
+| `Gruppe` | "Gruppe" | "Gruppe" | Konto-grupperings-tag |
+| `IB` | "IB 2025" | "IB" | Inngående saldo (SB) |
+| `UB` (eller `Sum`) | "UB 2025" | "UB" | Utgående saldo (SB) |
+| `UB_fjor` | "UB 2024" | "UB i fjor" | UB forrige regnskapsår (SB) |
+| `HB` | "HB 2025" | "HB" | HB-aggregat (sum transaksjoner i HB) |
+| `Endring` | "Endr UB-IB 25" | "Endr UB-IB" | Periode-bevegelse, UB − IB |
+| `Endring_fjor` | "Endr UB 25/24" | "Endring" | År-over-år, UB − UB_fjor |
+| `Endring_pct` | "Endr % 25/24" | "Endring %" | Prosentvis YoY-endring |
+| `Antall` | "Antall" | "Antall" | Antall transaksjoner |
+| `Antall_bilag` | "Antall bilag" | "Antall bilag" | Antall unike bilag |
+| `AO_belop` | "Tilleggspostering" | "Tilleggspostering" | Sum tilleggsposteringer (ÅO) |
+| `UB_for_ao` | "UB før ÅO" | "UB før ÅO" | UB uten tilleggsposteringer |
+| `UB_etter_ao` | "UB etter ÅO" | "UB etter ÅO" | UB inkludert tilleggsposteringer |
+| `BRREG` | "BRREG 2024" | "BRREG" | BRREG-tall, brreg_year injiseres |
+| `Avvik_brreg` | "Avvik mot BRREG" | "Avvik mot BRREG" | Differanse mot BRREG |
+| `Avvik_brreg_pct` | "Avvik % mot BRREG" | "Avvik % mot BRREG" | Prosentvis avvik mot BRREG |
 
 ## Viktig semantisk skille: `Endring` vs `Endring_fjor`
 
-To kolonner med "Endring" i navnet er ofte forvirrende. Skillet er bevisst:
+To kolonner med "Endring" i navnet er ofte forvirrende. Skillet er bevisst,
+og labels gjør operandene eksplisitte:
 
 - **`Endring`** = periode-bevegelse innenfor samme år: `UB − IB`.
-  Vises som *"Bevegelse i år"* for å gjøre forskjellen visuell.
+  Vises som *"Endr UB-IB 25"* — operandene er entydig hva som er trukket fra hva.
 - **`Endring_fjor`** = år-over-år sammenligning: `UB − UB_fjor`.
-  Vises som *"Endring"* fordi det er den brukeren typisk forstår som "endring".
+  Vises som *"Endr UB 25/24"* — UB i 2025 minus UB i 2024.
 
 Bruk riktig ID — å forveksle dem gir tall som ser like ut men betyr
 forskjellige ting (særlig for IB-saldoer, der `UB − IB` og `UB − UB_fjor`

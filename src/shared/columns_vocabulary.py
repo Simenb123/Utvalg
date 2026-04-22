@@ -30,10 +30,13 @@ LABELS_STATIC: dict[str, str] = {
     "Vedlegg":        "Vedlegg",
     "Gruppe":         "Gruppe",
 
-    # Saldo / bevegelse
+    # Saldo / bevegelse — fallback-labels uten år. Med år får disse 4-sifret
+    # årstall (UB 2025) for rene verdier, eller 2-sifret (Endr UB 25/24)
+    # for endringskolonner. Se heading() for full formattering.
     "IB":             "IB",
-    "Endring":        "Bevegelse i år",   # periode-bevegelse (UB - IB)
-    "Endring_fjor":   "Endring",          # år-over-år (UB - UB_fjor)
+    "HB":             "HB",                  # HB-aggregat (sum transaksjoner i HB)
+    "Endring":        "Endr UB-IB",          # periode-bevegelse (UB - IB)
+    "Endring_fjor":   "Endring",             # år-over-år (UB - UB_fjor)
     "Endring_pct":    "Endring %",
     "Antall":         "Antall",
     "Antall_bilag":   "Antall bilag",
@@ -58,19 +61,47 @@ def heading(
 ) -> str:
     """Returner kanonisk brukerrettet overskrift for en kolonne-ID.
 
-    Dynamisk år injiseres for kolonner hvor det er meningsfullt:
-        - ``Sum`` / ``UB``  → ``UB <år>`` når år er kjent, ellers ``UB``.
-        - ``UB_fjor``       → ``UB <år-1>`` når år er kjent, ellers ``UB i fjor``.
-        - ``BRREG``         → ``BRREG <år>`` når brreg_year er kjent, ellers ``BRREG``.
+    Formatkonvensjon:
+        - Rene verdier   → 4-sifret år: "UB 2025", "IB 2025", "HB 2025"
+        - Endringer      → 2-sifret år: "Endr UB 25/24", "Endr UB-IB 25"
+                           Endringer er entydige om hvilke verdier som er
+                           subtrahert fra hverandre.
+
+    Spesielle behandlinger:
+        - ``Sum`` / ``UB``    → ``UB <år>`` når år kjent, ellers ``UB``.
+        - ``UB_fjor``         → ``UB <år-1>`` når år kjent, ellers ``UB i fjor``.
+        - ``IB``              → ``IB <år>`` når år kjent, ellers ``IB``.
+        - ``HB``              → ``HB <år>`` når år kjent, ellers ``HB``.
+        - ``BRREG``           → ``BRREG <år>`` når brreg_year kjent.
+        - ``Endring``         → ``Endr UB-IB <yy>`` (periode, UB minus IB).
+        - ``Endring_fjor``    → ``Endr UB <yy>/<yy-1>`` (år-over-år).
+        - ``Endring_pct``     → ``Endr % <yy>/<yy-1>``.
 
     Øvrige IDs slås opp i ``LABELS_STATIC``; ukjente returneres uendret.
     """
+    # Rene verdier (4-sifret år)
     if col_id in ("Sum", "UB"):
         return f"UB {year}" if year is not None else "UB"
     if col_id == "UB_fjor":
         return f"UB {year - 1}" if year is not None else "UB i fjor"
+    if col_id == "IB":
+        return f"IB {year}" if year is not None else "IB"
+    if col_id == "HB":
+        return f"HB {year}" if year is not None else "HB"
     if col_id == "BRREG":
         return f"BRREG {brreg_year}" if brreg_year is not None else "BRREG"
+
+    # Endringskolonner (2-sifret år for kompakt visning)
+    if year is not None:
+        yy = year % 100
+        py = (year - 1) % 100
+        if col_id == "Endring":
+            return f"Endr UB-IB {yy:02d}"
+        if col_id == "Endring_fjor":
+            return f"Endr UB {yy:02d}/{py:02d}"
+        if col_id == "Endring_pct":
+            return f"Endr % {yy:02d}/{py:02d}"
+
     return LABELS_STATIC.get(col_id, col_id)
 
 

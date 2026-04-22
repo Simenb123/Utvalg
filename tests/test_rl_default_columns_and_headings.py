@@ -220,9 +220,10 @@ def test_update_pivot_headings_substitutes_active_year(monkeypatch) -> None:
 
     assert page._pivot_tree.headings["Sum"] == "UB 2025"
     assert page._pivot_tree.headings["UB_fjor"] == "UB 2024"
-    assert page._pivot_tree.headings["Endring"] == "Bevegelse i år"
-    assert page._pivot_tree.headings["Endring_fjor"] == "Endring"
-    assert page._pivot_tree.headings["Endring_pct"] == "Endring %"
+    # Med år: kompakt 2-sifret endringsformat
+    assert page._pivot_tree.headings["Endring"] == "Endr UB-IB 25"
+    assert page._pivot_tree.headings["Endring_fjor"] == "Endr UB 25/24"
+    assert page._pivot_tree.headings["Endring_pct"] == "Endr % 25/24"
 
 
 def test_update_pivot_headings_falls_back_when_year_missing(monkeypatch) -> None:
@@ -237,7 +238,7 @@ def test_update_pivot_headings_falls_back_when_year_missing(monkeypatch) -> None
     # Uten år: UB og UB_fjor beholder statiske labels
     assert page._pivot_tree.headings["Sum"] == "UB"
     assert page._pivot_tree.headings["UB_fjor"] == "UB i fjor"
-    assert page._pivot_tree.headings["Endring"] == "Bevegelse i år"
+    assert page._pivot_tree.headings["Endring"] == "Endr UB-IB"
     assert page._pivot_tree.headings["Endring_fjor"] == "Endring"
 
 
@@ -272,8 +273,8 @@ def test_update_pivot_headings_sb_konto_injects_active_year(monkeypatch) -> None
     assert page._pivot_tree.headings["Kontonavn"] == "Kontonavn"
     assert page._pivot_tree.headings["Sum"] == "UB 2025"
     assert page._pivot_tree.headings["UB_fjor"] == "UB 2024"
-    assert page._pivot_tree.headings["Endring_fjor"] == "Endring"
-    assert page._pivot_tree.headings["Endring_pct"] == "Endring %"
+    assert page._pivot_tree.headings["Endring_fjor"] == "Endr UB 25/24"
+    assert page._pivot_tree.headings["Endring_pct"] == "Endr % 25/24"
     assert page._pivot_tree.headings["Antall"] == "Antall"
 
 
@@ -302,11 +303,11 @@ def test_rl_headings_with_year_helper() -> None:
     assert headings[0] == "Nr"
     assert headings[1] == "Regnskapslinje"
     assert headings[2] == ""               # OK — ikke relevant for RL
-    assert headings[3] == "IB"
-    assert headings[4] == "Bevegelse i år"
+    assert headings[3] == "IB 2025"
+    assert headings[4] == "Endr UB-IB 25"
     assert headings[9] == "Antall"
-    assert headings[11] == "Endring"
-    assert headings[12] == "Endring %"
+    assert headings[11] == "Endr UB 25/24"
+    assert headings[12] == "Endr % 25/24"
 
 
 def test_rl_headings_with_year_none_returns_static() -> None:
