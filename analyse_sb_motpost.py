@@ -13,6 +13,7 @@ import pandas as pd
 import formatting
 
 from analyse_sb_refresh import _clear_tree
+from analyse_sb_tree import _hide_all_views
 
 
 # =====================================================================
