@@ -12,7 +12,16 @@ from typing import Any
 
 
 def show_pivot_column_menu(*, page: Any, event: Any) -> None:
-    """Vis høyreklikkmeny for å vise/skjule pivot-kolonner."""
+    """Vis kontekstavhengig hoyreklikkmeny for pivot-treet.
+
+    - Pa kolonneoverskrift  -> vis/skjul kolonner + Standard.
+    - Pa datarad            -> rad-kontekst (statistikk, kommentar, koble til handling).
+    - Pa tom plass          -> ingen meny.
+
+    Tidligere viste menyen kolonne-show/hide overalt, ogsa pa rader og tom
+    plass. Brukeren ba om at det alternativet kun skal komme nar man
+    faktisk hoyreklikker pa kolonneoverskriften.
+    """
     if not getattr(page, "_tk_ok", False) or event is None:
         return
     try:
@@ -28,12 +37,22 @@ def show_pivot_column_menu(*, page: Any, event: Any) -> None:
     )
 
     tree = getattr(page, "_pivot_tree", None)
+    if tree is None:
+        return
+
+    try:
+        region = tree.identify_region(event.x, event.y)
+    except Exception:
+        region = ""
+
     menu = tk.Menu(page, tearoff=0)
-    for col in page.PIVOT_COLS:
-        if col in page.PIVOT_COLS_PINNED:
-            continue
-        display_name = col
-        if tree is not None:
+
+    if region == "heading":
+        # --- Klikk på kolonneoverskrift: vis/skjul kolonner ---
+        for col in page.PIVOT_COLS:
+            if col in page.PIVOT_COLS_PINNED:
+                continue
+            display_name = col
             try:
                 heading_text = tree.heading(col, "text")
                 if heading_text and heading_text.strip():
@@ -42,68 +61,76 @@ def show_pivot_column_menu(*, page: Any, event: Any) -> None:
                     continue  # Ikke relevant i nåværende modus
             except Exception:
                 pass
-        is_visible = col in page._pivot_visible_cols
-        label = f"{'✓  ' if is_visible else '    '}{display_name}"
-        menu.add_command(
-            label=label,
-            command=lambda c=col: toggle_pivot_column(page=page, col=c),
-        )
-    menu.add_separator()
-    menu.add_command(label="Standard", command=lambda: reset_pivot_columns(page=page))
+            is_visible = col in page._pivot_visible_cols
+            label = f"{'✓  ' if is_visible else '    '}{display_name}"
+            menu.add_command(
+                label=label,
+                command=lambda c=col: toggle_pivot_column(page=page, col=c),
+            )
+        menu.add_separator()
+        menu.add_command(label="Standard", command=lambda: reset_pivot_columns(page=page))
 
-    # Kommentar-alternativ for RL- og konto-moduser
-    agg_mode = _read_agg_mode(page)
-
-    if tree is not None:
+    elif region == "cell":
+        # --- Klikk på datarad: kontekst-spesifikke valg ---
         try:
             item = tree.identify_row(event.y)
-            if item:
-                vals = tree.item(item, "values")
-                if vals:
-                    first_col = str(vals[0]).strip()
-                    second_col = str(vals[1]).strip() if len(vals) > 1 else ""
-                    if first_col and not first_col.startswith("\u03a3"):
-                        menu.add_separator()
-                        if agg_mode == "Regnskapslinje":
-                            menu.add_command(
-                                label=f"Vis statistikk for {first_col} {second_col}",
-                                command=lambda r=first_col: _open_statistikk(page=page, regnr=r),
-                            )
-                            menu.add_command(
-                                label=f"Kommentar for {first_col} {second_col}\u2026",
-                                command=lambda: _open_rl_comment(page=page, regnr=first_col, rl_name=second_col),
-                            )
-                            link_label = _action_link_label(
-                                kind="rl", entity_key=first_col, base="Koble til handling"
-                            )
-                            menu.add_command(
-                                label=f"{link_label}\u2026",
-                                command=lambda: _open_action_link(
-                                    page=page, kind="rl",
-                                    entity_key=first_col,
-                                    entity_label=f"{first_col} {second_col}",
-                                ),
-                            )
-                        elif agg_mode in ("SB-konto", "HB-konto", ""):
-                            menu.add_command(
-                                label=f"Kommentar for {first_col} {second_col}\u2026",
-                                command=lambda: _open_account_comment(page=page, konto=first_col, kontonavn=second_col),
-                            )
-                            link_label = _action_link_label(
-                                kind="account", entity_key=first_col, base="Koble til handling"
-                            )
-                            menu.add_command(
-                                label=f"{link_label}\u2026",
-                                command=lambda: _open_action_link(
-                                    page=page, kind="account",
-                                    entity_key=first_col,
-                                    entity_label=f"{first_col} {second_col}",
-                                ),
-                            )
-        except Exception:
-            pass
+            if not item:
+                return
+            vals = tree.item(item, "values")
+            if not vals:
+                return
+            first_col = str(vals[0]).strip()
+            second_col = str(vals[1]).strip() if len(vals) > 1 else ""
+            if not first_col or first_col.startswith("Σ"):
+                return
 
+            agg_mode = _read_agg_mode(page)
+            if agg_mode == "Regnskapslinje":
+                menu.add_command(
+                    label=f"Vis statistikk for {first_col} {second_col}",
+                    command=lambda r=first_col: _open_statistikk(page=page, regnr=r),
+                )
+                menu.add_command(
+                    label=f"Kommentar for {first_col} {second_col}…",
+                    command=lambda: _open_rl_comment(page=page, regnr=first_col, rl_name=second_col),
+                )
+                link_label = _action_link_label(
+                    kind="rl", entity_key=first_col, base="Koble til handling"
+                )
+                menu.add_command(
+                    label=f"{link_label}…",
+                    command=lambda: _open_action_link(
+                        page=page, kind="rl",
+                        entity_key=first_col,
+                        entity_label=f"{first_col} {second_col}",
+                    ),
+                )
+            elif agg_mode in ("SB-konto", "HB-konto", ""):
+                menu.add_command(
+                    label=f"Kommentar for {first_col} {second_col}…",
+                    command=lambda: _open_account_comment(page=page, konto=first_col, kontonavn=second_col),
+                )
+                link_label = _action_link_label(
+                    kind="account", entity_key=first_col, base="Koble til handling"
+                )
+                menu.add_command(
+                    label=f"{link_label}…",
+                    command=lambda: _open_action_link(
+                        page=page, kind="account",
+                        entity_key=first_col,
+                        entity_label=f"{first_col} {second_col}",
+                    ),
+                )
+        except Exception:
+            return
+    else:
+        # Tom plass eller annen region — ingen meny
+        return
+
+    # Vis menyen kun hvis den faktisk har noen valg
     try:
+        if menu.index("end") is None:
+            return
         menu.tk_popup(event.x_root, event.y_root)
     except Exception:
         pass
