@@ -535,7 +535,9 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         )
 
     def _update_kpi(self, page: object, regnr: int) -> None:
-        pivot_df = getattr(page, "_pivot_df_last", None)
+        # Bruk _pivot_df_rl (RL-spesifikk), ikke _pivot_df_last — sistnevnte
+        # kan være konto-pivot uten regnr.
+        pivot_df = getattr(page, "_pivot_df_rl", None)
         blank = "\u2013"
         if pivot_df is None or pivot_df.empty:
             for var in self._kpi_vars.values():

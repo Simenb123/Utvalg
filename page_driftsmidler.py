@@ -461,9 +461,10 @@ class DriftsmidlerPage(ttk.Frame):
         classified = _classify_dm_transactions(df_all, dm_ranges, avskr_ranges)
         self._classified_df = classified
 
-        # Hent regnr 555 UB fra pivot
+        # Hent regnr 555 UB fra pivot. Bruk _pivot_df_rl (RL-spesifikk),
+        # ikke _pivot_df_last — sistnevnte kan være konto-pivot uten regnr.
         regnr_555_ub = None
-        pivot_df = getattr(page, "_pivot_df_last", None)
+        pivot_df = getattr(page, "_pivot_df_rl", None)
         if pivot_df is not None and not pivot_df.empty and "regnr" in pivot_df.columns:
             row_555 = pivot_df[pivot_df["regnr"].astype(int) == 555]
             if not row_555.empty and "UB" in row_555.columns:

@@ -218,8 +218,11 @@ def refresh_nokkeltall_view(page: Any) -> None:
         _write("Ingen regnskapsdata tilgjengelig.\n\nLast inn HB-data og velg klient.")
         return
 
-    # Legg til fjorårskolonner hvis tilgjengelig
-    pivot_df = getattr(page, "_pivot_df_last", None)
+    # Legg til fjorårskolonner hvis tilgjengelig.
+    # Bruk den RL-spesifikke pivot-cachen (_pivot_df_rl) — _pivot_df_last
+    # kan være SB-/HB-konto-pivot avhengig av hvilken modus brukeren sist
+    # stod i, og har da Konto-nøkkel uten regnr.
+    pivot_df = getattr(page, "_pivot_df_rl", None)
     if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
         rl_df = rl_df.copy()
         for col in ("UB_fjor", "Endring_fjor", "Endring_pct"):

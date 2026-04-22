@@ -851,10 +851,10 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
 
         # UB_fjor leveres nå direkte fra prepare_regnskapsoppstilling_export_data
         # (build_rl_pivot kalles med sb_prev_df). Fallback: hvis rl_df mangler
-        # UB_fjor, prøv å merge fra _pivot_df_last (gammel sti — virker bare
-        # når Analyse-fanen står i Regnskapslinje-modus).
+        # UB_fjor, prøv å merge fra _pivot_df_rl (kun satt når Analyse-fanen
+        # har vært i Regnskapslinje-modus minst én gang).
         if "UB_fjor" not in rl_df.columns:
-            pivot_df = getattr(self._analyse_page, "_pivot_df_last", None)
+            pivot_df = getattr(self._analyse_page, "_pivot_df_rl", None)
             if (
                 isinstance(pivot_df, pd.DataFrame)
                 and "UB_fjor" in pivot_df.columns

@@ -370,7 +370,9 @@ def refresh_sb_konto_pivot(*, page: Any) -> None:
         pass
 
     try:
-        page._pivot_df_last = pivot_df.copy()
+        snap = pivot_df.copy()
+        page._pivot_df_last = snap
+        page._pivot_df_sb_konto = snap
     except Exception:
         pass
 
@@ -653,7 +655,9 @@ def refresh_hb_konto_pivot(*, page: Any) -> None:
 
     # Cache siste pivot for eksport
     try:
-        page._pivot_df_last = pivot_df.copy()
+        snap = pivot_df.copy()
+        page._pivot_df_last = snap
+        page._pivot_df_hb_konto = snap
     except Exception:
         pass
 

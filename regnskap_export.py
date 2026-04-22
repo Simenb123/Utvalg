@@ -24,8 +24,9 @@ def get_export_rl_df(page: Any) -> pd.DataFrame | None:
     rl_df, _, _ = page._fetch_rl_df()
     if rl_df is None or rl_df.empty:
         return None
-    # Merge UB_fjor
-    pivot_df = getattr(page._analyse_page, "_pivot_df_last", None)
+    # Merge UB_fjor — bruk _pivot_df_rl (RL-spesifikk), ikke _pivot_df_last
+    # som kan være konto-pivot uten regnr.
+    pivot_df = getattr(page._analyse_page, "_pivot_df_rl", None)
     if isinstance(pivot_df, pd.DataFrame) and "UB_fjor" in pivot_df.columns:
         rl_df = rl_df.copy()
         if "UB_fjor" not in rl_df.columns:

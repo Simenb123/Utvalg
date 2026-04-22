@@ -493,7 +493,9 @@ def refresh_rl_pivot(*, page: Any) -> None:
             has_brreg = False
 
     try:
-        page._pivot_df_last = pivot_df.copy()
+        snap = pivot_df.copy()
+        page._pivot_df_last = snap
+        page._pivot_df_rl = snap
     except Exception:
         pass
 

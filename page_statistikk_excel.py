@@ -184,7 +184,9 @@ def write_workbook(
     ws1.title = "Sammendrag"
     _title(ws1, f"Statistikk – {regnr} {rl_name}{ts}", 6)
     _header(ws1, 4, ["UB", "UB i fjor", "Endring (kr)", "Endring %", "Antall bilag", ""])
-    pivot_df = getattr(page, "_pivot_df_last", None)
+    # Bruk _pivot_df_rl (RL-spesifikk), ikke _pivot_df_last — sistnevnte
+    # kan være konto-pivot uten regnr.
+    pivot_df = getattr(page, "_pivot_df_rl", None)
     kpi = None
     if pivot_df is not None and not pivot_df.empty:
         kpi = next((r for _, r in pivot_df.iterrows() if _safe_int(r.get("regnr", -1)) == regnr), None)
