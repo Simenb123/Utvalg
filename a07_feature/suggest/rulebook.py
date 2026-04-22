@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import json
 from pathlib import Path
 import re
@@ -192,11 +193,8 @@ def _find_rulebook_path(explicit: Optional[str] = None) -> Optional[str]:
     return None
 
 
-def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
-    path = _find_rulebook_path(rulebook_path)
-    if not path:
-        return {}
-
+@lru_cache(maxsize=16)
+def _load_rulebook_cached(path: str, mtime_ns: int) -> Rulebook:
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
@@ -272,3 +270,15 @@ def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
         )
 
     return out
+
+
+def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:
+    path = _find_rulebook_path(rulebook_path)
+    if not path:
+        return {}
+
+    try:
+        mtime_ns = Path(path).stat().st_mtime_ns
+    except Exception:
+        mtime_ns = 0
+    return dict(_load_rulebook_cached(str(path), int(mtime_ns)))

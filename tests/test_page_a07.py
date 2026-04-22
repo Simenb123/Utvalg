@@ -2052,7 +2052,7 @@ def test_filter_control_visible_codes_df_hides_non_matching_codes_for_this_view(
     assert list(out["Kode"]) == ["feriepenger"]
 
 
-def test_selected_code_from_tree_prefers_tree_focus_for_a07_work_code() -> None:
+def test_selected_code_from_tree_prefers_tree_selection_for_a07_work_code() -> None:
     class DummyTree:
         def focus(self):
             return "sumAvgiftsgrunnlagRefusjon"
@@ -2072,7 +2072,7 @@ def test_selected_code_from_tree_prefers_tree_focus_for_a07_work_code() -> None:
 
     out = page_a07.A07Page._selected_code_from_tree(dummy, tree)
 
-    assert out == "sumAvgiftsgrunnlagRefusjon"
+    assert out == "feriepenger"
 
 
 def test_control_action_style_maps_work_labels() -> None:
@@ -3457,7 +3457,7 @@ def test_canonical_a07_account_lists_use_extended_multiselect() -> None:
 
     assert 'self.tree_control_gl.configure(selectmode="extended")' in source
     assert 'self.tree_control_accounts.configure(height=6, selectmode="extended")' in source
-    assert "self._focus_selected_control_account_in_gl(allow_multi=False)" in source
+    assert 'self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._update_a07_action_button_state())' in source
 
 
 def test_canonical_control_statement_tab_omits_noisy_header_controls() -> None:
@@ -4132,7 +4132,7 @@ def test_suggestion_and_reconcile_tree_tags_map_visual_state() -> None:
     assert page_a07.reconcile_tree_tag(reconcile_diff) == "reconcile_diff"
 
 
-def test_tree_iid_from_event_prefers_identified_row_then_selection() -> None:
+def test_tree_iid_from_event_prefers_identified_row_and_ignores_blank_event() -> None:
     class DummyTree:
         def __init__(self) -> None:
             self._selection = ("selected_iid",)
@@ -4148,7 +4148,8 @@ def test_tree_iid_from_event_prefers_identified_row_then_selection() -> None:
     tree = DummyTree()
 
     assert page_a07.A07Page._tree_iid_from_event(object(), tree, event) == "row_from_pointer"
-    assert page_a07.A07Page._tree_iid_from_event(object(), tree, fallback_event) == "selected_iid"
+    assert page_a07.A07Page._tree_iid_from_event(object(), tree, fallback_event) is None
+    assert page_a07.A07Page._tree_iid_from_event(object(), tree, None) == "selected_iid"
 
 
 def test_track_unmapped_drop_target_updates_selection_and_hint() -> None:

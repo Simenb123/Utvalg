@@ -208,13 +208,6 @@ class A07PageSelectionMixin:
             except Exception:
                 valid_groups = set()
             try:
-                focused_group = str(self.tree_a07.focus() or "").strip()
-            except Exception:
-                focused_group = ""
-            if focused_group and (not valid_groups or focused_group in valid_groups):
-                self._selected_rf1022_group_id = focused_group
-                return focused_group
-            try:
                 selection = self.tree_a07.selection()
             except Exception:
                 selection = ()
@@ -223,6 +216,13 @@ class A07PageSelectionMixin:
                 if selected_group and (not valid_groups or selected_group in valid_groups):
                     self._selected_rf1022_group_id = selected_group
                     return selected_group
+            try:
+                focused_group = str(self.tree_a07.focus() or "").strip()
+            except Exception:
+                focused_group = ""
+            if focused_group and (not valid_groups or focused_group in valid_groups):
+                self._selected_rf1022_group_id = focused_group
+                return focused_group
         stored_group = str(getattr(self, "_selected_rf1022_group_id", "") or "").strip()
         if work_level == "rf1022" and stored_group and (not valid_groups or stored_group in valid_groups):
             return stored_group
@@ -625,7 +625,14 @@ class A07PageSelectionMixin:
         key = self._tree_selection_key(tree)
         return bool(key) and key in self._suppressed_tree_select_keys
 
-    def _set_tree_selection(self, tree: ttk.Treeview, target: str | None, *, reveal: bool = True) -> bool:
+    def _set_tree_selection(
+        self,
+        tree: ttk.Treeview,
+        target: str | None,
+        *,
+        reveal: bool = False,
+        focus: bool = False,
+    ) -> bool:
         target_s = str(target or "").strip()
         if not target_s:
             return False
@@ -636,7 +643,8 @@ class A07PageSelectionMixin:
         self._suspend_selection_sync = True
         try:
             tree.selection_set(target_s)
-            tree.focus(target_s)
+            if focus:
+                tree.focus(target_s)
             if reveal:
                 tree.see(target_s)
             try:

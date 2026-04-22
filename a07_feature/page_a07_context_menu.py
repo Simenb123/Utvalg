@@ -44,9 +44,8 @@ class A07PageContextMenuMixin:
         try:
             if preserve_existing_selection and already_selected:
                 tree.focus(iid)
-                tree.see(iid)
             else:
-                self._set_tree_selection(tree, iid)
+                self._set_tree_selection(tree, iid, reveal=False, focus=True)
         except Exception:
             return None
 
@@ -104,9 +103,27 @@ class A07PageContextMenuMixin:
             assign_label = "Tildel til valgt RF-1022-post (->)"
             if selected_group:
                 assign_label = f"Tildel til {rf1022_group_label(selected_group) or selected_group} (->)"
-            assign_state = "normal" if accounts and selected_group else "disabled"
+            try:
+                rf_target_code = self._resolve_rf1022_target_code(selected_group, accounts) if selected_group else None
+            except Exception:
+                rf_target_code = None
+            assign_state = "normal" if accounts and selected_group and rf_target_code else "disabled"
+            assign_command = (
+                lambda accounts=tuple(accounts), selected_group=selected_group: self._assign_accounts_to_rf1022_group(
+                    accounts,
+                    selected_group,
+                    source_label="RF-1022-mapping",
+                )
+            )
         elif selected_code:
             assign_label = f"Tildel til {selected_code} (->)"
+            assign_command = (
+                lambda accounts=tuple(accounts), selected_code=selected_code: self._assign_accounts_to_a07_code(
+                    accounts,
+                    selected_code,
+                    source_label="Mapping",
+                )
+            )
         menu.add_command(
             label=assign_label,
             command=assign_command,
@@ -121,10 +138,18 @@ class A07PageContextMenuMixin:
             if group_choices:
                 group_menu = tk.Menu(menu, tearoff=0)
                 for group_id, group_label in group_choices:
+                    try:
+                        group_target_code = self._resolve_rf1022_target_code(group_id, accounts)
+                    except Exception:
+                        group_target_code = None
                     group_menu.add_command(
                         label=group_label,
-                        command=lambda group_id=group_id: self._assign_selected_accounts_to_rf1022_group(group_id),
-                        state=("normal" if accounts else "disabled"),
+                        command=lambda group_id=group_id, accounts=tuple(accounts): self._assign_accounts_to_rf1022_group(
+                            accounts,
+                            group_id,
+                            source_label="RF-1022-mapping",
+                        ),
+                        state=("normal" if accounts and group_target_code else "disabled"),
                     )
                 menu.add_cascade(label="Velg RF-1022-post", menu=group_menu)
         code_choices_getter = getattr(self, "_a07_code_menu_choices", None)
@@ -137,13 +162,22 @@ class A07PageContextMenuMixin:
             for code, code_label in code_choices:
                 code_menu.add_command(
                     label=code_label,
-                    command=lambda code=code: self._assign_selected_accounts_to_a07_code(code),
+                    command=lambda code=code, accounts=tuple(accounts): self._assign_accounts_to_a07_code(
+                        accounts,
+                        code,
+                        source_label="Mapping",
+                    ),
                     state=("normal" if accounts else "disabled"),
                 )
             menu.add_cascade(label="Velg A07-kode", menu=code_menu)
         menu.add_command(
             label="Fjern mapping (<-)",
-            command=self._clear_selected_control_mapping,
+            command=lambda accounts=tuple(accounts): self._remove_mapping_accounts_checked(
+                accounts,
+                focus_widget=self.tree_control_gl,
+                refresh="core",
+                source_label="Fjernet kode fra",
+            ),
             state=("normal" if has_mapped_accounts else "disabled"),
         )
         menu.add_command(
@@ -192,7 +226,10 @@ class A07PageContextMenuMixin:
         menu.add_separator()
         menu.add_command(
             label="Avansert mapping...",
-            command=self._open_manual_mapping_clicked,
+            command=lambda account=(accounts[0] if accounts else None), code=(selected_code or None): self._open_manual_mapping_clicked(
+                initial_account=account,
+                initial_code=code,
+            ),
             state=("normal" if accounts else "disabled"),
         )
         return self._post_context_menu(menu, event)
@@ -220,7 +257,12 @@ class A07PageContextMenuMixin:
         )
         menu.add_command(
             label=f"Fjern mapping fra {account_count} valgte" if multi else "Fjern mapping",
-            command=self._remove_selected_control_accounts,
+            command=lambda accounts=tuple(accounts): self._remove_mapping_accounts_checked(
+                accounts,
+                focus_widget=tree,
+                refresh="all",
+                source_label="Fjernet mapping fra",
+            ),
             state=("normal" if accounts else "disabled"),
         )
         learning_context_getter = getattr(self, "_selected_control_account_learning_context", None)
@@ -268,7 +310,10 @@ class A07PageContextMenuMixin:
         menu.add_separator()
         menu.add_command(
             label="Avansert mapping...",
-            command=self._open_manual_mapping_clicked,
+            command=lambda account=(accounts[0] if accounts else None): self._open_manual_mapping_clicked(
+                initial_account=account,
+                initial_code=self._mapped_a07_code_for_account(account) if account else None,
+            ),
             state=("normal" if accounts else "disabled"),
         )
         return self._post_context_menu(menu, event)
@@ -329,14 +374,29 @@ class A07PageContextMenuMixin:
             assign_label = "Tildel valgte kontoer hit (RF-1022 ->)"
             if group_label:
                 assign_label = f"Tildel valgte kontoer til {group_label} (RF-1022 ->)"
+            try:
+                target_code = self._resolve_rf1022_target_code(group_id, selected_accounts)
+            except Exception:
+                target_code = None
             menu.add_command(
                 label=assign_label,
-                command=self._assign_selected_control_mapping,
-                state=("normal" if group_id and selected_accounts else "disabled"),
+                command=lambda accounts=tuple(selected_accounts), group_id=group_id: self._assign_accounts_to_rf1022_group(
+                    accounts,
+                    group_id,
+                    source_label="RF-1022-mapping",
+                ),
+                state=(
+                    "normal" if group_id and selected_accounts and target_code else "disabled"
+                ),
             )
             menu.add_command(
                 label="Fjern mapping fra valgte kontoer (<-)",
-                command=self._clear_selected_control_mapping,
+                command=lambda accounts=tuple(selected_accounts): self._remove_mapping_accounts_checked(
+                    accounts,
+                    focus_widget=self.tree_control_gl,
+                    refresh="core",
+                    source_label="Fjernet kode fra",
+                ),
                 state=("normal" if has_account_mapping else "disabled"),
             )
             menu.add_separator()
@@ -354,12 +414,21 @@ class A07PageContextMenuMixin:
 
         menu.add_command(
             label=("Tildel valgte kontoer hit (RF-1022 ->)" if work_level == "rf1022" else "Tildel valgte kontoer hit (->)"),
-            command=self._assign_selected_control_mapping,
+            command=lambda accounts=tuple(selected_accounts), code=code: self._assign_accounts_to_a07_code(
+                accounts,
+                code,
+                source_label="Mapping",
+            ),
             state=("normal" if code and selected_accounts else "disabled"),
         )
         menu.add_command(
             label="Fjern mapping fra valgte kontoer (<-)",
-            command=self._clear_selected_control_mapping,
+            command=lambda accounts=tuple(selected_accounts): self._remove_mapping_accounts_checked(
+                accounts,
+                focus_widget=self.tree_control_gl,
+                refresh="core",
+                source_label="Fjernet kode fra",
+            ),
             state=("normal" if has_account_mapping else "disabled"),
         )
         menu.add_separator()
@@ -423,12 +492,21 @@ class A07PageContextMenuMixin:
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(
             label="Tildel valgte kontoer hit (->)",
-            command=self._assign_selected_control_mapping,
+            command=lambda accounts=tuple(selected_accounts), group_id=group_id: self._assign_accounts_to_a07_code(
+                accounts,
+                group_id,
+                source_label="Mapping",
+            ),
             state=("normal" if group_id and selected_accounts else "disabled"),
         )
         menu.add_command(
             label="Fjern mapping fra valgte kontoer (<-)",
-            command=self._clear_selected_control_mapping,
+            command=lambda accounts=tuple(selected_accounts): self._remove_mapping_accounts_checked(
+                accounts,
+                focus_widget=self.tree_control_gl,
+                refresh="core",
+                source_label="Fjernet kode fra",
+            ),
             state=("normal" if has_account_mapping else "disabled"),
         )
         menu.add_separator()

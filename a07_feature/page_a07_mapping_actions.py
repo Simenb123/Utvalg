@@ -87,6 +87,7 @@ from a07_feature.control.data import (
     rf1022_group_a07_codes,
     rf1022_group_label,
     rf1022_post_for_group,
+    RF1022_UNKNOWN_GROUP,
     select_batch_suggestion_rows,
     select_magic_wand_suggestion_rows,
     suggestion_tree_tag,
@@ -623,6 +624,7 @@ class A07PageMappingActionsMixin:
         return work
 
     def _build_global_auto_mapping_plan(self, candidates: pd.DataFrame | None = None) -> pd.DataFrame:
+        started = time.perf_counter()
         if candidates is None:
             candidates = self._all_rf1022_candidate_df()
         code_resolver = getattr(self, "_rf1022_candidates_with_target_codes", None)
@@ -636,7 +638,7 @@ class A07PageMappingActionsMixin:
             suggestions_df = self._ensure_suggestion_display_fields()
         except Exception:
             suggestions_df = pd.DataFrame()
-        return build_global_auto_mapping_plan(
+        plan = build_global_auto_mapping_plan(
             candidates,
             getattr(self, "control_gl_df", pd.DataFrame()),
             suggestions_df,
@@ -645,6 +647,12 @@ class A07PageMappingActionsMixin:
             basis_col=getattr(getattr(self, "workspace", None), "basis_col", "Endring"),
             rulebook=getattr(self, "effective_rulebook", None),
         )
+        try:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            self._diag(f"global_auto_plan rows={len(plan.index)} elapsed_ms={elapsed_ms}")
+        except Exception:
+            pass
+        return plan
 
     @staticmethod
     def _global_auto_plan_action_counts(plan: pd.DataFrame | None) -> dict[str, int]:
@@ -672,9 +680,93 @@ class A07PageMappingActionsMixin:
         return counts
 
     def _rf1022_candidate_action_counts(self, candidates: pd.DataFrame | None) -> dict[str, int]:
-        return A07PageMappingActionsMixin._global_auto_plan_action_counts(
-            self._build_global_auto_mapping_plan(candidates)
-        )
+        return self.get_global_auto_plan_summary(candidates)
+
+    def get_global_auto_plan_summary(self, candidates: pd.DataFrame | None = None) -> dict[str, int]:
+        """Cheap UI precheck; click handlers still build the full guarded plan."""
+        started = time.perf_counter()
+        counts = {
+            "safe": 0,
+            "actionable": 0,
+            "review": 0,
+            "invalid": 0,
+            "already": 0,
+            "conflict": 0,
+            "locked": 0,
+            "blocked": 0,
+        }
+        if candidates is None:
+            candidates = self._all_rf1022_candidate_df()
+        code_resolver = getattr(self, "_rf1022_candidates_with_target_codes", None)
+        if callable(code_resolver):
+            try:
+                candidates = code_resolver(candidates)
+            except Exception:
+                candidates = pd.DataFrame()
+        if candidates is None or candidates.empty:
+            return counts
+
+        try:
+            locked = _locked_codes_for(self)
+        except Exception:
+            locked = set()
+        try:
+            current_mapping = dict(self._effective_mapping() or {})
+        except Exception:
+            current_mapping = dict(getattr(getattr(self, "workspace", None), "mapping", None) or {})
+        gl_accounts: set[str] = set()
+        gl_df = getattr(self, "control_gl_df", None)
+        if isinstance(gl_df, pd.DataFrame) and not gl_df.empty and "Konto" in gl_df.columns:
+            try:
+                gl_accounts = {str(value).strip() for value in gl_df["Konto"].dropna().astype(str) if str(value).strip()}
+            except Exception:
+                gl_accounts = set()
+
+        for _, row in candidates.iterrows():
+            account = str(row.get("Konto") or "").strip()
+            code = str(row.get("Kode") or "").strip()
+            group_id = str(row.get("Rf1022GroupId") or "").strip()
+            status = str(row.get("Forslagsstatus") or "").strip()
+            try:
+                strict = bool(a07_suggestion_is_strict_auto(row))
+            except Exception:
+                strict = False
+            strict = strict or status == "Trygt forslag"
+            if not account or not code:
+                counts["invalid"] += 1
+                continue
+            if not strict:
+                counts["review"] += 1
+                continue
+            if gl_accounts and account not in gl_accounts:
+                counts["invalid"] += 1
+                continue
+            current = str(current_mapping.get(account) or "").strip()
+            if current == code:
+                counts["already"] += 1
+                counts["safe"] += 1
+                continue
+            if current and current != code:
+                counts["conflict"] += 1
+                continue
+            if code in locked:
+                counts["locked"] += 1
+                continue
+            resolved_group = a07_code_rf1022_group(code)
+            if resolved_group == RF1022_UNKNOWN_GROUP:
+                counts["review"] += 1
+                continue
+            if group_id and group_id != resolved_group:
+                counts["blocked"] += 1
+                continue
+            counts["actionable"] += 1
+            counts["safe"] += 1
+        try:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            self._diag(f"global_auto_summary candidates={len(candidates.index)} actionable={counts['actionable']} elapsed_ms={elapsed_ms}")
+        except Exception:
+            pass
+        return counts
 
     def _selected_rf1022_candidate_row(self) -> pd.Series | None:
         tree = getattr(self, "tree_control_suggestions", None)
@@ -1579,7 +1671,11 @@ class A07PageMappingActionsMixin:
         except Exception as exc:
             messagebox.showerror("A07", f"Trygg auto-matching kunne ikke fullføre:\n{exc}")
 
-    def _open_manual_mapping_clicked(self) -> None:
+    def _open_manual_mapping_clicked(
+        self,
+        initial_account: str | None = None,
+        initial_code: str | None = None,
+    ) -> None:
         if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
             self._notify_inline(
                 "Last A07 og bruk aktiv saldobalanse for valgt klient/Ã¥r for Ã¥ lage mapping.",
@@ -1593,7 +1689,10 @@ class A07PageMappingActionsMixin:
             self._notify_inline("Fant ikke nok data til Ã¥ bygge avansert mapping.", focus_widget=self)
             return
 
-        initial_account, initial_code = self._manual_mapping_defaults()
+        initial_account, initial_code = self._manual_mapping_defaults(
+            preferred_account=initial_account,
+            preferred_code=initial_code,
+        )
         choice = open_manual_mapping_dialog(
             self,
             account_options=account_options,

@@ -79,6 +79,7 @@ class A07PageTreeUiMixin:
                     iid = ""
                 if iid:
                     return iid
+                return None
 
         selection = tree.selection()
         if not selection:
@@ -86,19 +87,24 @@ class A07PageTreeUiMixin:
         iid = str(selection[0]).strip()
         return iid or None
 
-    def _manual_mapping_defaults(self) -> tuple[str | None, str | None]:
-        konto = None
-        kode = None
+    def _manual_mapping_defaults(
+        self,
+        *,
+        preferred_account: str | None = None,
+        preferred_code: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        konto = str(preferred_account or "").strip() or None
+        kode = str(preferred_code or "").strip() or None
 
         control_gl_values = self._selected_tree_values(self.tree_control_gl)
-        if control_gl_values:
+        if control_gl_values and konto is None:
             konto = str(control_gl_values[0]).strip() or None
             control_gl_column_ids = [column_id for column_id, *_rest in _CONTROL_GL_COLUMNS]
             try:
                 code_index = control_gl_column_ids.index("Kode")
             except ValueError:
                 code_index = -1
-            if code_index >= 0 and len(control_gl_values) > code_index:
+            if kode is None and code_index >= 0 and len(control_gl_values) > code_index:
                 raw_code = str(control_gl_values[code_index]).strip()
                 numeric_probe = raw_code.replace(" ", "").replace("\xa0", "").replace(",", ".")
                 if raw_code and not numeric_probe.replace(".", "", 1).replace("-", "", 1).isdigit():
@@ -203,11 +209,11 @@ class A07PageTreeUiMixin:
                 on_complete=lambda code=code_s: self._focus_control_code(code),
             )
             return
-        if not self._set_tree_selection(self.tree_a07, code_s):
+        if not self._set_tree_selection(self.tree_a07, code_s, reveal=True, focus=True):
             return
         try:
             if code_s in self.tree_groups.get_children():
-                self._set_tree_selection(self.tree_groups, code_s)
+                self._set_tree_selection(self.tree_groups, code_s, reveal=True, focus=True)
         except Exception:
             pass
         try:
@@ -314,7 +320,7 @@ class A07PageTreeUiMixin:
         konto_s = str(konto or "").strip()
         if not konto_s:
             return
-        self._set_tree_selection(self.tree_unmapped, konto_s)
+        self._set_tree_selection(self.tree_unmapped, konto_s, reveal=True, focus=True)
 
     def _start_unmapped_drag(self, event: tk.Event | None = None) -> None:
         account = self._tree_iid_from_event(self.tree_unmapped, event)
@@ -380,7 +386,10 @@ class A07PageTreeUiMixin:
             return
         selector = getattr(self, "_set_tree_selection", None)
         if callable(selector):
-            selector(self.tree_a07, code)
+            try:
+                selector(self.tree_a07, code, reveal=False, focus=False)
+            except TypeError:
+                selector(self.tree_a07, code)
         else:
             try:
                 self.tree_a07.selection_set(code)

@@ -102,6 +102,11 @@ class A07PageSupportRenderMixin:
             suggestion_scope = self._selected_suggestion_scope() if key == "suggestions" else ""
         except Exception:
             suggestion_scope = ""
+        try:
+            mapping = self._effective_mapping()
+            mapping_signature = (len(mapping), hash(tuple(sorted((str(k), str(v)) for k, v in mapping.items()))))
+        except Exception:
+            mapping_signature = (0, 0)
         return (
             key,
             work_level,
@@ -109,6 +114,7 @@ class A07PageSupportRenderMixin:
             str(selected_code or "").strip(),
             str(mapping_filter or "").strip(),
             str(suggestion_scope or "").strip(),
+            mapping_signature,
         )
 
     def _invalidate_control_support(self, reason: str = "", *, rerender: bool = True) -> None:
@@ -141,7 +147,7 @@ class A07PageSupportRenderMixin:
                 except Exception:
                     pass
 
-    def _update_a07_action_button_state(self) -> None:
+    def _update_a07_action_button_state(self, summary: dict[str, int] | None = None) -> None:
         best_enabled = False
         batch_enabled = False
         try:
@@ -159,14 +165,10 @@ class A07PageSupportRenderMixin:
 
         if row is not None:
             if work_level == "rf1022":
-                plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
-                if callable(plan_builder):
+                summary_getter = getattr(self, "get_global_auto_plan_summary", None)
+                if callable(summary_getter):
                     try:
-                        plan = plan_builder(pd.DataFrame([dict(row)]))
-                        if plan is not None and not plan.empty and "Action" in plan.columns:
-                            best_enabled = bool(
-                                (plan["Action"].fillna("").astype(str).str.strip() == "apply").any()
-                            )
+                        best_enabled = bool(int(summary_getter(pd.DataFrame([dict(row)])).get("actionable", 0) or 0))
                     except Exception:
                         best_enabled = False
             else:
@@ -185,14 +187,16 @@ class A07PageSupportRenderMixin:
                     and a07_suggestion_is_strict_auto(row)
                 )
 
-        plan_builder = getattr(self, "_build_global_auto_mapping_plan", None)
-        if callable(plan_builder):
+        if summary is None:
+            summary_getter = getattr(self, "get_global_auto_plan_summary", None)
+            if callable(summary_getter):
+                try:
+                    summary = summary_getter()
+                except Exception:
+                    summary = None
+        if isinstance(summary, dict):
             try:
-                plan = plan_builder()
-                if plan is not None and not plan.empty and "Action" in plan.columns:
-                    batch_enabled = bool(
-                        (plan["Action"].fillna("").astype(str).str.strip() == "apply").any()
-                    )
+                batch_enabled = bool(int(summary.get("actionable", 0) or 0))
             except Exception:
                 batch_enabled = False
 
@@ -363,7 +367,11 @@ class A07PageSupportRenderMixin:
             children = ()
         if target not in children:
             return
-        if self._set_tree_selection(tree, target):
+        try:
+            did_select = self._set_tree_selection(tree, target, reveal=True, focus=True)
+        except TypeError:
+            did_select = self._set_tree_selection(tree, target)
+        if did_select:
             try:
                 tree.focus_set()
             except Exception:
@@ -428,12 +436,15 @@ class A07PageSupportRenderMixin:
                 global_safe_count = int(
                     (all_candidates["Forslagsstatus"].astype(str).str.strip() == "Trygt forslag").sum()
                 )
+            action_counts = {"actionable": global_safe_count}
             actionable_count = global_safe_count
             action_counter = getattr(self, "_rf1022_candidate_action_counts", None)
             if callable(action_counter):
                 try:
-                    actionable_count = int(action_counter(all_candidates).get("actionable", 0))
+                    action_counts = action_counter(all_candidates)
+                    actionable_count = int(action_counts.get("actionable", 0))
                 except Exception:
+                    action_counts = {"actionable": global_safe_count}
                     actionable_count = global_safe_count
             best_button = getattr(self, "btn_control_best", None)
             if best_button is not None:
@@ -480,7 +491,7 @@ class A07PageSupportRenderMixin:
                 )
             self.control_suggestion_effect_var.set("")
             self.suggestion_details_var.set("")
-            self._update_a07_action_button_state()
+            self._update_a07_action_button_state(summary=action_counts)
             return
 
         if suggestions_actions is not None:
@@ -643,7 +654,9 @@ class A07PageSupportRenderMixin:
                 selected_account = str(current_accounts[0]).strip() or None
         except Exception:
             selected_account = None
-        self._refresh_suggestions_tree()
+        if active_tab == "suggestions":
+            self._refresh_suggestions_tree()
+            return
 
         if work_level == "rf1022":
             accounts_df = build_control_statement_accounts_df(
@@ -651,9 +664,6 @@ class A07PageSupportRenderMixin:
                 self.control_statement_df,
                 selected_group,
             )
-            if active_tab == "suggestions" and self._should_default_rf1022_to_mapping(selected_group, accounts_df):
-                self._select_support_tab_key("mapping", force_render=False)
-            self._maybe_default_mapping_filter_to_critical(accounts_df)
             self.control_selected_accounts_df = self._filter_visible_mapping_accounts_df(accounts_df)
             summary_label = rf1022_group_label(selected_group) or "valgt RF-1022-post"
         else:
@@ -666,7 +676,6 @@ class A07PageSupportRenderMixin:
                         columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]
                     )
                 else:
-                    self._maybe_default_mapping_filter_to_critical(selected_accounts)
                     self.control_selected_accounts_df = self._filter_visible_mapping_accounts_df(selected_accounts)
             else:
                 self.control_selected_accounts_df = pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS])
@@ -873,7 +882,7 @@ class A07PageSupportRenderMixin:
             self._select_best_suggestion_row_for_code(code_s)
         elif tab_key == "history" and code_s:
             try:
-                self._set_tree_selection(self.tree_history, code_s)
+                self._set_tree_selection(self.tree_history, code_s, reveal=True, focus=True)
             except Exception:
                 pass
         elif tab_key == "mapping":
@@ -890,7 +899,7 @@ class A07PageSupportRenderMixin:
                     children = ()
                 if selected_group and selected_group in children:
                     try:
-                        self._set_tree_selection(self.tree_control_statement, selected_group)
+                        self._set_tree_selection(self.tree_control_statement, selected_group, reveal=True, focus=True)
                     except Exception:
                         pass
             try:

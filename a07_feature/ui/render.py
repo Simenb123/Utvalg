@@ -20,7 +20,13 @@ from .tree_render import A07PageTreeRenderMixin
 class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
     def _refresh_a07_tree(self) -> None:
         work_level = self._selected_control_work_level()
-        current_selection = str(self.tree_a07.focus() or "").strip()
+        try:
+            selection = self.tree_a07.selection()
+        except Exception:
+            selection = ()
+        current_selection = str(selection[0] or "").strip() if selection else ""
+        if not current_selection:
+            current_selection = str(self.tree_a07.focus() or "").strip()
         if work_level == "rf1022":
             filtered = self.rf1022_overview_df.copy() if self.rf1022_overview_df is not None else self.rf1022_overview_df
             filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
@@ -73,11 +79,17 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
             self._selected_rf1022_group_id = str(target or "").strip() or None
         else:
             target = current_selection if current_selection and current_selection in children else children[0]
-        self._set_tree_selection(self.tree_a07, target)
+        self._set_tree_selection(self.tree_a07, target, reveal=False, focus=False)
 
     def _refresh_a07_tree_chunked(self, *, on_complete: Callable[[], None] | None = None) -> None:
         work_level = self._selected_control_work_level()
-        current_selection = str(self.tree_a07.focus() or "").strip()
+        try:
+            selection = self.tree_a07.selection()
+        except Exception:
+            selection = ()
+        current_selection = str(selection[0] or "").strip() if selection else ""
+        if not current_selection:
+            current_selection = str(self.tree_a07.focus() or "").strip()
         if work_level == "rf1022":
             filtered = self.rf1022_overview_df.copy() if self.rf1022_overview_df is not None else self.rf1022_overview_df
             filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
@@ -122,7 +134,7 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
                         target = current_selection if current_selection and current_selection in children else children[0]
                     if work_level == "rf1022":
                         self._selected_rf1022_group_id = str(target or "").strip() or None
-                    self._set_tree_selection(self.tree_a07, target)
+                    self._set_tree_selection(self.tree_a07, target, reveal=False, focus=False)
             if on_complete is not None:
                 on_complete()
 

@@ -211,6 +211,19 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
                             return resolver(self)
                 except Exception:
                     pass
+            value_getter = getattr(self, "_selected_tree_values", None)
+            if callable(value_getter):
+                values = value_getter(tree)
+            else:
+                try:
+                    selection = tree.selection()
+                except Exception:
+                    selection = ()
+                values = tree.item(selection[0], "values") if selection else ()
+            if values:
+                code = str(values[0]).strip()
+                if code:
+                    return code
             try:
                 focused_code = str(tree.focus() or "").strip()
             except Exception:
@@ -295,7 +308,7 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
                 iid = ""
             if iid:
                 try:
-                    self._set_tree_selection(tree, iid)
+                    self._set_tree_selection(tree, iid, reveal=True, focus=True)
                 except Exception:
                     pass
         return best_row
@@ -1019,9 +1032,8 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         try:
             if preserve_existing_selection and already_selected:
                 tree.focus(iid)
-                tree.see(iid)
             else:
-                self._set_tree_selection(tree, iid)
+                self._set_tree_selection(tree, iid, reveal=False, focus=True)
         except Exception:
             return None
 

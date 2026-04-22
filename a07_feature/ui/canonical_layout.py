@@ -577,18 +577,12 @@ class A07PageCanonicalUiMixin:
         self.tree_suggestions.bind("<Double-1>", lambda _event: self._apply_selected_suggestion())
         self.tree_suggestions.bind("<Return>", lambda _event: self._apply_selected_suggestion())
         self.tree_suggestions.bind("<<TreeviewSelect>>", lambda _event: self._on_suggestion_selected())
-        self.tree_control_accounts.bind(
-            "<<TreeviewSelect>>",
-            lambda _event: self._focus_selected_control_account_in_gl(allow_multi=False),
-        )
+        self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._update_a07_action_button_state())
         self.tree_control_accounts.bind("<Double-1>", lambda _event: self._open_manual_mapping_clicked())
         self.tree_control_accounts.bind("<Delete>", lambda _event: self._remove_selected_control_accounts())
         self.tree_control_accounts.bind("<Button-3>", self._show_control_accounts_context_menu, add="+")
         self.tree_control_statement.bind("<<TreeviewSelect>>", lambda _event: self._on_control_statement_selected())
-        self.tree_control_statement_accounts.bind(
-            "<<TreeviewSelect>>",
-            lambda _event: self._focus_selected_control_statement_account_in_gl(),
-        )
+        self.tree_control_statement_accounts.bind("<<TreeviewSelect>>", lambda _event: self._update_a07_action_button_state())
         self.tree_control_statement_accounts.bind("<Double-1>", lambda _event: self._focus_selected_control_statement_account_in_gl())
         self.tree_control_statement_accounts.bind("<Return>", lambda _event: self._focus_selected_control_statement_account_in_gl())
         self.tree_control_statement_accounts.bind("<Button-3>", self._show_control_statement_accounts_context_menu, add="+")
