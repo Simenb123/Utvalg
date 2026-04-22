@@ -56,7 +56,7 @@ except Exception:
     OversiktPage = None  # type: ignore
 
 try:
-    from page_driftsmidler import DriftsmidlerPage
+    from src.pages.driftsmidler import DriftsmidlerPage
 except Exception:
     DriftsmidlerPage = None  # type: ignore
 
