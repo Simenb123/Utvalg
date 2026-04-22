@@ -628,6 +628,12 @@ class RevisjonshandlingerPage(ttk.Frame):
                 continue
             if search and search not in name.lower() and search not in nr.lower():
                 continue
+            try:
+                amount = self._rl_amounts.get(int(nr))
+            except (ValueError, TypeError):
+                amount = None
+            if not amount:
+                continue
             iid = f"RL:{nr}"
             self._tree.insert("", "end", iid=iid, values=(
                 "—",            # opprinnelse

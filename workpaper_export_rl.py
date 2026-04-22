@@ -106,11 +106,19 @@ def export_regnskapsoppstilling_excel(page) -> None:
     try:
         import analyse_regnskapsoppstilling_excel
 
+        # Kontospesifisert-arket skal alltid vise alle kontoer pr. RL,
+        # uavhengig av hva brukeren har markert i UI. Bruk derfor den
+        # ufiltrerte HB (df_hb), ikke den seleksjons-filtrerte
+        # transactions_df som brukes til andre eksporter.
+        hb_full = payload.get("df_hb")
+        if hb_full is None or (isinstance(hb_full, pd.DataFrame) and hb_full.empty):
+            hb_full = payload.get("transactions_df")
+
         saved = analyse_regnskapsoppstilling_excel.save_regnskapsoppstilling_workbook(
             path,
             rl_df=rl_df,
             regnskapslinjer=payload.get("regnskapslinjer"),
-            transactions_df=payload.get("transactions_df"),
+            transactions_df=hb_full,
             sb_df=payload.get("sb_df"),
             intervals=payload.get("intervals"),
             account_overrides=payload.get("account_overrides"),

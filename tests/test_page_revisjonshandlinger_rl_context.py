@@ -116,6 +116,7 @@ def test_rl_gap_rows_hidden_by_default(tmp_path, monkeypatch):
 def test_rl_gap_rows_show_when_toggle_on(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
+        page._rl_amounts = {605: 50000.0, 70: 12000.0}
         page.var_show_rl_gaps.set(True)
         page._apply_filter()
         ids = page._tree.get_children()
@@ -128,9 +129,24 @@ def test_rl_gap_rows_show_when_toggle_on(tmp_path, monkeypatch):
         root.destroy()
 
 
+def test_rl_gap_rows_hidden_when_no_amount(tmp_path, monkeypatch):
+    """RL uten beløp skal ikke vises som gap-rad selv med toggle på."""
+    root, page = _make_page(tmp_path, monkeypatch)
+    try:
+        page._rl_amounts = {605: 50000.0}  # 70 mangler beløp
+        page.var_show_rl_gaps.set(True)
+        page._apply_filter()
+        ids = page._tree.get_children()
+        assert "RL:605" in ids
+        assert "RL:70" not in ids
+    finally:
+        root.destroy()
+
+
 def test_rl_gap_row_has_handling_placeholder_text(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
+        page._rl_amounts = {605: 50000.0}
         page.var_show_rl_gaps.set(True)
         page._apply_filter()
         idx = list(page._tree["columns"]).index("handling")
@@ -158,6 +174,7 @@ def test_rl_gap_row_has_amount_and_scope(tmp_path, monkeypatch):
 def test_rl_gap_row_has_gap_tag(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
+        page._rl_amounts = {605: 50000.0}
         page.var_show_rl_gaps.set(True)
         page._apply_filter()
         assert "rl_gap" in page._tree.item("RL:605", "tags")
@@ -168,6 +185,7 @@ def test_rl_gap_row_has_gap_tag(tmp_path, monkeypatch):
 def test_select_rl_gap_shows_helpful_detail(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
+        page._rl_amounts = {605: 50000.0}
         page.var_show_rl_gaps.set(True)
         page._apply_filter()
         page._tree.selection_set("RL:605")
@@ -235,6 +253,7 @@ def test_belop_sort_is_numeric(tmp_path, monkeypatch):
 def test_sort_keeps_rl_gap_rows_at_bottom(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
+        page._rl_amounts = {605: 50000.0, 70: 12000.0}
         page.var_show_rl_gaps.set(True)
         page._apply_filter()
         page._on_heading_click("regnr")
@@ -250,6 +269,7 @@ def test_sort_keeps_rl_gap_rows_at_bottom(tmp_path, monkeypatch):
 def test_double_click_on_rl_gap_calls_link_dialog(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
+        page._rl_amounts = {70: 12000.0}
         page.var_show_rl_gaps.set(True)
         page._apply_filter()
         page._tree.selection_set("RL:70")

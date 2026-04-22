@@ -849,18 +849,20 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
         # Load custom notes list
         self._load_custom_notes_list()
 
-        # Merge UB_fjor from Analyse pivot if available
-        pivot_df = getattr(self._analyse_page, "_pivot_df_last", None)
-        if (
-            isinstance(pivot_df, pd.DataFrame)
-            and "UB_fjor" in pivot_df.columns
-            and "regnr" in pivot_df.columns
-        ):
-            rl_df = rl_df.copy()
-            for col in ("UB_fjor",):
-                if col in pivot_df.columns and col not in rl_df.columns:
-                    m = pivot_df[["regnr", col]].drop_duplicates(subset=["regnr"])
-                    rl_df = rl_df.merge(m, on="regnr", how="left")
+        # UB_fjor leveres nå direkte fra prepare_regnskapsoppstilling_export_data
+        # (build_rl_pivot kalles med sb_prev_df). Fallback: hvis rl_df mangler
+        # UB_fjor, prøv å merge fra _pivot_df_last (gammel sti — virker bare
+        # når Analyse-fanen står i Regnskapslinje-modus).
+        if "UB_fjor" not in rl_df.columns:
+            pivot_df = getattr(self._analyse_page, "_pivot_df_last", None)
+            if (
+                isinstance(pivot_df, pd.DataFrame)
+                and "UB_fjor" in pivot_df.columns
+                and "regnr" in pivot_df.columns
+            ):
+                rl_df = rl_df.copy()
+                m = pivot_df[["regnr", "UB_fjor"]].drop_duplicates(subset=["regnr"])
+                rl_df = rl_df.merge(m, on="regnr", how="left")
 
         self._ub      = ub_lookup(rl_df, "UB")
         has_prev      = "UB_fjor" in rl_df.columns

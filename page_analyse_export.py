@@ -186,6 +186,27 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
     except Exception:
         account_overrides = None
 
+    # Last fjorårs-SB hvis tilgjengelig — sendes til build_rl_pivot så rl_df
+    # alltid får UB_fjor/Endring_fjor uavhengig av om Analyse-fanen står i
+    # Regnskapslinje-modus. Tidligere ble fjor merget inn fra _pivot_df_last
+    # i page_regnskap.py, men det feilet stille når brukeren stod i HB-/SB-
+    # konto-modus (da har _pivot_df_last "Konto", ikke "regnr").
+    sb_prev_df = None
+    try:
+        sb_prev_df = page_analyse_rl.ensure_sb_prev_loaded(page=page)
+    except Exception as exc:
+        log.debug("prepare_regnskapsoppstilling_export_data: ensure_sb_prev_loaded feilet: %s", exc)
+
+    prior_year_overrides = None
+    try:
+        import regnskap_client_overrides as _rco
+        client_name = getattr(session, "client", None) if session is not None else None
+        active_year = getattr(session, "year", None) if session is not None else None
+        if client_name and active_year is not None:
+            prior_year_overrides = _rco.load_prior_year_overrides(client_name, str(active_year))
+    except Exception as exc:
+        log.debug("prepare_regnskapsoppstilling_export_data: prior_year_overrides feilet: %s", exc)
+
     if not isinstance(df_filtered, pd.DataFrame) or df_filtered.empty or intervals is None or regnskapslinjer is None:
         rl_df = pd.DataFrame()
     else:
@@ -195,7 +216,9 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
                 intervals,
                 regnskapslinjer,
                 sb_df=sb_df,
+                sb_prev_df=sb_prev_df,
                 account_overrides=account_overrides,
+                prior_year_overrides=prior_year_overrides,
             )
         except Exception:
             rl_df = pd.DataFrame()
@@ -229,10 +252,15 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
                     if isinstance(df_filtered, pd.DataFrame) and not df_filtered.empty
                     else pd.DataFrame())
 
+    df_hb_full = (df_filtered
+                  if isinstance(df_filtered, pd.DataFrame) and not df_filtered.empty
+                  else pd.DataFrame())
+
     return {
         "rl_df": rl_df if isinstance(rl_df, pd.DataFrame) else pd.DataFrame(),
         "regnskapslinjer": regnskapslinjer,
         "transactions_df": tx_df if isinstance(tx_df, pd.DataFrame) else pd.DataFrame(),
+        "df_hb": df_hb_full,
         "reskontro_df": reskontro_df,
         "sb_df": sb_df if isinstance(sb_df, pd.DataFrame) else pd.DataFrame(),
         "intervals": intervals,
