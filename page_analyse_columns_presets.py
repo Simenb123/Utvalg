@@ -196,6 +196,16 @@ def load_sb_columns_from_preferences(*, page: Any) -> None:
     order = stored_order if isinstance(stored_order, list) else list(default_order)
     visible = stored_visible if isinstance(stored_visible, list) else list(default_visible)
 
+    # Auto-migrer: hvis en kolonne fra default_visible mangler både i order
+    # og visible, ble preferansen lagret før den kolonnen var standard. Legg
+    # den inn (siste posisjon) slik at brukeren ser den uten å måtte åpne
+    # kolonnevelgeren manuelt. Bevarer kolonner brukeren bevisst har skjult
+    # (de er fortsatt i order men ikke i visible).
+    for col in default_visible:
+        if col not in order and col not in visible:
+            order.append(col)
+            visible.append(col)
+
     order_clean, visible_order = analyse_columns.normalize_tx_column_config(
         order=order,
         visible=visible,

@@ -96,6 +96,91 @@ def _bind_sb_once(*, page: Any, tree: Any) -> None:
     _bind_sb_rightclick(page=page, tree=tree)
     _bind_sb_header_rightclick(page=page, tree=tree)
     _bind_sb_drag_drop(page=page, tree=tree)
+    _bind_sb_header_sort(page=page, tree=tree)
+
+
+# Numeriske kolonner som sorteres som tall (bruker SB_COLS-IDs).
+_SB_NUMERIC_SORT_COLS = {
+    "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
+}
+
+
+def _bind_sb_header_sort(*, page: Any, tree: Any) -> None:
+    """Bind venstreklikk på SB-kolonneoverskrift til sortering.
+
+    Klikk veksler mellom stigende og synkende. Numeriske kolonner sorteres
+    som tall (parser norsk format med mellomrom som tusen-skille og komma
+    som desimal); øvrige kolonner sorteres alfabetisk.
+    """
+    state: dict[str, object] = {"col": None, "desc": False}
+
+    def _parse_no_number(s: str) -> float:
+        if s is None:
+            return 0.0
+        txt = str(s).strip().replace(" ", " ")
+        if not txt:
+            return 0.0
+        # Strip prosent og non-numeric tegn (behold minus, komma, punktum, siffer)
+        clean = "".join(ch for ch in txt if ch.isdigit() or ch in "-,.")
+        # Norsk format: " " = tusen-skille (ikke i clean), "," = desimal
+        clean = clean.replace(",", ".")
+        try:
+            return float(clean) if clean not in ("", "-", ".", "-.") else 0.0
+        except ValueError:
+            return 0.0
+
+    def _on_header_click(col: str) -> None:
+        try:
+            children = list(tree.get_children(""))
+        except Exception:
+            return
+        if not children:
+            return
+        desc = state["desc"] if state["col"] == col else False
+        desc = not desc
+
+        is_num = col in _SB_NUMERIC_SORT_COLS
+
+        def _key(iid: str):
+            try:
+                v = tree.set(iid, col)
+            except Exception:
+                v = ""
+            if is_num:
+                num = _parse_no_number(v)
+                # Tomme felt sist uansett retning
+                empty = not str(v).strip()
+                return (1 if empty else 0, -num if desc else num)
+            txt = str(v or "").lower()
+            return (1 if not txt else 0, txt)
+
+        try:
+            ordered = sorted(children, key=_key, reverse=False)
+        except Exception:
+            return
+
+        if not is_num and desc:
+            ordered = list(reversed(ordered))
+
+        for i, iid in enumerate(ordered):
+            try:
+                tree.move(iid, "", i)
+            except Exception:
+                pass
+
+        state["col"] = col
+        state["desc"] = desc
+
+    # Bind hver kolonneoverskrift til sin egen handler
+    try:
+        cols = list(tree["columns"])  # type: ignore[index]
+    except Exception:
+        cols = []
+    for col in cols:
+        try:
+            tree.heading(col, command=lambda c=col: _on_header_click(c))
+        except Exception:
+            pass
 
     def _on_sb_header_release(event: Any) -> None:
         try:
@@ -164,6 +249,10 @@ def _show_sb_header_menu(*, page: Any, tree: Any, event: Any) -> None:
     current_visible = list(getattr(page, "_sb_cols_visible", default_order))
     pinned = set(_cols.SB_PINNED_COLS)
 
+    # Hent brukervennlige labels via felles vokabular slik at menyen
+    # viser "UB 2025" / "Δ UB 25/24" istedenfor interne IDs.
+    year = _cols._active_year()
+
     menu = tk.Menu(tree, tearoff=0)
 
     def _toggle(col: str) -> None:
@@ -178,7 +267,10 @@ def _show_sb_header_menu(*, page: Any, tree: Any, event: Any) -> None:
             page=page, order=current_order, visible=new_visible)
 
     for col in current_order:
-        heading = _SB_COL_HEADINGS.get(col, col)
+        try:
+            heading = _cols.analysis_heading(col, year=year)
+        except Exception:
+            heading = _SB_COL_HEADINGS.get(col, col)
         is_visible = col in current_visible
         is_pinned = col in pinned
         label = f"\u2713 {heading}" if is_visible else f"   {heading}"
