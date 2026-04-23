@@ -1,0 +1,307 @@
+"""Tests for ui_managed_treeview.ManagedTreeview.
+
+Focus areas:
+1. Construction + ColumnSpec handling
+2. Preferences integration (new key scheme)
+3. Backward-compat via ``legacy_pref_keys``
+4. Width load/save round-trip + validation bounds
+5. Binding wiring on the ``tree`` mock
+
+These tests use MagicMock for ttk.Treeview to avoid requiring an actual
+Tk display. Integration with a real Treeview is covered by the
+consolidation-page tests that already use ManagedTreeview in the wild.
+"""
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_tree(columns=("a", "b", "c")):
+    """MagicMock of ttk.Treeview that supports subscript + heading."""
+    tree = MagicMock()
+    tree.__setitem__ = MagicMock()
+    tree.__getitem__ = MagicMock(return_value=list(columns))
+    tree.identify_region = MagicMock(return_value="heading")
+    tree.heading = MagicMock(return_value="")
+    tree.column = MagicMock()
+    tree.bind = MagicMock()
+    tree.after_idle = MagicMock()
+    # after() queues but we don't execute — stabilize_layout only schedules
+    tree.after = MagicMock(return_value="after-id")
+    return tree
+
+
+def _make_specs():
+    from ui_managed_treeview import ColumnSpec
+    return [
+        ColumnSpec(id="a", heading="A", width=100, visible_by_default=True),
+        ColumnSpec(id="b", heading="B", width=120, visible_by_default=True),
+        ColumnSpec(id="c", heading="C", width=80, visible_by_default=False),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Construction
+# ---------------------------------------------------------------------------
+
+class TestConstruction:
+    def test_minimal_construction(self):
+        from ui_managed_treeview import ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="test", column_specs=_make_specs(),
+                pref_prefix="testui", auto_bind=False,
+            )
+        assert mt.view_id == "test"
+        assert mt.pref_prefix == "testui"
+        assert mt._width_pref_key == "testui.test.column_widths"
+
+    def test_column_manager_uses_same_prefix_and_view_id(self):
+        from ui_managed_treeview import ManagedTreeview
+        tree = _make_tree()
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="myview", column_specs=_make_specs(),
+                pref_prefix="myapp", auto_bind=False,
+            )
+        assert mt.column_manager._pref_key == "myapp.myview.visible_cols"
+        assert mt.column_manager._order_key == "myapp.myview.column_order"
+
+    def test_str_specs_are_normalized_to_columnspec(self):
+        from ui_managed_treeview import ManagedTreeview
+        tree = _make_tree(("x", "y"))
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="test", column_specs=["x", "y"],
+                auto_bind=False,
+            )
+        assert [s.id for s in mt._specs] == ["x", "y"]
+        # default values
+        assert all(s.sortable for s in mt._specs)
+        assert all(s.visible_by_default for s in mt._specs)
+
+    def test_pinned_cols_propagate_to_manager(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [
+            ColumnSpec(id="a", pinned=True),
+            ColumnSpec(id="b"),
+            ColumnSpec(id="c"),
+        ]
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="test", column_specs=specs,
+                auto_bind=False,
+            )
+        assert mt._pinned == ("a",)
+        assert mt.column_manager._pinned == frozenset({"a"})
+
+
+# ---------------------------------------------------------------------------
+# Width helpers
+# ---------------------------------------------------------------------------
+
+class TestWidthHelpers:
+    def test_load_widths_strips_bad_values(self):
+        from ui_managed_treeview import _load_widths
+        fake_store = {"mykey": {"a": 100, "b": "bad", "c": 5, "d": 2000, "e": 80}}
+        with patch("preferences.get", side_effect=lambda k, d=None: fake_store.get(k, d)):
+            got = _load_widths("mykey")
+        # 5 is < 40 and 2000 is > 1600 — both rejected. "bad" not int.
+        assert got == {"a": 100, "e": 80}
+
+    def test_save_widths_enforces_bounds(self):
+        from ui_managed_treeview import _save_widths
+        saved = {}
+        def _setter(k, v):
+            saved[k] = v
+        with patch("preferences.set", side_effect=_setter):
+            _save_widths("mykey", {"a": 100, "b": 5, "c": 2000, "d": "bad"})
+        assert saved["mykey"] == {"a": 100}
+
+    def test_load_widths_tolerates_non_dict(self):
+        from ui_managed_treeview import _load_widths
+        with patch("preferences.get", return_value="not-a-dict"):
+            assert _load_widths("mykey") == {}
+
+
+# ---------------------------------------------------------------------------
+# Legacy preference-key migration
+# ---------------------------------------------------------------------------
+
+class TestLegacyMigration:
+    def test_migrates_when_new_missing_and_legacy_present(self):
+        from ui_managed_treeview import _migrate_legacy_pref_keys
+        store = {
+            "legacy.visible": ["a", "b"],
+            "legacy.order": ["b", "a"],
+        }
+
+        def _get(k, d=None):
+            return store.get(k, d)
+
+        def _set(k, v):
+            store[k] = v
+
+        with patch("preferences.get", side_effect=_get), \
+             patch("preferences.set", side_effect=_set):
+            _migrate_legacy_pref_keys(
+                view_id="myview",
+                pref_prefix="ui",
+                legacy={
+                    "visible_cols": "legacy.visible",
+                    "column_order": "legacy.order",
+                },
+            )
+        assert store["ui.myview.visible_cols"] == ["a", "b"]
+        assert store["ui.myview.column_order"] == ["b", "a"]
+        # Legacy keys are preserved (not deleted) — intentional for rollback.
+        assert store["legacy.visible"] == ["a", "b"]
+
+    def test_does_not_overwrite_existing_new_key(self):
+        from ui_managed_treeview import _migrate_legacy_pref_keys
+        store = {
+            "ui.myview.visible_cols": ["new", "value"],
+            "legacy.visible": ["old", "value"],
+        }
+
+        def _get(k, d=None):
+            return store.get(k, d)
+
+        def _set(k, v):
+            store[k] = v
+
+        with patch("preferences.get", side_effect=_get), \
+             patch("preferences.set", side_effect=_set):
+            _migrate_legacy_pref_keys(
+                view_id="myview",
+                pref_prefix="ui",
+                legacy={"visible_cols": "legacy.visible"},
+            )
+        # New key must NOT be overwritten.
+        assert store["ui.myview.visible_cols"] == ["new", "value"]
+
+    def test_no_op_when_both_missing(self):
+        from ui_managed_treeview import _migrate_legacy_pref_keys
+        store = {}
+
+        def _get(k, d=None):
+            return store.get(k, d)
+
+        def _set(k, v):
+            store[k] = v
+
+        with patch("preferences.get", side_effect=_get), \
+             patch("preferences.set", side_effect=_set):
+            _migrate_legacy_pref_keys(
+                view_id="myview",
+                pref_prefix="ui",
+                legacy={"visible_cols": "legacy.missing"},
+            )
+        assert store == {}
+
+    def test_ignores_unknown_aspect(self):
+        """Only known aspects (visible_cols, column_order, column_widths)
+        trigger migration. Bogus aspect names are silently skipped."""
+        from ui_managed_treeview import _migrate_legacy_pref_keys
+        store = {"legacy.weird": "something"}
+
+        def _get(k, d=None):
+            return store.get(k, d)
+
+        def _set(k, v):
+            store[k] = v
+
+        with patch("preferences.get", side_effect=_get), \
+             patch("preferences.set", side_effect=_set):
+            _migrate_legacy_pref_keys(
+                view_id="myview",
+                pref_prefix="ui",
+                legacy={"made_up_aspect": "legacy.weird"},
+            )
+        # No "ui.myview.made_up_aspect" key written.
+        assert list(store.keys()) == ["legacy.weird"]
+
+    def test_managedtreeview_triggers_migration_before_loading(self):
+        """End-to-end: ManagedTreeview with legacy_pref_keys reads the
+        legacy value through the migration path so column_manager sees
+        it under the new name."""
+        from ui_managed_treeview import ManagedTreeview
+        store = {
+            "saldobalanse.columns.visible": ["a", "b"],
+            "saldobalanse.columns.order": ["b", "a", "c"],
+        }
+
+        def _get(k, d=None):
+            return store.get(k, d)
+
+        def _set(k, v):
+            store[k] = v
+
+        tree = _make_tree(("a", "b", "c"))
+        with patch("preferences.get", side_effect=_get), \
+             patch("preferences.set", side_effect=_set):
+            mt = ManagedTreeview(
+                tree, view_id="saldobalanse",
+                column_specs=_make_specs(),
+                pref_prefix="ui",
+                auto_bind=False,
+                legacy_pref_keys={
+                    "visible_cols": "saldobalanse.columns.visible",
+                    "column_order": "saldobalanse.columns.order",
+                },
+            )
+        # New keys were populated from legacy.
+        assert store["ui.saldobalanse.visible_cols"] == ["a", "b"]
+        assert store["ui.saldobalanse.column_order"] == ["b", "a", "c"]
+        # Legacy keys still there.
+        assert store["saldobalanse.columns.visible"] == ["a", "b"]
+        # Column manager loaded the migrated values.
+        assert mt.column_manager._visible == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# Bindings
+# ---------------------------------------------------------------------------
+
+class TestBindings:
+    def test_auto_bind_false_skips_binding(self):
+        from ui_managed_treeview import ManagedTreeview
+        tree = _make_tree()
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            ManagedTreeview(
+                tree, view_id="t", column_specs=_make_specs(),
+                auto_bind=False,
+            )
+        # Only enable_treeview_sorting may bind heading commands,
+        # but Button-3 / ButtonPress etc. must not fire.
+        bind_events_keys = [call.args[0] for call in tree.bind.call_args_list]
+        assert "<Button-3>" not in bind_events_keys
+        assert "<ButtonPress-1>" not in bind_events_keys
+
+    def test_auto_bind_true_registers_events(self):
+        from ui_managed_treeview import ManagedTreeview
+        tree = _make_tree()
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            ManagedTreeview(
+                tree, view_id="t", column_specs=_make_specs(),
+                auto_bind=True,
+            )
+        bind_events = [call.args[0] for call in tree.bind.call_args_list]
+        assert "<Button-3>" in bind_events
+        assert "<ButtonPress-1>" in bind_events
+        assert "<B1-Motion>" in bind_events
+        assert "<ButtonRelease-1>" in bind_events

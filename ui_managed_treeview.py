@@ -111,6 +111,49 @@ def _save_widths(pref_key: str, widths: dict[str, int]) -> None:
         pass
 
 
+# Mapping from logical aspect name to the suffix the new key uses.
+# Callers pass a dict like {"visible_cols": "legacy.x", "column_order": "legacy.y"}
+# using the same logical names — which must match these suffixes.
+_NEW_KEY_SUFFIXES = ("visible_cols", "column_order", "column_widths")
+
+
+def _migrate_legacy_pref_keys(
+    *,
+    view_id: str,
+    pref_prefix: str,
+    legacy: dict[str, str],
+) -> None:
+    """Copy values from legacy pref keys to the standard new-key scheme.
+
+    For each entry ``{aspect: legacy_key}`` in *legacy*: if the new key
+    (``{pref_prefix}.{view_id}.{aspect}``) is missing but the legacy key
+    exists, read the legacy value and write it to the new key. Legacy
+    key is left untouched (so rolling back a deploy still works). After
+    the first migration, the new key exists and this function becomes a
+    no-op on subsequent starts.
+    """
+    for aspect, legacy_key in legacy.items():
+        if aspect not in _NEW_KEY_SUFFIXES:
+            continue
+        new_key = f"{pref_prefix}.{view_id}.{aspect}"
+        try:
+            existing_new = preferences.get(new_key, None)
+        except Exception:
+            existing_new = None
+        if existing_new is not None:
+            continue  # new key already populated — nothing to do
+        try:
+            legacy_value = preferences.get(legacy_key, None)
+        except Exception:
+            legacy_value = None
+        if legacy_value is None:
+            continue
+        try:
+            preferences.set(new_key, legacy_value)
+        except Exception:
+            pass
+
+
 class ManagedTreeview:
     """Samlet controller for Treeview-kolonner og header-interaksjon."""
 
@@ -125,6 +168,7 @@ class ManagedTreeview:
         pinned_cols: Sequence[str] | None = None,
         on_body_right_click: Callable[[Any], Any] | None = None,
         auto_bind: bool = True,
+        legacy_pref_keys: dict[str, str] | None = None,
     ) -> None:
         self.tree = tree
         self.view_id = str(view_id or "").strip()
@@ -133,6 +177,15 @@ class ManagedTreeview:
         self._drag_state: dict[str, Any] | None = None
         self._stabilize_generation = 0
         self._width_pref_key = f"{pref_prefix}.{self.view_id}.column_widths"
+        # Auto-migrate legacy preference keys BEFORE any reading happens,
+        # so TreeviewColumnManager.load_from_preferences() and
+        # _load_widths() see the migrated values under the new names.
+        if legacy_pref_keys:
+            _migrate_legacy_pref_keys(
+                view_id=self.view_id,
+                pref_prefix=pref_prefix,
+                legacy=legacy_pref_keys,
+            )
         self._widths = _load_widths(self._width_pref_key)
 
         self._specs: list[ColumnSpec] = self._normalize_specs(column_specs)
