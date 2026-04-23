@@ -99,87 +99,24 @@ def _bind_sb_once(*, page: Any, tree: Any) -> None:
     _bind_sb_header_sort(page=page, tree=tree)
 
 
-# Numeriske kolonner som sorteres som tall (bruker SB_COLS-IDs).
-_SB_NUMERIC_SORT_COLS = {
-    "regnr",
-    "IB", "Endring", "UB", "UB_fjor", "Endring_fjor", "Endring_pct", "Antall",
-}
-
-
 def _bind_sb_header_sort(*, page: Any, tree: Any) -> None:
     """Bind venstreklikk på SB-kolonneoverskrift til sortering.
 
-    Klikk veksler mellom stigende og synkende. Numeriske kolonner sorteres
-    som tall (parser norsk format med mellomrom som tusen-skille og komma
-    som desimal); øvrige kolonner sorteres alfabetisk.
+    Sorteringen delegeres til felleskomponenten
+    ``ui_treeview_sort.enable_treeview_sorting`` — den auto-detekterer
+    numerisk vs. tekst vs. dato per kolonne basert på innholdet (støtter
+    norsk tallformat med mellomrom som tusen-skille og komma som desimal).
+    Samme sortering brukes nå i Saldobalanse-fanen (via ManagedTreeview)
+    og andre konsoliderte tabeller.
     """
-    state: dict[str, object] = {"col": None, "desc": False}
-
-    def _parse_no_number(s: str) -> float:
-        if s is None:
-            return 0.0
-        txt = str(s).strip().replace(" ", " ")
-        if not txt:
-            return 0.0
-        # Strip prosent og non-numeric tegn (behold minus, komma, punktum, siffer)
-        clean = "".join(ch for ch in txt if ch.isdigit() or ch in "-,.")
-        # Norsk format: " " = tusen-skille (ikke i clean), "," = desimal
-        clean = clean.replace(",", ".")
-        try:
-            return float(clean) if clean not in ("", "-", ".", "-.") else 0.0
-        except ValueError:
-            return 0.0
-
-    def _on_header_click(col: str) -> None:
-        try:
-            children = list(tree.get_children(""))
-        except Exception:
-            return
-        if not children:
-            return
-        desc = state["desc"] if state["col"] == col else False
-        desc = not desc
-
-        is_num = col in _SB_NUMERIC_SORT_COLS
-
-        def _key(iid: str):
-            try:
-                v = tree.set(iid, col)
-            except Exception:
-                v = ""
-            if is_num:
-                num = _parse_no_number(v)
-                # Tomme felt sist uansett retning
-                empty = not str(v).strip()
-                return (1 if empty else 0, -num if desc else num)
-            txt = str(v or "").lower()
-            return (1 if not txt else 0, txt)
-
-        try:
-            ordered = sorted(children, key=_key, reverse=False)
-        except Exception:
-            return
-
-        if not is_num and desc:
-            ordered = list(reversed(ordered))
-
-        for i, iid in enumerate(ordered):
-            try:
-                tree.move(iid, "", i)
-            except Exception:
-                pass
-
-        state["col"] = col
-        state["desc"] = desc
-
-    # Bind hver kolonneoverskrift til sin egen handler
     try:
-        cols = list(tree["columns"])  # type: ignore[index]
+        from ui_treeview_sort import enable_treeview_sorting
     except Exception:
-        cols = []
-    for col in cols:
+        enable_treeview_sorting = None  # type: ignore[assignment]
+
+    if enable_treeview_sorting is not None:
         try:
-            tree.heading(col, command=lambda c=col: _on_header_click(c))
+            enable_treeview_sorting(tree)
         except Exception:
             pass
 
@@ -208,7 +145,7 @@ def _bind_sb_header_sort(*, page: Any, tree: Any) -> None:
             kontonavn = str(values[1]).strip() if len(values) > 1 else ""
         except Exception:
             return
-        if not konto or konto.startswith("\u03a3"):  # Skip sum-rader
+        if not konto or konto.startswith("Σ"):  # Skip sum-rader
             return
         show_kontodetaljer_dialog(page=page, konto=konto, kontonavn=kontonavn)
 
