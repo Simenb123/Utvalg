@@ -275,8 +275,6 @@ class App(tk.Tk):
         if self.page_oversikt is not None:
             self.nb.add(self.page_oversikt, text="Oversikt")
         self.nb.add(self.page_dataset, text="Dataset")
-        if self.page_revisjonshandlinger is not None:
-            self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         self.nb.add(self.page_analyse, text="Analyse")
         self.nb.add(self.page_saldobalanse, text="Saldobalanse")
         self.nb.add(self.page_admin, text="Admin")
@@ -290,6 +288,8 @@ class App(tk.Tk):
             self.nb.add(self.page_scoping, text="Scoping")
         else:
             self.page_scoping = None
+        if self.page_revisjonshandlinger is not None:
+            self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         self.nb.add(self.page_mva, text="MVA")
         self.nb.add(self.page_lonn, text="Lønn")
         self.nb.add(self.page_skatt, text="Skatt")
