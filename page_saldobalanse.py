@@ -121,6 +121,22 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         self._btn_export = None
         self._btn_map = None
         self._btn_classify = None
+        # Retired widgets — kept as None so saldobalanse_payroll_mode.sync_mode_ui
+        # and other callers that do ``getattr(page, "_xxx", None)`` continue to
+        # find a stable attribute rather than raising. The underlying Tk vars
+        # (`_var_work_mode`, `_var_preset`, `_var_payroll_scope`, `_var_only_unmapped`,
+        # `_var_only_with_ao`) still exist so A07's focus_payroll_accounts can
+        # drive state programmatically even without UI controls.
+        self._btn_columns = None
+        self._btn_refresh = None
+        self._chk_only_unmapped = None
+        self._chk_only_with_ao = None
+        self._lbl_mode = None
+        self._cmb_mode = None
+        self._lbl_preset = None
+        self._cmb_preset = None
+        self._lbl_payroll_scope = None
+        self._cmb_payroll_scope = None
         self._chk_include_ao = None
         self._selection_actions_frame = None
         self._selection_actions_summary_var = tk.StringVar(value="") if tk is not None else None
@@ -227,49 +243,16 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         )
         self._chk_include_ao.grid(row=0, column=2, sticky="w", padx=(0, 8))
 
-        self._chk_only_unmapped = ttk.Checkbutton(
-            top,
-            text="Kun umappede",
-            variable=self._var_only_unmapped,
-            command=self.refresh,
-        )
-        self._chk_only_unmapped.grid(row=0, column=3, sticky="w", padx=(0, 8))
         self._chk_include_zero = ttk.Checkbutton(
             top,
             text="Vis null",
             variable=self._var_include_zero,
             command=self.refresh,
         )
-        self._chk_include_zero.grid(row=0, column=4, sticky="w", padx=(0, 8))
-        self._chk_only_with_ao = ttk.Checkbutton(
-            top,
-            text="Kun m/ÅO",
-            variable=self._var_only_with_ao,
-            command=self.refresh,
-        )
-        self._chk_only_with_ao.grid(row=0, column=5, sticky="w", padx=(0, 8))
-        self._lbl_mode = ttk.Label(top, text="Modus:")
-        self._lbl_mode.grid(row=0, column=6, sticky="w", padx=(8, 0))
-        cmb_mode = ttk.Combobox(
-            top,
-            textvariable=self._var_work_mode,
-            values=WORK_MODE_OPTIONS,
-            state="readonly",
-            width=18,
-        )
-        cmb_mode.grid(row=0, column=7, sticky="w", padx=(6, 0))
-        self._cmb_mode = cmb_mode
-        self._btn_leave_payroll = ttk.Button(top, text="Vanlig saldobalanse", command=self._leave_payroll_mode)
-        self._btn_leave_payroll.grid(row=0, column=8, padx=(8, 0))
-
-        self._lbl_preset = ttk.Label(top, text="Preset:")
-        self._lbl_preset.grid(row=1, column=0, sticky="w", pady=(6, 0))
-        cmb_preset = ttk.Combobox(top, textvariable=self._var_preset, values=PRESET_OPTIONS, state="readonly", width=16)
-        cmb_preset.grid(row=1, column=1, sticky="w", padx=(6, 8), pady=(6, 0))
-        self._cmb_preset = cmb_preset
+        self._chk_include_zero.grid(row=0, column=3, sticky="w", padx=(0, 8))
 
         self._lbl_mapping_status = ttk.Label(top, text="Mapping:")
-        self._lbl_mapping_status.grid(row=1, column=2, sticky="w", pady=(6, 0))
+        self._lbl_mapping_status.grid(row=1, column=0, sticky="w", pady=(6, 0))
         cmb_mapping = ttk.Combobox(
             top,
             textvariable=self._var_mapping_status,
@@ -277,11 +260,11 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
             state="readonly",
             width=14,
         )
-        cmb_mapping.grid(row=1, column=3, sticky="w", padx=(0, 8), pady=(6, 0))
+        cmb_mapping.grid(row=1, column=1, sticky="w", padx=(6, 8), pady=(6, 0))
         self._cmb_mapping_status = cmb_mapping
 
         self._lbl_source = ttk.Label(top, text="Kilde:")
-        self._lbl_source.grid(row=1, column=4, sticky="w", pady=(6, 0))
+        self._lbl_source.grid(row=1, column=2, sticky="w", pady=(6, 0))
         cmb_source = ttk.Combobox(
             top,
             textvariable=self._var_source,
@@ -289,39 +272,13 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
             state="readonly",
             width=10,
         )
-        cmb_source.grid(row=1, column=5, sticky="w", padx=(0, 8), pady=(6, 0))
+        cmb_source.grid(row=1, column=3, sticky="w", padx=(0, 8), pady=(6, 0))
         self._cmb_source = cmb_source
 
-        self._lbl_payroll_scope = ttk.Label(top, text="Lønn:")
-        self._lbl_payroll_scope.grid(row=1, column=6, sticky="w", pady=(6, 0))
-        cmb_payroll = ttk.Combobox(
-            top,
-            textvariable=self._var_payroll_scope,
-            values=PAYROLL_SCOPE_OPTIONS,
-            state="readonly",
-            width=18,
-        )
-        cmb_payroll.grid(row=1, column=7, sticky="w", padx=(0, 8), pady=(6, 0))
-        self._cmb_payroll_scope = cmb_payroll
-
-        self._btn_columns = ttk.Button(top, text="Kolonner...", command=self._open_column_chooser)
-        self._btn_columns.grid(row=1, column=8, padx=(0, 8), pady=(6, 0))
-        self._btn_primary_action = ttk.Button(top, text="Godkjenn forslag", command=self._run_primary_action)
-        self._btn_primary_action.grid(row=1, column=9, padx=(0, 8), pady=(6, 0))
-        self._btn_use_suggestion = ttk.Button(top, text="Godkjenn forslag", command=self._apply_best_suggestions_to_selected_accounts)
-        self._btn_use_suggestion.grid(row=1, column=10, padx=(0, 8), pady=(6, 0))
-        self._btn_use_history = ttk.Button(top, text="Bruk fjorårets klassifisering", command=self._apply_history_to_selected_accounts)
-        self._btn_use_history.grid(row=1, column=11, padx=(0, 8), pady=(6, 0))
-        self._btn_reset_suspicious = ttk.Button(top, text="Nullstill mistenkelige", command=self._clear_selected_suspicious_payroll_fields)
-        self._btn_reset_suspicious.grid(row=1, column=12, padx=(0, 8), pady=(6, 0))
         self._btn_map = ttk.Button(top, text="Map valgt konto...", command=self._map_selected_account)
-        self._btn_map.grid(row=1, column=13, padx=(0, 8), pady=(6, 0))
-        self._btn_classify = ttk.Button(top, text="Avansert klassifisering...", command=self._open_advanced_classification)
-        self._btn_classify.grid(row=1, column=14, padx=(0, 8), pady=(6, 0))
+        self._btn_map.grid(row=1, column=4, padx=(0, 8), pady=(6, 0))
         self._btn_export = ttk.Button(top, text="Eksporter Excel...", command=self._export_current_view_to_excel)
-        self._btn_export.grid(row=1, column=15, padx=(0, 8), pady=(6, 0))
-        self._btn_refresh = ttk.Button(top, text="Oppfrisk", command=self._hard_refresh)
-        self._btn_refresh.grid(row=1, column=16, pady=(6, 0))
+        self._btn_export.grid(row=1, column=5, pady=(6, 0))
 
         ttk.Label(self, textvariable=self._status_var, padding=(8, 0, 8, 4)).grid(row=1, column=0, sticky="ew")
 
@@ -432,11 +389,8 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         except Exception:
             pass
         try:
-            cmb_mode.bind("<<ComboboxSelected>>", lambda _event: self._on_work_mode_changed(), add="+")
-            cmb_preset.bind("<<ComboboxSelected>>", lambda _event: self._on_preset_changed(), add="+")
             cmb_mapping.bind("<<ComboboxSelected>>", lambda _event: self._schedule_refresh(80), add="+")
             cmb_source.bind("<<ComboboxSelected>>", lambda _event: self._schedule_refresh(80), add="+")
-            cmb_payroll.bind("<<ComboboxSelected>>", lambda _event: self._schedule_refresh(80), add="+")
         except Exception:
             pass
 

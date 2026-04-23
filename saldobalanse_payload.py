@@ -99,6 +99,10 @@ DEFAULT_VISIBLE_COLUMNS = (
     "Antall",
     "Regnskapslinje",
     "Mappingstatus",
+    "A07-kode",
+    "RF-1022-post",
+    "Detaljklassifisering",
+    "Eid selskap",
 )
 
 DEFAULT_COLUMN_ORDER = ALL_COLUMNS

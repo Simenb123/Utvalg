@@ -761,17 +761,26 @@ def test_should_include_payroll_payload_depends_on_scope_or_visible_columns() ->
         def get(self):
             return self.value
 
+    # Minimal non-payroll view: no payroll columns visible, scope=Alle.
+    non_payroll_cols = ["Konto", "Kontonavn", "IB", "UB", "Regnskapslinje"]
+
     dummy = SimpleNamespace(
         _var_payroll_scope=_Var(page_saldobalanse.FILTER_ALL),
-        _visible_cols=list(page_saldobalanse.DEFAULT_VISIBLE_COLUMNS),
+        _visible_cols=list(non_payroll_cols),
     )
 
     assert page_saldobalanse.SaldobalansePage._should_include_payroll_payload(dummy) is False
 
+    # DEFAULT_VISIBLE_COLUMNS now includes A07-kode (a payroll column), so the
+    # default view pulls payroll data — matches the UI now that A07-kode/
+    # RF-1022-post/Detaljklassifisering are part of the standard column set.
+    dummy._visible_cols = list(page_saldobalanse.DEFAULT_VISIBLE_COLUMNS)
+    assert page_saldobalanse.SaldobalansePage._should_include_payroll_payload(dummy) is True
+
     dummy._visible_cols = list(page_saldobalanse.COLUMN_PRESETS["Lønn/A07"])
     assert page_saldobalanse.SaldobalansePage._should_include_payroll_payload(dummy) is True
 
-    dummy._visible_cols = list(page_saldobalanse.DEFAULT_VISIBLE_COLUMNS)
+    dummy._visible_cols = list(non_payroll_cols)
     dummy._var_payroll_scope = _Var("Kun forslag")
     assert page_saldobalanse.SaldobalansePage._should_include_payroll_payload(dummy) is True
 
