@@ -120,14 +120,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     ttk.Label(pivot_header, text="Visning:").grid(row=0, column=0, padx=(0, 6))
     _agg_changed = getattr(page, "_on_aggregering_changed", None)
     _agg_cb = (lambda: _agg_changed()) if callable(_agg_changed) else None
-    rb_agg_sb = ttk.Radiobutton(
-        pivot_header,
-        text="Saldobalanse",
-        variable=var_agg,
-        value="Saldobalanse",
-        command=_agg_cb,
-    )
-    rb_agg_sb.grid(row=0, column=1, sticky="w", padx=(0, 8))
+    # Regnskapslinje først (default-visning), Saldobalanse som sekundærvalg.
     rb_agg_rl = ttk.Radiobutton(
         pivot_header,
         text="Regnskapslinje",
@@ -135,7 +128,15 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         value="Regnskapslinje",
         command=_agg_cb,
     )
-    rb_agg_rl.grid(row=0, column=2, sticky="w")
+    rb_agg_rl.grid(row=0, column=1, sticky="w", padx=(0, 8))
+    rb_agg_sb = ttk.Radiobutton(
+        pivot_header,
+        text="Saldobalanse",
+        variable=var_agg,
+        value="Saldobalanse",
+        command=_agg_cb,
+    )
+    rb_agg_sb.grid(row=0, column=2, sticky="w")
     page._cmb_agg = None  # tidligere Combobox — beholdes som None for bakoverkompat
     page._rb_agg_sb = rb_agg_sb
     page._rb_agg_rl = rb_agg_rl
@@ -390,25 +391,69 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     tx_header.grid(row=0, column=0, sticky="ew", pady=(0, 2))
     tx_header.columnconfigure(1, weight=1)
 
-    ttk.Label(tx_header, text="Visning:").grid(row=0, column=0, padx=(0, 4))
+    ttk.Label(tx_header, text="Visning:").grid(row=0, column=0, padx=(0, 6))
 
     _var_tx_mode = getattr(page, "_var_tx_view_mode", None)
     if _var_tx_mode is not None:
-        _tx_mode_cb = ttk.Combobox(
-            tx_header,
-            textvariable=_var_tx_mode,
-            values=["Saldobalanse", "Transaksjoner", "Nøkkeltall", "Motposter", "Motposter (kontonivå)"],
-            state="readonly",
-            width=24,
-        )
-        _tx_mode_cb.grid(row=0, column=1, sticky="w")
-        page._tx_view_combo = _tx_mode_cb
-
         _on_tx_mode_fn = getattr(page, "_on_tx_view_mode_changed", None)
-        if callable(_on_tx_mode_fn):
-            _tx_mode_cb.bind("<<ComboboxSelected>>", lambda _e: _on_tx_mode_fn())
-    # NB: hadde tidligere en fallback-Label "Hovedbok" når _var_tx_view_mode mangler.
-    # Fjernet — Combobox-en speiler datanivå tydelig nok via valgte verdi.
+        _tx_mode_cb_call = (lambda: _on_tx_mode_fn()) if callable(_on_tx_mode_fn) else None
+
+        # To primær-radios: Saldobalanse, Transaksjoner.
+        rb_tx_sb = ttk.Radiobutton(
+            tx_header, text="Saldobalanse",
+            variable=_var_tx_mode, value="Saldobalanse",
+            command=_tx_mode_cb_call,
+        )
+        rb_tx_sb.grid(row=0, column=1, sticky="w", padx=(0, 8))
+        rb_tx_tx = ttk.Radiobutton(
+            tx_header, text="Transaksjoner",
+            variable=_var_tx_mode, value="Transaksjoner",
+            command=_tx_mode_cb_call,
+        )
+        rb_tx_tx.grid(row=0, column=2, sticky="w", padx=(0, 8))
+
+        # "Annet ▾"-menubutton: Motposter, Motposter (kontonivå), Nøkkeltall.
+        adv_btn = ttk.Menubutton(tx_header, text="Annet ▾", direction="below")
+        adv_btn.grid(row=0, column=3, sticky="w")
+        adv_menu = tk.Menu(adv_btn, tearoff=False)
+        adv_btn["menu"] = adv_menu
+        _adv_options = ("Motposter", "Motposter (kontonivå)", "Nøkkeltall")
+        for label in _adv_options:
+            adv_menu.add_radiobutton(
+                label=label,
+                variable=_var_tx_mode,
+                value=label,
+                command=_tx_mode_cb_call,
+            )
+
+        # Sync menubutton-tekst med aktiv visning.
+        def _sync_adv_btn_text(*_args) -> None:
+            try:
+                val = _var_tx_mode.get()
+            except Exception:
+                val = ""
+            try:
+                if val in _adv_options:
+                    adv_btn.configure(text=f"{val} ▾")
+                else:
+                    adv_btn.configure(text="Annet ▾")
+            except Exception:
+                pass
+
+        try:
+            _var_tx_mode.trace_add("write", _sync_adv_btn_text)
+        except Exception:
+            pass
+        _sync_adv_btn_text()
+
+        # Bakoverkompat — _tx_view_combo brukes av eksisterende kode (f.eks.
+        # disabling i TB-only). Vi setter den til menubuttonen så .configure(state=...)
+        # fortsatt virker — men kun "Annet"-knappen påvirkes; radioene er separate.
+        page._tx_view_combo = adv_btn
+        page._rb_tx_sb = rb_tx_sb
+        page._rb_tx_tx = rb_tx_tx
+        page._tx_view_adv_btn = adv_btn
+        page._tx_view_adv_menu = adv_menu
 
     # "Vis: <antall>" — flyttet hit fra toolbar (rad 2). Bestemmer hvor mange
     # rader som vises i listen rett under denne headeren.

@@ -194,7 +194,7 @@ def build_toolbar(
     # Aggregering flyttes til over venstre pivot-panel (se lenger ned)
     var_agg = getattr(page, "_var_aggregering", None)
     if var_agg is None:
-        var_agg = tk.StringVar(master=page, value="Saldobalanse")
+        var_agg = tk.StringVar(master=page, value="Regnskapslinje")
     page._var_aggregering = var_agg
 
     # MVA-kode + Min/Maks beløp + MVA-filter er flyttet til "Mer filter…"-popup.

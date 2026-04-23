@@ -245,7 +245,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         self._var_mva_code = tk.StringVar(value=self.MVA_CODE_ALL_LABEL)
         self._var_mva_mode = tk.StringVar(value=self.MVA_FILTER_OPTIONS[0])
         self._var_max_rows = tk.IntVar(value=200)
-        self._var_aggregering = tk.StringVar(value="Saldobalanse")
+        self._var_aggregering = tk.StringVar(value="Regnskapslinje")
         self._series_vars = [tk.IntVar(value=0) for _ in range(10)]
         self._mva_code_values: List[str] = [self.MVA_CODE_ALL_LABEL]
         self._rl_mapping_warning: str = ""
