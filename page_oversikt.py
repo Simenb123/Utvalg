@@ -73,7 +73,14 @@ class OversiktPage(ttk.Frame):
     def _build_header(self) -> None:
         hdr = ttk.Frame(self)
         hdr.grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 4))
-        hdr.columnconfigure(1, weight=1)
+        hdr.columnconfigure(2, weight=1)
+
+        # AarVaaken-logo til venstre — diskret merkevare-element på landing-fanen
+        self._aarvaaken_photo = self._load_aarvaaken_for_header(target_height=56)
+        if self._aarvaaken_photo is not None:
+            logo_lbl = ttk.Label(hdr, image=self._aarvaaken_photo)
+            logo_lbl.image = self._aarvaaken_photo  # GC-referanse
+            logo_lbl.grid(row=0, column=0, sticky="w", padx=(0, 16))
 
         # Hilsen
         name = ""
@@ -81,18 +88,18 @@ class OversiktPage(ttk.Frame):
             name = self._user.full_name or self._user.windows_user or ""
         greeting = f"Hei, {name}" if name else "Oversikt"
         self._lbl_greeting = ttk.Label(hdr, text=greeting, font=("Segoe UI", 16, "bold"))
-        self._lbl_greeting.grid(row=0, column=0, sticky="w")
+        self._lbl_greeting.grid(row=0, column=1, sticky="w")
 
         # Aktiv klient
         self._lbl_active = ttk.Label(hdr, text="", style="Muted.TLabel")
-        self._lbl_active.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self._lbl_active.grid(row=0, column=2, sticky="e", padx=(12, 0))
 
         # Ga til aktiv klient-knapp
         self._btn_goto_active = ttk.Button(
             hdr, text="Vis", width=6, style="Secondary.TButton",
             command=self._goto_active_client,
         )
-        self._btn_goto_active.grid(row=0, column=2, sticky="e", padx=(6, 0))
+        self._btn_goto_active.grid(row=0, column=3, sticky="e", padx=(6, 0))
         self._btn_goto_active.grid_remove()  # skjult til vi har aktiv klient
 
         # Sokefelt
@@ -117,6 +124,48 @@ class OversiktPage(ttk.Frame):
             self._entry_search.insert(0, "Sok klient...")
             self._entry_search.config(foreground="gray")
             self._search_placeholder = True
+
+    def _load_aarvaaken_for_header(self, *, target_height: int = 56):
+        """Last AarVaaken.png skalert til ønsket høyde for header-bruk.
+
+        Returnerer ImageTk.PhotoImage eller None ved feil. Caches på
+        instansen via self._aarvaaken_photo (kall fra _build_header).
+        Hvite marger croppes vekk på samme måte som splash.
+        """
+        try:
+            from PIL import Image, ImageTk  # type: ignore[import-untyped]
+            from pathlib import Path
+            import sys
+
+            candidates = []
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "doc" / "pictures" / "AarVaaken.png")
+            candidates.append(Path(__file__).resolve().parent / "doc" / "pictures" / "AarVaaken.png")
+
+            pic_path = next((p for p in candidates if p.exists()), None)
+            if pic_path is None:
+                return None
+
+            img = Image.open(str(pic_path))
+
+            # Crop hvite kanter — samme terskel-tilnærming som splash
+            try:
+                gray = img.convert("L")
+                bw = gray.point(lambda p: 255 if p < 250 else 0)
+                bbox = bw.getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+            except Exception:
+                pass
+
+            # Skaler til target_height, behold aspekt-ratio
+            w, h = img.size
+            target_w = max(1, int(round(target_height * w / h)))
+            img = img.resize((target_w, target_height), Image.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
 
     def _on_search_focus_in(self, _event=None) -> None:
         if self._search_placeholder:
