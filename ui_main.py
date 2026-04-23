@@ -225,29 +225,52 @@ class App(tk.Tk):
         except Exception:
             self._app_loading_overlay = None
 
-        # Pages
-        self.page_dataset = DatasetPage(self.nb)
-        self.page_analyse = AnalysePage(self.nb)
-        self.page_saldobalanse = SaldobalansePage(self.nb)
-        self.page_admin = AdminPage(self.nb)
-        self.page_a07 = A07Page(self.nb)
-        self.page_ar = ARPage(self.nb)
-        self.page_utvalg = UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample)
-        self.page_resultat = UtvalgPage(self.nb)
-        self.page_logg = LoggPage(self.nb)
-        self.page_consolidation = ConsolidationPage(self.nb)
-        self.page_regnskap = RegnskapPage(self.nb)
-        self.page_materiality = MaterialityPage(self.nb)
-        self.page_mva = MvaPage(self.nb)
-        self.page_lonn = LonnPage(self.nb)
-        self.page_skatt = SkattPage(self.nb)
-        self.page_reskontro = ReskontroPage(self.nb)
-        self.page_fagchat = FagchatPage(self.nb) if FagchatPage is not None else None
-        self.page_documents = DocumentsPage(self.nb) if DocumentsPage is not None else None
-        self.page_statistikk = StatistikkPage(self.nb) if StatistikkPage is not None else None
-        self.page_driftsmidler = DriftsmidlerPage(self.nb) if DriftsmidlerPage is not None else None
-        self.page_revisjonshandlinger = RevisjonshandlingerPage(self.nb) if RevisjonshandlingerPage is not None else None
-        self.page_oversikt = OversiktPage(self.nb, nb=self.nb, dataset_page=self.page_dataset) if OversiktPage is not None else None
+        # Pages — instrumentert med valgfri timing for å diagnostisere
+        # treg oppstart. Aktiveres med UTVALG_PROFILE_REFRESH=1 (samme
+        # flagg som refresh-profilen).
+        import os as _os
+        import time as _time
+        _profile_pages = _os.environ.get("UTVALG_PROFILE_REFRESH", "").strip().lower() in {"1", "true", "yes", "on"}
+        _page_times: dict[str, float] = {}
+
+        def _build(label: str, fn):
+            t0 = _time.perf_counter() if _profile_pages else 0.0
+            result = fn()
+            if _profile_pages:
+                _page_times[label] = (_time.perf_counter() - t0) * 1000
+            return result
+
+        self.page_dataset = _build("dataset", lambda: DatasetPage(self.nb))
+        self.page_analyse = _build("analyse", lambda: AnalysePage(self.nb))
+        self.page_saldobalanse = _build("saldobalanse", lambda: SaldobalansePage(self.nb))
+        self.page_admin = _build("admin", lambda: AdminPage(self.nb))
+        self.page_a07 = _build("a07", lambda: A07Page(self.nb))
+        self.page_ar = _build("ar", lambda: ARPage(self.nb))
+        self.page_utvalg = _build("utvalg_strata", lambda: UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample))
+        self.page_resultat = _build("resultat", lambda: UtvalgPage(self.nb))
+        self.page_logg = _build("logg", lambda: LoggPage(self.nb))
+        self.page_consolidation = _build("consolidation", lambda: ConsolidationPage(self.nb))
+        self.page_regnskap = _build("regnskap", lambda: RegnskapPage(self.nb))
+        self.page_materiality = _build("materiality", lambda: MaterialityPage(self.nb))
+        self.page_mva = _build("mva", lambda: MvaPage(self.nb))
+        self.page_lonn = _build("lonn", lambda: LonnPage(self.nb))
+        self.page_skatt = _build("skatt", lambda: SkattPage(self.nb))
+        self.page_reskontro = _build("reskontro", lambda: ReskontroPage(self.nb))
+        self.page_fagchat = _build("fagchat", lambda: FagchatPage(self.nb)) if FagchatPage is not None else None
+        self.page_documents = _build("documents", lambda: DocumentsPage(self.nb)) if DocumentsPage is not None else None
+        self.page_statistikk = _build("statistikk", lambda: StatistikkPage(self.nb)) if StatistikkPage is not None else None
+        self.page_driftsmidler = _build("driftsmidler", lambda: DriftsmidlerPage(self.nb)) if DriftsmidlerPage is not None else None
+        self.page_revisjonshandlinger = _build("revisjonshandlinger", lambda: RevisjonshandlingerPage(self.nb)) if RevisjonshandlingerPage is not None else None
+        self.page_oversikt = _build("oversikt", lambda: OversiktPage(self.nb, nb=self.nb, dataset_page=self.page_dataset)) if OversiktPage is not None else None
+
+        if _profile_pages and _page_times:
+            import sys as _sys
+            ranked = sorted(_page_times.items(), key=lambda kv: -kv[1])
+            total = sum(_page_times.values())
+            parts = [f"[STARTUP PROFILE] total={total:.0f}ms"]
+            for label, ms in ranked:
+                parts.append(f"{label}={ms:.0f}ms")
+            print(" | ".join(parts), file=_sys.stderr, flush=True)
 
         if self.page_oversikt is not None:
             self.nb.add(self.page_oversikt, text="Oversikt")
