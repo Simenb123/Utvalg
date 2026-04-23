@@ -53,6 +53,16 @@ class ColumnSpec:
 
 
 def _column_id_from_event(tree: Any, event: Any) -> str:
+    """Resolve the column id under ``event.x``.
+
+    ``tree.identify_column(x)`` returns a token like ``"#3"`` where the
+    index refers to *displaycolumns* (the visible/ordered list), not the
+    raw ``tree["columns"]`` tuple. Mapping the index against
+    ``tree["columns"]`` breaks as soon as the user reorders columns or
+    hides any of them — which is exactly what ManagedTreeview lets them
+    do. Always resolve against displaycolumns, falling back to columns
+    when displaycolumns is the sentinel ``"#all"``.
+    """
     try:
         token = str(tree.identify_column(int(getattr(event, "x", 0) or 0)))
     except Exception:
@@ -63,6 +73,17 @@ def _column_id_from_event(tree: Any, event: Any) -> str:
         index = int(token[1:]) - 1
     except Exception:
         return ""
+    if index < 0:
+        return ""
+    try:
+        display = list(tree["displaycolumns"])
+    except Exception:
+        display = []
+    if display and str(display[0]) != "#all":
+        if index < len(display):
+            return str(display[index])
+        return ""
+    # displaycolumns == "#all" — fall back to raw columns tuple.
     try:
         cols = list(tree["columns"])
     except Exception:

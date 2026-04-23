@@ -443,6 +443,39 @@ class TestDragReorder:
         # Escape must not trigger the reorder.
         assert list(mt.column_manager._order) == original
 
+    def test_column_id_lookup_uses_displaycolumns_after_reorder(self):
+        """Regression: tree.identify_column returns #N indexed into
+        displaycolumns (the visible/ordered list), not the raw columns
+        tuple. After a reorder, the two differ and the drag handler
+        must resolve against displaycolumns.
+        """
+        from ui_managed_treeview import _column_id_from_event
+        tree = MagicMock()
+        tree.identify_column = MagicMock(return_value="#2")
+        # Original columns: a, b, c. User has reordered to: c, a, b.
+        # displaycolumns reflects the reorder; columns is the raw tuple.
+        tree.__getitem__ = MagicMock(
+            side_effect=lambda k: {"displaycolumns": ("c", "a", "b"),
+                                   "columns": ("a", "b", "c")}[k]
+        )
+        evt = MagicMock()
+        evt.x = 120
+        assert _column_id_from_event(tree, evt) == "a"  # #2 in displaycolumns
+
+    def test_column_id_lookup_displaycolumns_all_fallback(self):
+        """When displaycolumns is the sentinel '#all' we fall back to
+        the raw columns tuple (legacy default for fresh trees)."""
+        from ui_managed_treeview import _column_id_from_event
+        tree = MagicMock()
+        tree.identify_column = MagicMock(return_value="#3")
+        tree.__getitem__ = MagicMock(
+            side_effect=lambda k: {"displaycolumns": ("#all",),
+                                   "columns": ("a", "b", "c")}[k]
+        )
+        evt = MagicMock()
+        evt.x = 120
+        assert _column_id_from_event(tree, evt) == "c"
+
     def test_reorder_columns_after_flag_forwarded(self):
         from ui_managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
