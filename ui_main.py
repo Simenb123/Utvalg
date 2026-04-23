@@ -846,6 +846,16 @@ class App(tk.Tk):
                 self._refresh_scoping_from_session()
             return
 
+        if selected_widget is getattr(self, "page_materiality", None):
+            # Auto-refresh ved aktivering — Vesentlighet leser session.client/year
+            # og må synkes hver gang brukeren bytter klient eller år, ikke kun
+            # ved første dataset-load.
+            try:
+                self.after_idle(self._refresh_materiality_from_session)
+            except Exception:
+                self._refresh_materiality_from_session()
+            return
+
         if selected_widget is getattr(self, "page_documents", None):
             # Auto-refresh ved aktivering — sparer brukeren for å trykke
             # "Oppdater" hver gang de bytter til fanen.
@@ -919,6 +929,21 @@ class App(tk.Tk):
                 self.page_ar.refresh_from_session(session)  # type: ignore[attr-defined]
         except Exception:
             log.exception("AR refresh after tab change failed")
+
+    def _refresh_materiality_from_session(self) -> None:
+        """Auto-refresh Vesentlighet-fanen når brukeren aktiverer den.
+
+        Sikrer at klient/år alltid er synket, uavhengig av om datasett ble
+        lastet før eller etter at fanen ble besøkt.
+        """
+        try:
+            page = getattr(self, "page_materiality", None)
+            if page is None:
+                return
+            if hasattr(page, "refresh_from_session") and callable(getattr(page, "refresh_from_session")):
+                page.refresh_from_session(session)
+        except Exception:
+            log.exception("Materiality refresh after tab change failed")
 
     def _refresh_handlinger_from_session(self) -> None:
         try:
