@@ -24,7 +24,39 @@ from saldobalanse_payload import (
 )
 
 
+def _managed(page):
+    """Return ``page._managed_tree`` if it's wired up, else ``None``.
+
+    Lets the legacy helpers work both before and after the Treeview has
+    been built (e.g. during early ``__init__`` before _build_ui runs).
+    """
+    return getattr(page, "_managed_tree", None)
+
+
 def load_column_preferences(page) -> None:
+    """Sync ``page._column_order`` / ``page._visible_cols`` from the
+    active ``ManagedTreeview`` (or directly from the legacy pref keys
+    as fallback during bootstrapping).
+
+    Once ``_build_ui`` has run, the managed tree is the source of truth
+    — this function just mirrors its current state onto the page
+    attributes that preset-comparison helpers like
+    ``_preset_name_for_visible_columns`` still read.
+    """
+    mt = _managed(page)
+    if mt is not None:
+        cm = mt.column_manager
+        cleaned_order = [col for col in cm.column_order if col in ALL_COLUMNS]
+        for col in ALL_COLUMNS:
+            if col not in cleaned_order:
+                cleaned_order.append(col)
+        page._column_order = cleaned_order
+        page._visible_cols = [col for col in cm.visible_cols if col in ALL_COLUMNS]
+        return
+
+    # Bootstrap fallback — tree not built yet. Read legacy prefs
+    # directly; the real ManagedTreeview will auto-migrate on first
+    # construction so later loads go through the branch above.
     try:
         order = preferences.get("saldobalanse.columns.order", None)
         visible = preferences.get("saldobalanse.columns.visible", None)
@@ -47,6 +79,20 @@ def load_column_preferences(page) -> None:
 
 
 def persist_column_preferences(page) -> None:
+    """Delegate persistence to the managed tree when available.
+
+    ``ManagedTreeview``/``TreeviewColumnManager`` persist themselves on
+    mutation, so this is a no-op in the normal flow. The legacy
+    fallback is kept so early-init code paths (pre _build_ui) still
+    write something.
+    """
+    mt = _managed(page)
+    if mt is not None:
+        try:
+            mt.column_manager.save_to_preferences()
+        except Exception:
+            pass
+        return
     try:
         preferences.set("saldobalanse.columns.order", list(page._column_order))
         preferences.set("saldobalanse.columns.visible", list(page._visible_cols))
@@ -55,6 +101,22 @@ def persist_column_preferences(page) -> None:
 
 
 def apply_visible_columns(page) -> None:
+    """Push the active visible-cols selection into the tree.
+
+    Delegates to ``ManagedTreeview.column_manager.apply_visible()`` when
+    the managed tree is live, so pinned-first ordering and displaycolumns
+    stay in sync.
+    """
+    mt = _managed(page)
+    if mt is not None:
+        # Sync the page's in-memory state into the manager before applying,
+        # so preset-driven changes to ``page._visible_cols`` take effect.
+        try:
+            mt.column_manager.set_visible_columns(list(page._visible_cols))
+        except Exception:
+            pass
+        return
+    # Legacy fallback (tree not live yet)
     if page._tree is None:
         return
     visible = [col for col in page._column_order if col in page._visible_cols]

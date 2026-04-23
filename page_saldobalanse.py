@@ -349,24 +349,24 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
 
         self._tree = ttk.Treeview(tree_frame, columns=ALL_COLUMNS, show="headings", selectmode="extended")
         self._tree.grid(row=0, column=0, sticky="nsew")
-        # Heading-text hentes via felles vokabular: kjente IDs (IB, UB,
-        # Endring, ...) får dynamisk år-formattering, ukjente returneres
-        # uendret (heading() har innebygd fallback).
-        _yr = active_year_from_session()
-        for col in ALL_COLUMNS:
-            anchor = "e" if col in NUMERIC_COLUMNS else "w"
-            stretch = col in {
-                "Kontonavn",
-                "Regnskapslinje",
-                "Lønnsflagg",
-                "Flagg-forslag",
-                "A07-forslag",
-                "RF-1022-forslag",
-                "Matchgrunnlag",
-                "Problem",
-            }
-            self._tree.heading(col, text=heading(col, year=_yr))
-            self._tree.column(col, width=COLUMN_WIDTHS.get(col, 110), minwidth=50, stretch=stretch, anchor=anchor)
+        # Kolonnedefinisjoner, sortering, kolonne-meny, bredde-persist
+        # og dra-rekkefølge håndteres av ManagedTreeview. Kolonne-preset-
+        # bytte går via ``self._managed_tree.column_manager.set_visible_columns``.
+        # Gammel Saldobalanse-preference-nøkler auto-migreres til
+        # ``ui.saldobalanse.*`` første gang siden lastes.
+        from ui_managed_treeview import ManagedTreeview
+        from saldobalanse_payload import build_column_specs
+        self._managed_tree = ManagedTreeview(
+            self._tree,
+            view_id="saldobalanse",
+            column_specs=build_column_specs(active_year_from_session()),
+            pref_prefix="ui",
+            on_body_right_click=self._open_context_menu,
+            legacy_pref_keys={
+                "visible_cols": "saldobalanse.columns.visible",
+                "column_order": "saldobalanse.columns.order",
+            },
+        )
 
         try:
             self._tree.tag_configure("problem", foreground="#9C1C1C")
@@ -418,7 +418,8 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         try:
             self._tree.bind("<<TreeviewSelect>>", lambda _event: self._on_tree_selection_changed(), add="+")
             self._tree.bind("<Double-1>", lambda _event: self._map_selected_account(), add="+")
-            self._tree.bind("<Button-3>", self._open_context_menu, add="+")
+            # <Button-3> håndteres av ManagedTreeview: header → kolonne-meny,
+            # body → ``on_body_right_click=self._open_context_menu``.
             self._tree.bind("<Return>", lambda _event: self._open_advanced_classification(), add="+")
             self._tree.bind("<Control-h>", lambda _event: self._apply_history_to_selected_accounts(), add="+")
             self._tree.bind("<Control-b>", lambda _event: self._apply_best_suggestions_to_selected_accounts(), add="+")

@@ -1308,3 +1308,47 @@ def build_saldobalanse_df(
         payroll_scope=payroll_scope,
         include_payroll=include_payroll,
     ).df
+
+
+# Stretch-sett — hvilke kolonner som skal få ``stretch=True`` i Treeview.
+# Tidligere hardkodet inline i page_saldobalanse._build_ui; flyttet hit
+# slik at build_column_specs har én kilde for kolonne-metadata.
+STRETCH_COLUMNS = frozenset({
+    "Kontonavn",
+    "Regnskapslinje",
+    "Lønnsflagg",
+    "Flagg-forslag",
+    "A07-forslag",
+    "RF-1022-forslag",
+    "Matchgrunnlag",
+    "Problem",
+})
+
+
+def build_column_specs(year: int | None = None):
+    """Returner `ColumnSpec`-liste for Saldobalanse-Treeview.
+
+    Importerer `ColumnSpec` lazy for å unngå at payload-modulen drar
+    inn Tkinter ved import (payload brukes også fra ikke-GUI-kontekst).
+
+    ``year`` brukes for å formatere årsavhengige kolonne-overskrifter
+    (f.eks. "IB 2025" / "UB 2024") via ``columns_vocabulary.heading``.
+    """
+    from ui_managed_treeview import ColumnSpec
+    from src.shared.columns_vocabulary import heading
+
+    specs = []
+    for col in ALL_COLUMNS:
+        specs.append(
+            ColumnSpec(
+                id=col,
+                heading=heading(col, year=year),
+                width=COLUMN_WIDTHS.get(col, 110),
+                minwidth=50,
+                anchor="e" if col in NUMERIC_COLUMNS else "w",
+                stretch=col in STRETCH_COLUMNS,
+                visible_by_default=col in DEFAULT_VISIBLE_COLUMNS,
+                sortable=True,
+            )
+        )
+    return specs

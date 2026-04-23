@@ -49,6 +49,20 @@ class TreeviewColumnManager:
         self.apply_visible()
 
     # ------------------------------------------------------------------
+    # Public read-only views
+    # ------------------------------------------------------------------
+
+    @property
+    def visible_cols(self) -> list[str]:
+        """Copy of currently visible columns in internal order."""
+        return list(self._visible)
+
+    @property
+    def column_order(self) -> list[str]:
+        """Copy of the full column order (pinned-first invariant upheld)."""
+        return list(self._order)
+
+    # ------------------------------------------------------------------
     # Pinned-first invariant
     # ------------------------------------------------------------------
 
