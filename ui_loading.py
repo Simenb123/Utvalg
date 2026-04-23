@@ -21,8 +21,9 @@ class LoadingOverlay:
     """
 
     # Bredde i piksler for AarVaaken-banneret på loading-overlayen.
-    # Bildets aspekt er 4:1 (2508x627) — høyde beregnes proporsjonalt.
-    _BANNER_WIDTH = 360
+    # Bildets aspekt er ~6:1 etter crop av hvite kanter.
+    # Settes likt som splash for sammenhengende look.
+    _BANNER_WIDTH = 600
 
     def __init__(self, master: tk.Widget):
         self.master = master
@@ -133,20 +134,22 @@ class LoadingOverlay:
             if banner is not None:
                 banner_lbl = tk.Label(inner, image=banner, bg=bg_color, borderwidth=0)
                 banner_lbl.image = banner  # GC-referanse
-                banner_lbl.pack(padx=24, pady=(20, 12))
+                banner_lbl.pack(padx=32, pady=(28, 14))
 
-            # Status-tekst i Forest-grønn (samme som splash-undertittel)
+            # Status-tekst i Forest-grønn (større + bold for synlig oppdatering
+            # mellom stages — selv om Tk-progressbaren fryser pga. tung jobb,
+            # er teksten det brukeren leser for å vite at noe skjer).
             lbl = tk.Label(
                 inner,
                 text=text,
                 bg=bg_color,
                 fg=text_color,
-                font=(font_family, 10, "normal"),
+                font=(font_family, 12, "bold"),
             )
-            lbl.pack(padx=24, pady=(0, 10))
+            lbl.pack(padx=32, pady=(0, 14))
 
-            pb = ttk.Progressbar(inner, mode="indeterminate", length=240)
-            pb.pack(padx=24, pady=(0, 20))
+            pb = ttk.Progressbar(inner, mode="indeterminate", length=400)
+            pb.pack(padx=32, pady=(0, 28))
 
             self._win = win
             self._lbl = lbl
