@@ -3,7 +3,13 @@ from __future__ import annotations
 from tests.test_page_analyse_ui_regressions import DummyPage, DummyTkModule, DummyTtkModule, _DirOpt
 
 
-def test_build_ui_exposes_column_button_and_mva_filters() -> None:
+def test_build_ui_exposes_column_button() -> None:
+    """Kolonner-knappen skal være aktiv og kalle riktig command.
+
+    NB: MVA-kode og MVA-filter-comboboxene er flyttet ut av toolbar til
+    "Mer filter…"-popup-dialogen. StringVars deles, og MVA_FILTER_OPTIONS-
+    listen er fortsatt tilgjengelig som klassevariabel for popup-bygging.
+    """
     import page_analyse_ui
 
     page = DummyPage()
@@ -20,18 +26,7 @@ def test_build_ui_exposes_column_button_and_mva_filters() -> None:
     page._btn_columns.kwargs["command"]()
     assert page.calls.get("columns", 0) == 1
 
-    assert "<Return>" in page._ent_mva.bindings
-    page._ent_mva.bindings["<Return>"](None)
-    assert page.calls.get("apply_now", 0) >= 1
-    assert page._cmb_mva_code.kwargs.get("state") == "readonly"
-    assert list(page._cmb_mva_code.kwargs.get("values", ())) == ["Alle", "1", "3", "25"]
-
-    assert page._cmb_mva.kwargs.get("state") == "readonly"
-    assert list(page._cmb_mva.kwargs.get("values", ())) == [
-        "Alle",
-        "Med MVA-kode",
-        "Uten MVA-kode",
-        "Med MVA-beløp",
-        "Uten MVA-beløp",
-        "MVA-avvik",
-    ]
+    # Toolbar har ikke lenger MVA-kode eller MVA-filter direkte.
+    assert page._cmb_mva_code is None
+    assert page._cmb_mva is None
+    assert page._ent_mva is None

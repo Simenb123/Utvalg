@@ -197,18 +197,21 @@ def build_toolbar(
         var_agg = tk.StringVar(master=page, value="Saldobalanse")
     page._var_aggregering = var_agg
 
-    ttk.Label(row1, text="MVA-kode:").grid(row=0, column=4, sticky="w", padx=(0, 2))
-    cmb_mva_code = ttk.Combobox(
-        row1,
-        textvariable=var_mva_code,
-        values=mva_code_values,
-        width=12,
-        state="readonly",
-    )
-    cmb_mva_code.grid(row=0, column=5, sticky="w", padx=(0, 12))
+    # MVA-kode + Min/Maks beløp + MVA-filter er flyttet til "Mer filter…"-popup.
+    # StringVars beholdes og leses fortsatt av filter-logikken.
+    cmb_mva_code = None  # opprettes i popup ved behov, refereres ikke lenger her
 
     # Spacer to push buttons to the right
     row1.grid_columnconfigure(6, weight=1)
+
+    advanced_cmd = getattr(page, "_open_advanced_filters", None)
+    btn_advanced = ttk.Button(
+        row1,
+        text="Mer filter…",
+        command=advanced_cmd if callable(advanced_cmd) else None,
+        state=("normal" if callable(advanced_cmd) else "disabled"),
+    )
+    btn_advanced.grid(row=0, column=7, padx=(0, 6), sticky="e")
 
     columns_cmd = (
         getattr(page, "_open_column_chooser", None)
@@ -220,25 +223,25 @@ def build_toolbar(
         command=columns_cmd if callable(columns_cmd) else None,
         state=("normal" if callable(columns_cmd) else "disabled"),
     )
-    btn_columns.grid(row=0, column=7, padx=(0, 6), sticky="e")
+    btn_columns.grid(row=0, column=8, padx=(0, 6), sticky="e")
 
     btn_reset = ttk.Button(row1, text="Nullstill", command=page._reset_filters)
-    btn_reset.grid(row=0, column=8, padx=(0, 6), sticky="e")
+    btn_reset.grid(row=0, column=9, padx=(0, 6), sticky="e")
 
     btn_select_all = ttk.Button(row1, text="Marker alle", command=page._select_all_accounts)
-    btn_select_all.grid(row=0, column=9, padx=(0, 6), sticky="e")
+    btn_select_all.grid(row=0, column=10, padx=(0, 6), sticky="e")
 
     reports_btn = ttk.Menubutton(row1, text="Rapporter ▾", direction="below")
-    reports_btn.grid(row=0, column=10, padx=(0, 6), sticky="e")
+    reports_btn.grid(row=0, column=11, padx=(0, 6), sticky="e")
 
     actions_btn = ttk.Menubutton(row1, text="Handlinger ▾", direction="below")
-    actions_btn.grid(row=0, column=11, sticky="e")
+    actions_btn.grid(row=0, column=12, sticky="e")
 
     # Datanivå-indikator (Hovedbok / Kun saldobalanse)
     data_level_var = getattr(page, "_var_data_level", None)
     if data_level_var is not None:
         lbl_data_level = ttk.Label(row1, textvariable=data_level_var, style="Muted.TLabel")
-        lbl_data_level.grid(row=0, column=12, sticky="e", padx=(12, 0))
+        lbl_data_level.grid(row=0, column=13, sticky="e", padx=(12, 0))
         page._lbl_data_level = lbl_data_level
 
     actions_menu = tk.Menu(actions_btn, tearoff=False)
@@ -404,23 +407,11 @@ def build_toolbar(
     spn_max.bind("<FocusOut>", lambda _e: page._on_max_rows_changed())
     spn_max.bind("<Return>", lambda _e: page._on_max_rows_changed())
 
-    ttk.Label(row2, text="Min beløp:").grid(row=0, column=4, sticky="w")
-    ent_min = ttk.Entry(row2, textvariable=var_min, width=10)
-    ent_min.grid(row=0, column=5, sticky="w", padx=(4, 12))
-
-    ttk.Label(row2, text="Maks beløp:").grid(row=0, column=6, sticky="w")
-    ent_max = ttk.Entry(row2, textvariable=var_max, width=10)
-    ent_max.grid(row=0, column=7, sticky="w", padx=(4, 12))
-
-    ttk.Label(row2, text="MVA-filter:").grid(row=0, column=8, sticky="w")
-    cmb_mva = ttk.Combobox(
-        row2,
-        textvariable=var_mva_mode,
-        values=mva_filter_options,
-        width=18,
-        state="readonly",
-    )
-    cmb_mva.grid(row=0, column=9, sticky="w", padx=(4, 0))
+    # Min/Maks beløp og MVA-filter er flyttet til "Mer filter…"-popup.
+    # Widget-referansene beholdes som None — filter-logikken leser StringVars direkte.
+    ent_min = None
+    ent_max = None
+    cmb_mva = None
 
     # Skjul sumposter (kun relevant for Regnskapslinje-aggregering)
     var_hide_sumposter = getattr(page, "_var_hide_sumposter", None)
@@ -430,7 +421,7 @@ def build_toolbar(
             variable=var_hide_sumposter,
             command=page._on_hide_sumposter_changed,
         )
-        cb_hide_sum.grid(row=0, column=11, sticky="w", padx=(12, 0))
+        cb_hide_sum.grid(row=0, column=4, sticky="w", padx=(12, 0))
         page._cb_hide_sumposter = cb_hide_sum
 
     # Vis nullsaldo-kontoer (speiler _var_hide_zero: checked = vis, unchecked = skjul).
@@ -459,7 +450,7 @@ def build_toolbar(
             variable=var_show_zero,
             command=_on_show_zero_toggle,
         )
-        cb_show_zero.grid(row=0, column=12, sticky="w", padx=(8, 0))
+        cb_show_zero.grid(row=0, column=5, sticky="w", padx=(8, 0))
 
     # Inkluder tilleggsposteringer (ÅO) med indikator
     var_include_ao = getattr(page, "_var_include_ao", None)
@@ -469,9 +460,9 @@ def build_toolbar(
             variable=var_include_ao,
             command=page._on_include_ao_changed,
         )
-        cb_ao.grid(row=0, column=13, sticky="w", padx=(8, 0))
+        cb_ao.grid(row=0, column=6, sticky="w", padx=(8, 0))
         ao_count_label = ttk.Label(row2, text="", style="Muted.TLabel")
-        ao_count_label.grid(row=0, column=14, sticky="w", padx=(2, 0))
+        ao_count_label.grid(row=0, column=7, sticky="w", padx=(2, 0))
         page._ao_count_label = ao_count_label
 
     var_show_only_unmapped = getattr(page, "_var_show_only_unmapped", None)
@@ -481,30 +472,22 @@ def build_toolbar(
             variable=var_show_only_unmapped,
             command=page._on_show_only_unmapped_changed,
         )
-        cb_unmapped.grid(row=0, column=15, sticky="w", padx=(8, 0))
+        cb_unmapped.grid(row=0, column=8, sticky="w", padx=(8, 0))
         page._cb_show_only_unmapped = cb_unmapped
 
-    row2.grid_columnconfigure(16, weight=1)
+    row2.grid_columnconfigure(9, weight=1)
+
+    # Bilag/Motpart-feltene er fjernet fra toolbar (sjelden brukt i Analyse-fanen).
+    # StringVars beholdes (var_bilag, var_motpart) som tomme — filter blir no-op.
+    ent_bilag = None
+    ent_motpart = None
 
     row3 = ttk.Frame(filter_frame)
     row3.pack(fill="x", pady=(4, 0))
 
-    ttk.Label(row3, text="Bilag:").grid(row=0, column=0, sticky="w")
-    ent_bilag = ttk.Entry(row3, width=14, textvariable=var_bilag)
-    ent_bilag.grid(row=0, column=1, sticky="w", padx=(4, 12))
-
-    ttk.Label(row3, text="Motpart:").grid(row=0, column=2, sticky="w")
-    ent_motpart = ttk.Entry(row3, width=24, textvariable=var_motpart)
-    ent_motpart.grid(row=0, column=3, sticky="w", padx=(4, 12))
-
-    row3.grid_columnconfigure(4, weight=1)
-
-    row4 = ttk.Frame(filter_frame)
-    row4.pack(fill="x", pady=(4, 0))
-
     period_values = ["", *[str(i) for i in range(1, 13)]]
     period_picker, period_focus_widget = _build_period_range_picker(
-        row4,
+        row3,
         tk=tk,
         ttk=ttk,
         var_date_from=var_date_from,
@@ -515,9 +498,9 @@ def build_toolbar(
         ent_date_from = period_focus_widget
         ent_date_to = period_focus_widget
     else:
-        ttk.Label(row4, text="Periode fra:").grid(row=0, column=0, sticky="w")
+        ttk.Label(row3, text="Periode fra:").grid(row=0, column=0, sticky="w")
         ent_date_from = ttk.Combobox(
-            row4,
+            row3,
             textvariable=var_date_from,
             values=period_values,
             width=5,
@@ -525,9 +508,9 @@ def build_toolbar(
         )
         ent_date_from.grid(row=0, column=1, sticky="w", padx=(4, 12))
 
-        ttk.Label(row4, text="Periode til:").grid(row=0, column=2, sticky="w")
+        ttk.Label(row3, text="Periode til:").grid(row=0, column=2, sticky="w")
         ent_date_to = ttk.Combobox(
-            row4,
+            row3,
             textvariable=var_date_to,
             values=period_values,
             width=5,
@@ -535,36 +518,24 @@ def build_toolbar(
         )
         ent_date_to.grid(row=0, column=3, sticky="w", padx=(4, 0))
 
-    row4.grid_columnconfigure(4, weight=1)
+    row3.grid_columnconfigure(4, weight=1)
 
     # Ctrl+A i tekstfelt
     page._bind_entry_select_all(ent_search)
-    page._bind_entry_select_all(ent_bilag)
-    page._bind_entry_select_all(ent_motpart)
-    page._bind_entry_select_all(ent_min)
-    page._bind_entry_select_all(ent_max)
 
     # live filtering (debounced) + Enter for "apply now"
     ent_search.bind("<KeyRelease>", lambda _e: page._schedule_apply_filters())
-    ent_bilag.bind("<KeyRelease>", lambda _e: page._schedule_apply_filters())
-    ent_motpart.bind("<KeyRelease>", lambda _e: page._schedule_apply_filters())
-    ent_min.bind("<KeyRelease>", lambda _e: page._schedule_apply_filters())
-    ent_max.bind("<KeyRelease>", lambda _e: page._schedule_apply_filters())
 
     ent_search.bind("<Return>", lambda _e: page._apply_filters_now())
-    ent_bilag.bind("<Return>", lambda _e: page._apply_filters_now())
-    ent_motpart.bind("<Return>", lambda _e: page._apply_filters_now())
     ent_date_from.bind("<Return>", lambda _e: page._apply_filters_now())
     ent_date_to.bind("<Return>", lambda _e: page._apply_filters_now())
-    ent_min.bind("<Return>", lambda _e: page._apply_filters_now())
-    ent_max.bind("<Return>", lambda _e: page._apply_filters_now())
-    cmb_mva_code.bind("<Return>", lambda _e: page._apply_filters_now())
 
-    cmb_mva_code.bind("<<ComboboxSelected>>", lambda _e: page._apply_filters_now())
     cmb_dir.bind("<<ComboboxSelected>>", lambda _e: page._apply_filters_now())
     ent_date_from.bind("<<ComboboxSelected>>", lambda _e: page._apply_filters_now())
     ent_date_to.bind("<<ComboboxSelected>>", lambda _e: page._apply_filters_now())
-    cmb_mva.bind("<<ComboboxSelected>>", lambda _e: page._apply_filters_now())
+    # NB: cmb_mva_code, ent_min, ent_max, cmb_mva, ent_bilag, ent_motpart har egne
+    # bindings i "Mer filter…"-popup eller er fjernet — StringVar-trace under
+    # sikrer at endringer fra popup eller programmatisk set() trigger filteret.
 
     # Variabel-trace: gjør at paste/programmatisk set() også trigger
     _bind_var_write(var_search, _live_filter_cb)

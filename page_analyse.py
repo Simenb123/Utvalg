@@ -532,6 +532,100 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         else:
             self._open_tx_column_chooser()
 
+    def _open_advanced_filters(self) -> None:
+        """Popup-dialog for sjelden brukte filtre: MVA-kode, Min/Maks beløp.
+
+        StringVars deles med toolbaren — endringer i dialogen propageres
+        automatisk til filter-logikken via eksisterende StringVar-trace.
+        """
+        if not getattr(self, "_tk_ok", False):
+            return
+
+        existing = getattr(self, "_advanced_filters_dialog", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_set()
+                    return
+            except Exception:
+                pass
+
+        try:
+            dlg = tk.Toplevel(self)
+        except Exception:
+            return
+
+        dlg.title("Mer filter")
+        try:
+            dlg.transient(self.winfo_toplevel())
+        except Exception:
+            pass
+        dlg.resizable(False, False)
+
+        body = ttk.Frame(dlg, padding=(12, 10, 12, 10))
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+
+        var_mva_code = getattr(self, "_var_mva_code", None)
+        mva_code_values = list(
+            getattr(self, "_mva_code_values", [])
+            or [getattr(self, "MVA_CODE_ALL_LABEL", "Alle")]
+        )
+        ttk.Label(body, text="MVA-kode:").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        cmb_mva_code = ttk.Combobox(
+            body,
+            textvariable=var_mva_code,
+            values=mva_code_values,
+            width=18,
+            state="readonly",
+        )
+        cmb_mva_code.grid(row=0, column=1, sticky="we", padx=(8, 0), pady=(0, 6))
+
+        var_min = getattr(self, "_var_min", None)
+        ttk.Label(body, text="Min beløp:").grid(row=1, column=0, sticky="w", pady=(0, 6))
+        ent_min = ttk.Entry(body, textvariable=var_min, width=20)
+        ent_min.grid(row=1, column=1, sticky="we", padx=(8, 0), pady=(0, 6))
+
+        var_max = getattr(self, "_var_max", None)
+        ttk.Label(body, text="Maks beløp:").grid(row=2, column=0, sticky="w", pady=(0, 6))
+        ent_max = ttk.Entry(body, textvariable=var_max, width=20)
+        ent_max.grid(row=2, column=1, sticky="we", padx=(8, 0), pady=(0, 6))
+
+        button_row = ttk.Frame(dlg, padding=(12, 0, 12, 10))
+        button_row.grid(row=1, column=0, sticky="ew")
+        button_row.columnconfigure(0, weight=1)
+
+        def _on_close() -> None:
+            self._advanced_filters_dialog = None
+            self._cmb_mva_code = None
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+
+        ttk.Button(button_row, text="Lukk", command=_on_close).grid(row=0, column=1, sticky="e")
+        dlg.protocol("WM_DELETE_WINDOW", _on_close)
+        dlg.bind("<Escape>", lambda _e: _on_close())
+        dlg.bind("<Return>", lambda _e: _on_close())
+
+        # La refresh_mva_codes oppdatere comboen mens dialogen er åpen.
+        self._cmb_mva_code = cmb_mva_code
+        self._advanced_filters_dialog = dlg
+
+        try:
+            dlg.update_idletasks()
+            x = self.winfo_rootx() + 80
+            y = self.winfo_rooty() + 80
+            dlg.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        try:
+            ent_min.focus_set()
+        except Exception:
+            pass
+
     def _copy_selected_tx_rows_to_clipboard(self) -> None:
         if not self._tk_ok:
             return
