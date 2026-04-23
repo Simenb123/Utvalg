@@ -41,7 +41,7 @@ except Exception:
     FagchatPage = None  # type: ignore
 
 try:
-    from page_documents import DocumentsPage
+    from src.pages.documents import DocumentsPage
 except Exception:
     DocumentsPage = None  # type: ignore
 
@@ -844,6 +844,15 @@ class App(tk.Tk):
                 self.after_idle(self._refresh_scoping_from_session)
             except Exception:
                 self._refresh_scoping_from_session()
+            return
+
+        if selected_widget is getattr(self, "page_documents", None):
+            # Auto-refresh ved aktivering — sparer brukeren for å trykke
+            # "Oppdater" hver gang de bytter til fanen.
+            try:
+                self.after_idle(self._refresh_documents_on_tab_activate)
+            except Exception:
+                self._refresh_documents_on_tab_activate()
 
     def _dataset_store_context(self) -> tuple[str | None, str | None]:
         try:
@@ -930,6 +939,30 @@ class App(tk.Tk):
                 page.on_client_changed(client, year)
         except Exception:
             log.exception("Scoping refresh after tab change failed")
+
+    def _refresh_documents_on_tab_activate(self) -> None:
+        """Auto-refresh Dokumenter-fanen når brukeren aktiverer den.
+
+        Bruker DocumentsPage._refresh() (samme som "Oppdater"-knappen)
+        i stedet for refresh_from_session() — sistnevnte returnerer
+        tidlig hvis (klient, år) ikke er endret. Brukeren forventer at
+        ny fil dukket opp uten å klikke noe.
+        """
+        try:
+            page = getattr(self, "page_documents", None)
+            if page is None:
+                return
+            # Sørg for at klient/år er synket først
+            if hasattr(page, "refresh_from_session"):
+                try:
+                    page.refresh_from_session(session)
+                except Exception:
+                    pass
+            # Tving en disk-skann uavhengig av endring
+            if hasattr(page, "_refresh"):
+                page._refresh()
+        except Exception:
+            log.exception("Documents auto-refresh on tab change failed")
 
     def _on_data_ready(self, df: pd.DataFrame) -> None:
         """Kalles når dataset er lastet.
