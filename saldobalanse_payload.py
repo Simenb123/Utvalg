@@ -1014,21 +1014,33 @@ def _build_decorated_base_payload(
 
     name_cols = [col for col in ("Kontonavn_effective", "Kontonavn_base", "Kontonavn_adjusted") if col in merged.columns]
     if name_cols:
-        merged["Kontonavn"] = merged[name_cols].apply(_first_text_value, axis=1)
+        # Vektorisert alternativ til df.apply(_first_text_value, axis=1):
+        # bruker pandas' coalesce-mønster (først ikke-tom verdi per rad).
+        cleaned_cols: list[pd.Series] = []
+        for col in name_cols:
+            s = merged[col].astype("string").str.strip()
+            s = s.mask(s.str.lower().isin({"nan", "none", "<na>"}), "")
+            s = s.fillna("")
+            cleaned_cols.append(s)
+        # Start med første kolonne, fyll inn fra neste der tom.
+        navn = cleaned_cols[0]
+        for s in cleaned_cols[1:]:
+            navn = navn.mask(navn == "", s)
+        merged["Kontonavn"] = navn.astype(str)
     else:
         merged["Kontonavn"] = ""
 
     merged["IB"] = pd.to_numeric(merged.get("IB_effective"), errors="coerce").fillna(0.0)
     merged["Endring"] = pd.to_numeric(merged.get("Endring_effective"), errors="coerce").fillna(0.0)
     merged["UB"] = pd.to_numeric(merged.get("UB_effective"), errors="coerce").fillna(0.0)
-    merged["Kol"] = merged.apply(
-        lambda row: control_gl_basis_column_for_account(
-            row.get("Konto"),
-            row.get("Kontonavn"),
-            requested_basis="Endring",
-        ),
-        axis=1,
-    )
+    # Vektorisert: list-comp over tolist() er typisk 10-20× raskere enn
+    # df.apply(axis=1) når funksjonen er ren Python og ikke pandas-operasjoner.
+    _kol_konto = merged["Konto"].tolist()
+    _kol_navn = merged["Kontonavn"].tolist()
+    merged["Kol"] = [
+        control_gl_basis_column_for_account(k, n, requested_basis="Endring")
+        for k, n in zip(_kol_konto, _kol_navn)
+    ]
     merged["UB før ÅO"] = pd.to_numeric(merged.get("UB_base"), errors="coerce").fillna(merged["UB"])
     merged["UB etter ÅO"] = pd.to_numeric(merged.get("UB_adjusted"), errors="coerce").fillna(merged["UB"])
     merged["Tilleggspostering"] = merged["UB etter ÅO"] - merged["UB før ÅO"]
