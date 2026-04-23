@@ -32,6 +32,11 @@ def _build_period_range_picker(
     var_date_from: Any,
     var_date_to: Any,
 ) -> tuple[Any | None, Any | None]:
+    """Kompakt periodevelger.
+
+    Klikk: utvider/justerer range. Dobbeltklikk eller høyreklikk: nullstiller
+    til "Hele året". Ingen separat reset-knapp — gestene erstatter den.
+    """
     canvas_cls = getattr(tk, "Canvas", None)
     if canvas_cls is None:
         return None, None
@@ -39,8 +44,8 @@ def _build_period_range_picker(
     outer = ttk.Frame(master)
     ttk.Label(outer, text="Periode:").pack(side="left")
 
-    canvas_width = 380
-    canvas_height = 52
+    canvas_width = 360
+    canvas_height = 26
 
     canvas = canvas_cls(
         outer,
@@ -50,20 +55,14 @@ def _build_period_range_picker(
         bd=0,
         relief="flat",
         background="#FFFFFF",
+        cursor="hand2",
     )
     canvas.pack(side="left", padx=(8, 10))
 
-    btn_reset = ttk.Button(
-        outer,
-        text="Hele året",
-        command=lambda: _set_range(None, None),
-    )
-    btn_reset.pack(side="left")
-
-    left_pad = 18
-    right_pad = 18
-    base_y = 24
-    marker_r = 5
+    left_pad = 12
+    right_pad = 12
+    base_y = 9
+    marker_r = 4
 
     def _month_x(month: int) -> float:
         usable = canvas_width - left_pad - right_pad
@@ -98,6 +97,10 @@ def _build_period_range_picker(
         if from_value is None or to_value is None:
             _set_range(month, month)
             return "break"
+        # Klikk på eksisterende endepunkt → nullstill (lett discovery for "Hele året").
+        if month == from_value == to_value:
+            _set_range(None, None)
+            return "break"
         if abs(month - from_value) <= abs(month - to_value):
             from_value = month
         else:
@@ -107,7 +110,7 @@ def _build_period_range_picker(
         _set_range(from_value, to_value)
         return "break"
 
-    def _on_double_click(_event=None) -> str:
+    def _on_clear(_event=None) -> str:
         _set_range(None, None)
         return "break"
 
@@ -121,7 +124,8 @@ def _build_period_range_picker(
         line_start = _month_x(1)
         line_end = _month_x(12)
 
-        canvas.create_line(line_start, base_y, line_end, base_y, fill="#7A869A", width=2)
+        # Sentralt skinn-stripe.
+        canvas.create_line(line_start, base_y, line_end, base_y, fill="#C8D1DC", width=2)
 
         if from_value is not None and to_value is not None:
             canvas.create_line(
@@ -130,22 +134,27 @@ def _build_period_range_picker(
                 _month_x(to_value),
                 base_y,
                 fill="#2F6FED",
-                width=6,
+                width=4,
                 capstyle="round",
             )
 
         for month in range(1, 13):
             x = _month_x(month)
-            canvas.create_line(x, base_y - 8, x, base_y + 8, fill="#4C6A91", width=1)
-            if from_value is None or to_value is None:
-                fill = "#FFFFFF"
-                outline = "#4C6A91"
-            elif from_value <= month <= to_value:
-                fill = "#FFF59D" if month not in {from_value, to_value} else "#2F6FED"
+            in_range = (
+                from_value is not None
+                and to_value is not None
+                and from_value <= month <= to_value
+            )
+            is_endpoint = in_range and month in {from_value, to_value}
+            if is_endpoint:
+                fill = "#2F6FED"
+                outline = "#2F6FED"
+            elif in_range:
+                fill = "#2F6FED"
                 outline = "#2F6FED"
             else:
                 fill = "#FFFFFF"
-                outline = "#4C6A91"
+                outline = "#7A869A"
             canvas.create_oval(
                 x - marker_r,
                 base_y - marker_r,
@@ -153,16 +162,20 @@ def _build_period_range_picker(
                 base_y + marker_r,
                 fill=fill,
                 outline=outline,
-                width=2 if month in {from_value, to_value} else 1,
+                width=1,
             )
-            canvas.create_text(x, base_y + 16, text=str(month), fill="#42526E")
-
-        status_text = "Hele året" if from_value is None or to_value is None else f"{from_value}-{to_value}"
-        canvas.create_text(line_end, 8, text=status_text, anchor="e", fill="#2F6FED")
+            text_color = "#1F4FA0" if in_range else "#5E6C84"
+            canvas.create_text(
+                x, base_y + 12,
+                text=str(month),
+                fill=text_color,
+                font=("Segoe UI", 7),
+            )
 
     try:
         canvas.bind("<Button-1>", _on_click)
-        canvas.bind("<Double-1>", _on_double_click)
+        canvas.bind("<Double-1>", _on_clear)
+        canvas.bind("<Button-3>", _on_clear)  # høyreklikk = nullstill
     except Exception:
         pass
 

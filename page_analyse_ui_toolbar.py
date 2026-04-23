@@ -481,50 +481,47 @@ def build_toolbar(
             command=_on_decimals_toggle,
         )
 
-    row2.grid_columnconfigure(4, weight=1)
-
-    # Bilag/Motpart-feltene er fjernet fra toolbar (sjelden brukt i Analyse-fanen).
-    # StringVars beholdes (var_bilag, var_motpart) som tomme — filter blir no-op.
-    ent_bilag = None
-    ent_motpart = None
-
-    row3 = ttk.Frame(filter_frame)
-    row3.pack(fill="x", pady=(4, 0))
-
+    # Periode-velgeren plasseres på samme rad som Kontoserier — sparer en hel
+    # vertikal rad og gir mer plass til listene under.
     period_values = ["", *[str(i) for i in range(1, 13)]]
     period_picker, period_focus_widget = _build_period_range_picker(
-        row3,
+        row2,
         tk=tk,
         ttk=ttk,
         var_date_from=var_date_from,
         var_date_to=var_date_to,
     )
     if period_picker is not None:
-        period_picker.grid(row=0, column=0, sticky="w")
+        period_picker.grid(row=0, column=4, sticky="w", padx=(24, 0))
         ent_date_from = period_focus_widget
         ent_date_to = period_focus_widget
     else:
-        ttk.Label(row3, text="Periode fra:").grid(row=0, column=0, sticky="w")
+        ttk.Label(row2, text="Periode fra:").grid(row=0, column=4, sticky="w", padx=(24, 0))
         ent_date_from = ttk.Combobox(
-            row3,
+            row2,
             textvariable=var_date_from,
             values=period_values,
             width=5,
             state="readonly",
         )
-        ent_date_from.grid(row=0, column=1, sticky="w", padx=(4, 12))
+        ent_date_from.grid(row=0, column=5, sticky="w", padx=(4, 12))
 
-        ttk.Label(row3, text="Periode til:").grid(row=0, column=2, sticky="w")
+        ttk.Label(row2, text="Periode til:").grid(row=0, column=6, sticky="w")
         ent_date_to = ttk.Combobox(
-            row3,
+            row2,
             textvariable=var_date_to,
             values=period_values,
             width=5,
             state="readonly",
         )
-        ent_date_to.grid(row=0, column=3, sticky="w", padx=(4, 0))
+        ent_date_to.grid(row=0, column=7, sticky="w", padx=(4, 0))
 
-    row3.grid_columnconfigure(4, weight=1)
+    row2.grid_columnconfigure(8, weight=1)
+
+    # Bilag/Motpart-feltene er fjernet fra toolbar (sjelden brukt i Analyse-fanen).
+    # StringVars beholdes (var_bilag, var_motpart) som tomme — filter blir no-op.
+    ent_bilag = None
+    ent_motpart = None
 
     # Ctrl+A i tekstfelt
     page._bind_entry_select_all(ent_search)
