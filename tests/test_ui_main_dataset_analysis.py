@@ -126,7 +126,6 @@ def test_dataset_ready_continues_when_analyse_refresh_fails() -> None:
                 (_ for _ in ()).throw(RuntimeError("boom")),
             )[-1],
         )
-        setattr(app.page_resultat, "on_dataset_loaded", lambda _df: called.append("resultat"))
         setattr(app.page_saldobalanse, "refresh_from_session", lambda _session: called.append("saldobalanse"))
         setattr(app.page_materiality, "refresh_from_session", lambda _session: called.append("materiality"))
         setattr(app.page_a07, "refresh_from_session", lambda _session: called.append("a07"))
@@ -144,7 +143,7 @@ def test_dataset_ready_continues_when_analyse_refresh_fails() -> None:
         # Analyse refreshes (og kastet) — andre sider skal ennå ikke være
         # refreshet eager, men ligge i dirty-mappingen.
         assert called == [("analyse", True)]
-        for page in (app.page_resultat, app.page_saldobalanse, app.page_materiality):
+        for page in (app.page_saldobalanse, app.page_materiality):
             assert page in app._post_load_dirty_refreshers
         # A07 var aldri eager og skal heller ikke være i mappingen
         # (den har egen lazy-refresh via _on_notebook_tab_changed)
@@ -175,7 +174,6 @@ def test_dataset_ready_only_eager_refreshes_analyse_others_marked_dirty() -> Non
         setattr(app, "after_idle", lambda fn: fn())
         setattr(app, "after", lambda _ms, fn: fn())
         setattr(app.page_analyse, "refresh_from_session", lambda _session, *, defer_heavy=False: called.append(("analyse", defer_heavy)))
-        setattr(app.page_resultat, "on_dataset_loaded", lambda _df: called.append("resultat"))
         setattr(app.page_saldobalanse, "refresh_from_session", lambda _session: called.append("saldobalanse"))
         setattr(app.page_regnskap, "refresh_from_session", lambda _session: called.append("regnskap"))
         setattr(app.page_materiality, "refresh_from_session", lambda _session: called.append("materiality"))
@@ -193,7 +191,6 @@ def test_dataset_ready_only_eager_refreshes_analyse_others_marked_dirty() -> Non
 
         # Kun Analyse skal være kalt eager — andre sider er lazy
         assert ("analyse", True) in called
-        assert "resultat" not in called
         assert "saldobalanse" not in called
         assert "regnskap" not in called
         assert "materiality" not in called
@@ -204,7 +201,6 @@ def test_dataset_ready_only_eager_refreshes_analyse_others_marked_dirty() -> Non
         # refreshet. AR og Consolidation har egne tab-handlers og skal
         # ikke være i mappingen.
         dirty = app._post_load_dirty_refreshers
-        assert app.page_resultat in dirty
         assert app.page_saldobalanse in dirty
         assert app.page_regnskap in dirty
         assert app.page_materiality in dirty

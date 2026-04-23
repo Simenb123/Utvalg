@@ -22,9 +22,12 @@ from page_admin import AdminPage
 from page_a07 import A07Page
 from page_utvalg_strata import UtvalgStrataPage
 
-# "Resultat" fanen i dette repoet er implementert via page_utvalg.UtvalgPage
-# (ikke page_resultat, som du nå får ModuleNotFoundError på)
-from page_utvalg import UtvalgPage
+# UtvalgPage brukes tidligere som "Resultat"-fane, men den er fjernet.
+# Importen beholdes som no-op-trygg hvis annen kode senere referer til den.
+try:
+    from page_utvalg import UtvalgPage  # noqa: F401
+except Exception:
+    UtvalgPage = None  # type: ignore
 from src.pages.logg import LoggPage
 from page_consolidation import ConsolidationPage
 from page_ar import ARPage
@@ -247,7 +250,6 @@ class App(tk.Tk):
         self.page_a07 = _build("a07", lambda: A07Page(self.nb))
         self.page_ar = _build("ar", lambda: ARPage(self.nb))
         self.page_utvalg = _build("utvalg_strata", lambda: UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample))
-        self.page_resultat = _build("resultat", lambda: UtvalgPage(self.nb))
         self.page_logg = _build("logg", lambda: LoggPage(self.nb))
         self.page_consolidation = _build("consolidation", lambda: ConsolidationPage(self.nb))
         self.page_regnskap = _build("regnskap", lambda: RegnskapPage(self.nb))
@@ -297,7 +299,6 @@ class App(tk.Tk):
         self.nb.add(self.page_ar, text="AR")
         self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
-        self.nb.add(self.page_resultat, text="Resultat")
         if self.page_fagchat is not None:
             self.nb.add(self.page_fagchat, text="Fagchat")
         if self.page_documents is not None:
@@ -637,7 +638,6 @@ class App(tk.Tk):
         self.page_a07 = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
         self.page_ar = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
-        self.page_resultat = SimpleNamespace()  # type: ignore[assignment]
         self.page_logg = SimpleNamespace()  # type: ignore[assignment]
         self.page_consolidation = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_regnskap = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
@@ -1024,13 +1024,6 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Analyse refresh after dataset load failed")
 
-        def _refresh_resultat() -> None:
-            try:
-                if hasattr(self.page_resultat, "on_dataset_loaded") and callable(getattr(self.page_resultat, "on_dataset_loaded")):
-                    self.page_resultat.on_dataset_loaded(df)  # type: ignore[attr-defined]
-            except Exception:
-                log.exception("Resultat refresh after dataset load failed")
-
         def _refresh_saldobalanse() -> None:
             try:
                 if hasattr(self.page_saldobalanse, "refresh_from_session") and callable(getattr(self.page_saldobalanse, "refresh_from_session")):
@@ -1165,7 +1158,6 @@ class App(tk.Tk):
         # Bygg mapping: side-widget → refresh-callable. Filtreres for
         # None (sider som ikke er konstruert i denne build-en).
         candidate_refreshers: list[tuple[object | None, callable]] = [
-            (getattr(self, "page_resultat", None),     _refresh_resultat),
             (getattr(self, "page_saldobalanse", None), _refresh_saldobalanse),
             (getattr(self, "page_regnskap", None),     _refresh_regnskap),
             (getattr(self, "page_materiality", None),  _refresh_materiality),
@@ -1277,35 +1269,13 @@ class App(tk.Tk):
             pass
 
     def _on_utvalg_commit_sample(self, df_sample: pd.DataFrame) -> None:
-        """Callback fra UtvalgStrataPage/SelectionStudio når brukeren klikker "Legg i utvalg"."""
-        if df_sample is None or df_sample.empty:
-            return
+        """Callback fra UtvalgStrataPage/SelectionStudio når brukeren klikker "Legg i utvalg".
 
-        df_to_result = df_sample.copy()
-
-        # Prøv å ekspandere bilag -> transaksjoner hvis vi har full dataset
-        df_all = getattr(session, "dataset", None)
-        if isinstance(df_all, pd.DataFrame) and not df_all.empty:
-            try:
-                df_tx = expand_bilag_sample_to_transactions(df_sample_bilag=df_sample, df_transactions=df_all)
-                if not df_tx.empty:
-                    df_to_result = df_tx
-            except Exception:
-                df_to_result = df_sample.copy()
-
-        # Oppdater Resultat-fanen
-        try:
-            if hasattr(self.page_resultat, "on_dataset_loaded"):
-                self.page_resultat.on_dataset_loaded(df_to_result.copy())  # type: ignore[attr-defined]
-        except Exception:
-            pass
-
-        # Bytt til Resultat-fanen
-        try:
-            if hasattr(self, "nb") and hasattr(self.nb, "select"):
-                self.nb.select(self.page_resultat)
-        except Exception:
-            pass
+        Tidligere åpnet denne en egen Resultat-fane med utvalget. Resultat-fanen
+        er fjernet, så callbacken er nå en no-op — utvalget vises i Utvalg-fanens
+        egen visning. Beholdes for å bevare callback-kontrakten mot UtvalgStrataPage.
+        """
+        return
 
 
 def create_app() -> App:
