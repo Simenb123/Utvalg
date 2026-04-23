@@ -407,39 +407,16 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         _on_tx_mode_fn = getattr(page, "_on_tx_view_mode_changed", None)
         if callable(_on_tx_mode_fn):
             _tx_mode_cb.bind("<<ComboboxSelected>>", lambda _e: _on_tx_mode_fn())
-    else:
-        ttk.Label(tx_header, text="Hovedbok").grid(row=0, column=1, sticky="w")
+    # NB: hadde tidligere en fallback-Label "Hovedbok" når _var_tx_view_mode mangler.
+    # Fjernet — Combobox-en speiler datanivå tydelig nok via valgte verdi.
 
     # "Klassifiser kontoer..."-knappen er fjernet fra Analyse-fanen.
     # Saldobalanse-fanen har fortsatt sin egen "Avansert klassifisering"-handling
     # (saldobalanse_actions.open_advanced_classification) som bruker samme
     # views_konto_klassifisering-modulen.
 
-    # Desimal-toggle
-    _var_dec = getattr(page, "_var_decimals", None)
-    if _var_dec is not None:
-        def _on_decimal_toggle():
-            try:
-                page._on_tx_view_mode_changed()
-            except Exception:
-                pass
-            try:
-                page._refresh_pivot()
-            except Exception:
-                pass
-        ttk.Checkbutton(
-            tx_header, text="Desimaler",
-            variable=_var_dec,
-            command=_on_decimal_toggle,
-        ).grid(row=0, column=3, padx=(12, 0), sticky="w")
-
-    # Eksporter aktiv visning til Excel
-    _export_view_fn = getattr(page, "_export_active_view_excel", None)
-    if callable(_export_view_fn):
-        ttk.Button(
-            tx_header, text="Eksporter\u2026",
-            command=_export_view_fn,
-        ).grid(row=0, column=4, padx=(12, 0), sticky="w")
+    # Desimaler-toggle og "Eksporter..."-knapp er flyttet til "Visning ▾"-menyen
+    # på rad 1 i toolbaren (eksport håndteres via Rapporter-/Handlinger-menyen).
 
     tx_outer.rowconfigure(1, weight=1)
     tx_outer.columnconfigure(0, weight=1)

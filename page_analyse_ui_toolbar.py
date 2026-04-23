@@ -213,6 +213,15 @@ def build_toolbar(
     )
     btn_advanced.grid(row=0, column=7, padx=(0, 6), sticky="e")
 
+    # Visning-menubutton: samler de små av/på-bryterne (Skjul Σ, Vis nullsaldo,
+    # Inkl. ÅO, Vis kun umappede, Desimaler) bak ett dropdown-element.
+    view_btn = ttk.Menubutton(row1, text="Visning ▾", direction="below")
+    view_btn.grid(row=0, column=8, padx=(0, 6), sticky="e")
+    view_menu = tk.Menu(view_btn, tearoff=False)
+    view_btn["menu"] = view_menu
+    page._view_menu_btn = view_btn
+    page._view_menu = view_menu
+
     columns_cmd = (
         getattr(page, "_open_column_chooser", None)
         or getattr(page, "_open_tx_column_chooser", None)
@@ -223,26 +232,22 @@ def build_toolbar(
         command=columns_cmd if callable(columns_cmd) else None,
         state=("normal" if callable(columns_cmd) else "disabled"),
     )
-    btn_columns.grid(row=0, column=8, padx=(0, 6), sticky="e")
+    btn_columns.grid(row=0, column=9, padx=(0, 6), sticky="e")
 
     btn_reset = ttk.Button(row1, text="Nullstill", command=page._reset_filters)
-    btn_reset.grid(row=0, column=9, padx=(0, 6), sticky="e")
+    btn_reset.grid(row=0, column=10, padx=(0, 6), sticky="e")
 
     btn_select_all = ttk.Button(row1, text="Marker alle", command=page._select_all_accounts)
-    btn_select_all.grid(row=0, column=10, padx=(0, 6), sticky="e")
+    btn_select_all.grid(row=0, column=11, padx=(0, 6), sticky="e")
 
     reports_btn = ttk.Menubutton(row1, text="Rapporter ▾", direction="below")
-    reports_btn.grid(row=0, column=11, padx=(0, 6), sticky="e")
+    reports_btn.grid(row=0, column=12, padx=(0, 6), sticky="e")
 
     actions_btn = ttk.Menubutton(row1, text="Handlinger ▾", direction="below")
-    actions_btn.grid(row=0, column=12, sticky="e")
+    actions_btn.grid(row=0, column=13, sticky="e")
 
-    # Datanivå-indikator (Hovedbok / Kun saldobalanse)
-    data_level_var = getattr(page, "_var_data_level", None)
-    if data_level_var is not None:
-        lbl_data_level = ttk.Label(row1, textvariable=data_level_var, style="Muted.TLabel")
-        lbl_data_level.grid(row=0, column=13, sticky="e", padx=(12, 0))
-        page._lbl_data_level = lbl_data_level
+    # Datanivå-indikator (Hovedbok / Kun saldobalanse) — fjernet fra UI.
+    # StringVar (_var_data_level) beholdes for bakoverkompat med eksisterende kode.
 
     actions_menu = tk.Menu(actions_btn, tearoff=False)
     actions_btn["menu"] = actions_menu
@@ -413,18 +418,18 @@ def build_toolbar(
     ent_max = None
     cmb_mva = None
 
-    # Skjul sumposter (kun relevant for Regnskapslinje-aggregering)
+    # Visning-bryterne (Skjul Σ, Vis nullsaldo, Inkl. ÅO, Vis kun umappede,
+    # Desimaler) er flyttet til "Visning ▾"-menyen på rad 1.
+    # _ao_count_label er fjernet (sjelden informativ).
     var_hide_sumposter = getattr(page, "_var_hide_sumposter", None)
     if var_hide_sumposter is not None:
-        cb_hide_sum = ttk.Checkbutton(
-            row2, text="Skjul \u03a3",
+        view_menu.add_checkbutton(
+            label="Skjul Σ",
             variable=var_hide_sumposter,
             command=page._on_hide_sumposter_changed,
         )
-        cb_hide_sum.grid(row=0, column=4, sticky="w", padx=(12, 0))
-        page._cb_hide_sumposter = cb_hide_sum
 
-    # Vis nullsaldo-kontoer (speiler _var_hide_zero: checked = vis, unchecked = skjul).
+    # Vis nullsaldo (speiler _var_hide_zero — checked = vis, unchecked = skjul).
     var_hide_zero = getattr(page, "_var_hide_zero", None)
     if var_hide_zero is not None:
         var_show_zero = getattr(page, "_var_show_zero", None)
@@ -445,37 +450,47 @@ def build_toolbar(
             except Exception:
                 pass
 
-        cb_show_zero = ttk.Checkbutton(
-            row2, text="Vis nullsaldo",
+        view_menu.add_checkbutton(
+            label="Vis nullsaldo",
             variable=var_show_zero,
             command=_on_show_zero_toggle,
         )
-        cb_show_zero.grid(row=0, column=5, sticky="w", padx=(8, 0))
 
-    # Inkluder tilleggsposteringer (ÅO) med indikator
     var_include_ao = getattr(page, "_var_include_ao", None)
     if var_include_ao is not None:
-        cb_ao = ttk.Checkbutton(
-            row2, text="Inkl. \u00c5O",
+        view_menu.add_checkbutton(
+            label="Inkl. ÅO",
             variable=var_include_ao,
             command=page._on_include_ao_changed,
         )
-        cb_ao.grid(row=0, column=6, sticky="w", padx=(8, 0))
-        ao_count_label = ttk.Label(row2, text="", style="Muted.TLabel")
-        ao_count_label.grid(row=0, column=7, sticky="w", padx=(2, 0))
-        page._ao_count_label = ao_count_label
 
     var_show_only_unmapped = getattr(page, "_var_show_only_unmapped", None)
     if var_show_only_unmapped is not None:
-        cb_unmapped = ttk.Checkbutton(
-            row2, text="Vis kun umappede",
+        view_menu.add_checkbutton(
+            label="Vis kun umappede",
             variable=var_show_only_unmapped,
             command=page._on_show_only_unmapped_changed,
         )
-        cb_unmapped.grid(row=0, column=8, sticky="w", padx=(8, 0))
-        page._cb_show_only_unmapped = cb_unmapped
 
-    row2.grid_columnconfigure(9, weight=1)
+    var_decimals = getattr(page, "_var_decimals", None)
+    if var_decimals is not None:
+        def _on_decimals_toggle() -> None:
+            try:
+                page._on_tx_view_mode_changed()
+            except Exception:
+                pass
+            try:
+                page._refresh_pivot()
+            except Exception:
+                pass
+
+        view_menu.add_checkbutton(
+            label="Desimaler",
+            variable=var_decimals,
+            command=_on_decimals_toggle,
+        )
+
+    row2.grid_columnconfigure(4, weight=1)
 
     # Bilag/Motpart-feltene er fjernet fra toolbar (sjelden brukt i Analyse-fanen).
     # StringVars beholdes (var_bilag, var_motpart) som tomme — filter blir no-op.
