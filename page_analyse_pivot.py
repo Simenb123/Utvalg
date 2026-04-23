@@ -262,48 +262,56 @@ def refresh_pivot(*, page: Any) -> None:
 
     # Profile-flagget logger hvilken pivot-modus som dispatchers og hvor
     # lang tid den underliggende funksjonen tar. Aktiveres med
-    # UTVALG_PROFILE_REFRESH=1 (samme flagg som _run_heavy_refresh_staged).
+    # UTVALG_PROFILE_REFRESH=1. Bruker try/finally så loggen kommer ut
+    # også om underfunksjonen kaster.
     try:
         from page_analyse_refresh import _PROFILE_REFRESH
     except Exception:
         _PROFILE_REFRESH = False
 
     import time as _time
-    _t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
     import logging
     _log = logging.getLogger("app")
+    _t0 = _time.perf_counter()
 
-    def _log_pivot_done(mode: str) -> None:
+    try:
+        if agg_mode == "Regnskapslinje":
+            try:
+                import page_analyse_rl
+                page_analyse_rl.refresh_rl_pivot(page=page)
+            except Exception as exc:
+                _log.warning("refresh_pivot (RL): %s", exc)
+            return
+
+        if agg_mode == "MVA-kode":
+            try:
+                import page_analyse_mva
+                page_analyse_mva.refresh_mva_pivot(page=page)
+            except Exception as exc:
+                _log.warning("refresh_pivot (MVA): %s", exc)
+            return
+
+        if agg_mode == "SB-konto":
+            refresh_sb_konto_pivot(page=page)
+            return
+
+        # Default + legacy: HB-konto
+        refresh_hb_konto_pivot(page=page)
+    finally:
         if _PROFILE_REFRESH:
             ms = (_time.perf_counter() - _t0) * 1000
-            _log.warning(f"[REFRESH PROFILE: refresh_pivot dispatch] mode={mode} | total={ms:.0f}ms")
-
-    if agg_mode == "Regnskapslinje":
-        try:
-            import page_analyse_rl
-            page_analyse_rl.refresh_rl_pivot(page=page)
-        except Exception as exc:
-            _log.warning("refresh_pivot (RL): %s", exc)
-        _log_pivot_done("Regnskapslinje")
-        return
-
-    if agg_mode == "MVA-kode":
-        try:
-            import page_analyse_mva
-            page_analyse_mva.refresh_mva_pivot(page=page)
-        except Exception as exc:
-            _log.warning("refresh_pivot (MVA): %s", exc)
-        _log_pivot_done("MVA-kode")
-        return
-
-    if agg_mode == "SB-konto":
-        refresh_sb_konto_pivot(page=page)
-        _log_pivot_done("SB-konto")
-        return
-
-    # Default + legacy: HB-konto
-    refresh_hb_konto_pivot(page=page)
-    _log_pivot_done("HB-konto")
+            # Log via standard print til stderr som ekstra sikring — Python-
+            # logging kan være konfigurert til å filtrere "app"-loggeren.
+            msg = f"[REFRESH PROFILE: refresh_pivot dispatch] mode={agg_mode} | total={ms:.0f}ms"
+            try:
+                _log.warning(msg)
+            except Exception:
+                pass
+            try:
+                import sys
+                print(msg, file=sys.stderr, flush=True)
+            except Exception:
+                pass
 
 
 def refresh_sb_konto_pivot(*, page: Any) -> None:
