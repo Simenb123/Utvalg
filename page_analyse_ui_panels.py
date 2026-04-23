@@ -508,28 +508,47 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     tx_frame.rowconfigure(0, weight=1)
     tx_frame.columnconfigure(0, weight=1)
 
+    tx_cols = tuple(getattr(page, "TX_COLS", ("Dato", "Bilag", "Tekst", "Beløp")))
     tx_tree = ttk.Treeview(
         tx_frame,
-        columns=getattr(page, "TX_COLS", ("Dato", "Bilag", "Tekst", "Beløp")),
+        columns=tx_cols,
         show="headings",
         selectmode="extended",
     )
     tx_tree.grid(row=0, column=0, sticky="nsew")
-    for col in tx_tree["columns"]:
-        tx_tree.heading(col, text=col)
-        tx_tree.column(col, width=140, anchor="w")
 
-    # Standard-bredder
-    for col, w, a in [
-        ("Konto", 70, "w"),
-        ("Kontonavn", 180, "w"),
-        ("Dato", 90, "w"),
-        ("Bilag", 90, "w"),
-        ("Tekst", 320, "w"),
-        ("Beløp", 110, "e"),
-    ]:
-        if col in tx_tree["columns"]:
-            tx_tree.column(col, width=w, anchor=a)
+    # Heading/column-oppsett, bredde-persistens, sortering, kolonnevelger
+    # og drag-n-drop håndteres av ManagedTreeview. Gamle pref-nøkler fra
+    # den håndlagde implementasjonen auto-migreres første gang siden
+    # lastes.
+    try:
+        from ui_managed_treeview import ManagedTreeview
+        from page_analyse_columns_presets import build_tx_column_specs
+
+        page._tx_managed = ManagedTreeview(
+            tx_tree,
+            view_id="analyse_tx",
+            column_specs=build_tx_column_specs(
+                tx_cols_default=getattr(page, "TX_COLS_DEFAULT", tx_cols),
+                pinned_cols=getattr(page, "PINNED_TX_COLS", ("Konto", "Kontonavn")),
+            ),
+            pref_prefix="ui",
+            legacy_pref_keys={
+                "visible_cols":  "analyse.tx_cols.visible",
+                "column_order":  "analyse.tx_cols.order",
+                "column_widths": "analyse.tx_cols.widths",
+            },
+        )
+    except Exception:
+        # Fallback: fall tilbake på gammelt oppsett hvis ManagedTreeview
+        # ikke kan konstrueres (f.eks. headless CI uten display).
+        page._tx_managed = None
+        for col in tx_tree["columns"]:
+            try:
+                tx_tree.heading(col, text=col)
+                tx_tree.column(col, width=140, anchor="w")
+            except Exception:
+                pass
 
     try:
         tx_tree.tag_configure("neg", foreground="red")
@@ -714,16 +733,12 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     if callable(_detail_select_fn):
         detail_accounts_tree.bind("<<TreeviewSelect>>", lambda _e=None: _detail_select_fn())
 
+    # Kolonne-drag (omorganisering) håndteres nå av ManagedTreeview via
+    # _tx_managed. Den gamle håndlagde <ButtonPress-1>/<B1-Motion>/
+    # <ButtonRelease-1>-triploggen kalles ikke lenger — dens
+    # _on_tx_tree_mouse_*-metoder beholdes for API-kompatibilitet men er
+    # i praksis ubrukt etter migreringen.
     _tx_double_click_fn = getattr(page, "_on_tx_tree_double_click", None)
-    _tx_press_fn = getattr(page, "_on_tx_tree_mouse_press", None)
-    _tx_drag_fn = getattr(page, "_on_tx_tree_mouse_drag", None)
-    _tx_release_fn = getattr(page, "_on_tx_tree_mouse_release", None)
-    if callable(_tx_press_fn):
-        tx_tree.bind("<ButtonPress-1>", lambda e: _tx_press_fn(e))
-    if callable(_tx_drag_fn):
-        tx_tree.bind("<B1-Motion>", lambda e: _tx_drag_fn(e))
-    if callable(_tx_release_fn):
-        tx_tree.bind("<ButtonRelease-1>", lambda e: _tx_release_fn(e))
 
     # Bilag drilldown: dobbelklikk / Enter på transaksjonslisten
     _open_drill_fn = getattr(page, "_open_bilag_drilldown_from_tx_selection", None)

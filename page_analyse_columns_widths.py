@@ -798,6 +798,24 @@ def configure_tx_tree_columns(*, page: Any) -> None:
     if tree is None:
         return
 
+    # ManagedTreeview owns column state after migration — sync via its
+    # update_columns API instead of hand-rolling tree.configure() which
+    # would tear down the manager's display/order tracking.
+    managed = getattr(page, "_tx_managed", None)
+    if managed is not None:
+        try:
+            from page_analyse_columns_presets import build_tx_column_specs
+            cols = tuple(getattr(page, "TX_COLS", page.TX_COLS_DEFAULT))
+            managed.update_columns(
+                build_tx_column_specs(
+                    tx_cols_default=cols,
+                    pinned_cols=getattr(page, "PINNED_TX_COLS", ("Konto", "Kontonavn")),
+                )
+            )
+        except Exception:
+            pass
+        return
+
     cols = tuple(getattr(page, "TX_COLS", page.TX_COLS_DEFAULT))
 
     try:

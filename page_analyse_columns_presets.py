@@ -8,12 +8,51 @@ som fasade for bakoverkompatibilitet.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Sequence
 
 import analyse_columns
 import preferences
 
 from page_analyse_columns_widths import configure_tx_tree_columns
+
+
+# =====================================================================
+# ColumnSpec-bygger for ManagedTreeview-drevet TX-tree
+# =====================================================================
+
+def build_tx_column_specs(
+    *,
+    tx_cols_default: Sequence[str],
+    pinned_cols: Sequence[str] = ("Konto", "Kontonavn"),
+):
+    """Returner ColumnSpec-liste for TX-treet.
+
+    Brukes av page_analyse_ui_panels når TX-treet opprettes med
+    ManagedTreeview (drag-n-drop, kolonnevelger, preferences). Bredder/
+    ankre kommer fra analyse_treewidths-heuristikken, som er samme kilde
+    som den tidligere manuelle oppsett-løkken i configure_tx_tree_columns
+    brukte.
+    """
+    from ui_managed_treeview import ColumnSpec
+    import analyse_treewidths
+
+    pinned_set = set(pinned_cols)
+    specs = []
+    for col in tx_cols_default:
+        specs.append(
+            ColumnSpec(
+                id=col,
+                heading=col,
+                width=analyse_treewidths.default_column_width(col),
+                minwidth=analyse_treewidths.column_minwidth(col),
+                anchor=analyse_treewidths.column_anchor(col),
+                stretch=col in {"Tekst", "Kontonavn"},
+                visible_by_default=True,
+                pinned=col in pinned_set,
+                sortable=True,
+            )
+        )
+    return specs
 
 
 # =====================================================================
