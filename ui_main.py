@@ -260,7 +260,11 @@ class App(tk.Tk):
         self.page_reskontro = _build("reskontro", lambda: ReskontroPage(self.nb))
         self.page_fagchat = _build("fagchat", lambda: FagchatPage(self.nb)) if FagchatPage is not None else None
         self.page_documents = _build("documents", lambda: DocumentsPage(self.nb)) if DocumentsPage is not None else None
-        self.page_statistikk = _build("statistikk", lambda: StatistikkPage(self.nb)) if StatistikkPage is not None else None
+        # Statistikk er nå en on-demand popup, ikke fast fane. Instansen lages
+        # først ved første høyreklikk → "Vis statistikk for ..." via
+        # _open_statistikk_popup(). Attributtet beholdes som None så eksterne
+        # consumers (f.eks. session.APP.page_statistikk) ikke krasjer.
+        self.page_statistikk = None
         self.page_driftsmidler = _build("driftsmidler", lambda: DriftsmidlerPage(self.nb)) if DriftsmidlerPage is not None else None
         self.page_revisjonshandlinger = _build("revisjonshandlinger", lambda: RevisjonshandlingerPage(self.nb)) if RevisjonshandlingerPage is not None else None
         self.page_oversikt = _build("oversikt", lambda: OversiktPage(self.nb, nb=self.nb, dataset_page=self.page_dataset)) if OversiktPage is not None else None
@@ -303,8 +307,7 @@ class App(tk.Tk):
             self.nb.add(self.page_fagchat, text="Fagchat")
         if self.page_documents is not None:
             self.nb.add(self.page_documents, text="Dokumenter")
-        if self.page_statistikk is not None:
-            self.nb.add(self.page_statistikk, text="Statistikk")
+        # Statistikk lives in a Toplevel-popup — ikke i tab-strippen.
         try:
             self.nb.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
         except Exception:
@@ -929,6 +932,96 @@ class App(tk.Tk):
                 self.page_ar.refresh_from_session(session)  # type: ignore[attr-defined]
         except Exception:
             log.exception("AR refresh after tab change failed")
+
+    def _open_statistikk_popup(self, *, regnr: int | None = None) -> None:
+        """Åpne Statistikk i en Toplevel-popup (erstatter tidligere egen fane).
+
+        Første kall instansierer StatistikkPage inne i Toplevel-en og lagrer
+        referansen på self.page_statistikk (for bakoverkompat). Senere kall
+        gjenbruker vinduet hvis det fortsatt er levende.
+        """
+        existing = getattr(self, "_statistikk_toplevel", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    try:
+                        existing.deiconify()
+                        existing.lift()
+                        existing.focus_set()
+                    except Exception:
+                        pass
+                    if regnr is not None and self.page_statistikk is not None:
+                        try:
+                            self.page_statistikk.show_regnr(int(regnr))
+                        except Exception:
+                            pass
+                    return
+            except Exception:
+                pass
+            self._statistikk_toplevel = None
+            self.page_statistikk = None
+
+        if StatistikkPage is None:
+            return
+
+        try:
+            top = tk.Toplevel(self)
+        except Exception:
+            return
+
+        top.title("Statistikk")
+        try:
+            top.geometry("1200x800")
+        except Exception:
+            pass
+        top.minsize(800, 500)
+
+        try:
+            stat_page = StatistikkPage(top)
+            stat_page.pack(fill="both", expand=True)
+        except Exception:
+            log.exception("Kunne ikke bygge StatistikkPage i popup")
+            try:
+                top.destroy()
+            except Exception:
+                pass
+            return
+
+        # Koble til Analyse-page (samme som tidligere ved fane-init).
+        try:
+            if hasattr(stat_page, "set_analyse_page"):
+                stat_page.set_analyse_page(self.page_analyse)
+        except Exception:
+            pass
+
+        # Synk klient/år slik at data lastes umiddelbart.
+        try:
+            if hasattr(stat_page, "refresh_from_session"):
+                stat_page.refresh_from_session(session)
+        except Exception:
+            pass
+
+        def _on_close() -> None:
+            self._statistikk_toplevel = None
+            self.page_statistikk = None
+            try:
+                top.destroy()
+            except Exception:
+                pass
+
+        try:
+            top.protocol("WM_DELETE_WINDOW", _on_close)
+        except Exception:
+            pass
+
+        self._statistikk_toplevel = top
+        self.page_statistikk = stat_page
+
+        if regnr is not None:
+            try:
+                stat_page.show_regnr(int(regnr))
+            except Exception:
+                pass
 
     def _refresh_materiality_from_session(self) -> None:
         """Auto-refresh Vesentlighet-fanen når brukeren aktiverer den.

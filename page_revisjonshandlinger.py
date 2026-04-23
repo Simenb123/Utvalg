@@ -1205,28 +1205,22 @@ class RevisjonshandlingerPage(ttk.Frame):
             menu.grab_release()
 
     def _open_statistikk_for_regnr(self, regnr: str) -> None:
-        """Åpne Statistikk-fanen og vis oppgitt regnskapslinje.
+        """Åpne Statistikk-popup med oppgitt regnskapslinje.
 
-        Samme mønster som analyse-fanens "Vis statistikk for ..."-høyreklikk.
+        Statistikk er ikke lenger en egen fane — vises i Toplevel som
+        håndteres av App._open_statistikk_popup.
         """
         try:
             import session as _session
             app = getattr(_session, "APP", None)
-            if app is None:
+            opener = getattr(app, "_open_statistikk_popup", None) if app is not None else None
+            if not callable(opener):
                 return
-            stat_page = getattr(app, "page_statistikk", None)
-            if stat_page is None:
-                return
-            nb = getattr(app, "nb", None)
-            if nb is not None:
-                try:
-                    nb.select(stat_page)
-                except Exception:
-                    pass
             try:
-                stat_page.show_regnr(int(regnr))
+                regnr_int = int(regnr)
             except (TypeError, ValueError):
-                pass
+                return
+            opener(regnr=regnr_int)
         except Exception:
             pass
 

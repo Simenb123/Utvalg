@@ -182,18 +182,21 @@ def _open_action_link(
 
 
 def _open_statistikk(*, page: Any, regnr: str) -> None:
-    """Bytt til Statistikk-fanen og vis valgt regnskapslinje."""
+    """Åpne Statistikk i popup for valgt regnskapslinje.
+
+    Statistikk er ikke lenger en egen fane — vises i Toplevel som håndteres
+    av App._open_statistikk_popup. Signaturen beholdes for bakoverkompat.
+    """
     try:
         import session as _session
         app = getattr(_session, "APP", None)
-        if app is None:
+        opener = getattr(app, "_open_statistikk_popup", None) if app is not None else None
+        if not callable(opener):
             return
-        stat_page = getattr(app, "page_statistikk", None)
-        if stat_page is None:
+        try:
+            regnr_int = int(regnr)
+        except (TypeError, ValueError):
             return
-        nb = getattr(app, "nb", None)
-        if nb is not None:
-            nb.select(stat_page)
-        stat_page.show_regnr(int(regnr))
+        opener(regnr=regnr_int)
     except Exception:
         pass
