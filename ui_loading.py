@@ -76,6 +76,18 @@ class LoadingOverlay:
 
         try:
             img = Image.open(str(pic_path))
+
+            # Crop near-white kanter slik at motivet flukter med
+            # overlay-bakgrunnen (samme tilnærming som splash).
+            try:
+                gray = img.convert("L")
+                bw = gray.point(lambda p: 255 if p < 250 else 0)
+                bbox = bw.getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+            except Exception:
+                pass
+
             w, h = img.size
             target_w = self._BANNER_WIDTH
             target_h = max(1, int(round(target_w * h / w)))
@@ -90,6 +102,19 @@ class LoadingOverlay:
         parent = self.master.winfo_toplevel()
         win = self._win
         if win is None:
+            # Theme-farger fra vaak_tokens (samme som splash-skjermen)
+            try:
+                import vaak_tokens as _vt
+                bg_color = "#" + _vt.BG_SAND_SOFT
+                border_color = "#" + _vt.SAGE_DARK
+                text_color = "#" + _vt.FOREST
+                font_family = _vt.FONT_FAMILY_BODY
+            except Exception:
+                bg_color = "#F4EDDC"
+                border_color = "#8CBF7C"
+                text_color = "#325B1E"
+                font_family = "Segoe UI"
+
             win = tk.Toplevel(parent)
             win.overrideredirect(True)
             try:
@@ -97,29 +122,49 @@ class LoadingOverlay:
             except Exception:
                 pass
             win.withdraw()
-            frm = ttk.Frame(win, padding=12)
-            frm.place(relx=0.5, rely=0.5, anchor="center")
-            # AarVaaken-banner over teksten — vises kun hvis bildet kan lastes.
+            win.configure(bg=border_color)  # ramme-farge
+
+            # Inner frame: pack med 2px padding gir 2px sage-ramme i win-bg
+            inner = tk.Frame(win, bg=bg_color)
+            inner.pack(padx=2, pady=2, fill="both", expand=True)
+
+            # AarVaaken-banner — vises kun hvis bildet kan lastes
             banner = self._load_banner()
             if banner is not None:
-                banner_lbl = ttk.Label(frm, image=banner)
-                banner_lbl.image = banner  # behold referanse mot GC
-                banner_lbl.pack(pady=(0, 10))
-            lbl = ttk.Label(frm, text=text)
-            lbl.pack(pady=(0, 8))
-            pb = ttk.Progressbar(frm, mode="indeterminate", length=220)
-            pb.pack()
+                banner_lbl = tk.Label(inner, image=banner, bg=bg_color, borderwidth=0)
+                banner_lbl.image = banner  # GC-referanse
+                banner_lbl.pack(padx=24, pady=(20, 12))
+
+            # Status-tekst i Forest-grønn (samme som splash-undertittel)
+            lbl = tk.Label(
+                inner,
+                text=text,
+                bg=bg_color,
+                fg=text_color,
+                font=(font_family, 10, "normal"),
+            )
+            lbl.pack(padx=24, pady=(0, 10))
+
+            pb = ttk.Progressbar(inner, mode="indeterminate", length=240)
+            pb.pack(padx=24, pady=(0, 20))
+
             self._win = win
             self._lbl = lbl
             self._pb = pb
 
-        # cover parent
+        # Sentrer kompakt overlay på parent-vinduet (ikke dekk hele).
+        # Inner-frame styrer størrelsen via dens requested_size + 2px ramme.
         try:
-            w = max(parent.winfo_width(), 400)
-            h = max(parent.winfo_height(), 200)
-            x = parent.winfo_rootx()
-            y = parent.winfo_rooty()
-            self._win.geometry(f"{w}x{h}+{x}+{y}")  # type: ignore[union-attr]
+            self._win.update_idletasks()  # type: ignore[union-attr]
+            ww = self._win.winfo_reqwidth()  # type: ignore[union-attr]
+            wh = self._win.winfo_reqheight()  # type: ignore[union-attr]
+            pw = max(parent.winfo_width(), 400)
+            ph = max(parent.winfo_height(), 200)
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            x = px + max(0, (pw - ww) // 2)
+            y = py + max(0, (ph - wh) // 2)
+            self._win.geometry(f"{ww}x{wh}+{x}+{y}")  # type: ignore[union-attr]
         except Exception:
             pass
 
