@@ -93,6 +93,20 @@ def refresh_mapping_issues(page: Any) -> None:
             pass
 
 
+# Modul-nivå cache for mapping-drift. Profil viste 350-600ms pr kall —
+# kalt hver Analyse-refresh. Resultatet er deterministisk i input-DataFrames
+# (samme klient/år + samme SB/intervals → samme drift), så cache pr
+# (client, year, id(sb_df), id(sb_prev_df)) er trygt. Ny dataset gir nytt
+# DataFrame-objekt med ny id → automatisk invalidering.
+_DRIFT_CACHE: tuple[tuple, list] | None = None
+
+
+def _invalidate_drift_cache() -> None:
+    """Tving re-beregning. For tester eller eksplisitt invalidering."""
+    global _DRIFT_CACHE
+    _DRIFT_CACHE = None
+
+
 def _compute_mapping_drifts(page: Any) -> list:
     """Hent mapping-drift for gjeldende side. Returnerer tom liste ved feil."""
     try:
@@ -115,12 +129,27 @@ def _compute_mapping_drifts(page: Any) -> list:
     sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
     intervals = getattr(page, "_rl_intervals", None)
     regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+
+    global _DRIFT_CACHE
+    cache_key = (
+        client, year,
+        id(sb_df) if sb_df is not None else 0,
+        id(sb_prev_df) if sb_prev_df is not None else 0,
+        id(intervals) if intervals is not None else 0,
+        id(regnskapslinjer) if regnskapslinjer is not None else 0,
+    )
+    cached = _DRIFT_CACHE
+    if cached is not None and cached[0] == cache_key:
+        return list(cached[1])
+
     try:
-        return rl_mapping_drift.detect_mapping_drift(
+        result = rl_mapping_drift.detect_mapping_drift(
             client=client, year=year,
             sb_df=sb_df, sb_prev_df=sb_prev_df,
             intervals=intervals, regnskapslinjer=regnskapslinjer,
         )
+        _DRIFT_CACHE = (cache_key, list(result) if result else [])
+        return result
     except Exception:
         return []
 
