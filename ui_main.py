@@ -180,6 +180,10 @@ class App(tk.Tk):
     def __init__(self) -> None:
         self._tk_ok: bool = True
         self._tk_init_error: Optional[Exception] = None
+        # Side-widget → refresh-callable. Populeres av _on_data_ready
+        # for sider som ikke er Analyse — de refreshes først når brukeren
+        # aktiverer fanen (lazy refresh, jf. _on_notebook_tab_changed).
+        self._post_load_dirty_refreshers: dict = {}
 
         try:
             super().__init__()
@@ -538,6 +542,15 @@ class App(tk.Tk):
 
         self._sync_session_context_from_dataset_store()
 
+        # Lazy refresh: hvis fanen ble markert som dirty etter datasett-last
+        # uten å ha blitt åpnet ennå, kjør den nå (kun én gang).
+        try:
+            dirty_fn = self._post_load_dirty_refreshers.pop(selected_widget, None)
+            if dirty_fn is not None:
+                self.after_idle(dirty_fn)
+        except Exception:
+            pass
+
         if selected_widget is getattr(self, "page_consolidation", None):
             try:
                 self.after_idle(self._refresh_consolidation_from_session)
@@ -795,34 +808,36 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Oversikt refresh after dataset load failed")
 
+        # Eager: kun Analyse (mål-fanen brukeren bytter til umiddelbart).
+        # Lazy: alle andre faner får en "dirty"-markering og refreshes
+        # først når brukeren aktiverer dem. Tidligere ble alle 13 faner
+        # refreshet etter hverandre over 310ms etter datasett-last —
+        # mesteparten av de tunge operasjonene var bortkastet hvis
+        # brukeren bare skulle se Analyse-fanen.
         try:
             self.after_idle(_refresh_analyse)
-            self.after(25, _refresh_resultat)
-            self.after(40, _refresh_saldobalanse)
-            self.after(60, _refresh_regnskap)
-            self.after(85, _refresh_materiality)
-            self.after(110, _refresh_mva)
-            self.after(135, _refresh_lonn)
-            self.after(160, _refresh_skatt)
-            self.after(185, _refresh_reskontro)
-            self.after(210, _refresh_documents)
-            self.after(235, _refresh_statistikk)
-            self.after(260, _refresh_driftsmidler)
-            self.after(310, _refresh_oversikt)
         except Exception:
             _refresh_analyse()
-            _refresh_resultat()
-            _refresh_saldobalanse()
-            _refresh_regnskap()
-            _refresh_materiality()
-            _refresh_mva()
-            _refresh_lonn()
-            _refresh_skatt()
-            _refresh_reskontro()
-            _refresh_documents()
-            _refresh_statistikk()
-            _refresh_driftsmidler()
-            _refresh_oversikt()
+
+        # Bygg mapping: side-widget → refresh-callable. Filtreres for
+        # None (sider som ikke er konstruert i denne build-en).
+        candidate_refreshers: list[tuple[object | None, callable]] = [
+            (getattr(self, "page_resultat", None),     _refresh_resultat),
+            (getattr(self, "page_saldobalanse", None), _refresh_saldobalanse),
+            (getattr(self, "page_regnskap", None),     _refresh_regnskap),
+            (getattr(self, "page_materiality", None),  _refresh_materiality),
+            (getattr(self, "page_mva", None),          _refresh_mva),
+            (getattr(self, "page_lonn", None),         _refresh_lonn),
+            (getattr(self, "page_skatt", None),        _refresh_skatt),
+            (getattr(self, "page_reskontro", None),    _refresh_reskontro),
+            (getattr(self, "page_documents", None),    _refresh_documents),
+            (getattr(self, "page_statistikk", None),   _refresh_statistikk),
+            (getattr(self, "page_driftsmidler", None), _refresh_driftsmidler),
+            (getattr(self, "page_oversikt", None),     _refresh_oversikt),
+        ]
+        self._post_load_dirty_refreshers = {
+            widget: fn for widget, fn in candidate_refreshers if widget is not None
+        }
 
         # Vis Analyse som neste steg
         try:
