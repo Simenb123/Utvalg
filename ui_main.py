@@ -36,7 +36,7 @@ from page_skatt import SkattPage
 from page_reskontro import ReskontroPage
 
 try:
-    from page_fagchat import FagchatPage
+    from src.pages.fagchat import FagchatPage
 except Exception:
     FagchatPage = None  # type: ignore
 
