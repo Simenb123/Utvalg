@@ -63,6 +63,31 @@ from .patterns import (
     _VAT_PATTERNS,
 )
 
+# Bilagsprint detection lives in ``bilagsprint.py``. Re-exported here so
+# any legacy caller that does ``from document_engine.engine import
+# _is_bilagsprint_segment`` still works.
+# Amount self-consistency + joint selection + redo-OCR triggers live in
+# ``amount_consistency.py``. Re-exported here so legacy call-sites (tests,
+# external modules) keep working.
+from .amount_consistency import (
+    _amounts_self_consistent,
+    _apply_joint_amount_selection,
+    _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
+    _is_redo_extraction_better,
+    _OCR_REDO_AMOUNT_ABS_THRESHOLD,
+    _OCR_REDO_AMOUNT_REL_THRESHOLD,
+    _OCR_REDO_AMOUNT_SCORE_GATE,
+    _select_self_consistent_amounts,
+    _should_redo_ocr_for_amounts,
+    _validate_amount_self_consistency,
+)
+
+from .bilagsprint import (
+    _is_bilagsprint_segment,
+    _segment_is_bilagsprint,
+    _tag_bilagsprint_pages,
+)
+
 # Extractors + their scoring helpers live in ``extractors.py``. Re-exported
 # here so engine.py callers (and legacy imports from tests) can keep using
 # the original private names.
@@ -622,43 +647,6 @@ def _extract_text_from_pdf(
     )
 
 
-def _tag_bilagsprint_pages(segments: list[TextSegment]) -> None:
-    """Set ``is_bilagsprint_page=True`` on every segment from a Tripletex
-    accounting cover page.
-
-    The classification operates at *page granularity*: all segments on a
-    page are combined, and the page is declared a bilagsprint when the
-    combined text carries both a ``bilag nummer <digits>`` marker and a
-    kontering-summary signal (``konteringssammendrag``, ``sum debet``,
-    ``sum kredit``, ``kontostrengen``). This is the only way to correctly
-    classify word-level extractors: a single word-line almost never
-    contains both signals, so per-segment classification would leak
-    cover-page values into amount-extraction and hint-learning.
-    """
-    if not segments:
-        return
-    pages: dict[int | None, list[TextSegment]] = {}
-    for s in segments:
-        pages.setdefault(s.page, []).append(s)
-    flagged_pages: set[int | None] = set()
-    for page, segs in pages.items():
-        if page is None:
-            continue
-        combined = "\n".join(s.text for s in segs).lower()
-        if _BILAGSPRINT_NR_RE.search(combined) and _BILAGSPRINT_SIGNAL_RE.search(combined):
-            flagged_pages.add(page)
-    if not flagged_pages:
-        return
-    for s in segments:
-        if s.page in flagged_pages:
-            s.is_bilagsprint_page = True
-# Gap-splitting thresholds for wide table-style rows. A row like
-#   "Beløp  800,00      MVA  200,00      Total  1000,00"
-# has multiple label+value zones on one y-baseline; treating it as one
-# segment makes bbox-based matching useless because every amount shares the
-# same wide bbox. When the row spans most of the page AND has ≥ one gap of
-# _GAP_SPLIT_MIN_GAP_PT points, we additionally emit one segment per chunk
-# so each amount can be matched with a bbox tight to its own zone.
 _OCR_REDO_SCORE_THRESHOLD = 30.0
 def _extract_supplier_from_foretaksregisteret(
     segments: list[TextSegment], source_hint: str
@@ -1105,35 +1093,6 @@ def _segment_invoice_priority(segment: TextSegment) -> float:
     return score
 
 
-def _is_bilagsprint_segment(text: str) -> bool:
-    """Return True when *text* itself carries both bilagsprint signals.
-
-    This is the fallback check used when only the text of a segment is
-    available. Single word-level lines rarely satisfy both conditions at
-    once, so callers that have a :class:`TextSegment` should prefer
-    :func:`_segment_is_bilagsprint` — it consults the segment's
-    ``is_bilagsprint_page`` flag first, which is set per-page during
-    extraction and correctly covers word-level segments too.
-    """
-    lowered = text.lower()
-    has_bilag_nr = bool(_BILAGSPRINT_NR_RE.search(lowered))
-    has_kontering = bool(_BILAGSPRINT_SIGNAL_RE.search(lowered))
-    return has_bilag_nr and has_kontering
-
-
-def _segment_is_bilagsprint(segment: TextSegment) -> bool:
-    """Return True if *segment* belongs to a Tripletex bilagsprint page.
-
-    Checks the per-page flag set by :func:`_tag_bilagsprint_pages`
-    first; falls back to text-level detection for segments produced
-    without a full extraction pipeline (e.g. synthetic test fixtures
-    or the rare case where ``_tag_bilagsprint_pages`` was skipped).
-    """
-    if getattr(segment, "is_bilagsprint_page", False):
-        return True
-    return _is_bilagsprint_segment(segment.text)
-
-
 def _segment_bonus_count(text: str, patterns: tuple[re.Pattern[str], ...] | list[re.Pattern[str]]) -> int:
     return sum(1 for pattern in patterns if pattern.search(text))
 
@@ -1214,236 +1173,6 @@ def _normalize_amount_text(value: str) -> str:
 
 def _parse_amount(value: Any) -> float | None:
     return _format_parse_amount(value)
-
-
-_AMOUNT_SELF_CONSISTENCY_TOLERANCE = 1.0
-
-# Guard rails for the amount-driven redo-OCR fallback:
-#  - don't bother re-OCR'ing a PDF whose text layer is already strong enough
-#    that the mismatch is more likely a parsing issue than an OCR issue,
-#  - unless the deviation is so large (absolute or relative) that the
-#    correct value must have been mis-read.
-_OCR_REDO_AMOUNT_SCORE_GATE = 60.0
-_OCR_REDO_AMOUNT_ABS_THRESHOLD = 100.0
-_OCR_REDO_AMOUNT_REL_THRESHOLD = 0.10  # 10 % of total
-
-
-def _amounts_self_consistent(
-    evidence_map: dict[str, FieldEvidence],
-    *,
-    tolerance: float = _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
-) -> bool | None:
-    """Pure predicate mirror of :func:`_validate_amount_self_consistency`.
-
-    Returns True/False when all three amounts are present and parseable,
-    None when the check cannot be run. Does NOT mutate evidences.
-    """
-    st = _parse_amount(_ev_value(evidence_map.get("subtotal_amount")))
-    vt = _parse_amount(_ev_value(evidence_map.get("vat_amount")))
-    tt = _parse_amount(_ev_value(evidence_map.get("total_amount")))
-    if st is None or vt is None or tt is None:
-        return None
-    return abs((st + vt) - tt) <= tolerance
-
-
-def _should_redo_ocr_for_amounts(
-    evidence_map: dict[str, FieldEvidence],
-    extracted: ExtractedTextResult,
-) -> bool:
-    """Decide whether amount-inconsistency is worth a redo-OCR round."""
-    # Already retried in the low-score fallback → don't loop.
-    cand_sources = extracted.metadata.get("candidate_sources") or []
-    for cand in cand_sources:
-        if isinstance(cand, dict) and cand.get("source") == "pdf_ocrmypdf_redo":
-            return False
-    st = _parse_amount(_ev_value(evidence_map.get("subtotal_amount")))
-    vt = _parse_amount(_ev_value(evidence_map.get("vat_amount")))
-    tt = _parse_amount(_ev_value(evidence_map.get("total_amount")))
-    if st is None or vt is None or tt is None:
-        return False
-    deviation = abs((st + vt) - tt)
-    if deviation <= _AMOUNT_SELF_CONSISTENCY_TOLERANCE:
-        return False
-    selected_score = float(extracted.metadata.get("selected_score", 0.0) or 0.0)
-    if selected_score < _OCR_REDO_AMOUNT_SCORE_GATE:
-        return True
-    # Score looks healthy but numbers don't add up — only trust OCR as the
-    # culprit when the gap is materially large.
-    if deviation >= _OCR_REDO_AMOUNT_ABS_THRESHOLD:
-        return True
-    if abs(tt) > 0 and deviation / abs(tt) >= _OCR_REDO_AMOUNT_REL_THRESHOLD:
-        return True
-    return False
-
-
-def _is_redo_extraction_better(
-    new_evidence: dict[str, FieldEvidence],
-    old_evidence: dict[str, FieldEvidence],
-) -> bool:
-    """Prefer redo-OCR only when it genuinely improves the amounts.
-
-    Rules:
-      * redo consistent, old inconsistent → use redo
-      * redo consistent, old unknown      → use redo (redo filled a missing
-        field and stayed consistent)
-      * redo inconsistent                 → never promote over old
-    """
-    new_verdict = _amounts_self_consistent(new_evidence)
-    old_verdict = _amounts_self_consistent(old_evidence)
-    if new_verdict is True and old_verdict is False:
-        return True
-    if new_verdict is True and old_verdict is None:
-        return True
-    return False
-
-
-def _validate_amount_self_consistency(
-    evidence_map: dict[str, FieldEvidence],
-    *,
-    tolerance: float = _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
-) -> bool | None:
-    """Cross-check ``subtotal + vat ≈ total`` inside the invoice itself.
-
-    Sets ``metadata["self_consistent"]`` (True|False) on all three amount
-    evidences when all three are present. Does NOT mutate the values — we
-    only flag so downstream logic (and the UI) can decide whether to demote
-    confidence or warn the user. Returns the verdict, or None if the check
-    could not run (a field was missing / unparseable).
-    """
-    st = _parse_amount(_ev_value(evidence_map.get("subtotal_amount")))
-    vt = _parse_amount(_ev_value(evidence_map.get("vat_amount")))
-    tt = _parse_amount(_ev_value(evidence_map.get("total_amount")))
-    if st is None or vt is None or tt is None:
-        return None
-    consistent = abs((st + vt) - tt) <= tolerance
-    note_snippet = f"Intern kontroll: {st:.2f} + {vt:.2f} = {st + vt:.2f} vs total {tt:.2f}"
-    for fname in ("subtotal_amount", "vat_amount", "total_amount"):
-        ev = evidence_map.get(fname)
-        if ev is None:
-            continue
-        ev.metadata["self_consistent"] = consistent
-        if not consistent:
-            existing = (ev.validation_note or "").strip()
-            suffix = f"[Avvik — {note_snippet}]"
-            ev.validation_note = f"{existing} {suffix}".strip() if existing else suffix
-    return consistent
-
-
-def _select_self_consistent_amounts(
-    sub_cands: list[tuple[float, FieldEvidence]],
-    vat_cands: list[tuple[float, FieldEvidence]],
-    tot_cands: list[tuple[float, FieldEvidence]],
-    *,
-    top_k: int = 6,
-    tolerance: float = _AMOUNT_SELF_CONSISTENCY_TOLERANCE,
-) -> tuple[FieldEvidence, FieldEvidence, FieldEvidence] | None:
-    """Pick a ``(subtotal, vat, total)`` triple where ``s + v ≈ t`` holds.
-
-    Takes the top-K ranked candidates per field (deduplicated by parsed
-    numeric value — same amount at different bboxes collapses to one entry),
-    enumerates all combinations, and returns the consistent combination with
-    the lowest rank-position sum. Lower position = higher-ranked individual
-    candidate, so hint-boosted values still win when a consistent combo
-    exists. Returns ``None`` when no consistent triple can be formed.
-    """
-    def _dedupe(cands: list[tuple[float, FieldEvidence]]) -> list[tuple[int, float, FieldEvidence]]:
-        seen: set[str] = set()
-        out: list[tuple[int, float, FieldEvidence]] = []
-        for rank, ev in cands:
-            parsed = _parse_amount(ev.normalized_value)
-            if parsed is None:
-                continue
-            key = f"{parsed:.4f}"
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append((len(out), rank, ev))
-            if len(out) >= top_k:
-                break
-        return out
-
-    sub_top = _dedupe(sub_cands)
-    vat_top = _dedupe(vat_cands)
-    tot_top = _dedupe(tot_cands)
-    if not (sub_top and vat_top and tot_top):
-        return None
-
-    best_key: tuple[int, float] | None = None
-    best: tuple[FieldEvidence, FieldEvidence, FieldEvidence] | None = None
-    for si, s_rank, s_ev in sub_top:
-        s_val = _parse_amount(s_ev.normalized_value)
-        if s_val is None:
-            continue
-        for vi, v_rank, v_ev in vat_top:
-            v_val = _parse_amount(v_ev.normalized_value)
-            if v_val is None:
-                continue
-            for ti, t_rank, t_ev in tot_top:
-                t_val = _parse_amount(t_ev.normalized_value)
-                if t_val is None:
-                    continue
-                if abs((s_val + v_val) - t_val) > tolerance:
-                    continue
-                idx_sum = si + vi + ti
-                rank_sum = s_rank + v_rank + t_rank
-                key = (idx_sum, -rank_sum)
-                if best_key is None or key < best_key:
-                    best_key = key
-                    best = (s_ev, v_ev, t_ev)
-    return best
-
-
-def _apply_joint_amount_selection(
-    evidence_map: dict[str, FieldEvidence],
-    text: str,
-    segments: list[TextSegment],
-    source_hint: str,
-    *,
-    profile_hints: dict[str, list[dict[str, Any]]] | None = None,
-) -> None:
-    """Override independently-picked amounts with a self-consistent triple.
-
-    Runs after per-field selection. Exits early when any of the three fields
-    is missing or when the picked amounts already satisfy ``s + v ≈ t``.
-    Otherwise it gathers top-K candidates per field and picks the consistent
-    combination (see :func:`_select_self_consistent_amounts`). Each swapped
-    evidence is tagged with ``metadata["selected_by"] = "joint_amount_ranking"``.
-    """
-    if not all(k in evidence_map for k in ("subtotal_amount", "vat_amount", "total_amount")):
-        return
-    if _amounts_self_consistent(evidence_map) is True:
-        return
-
-    hints = profile_hints or {}
-    sub_cands = _collect_ranked_candidates(
-        "subtotal_amount", _SUBTOTAL_PATTERNS, text, segments,
-        _normalize_amount_text, 0.8, source_hint,
-        profile_hints=hints.get("subtotal_amount"),
-    )
-    vat_cands = _collect_ranked_candidates(
-        "vat_amount", _VAT_PATTERNS, text, segments,
-        _normalize_amount_text, 0.8, source_hint,
-        profile_hints=hints.get("vat_amount"),
-    )
-    tot_cands = _collect_ranked_candidates(
-        "total_amount", _AMOUNT_PATTERNS, text, segments,
-        _normalize_amount_text, 0.86, source_hint,
-        profile_hints=hints.get("total_amount"),
-    )
-    selection = _select_self_consistent_amounts(sub_cands, vat_cands, tot_cands)
-    if selection is None:
-        return
-    sub_ev, vat_ev, tot_ev = selection
-    for fname, new_ev in (
-        ("subtotal_amount", sub_ev),
-        ("vat_amount", vat_ev),
-        ("total_amount", tot_ev),
-    ):
-        old_ev = evidence_map.get(fname)
-        if old_ev is None or old_ev.normalized_value != new_ev.normalized_value:
-            new_ev.metadata = dict(new_ev.metadata or {})
-            new_ev.metadata["selected_by"] = "joint_amount_ranking"
-            evidence_map[fname] = new_ev
 
 
 def _ev_value(evidence: FieldEvidence | None) -> str:
