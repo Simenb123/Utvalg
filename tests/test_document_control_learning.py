@@ -10,6 +10,14 @@ from document_engine.profiles import _find_hint_in_segments, infer_field_hints
 
 
 def test_build_supplier_profile_collects_vendor_specific_hints() -> None:
+    """Flat fallback (no segments) emits hints for non-amount fields only.
+
+    Amount fields (subtotal/vat/total) are intentionally excluded from
+    this code path: a page=None hint with no geometry could later give
+    a label-only rank-boost to the wrong occurrence of ``sum``/``total``
+    on invoices with repeated labels. Amount hints must go through the
+    segment-based path in ``_upsert_profile_with_hints`` instead.
+    """
     fields = {
         "supplier_name": "Eksempel Partner AS",
         "supplier_orgnr": "987654321",
@@ -35,10 +43,21 @@ def test_build_supplier_profile_collects_vendor_specific_hints() -> None:
     assert profile["schema_version"] == 1
     assert profile["field_hints"]["invoice_number"][0]["label"] == "vår referanse"
     assert profile["field_hints"]["due_date"][0]["label"] == "forfall"
-    assert profile["field_hints"]["total_amount"][0]["label"] == "til betaling"
+    # Amount fields must NOT produce hints from the flat-text fallback.
+    assert "total_amount" not in profile["field_hints"]
+    assert "subtotal_amount" not in profile["field_hints"]
+    assert "vat_amount" not in profile["field_hints"]
 
 
 def test_apply_supplier_profile_reuses_learned_hints_on_new_document() -> None:
+    """Hints produced by the flat fallback are enough to re-extract
+    non-amount fields on a new invoice with the same vendor layout.
+
+    For amount fields this path no longer produces hints on its own (see
+    ``test_build_supplier_profile_collects_vendor_specific_hints``);
+    amount hints must be attached via segment-based inference in the
+    real save flow. This test therefore only covers the non-amount case.
+    """
     fields = {
         "supplier_name": "Eksempel Partner AS",
         "supplier_orgnr": "987654321",
@@ -73,7 +92,9 @@ def test_apply_supplier_profile_reuses_learned_hints_on_new_document() -> None:
     assert extracted["supplier_orgnr"] == "987654321"
     assert extracted["invoice_number"] == "INV-2025-002"
     assert extracted["due_date"] == "15.03.2025"
-    assert extracted["total_amount"] == "1 250,00 NOK"
+    # total_amount is NOT expected — the fallback no longer stores
+    # amount hints, so apply_supplier_profile has nothing to match on.
+    assert "total_amount" not in extracted
 
 
 def test_match_supplier_profile_can_match_on_alias_in_raw_text() -> None:
@@ -1011,3 +1032,583 @@ def test_ocrmypdf_redo_preserves_word_spans_from_fitz_words(monkeypatch, tmp_pat
 
 def pytest_fail_if_called(name: str):
     raise AssertionError(f"{name} must not be called when fitz_words already succeeds")
+
+
+import pytest
+
+from document_engine.profiles import (  # noqa: E402
+    _extract_label_from_line as _doc_extract_label,
+    is_valid_label_for_field,
+    normalize_hint_label as _doc_normalize_label,
+)
+
+
+# ----------------------------------------------------------------------
+# Semantic label policy — blacklist + per-field vocabulary
+# ----------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "sum debet",
+        "sum debet 2",         # substring match — cover-page with trailing ord
+        "sum kredit",
+        "Sum Debet",           # case-insensitive via normalize
+        "bilag nummer",
+        "bilag nummer 292-20",
+        "bilag nummer 135-2",
+        "konteringssammendrag",
+        "regnskapslinje",
+        "sist endret",
+    ],
+)
+@pytest.mark.parametrize(
+    "field",
+    ["invoice_number", "invoice_date", "due_date",
+     "subtotal_amount", "vat_amount", "total_amount", "currency"],
+)
+def test_is_valid_label_rejects_universal_blacklist_on_every_field(
+    label: str, field: str
+) -> None:
+    """Cover-page artefacts must never be learned on any field."""
+    assert is_valid_label_for_field(label, field) is False, (label, field)
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["side", "firma", "oslo", "Side", "FIRMA"],
+)
+def test_is_valid_label_rejects_exact_noise_words(label: str) -> None:
+    """Generic noise words are rejected everywhere — exact match only so
+    the substring ``oslo`` does not accidentally kill a label like
+    ``osloavtalen``."""
+    for field in ("invoice_number", "total_amount"):
+        assert is_valid_label_for_field(label, field) is False, (label, field)
+
+
+@pytest.mark.parametrize(
+    "label, field",
+    [
+        # invoice_number: vendor variants
+        ("fakturanr", "invoice_number"),
+        ("fakturanummer", "invoice_number"),
+        ("faktura nr", "invoice_number"),
+        ("vår referanse", "invoice_number"),
+        ("kid 01", "invoice_number"),
+        ("invoice number", "invoice_number"),
+        ("ordrenr", "invoice_number"),
+        # invoice_date
+        ("dato", "invoice_date"),
+        ("fakturadato", "invoice_date"),
+        ("invoice date", "invoice_date"),
+        # due_date
+        ("forfallsdato", "due_date"),
+        ("forfall", "due_date"),
+        ("betalingsfrist", "due_date"),   # "betal" substring → ok
+        ("invoice due date", "due_date"),
+        # subtotal_amount
+        ("netto", "subtotal_amount"),
+        ("beløp ekskl mva", "subtotal_amount"),
+        ("totalt beløp eks mva", "subtotal_amount"),
+        ("ordrebeløp", "subtotal_amount"),        # "ordrebel" substring
+        ("sum eksl mva", "subtotal_amount"),      # "eks" substring
+        # vat_amount
+        ("mva", "vat_amount"),
+        ("totalt mva beløp", "vat_amount"),
+        ("merverdiavgift", "vat_amount"),
+        ("vat amount", "vat_amount"),
+        # total_amount
+        ("sum", "total_amount"),
+        ("til betaling", "total_amount"),          # "betal" substring
+        ("å betale nok", "total_amount"),
+        ("totalt å betale", "total_amount"),
+        ("sum faktura", "total_amount"),
+        ("sluttsum", "total_amount"),
+        # currency — narrow vocab
+        ("valuta", "currency"),
+        ("nok", "currency"),
+        ("eur", "currency"),
+        ("invoice currency", "currency"),
+    ],
+)
+def test_is_valid_label_accepts_legitimate_labels(
+    label: str, field: str
+) -> None:
+    """Vendor-specific phrasing that was observed in the live store must
+    continue to pass. If one of these starts failing, the per-field
+    vocabulary has become too strict."""
+    assert is_valid_label_for_field(label, field) is True, (label, field)
+
+
+@pytest.mark.parametrize(
+    "label, field",
+    [
+        # currency is intentionally strict — SWIFT/BIC labels must not slip in
+        ("swift/bic dnba", "currency"),
+        ("dnba", "currency"),
+        ("ndea", "currency"),
+        # wrong-field: 'netto' is a subtotal label, not total
+        ("netto", "total_amount"),
+        # noisy amount-fragment labels are already killed by normalize,
+        # but we double-check here via the validator entry point.
+        ("27", "total_amount"),
+        ("41 1 345 00", "subtotal_amount"),
+        # address words on amount field
+        ("153 poulssons kvarter 1", "subtotal_amount"),
+    ],
+)
+def test_is_valid_label_rejects_wrong_field_or_noise(
+    label: str, field: str
+) -> None:
+    assert is_valid_label_for_field(label, field) is False, (label, field)
+
+
+def test_is_valid_label_without_field_only_runs_structural_and_blacklist() -> None:
+    # A valid label shape + not blacklisted → accepted regardless of field.
+    assert is_valid_label_for_field("fakturanr", None) is True
+    # Blacklisted → rejected even without a field.
+    assert is_valid_label_for_field("sum debet", None) is False
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # Accepted: real invoice labels with a word stem ≥3 letters.
+        ("Fakturanr", "fakturanr"),
+        ("Forfallsdato", "forfallsdato"),
+        ("Totalt MVA beløp", "totalt mva beløp"),
+        ("Netto", "netto"),
+        ("Til betaling", "til betaling"),
+        ("MVA", "mva"),                      # exactly 3 letters ok
+        # Rejected: pure-number / noise labels that polluted the store.
+        ("27", ""),
+        ("55", ""),
+        ("1 00", ""),
+        ("as 2", ""),                        # no word ≥3 letters
+        ("sum debet 2", "sum debet 2"),     # 'sum'/'debet' keeps it valid
+        ("  ", ""),
+        ("ab", ""),                          # too short
+        ("fakturanr 12345", ""),             # 5-digit run → reject
+    ],
+)
+def test_normalize_hint_label_rejects_noise(raw: str, expected: str) -> None:
+    assert _doc_normalize_label(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "line, marker, expected",
+    [
+        # Short labels are preserved verbatim.
+        ("Fakturanr: INV-2025-001", "INV-2025-001", "fakturanr"),
+        ("Totalt MVA beløp   235,00", "235,00", "totalt mva beløp"),
+        # Long noisy prefixes collapse to last 3 words, and the last 3 words
+        # of 'av 940 00' have no real word → label is rejected entirely.
+        ("MVA 25.00% av 940.00 = 235.00", "235.00", ""),
+        # Address line followed by amount → last 3 words, 'kvarter' ≥3 letters.
+        ("153 Poulssons kvarter 1    940,00", "940,00", "poulssons kvarter 1"),
+        # Colon-separated: whole prefix before ':' used when no marker prefix.
+        ("Reference: ABC-123", "ABC-123", "reference"),
+    ],
+)
+def test_extract_label_from_line_trims_to_last_three_words(
+    line: str, marker: str, expected: str
+) -> None:
+    assert _doc_extract_label(line, marker) == expected
+
+
+def test_infer_field_hints_fallback_never_emits_page_none_amount_hints() -> None:
+    """Amount fields must never produce ``page=None`` hints from the flat
+    raw-text fallback.
+
+    A page=None hint has no geometry and can later be boosted to the wrong
+    row by label-only matching on invoices with repeated labels like
+    ``sum`` or ``total``. Non-amount fields (invoice_number, date, etc.)
+    keep their fallback behaviour because their labels are far less
+    ambiguous.
+    """
+    raw_text = "\n".join([
+        "Fakturanr: INV-2025-001",
+        "Forfall: 01.03.2025",
+        "Sum: 1 000,00",
+        "MVA: 250,00",
+        "Total: 1 250,00 NOK",
+    ])
+    fields = {
+        "invoice_number": "INV-2025-001",
+        "due_date": "01.03.2025",
+        "subtotal_amount": "1000.00",
+        "vat_amount": "250.00",
+        "total_amount": "1250.00",
+    }
+
+    hints = infer_field_hints(raw_text, fields)  # no segments → fallback
+
+    # Non-amount fields should still produce hints
+    assert hints.get("invoice_number"), "invoice_number fallback hint missing"
+    assert hints.get("due_date"), "due_date fallback hint missing"
+
+    # Amount fields must produce nothing in the flat fallback
+    for fname in ("subtotal_amount", "vat_amount", "total_amount"):
+        assert hints.get(fname, []) == [], (
+            f"{fname} produced fallback hint: {hints[fname]!r}"
+        )
+
+
+def test_profile_hint_boost_disables_label_only_for_amount_fields() -> None:
+    """Amount fields must not receive a label-only boost.
+
+    Invoices often repeat labels like ``Sum`` (totals table header, line
+    subtotal, final sum) — a label-only hint with no page context could
+    lift the wrong row. The boost is only allowed once the hint has a
+    page (or page + bbox) confirming the actual location.
+    """
+    from document_engine.engine import _profile_hint_boost
+    from document_engine.models import FieldEvidence
+
+    # Candidate on the invoice page with no bbox; hint has page=2 but the
+    # candidate's evidence.page is None → only label can match.
+    ev_total = FieldEvidence(field_name="total_amount", normalized_value="1250.00", page=None)
+    ev_date  = FieldEvidence(field_name="invoice_date",  normalized_value="01.03.2025", page=None)
+    hints = [{"label": "sum", "page": 2, "count": 3}]
+    segment_text = "Sum: 1 250,00"
+
+    assert _profile_hint_boost(ev_total, segment_text, hints) == 0.0, (
+        "label-only boost leaked into amount-field ranking"
+    )
+    # Non-amount fields keep the label-only boost path. Use a non-empty
+    # segment text that contains the hint label.
+    ev_inv = FieldEvidence(
+        field_name="invoice_number", normalized_value="INV-1", page=None,
+    )
+    hints_inv = [{"label": "fakturanr", "page": 2, "count": 3}]
+    assert _profile_hint_boost(ev_inv, "Fakturanr: INV-1", hints_inv) == 200.0
+
+
+def test_user_search_saves_position_only_hint_when_label_unavailable() -> None:
+    """User-confirmed position is learned even on table-layout rows
+    where the label-extractor cannot produce a prefix.
+
+    This is the Norkart / BRAGE case: the amount sits in a column with
+    no ``Netto:`` or ``Beløp eksl. mva:`` label on the same line. Before
+    this fix, ``_find_hint_in_segments`` returned None → no hint → the
+    vendor profile never learned the position, even after many saves.
+    Now we fall back to a ``(label="", page=N, bbox=...)`` hint so the
+    next invoice from the same supplier can match via bbox_near.
+    """
+    from document_engine.models import FieldEvidence
+
+    seg = TextSegment(
+        text="1 4 112,11",   # table row with leading "1" — no usable label
+        source="pdf_text_fitz_words",
+        page=2,
+        bbox=(541.0, 420.0, 572.0, 429.0),
+    )
+    evidence = {
+        "subtotal_amount": FieldEvidence(
+            field_name="subtotal_amount",
+            normalized_value="4112.11",
+            raw_value="4 112,11",
+            source="user_search",  # ← key: user explicitly picked this
+            page=2,
+            bbox=(541.0, 420.0, 572.0, 429.0),
+        )
+    }
+
+    hints = infer_field_hints(
+        "1 4 112,11",
+        {"subtotal_amount": "4 112,11"},
+        segments=[seg],
+        field_evidence=evidence,
+    )
+
+    assert "subtotal_amount" in hints
+    sub_hint = hints["subtotal_amount"][0]
+    assert sub_hint["label"] == ""              # position-only
+    assert sub_hint["page"] == 2
+    assert sub_hint["bbox"] == (541.0, 420.0, 572.0, 429.0)
+
+
+def test_position_only_hints_survive_merge_entries() -> None:
+    """_merge_hint_entries must not drop position-only hints even though
+    their label is empty — they carry real geometry."""
+    from document_engine.profiles import _merge_hint_entries
+
+    pos_hint = {"label": "", "page": 2, "bbox": (541.0, 420.0, 572.0, 429.0), "count": 1}
+    merged = _merge_hint_entries([], [pos_hint])
+    assert len(merged) == 1
+    assert merged[0]["label"] == ""
+    assert merged[0]["page"] == 2
+    assert merged[0]["bbox"] == (541.0, 420.0, 572.0, 429.0)
+
+    # A second save at the same page accumulates count
+    merged2 = _merge_hint_entries(merged, [pos_hint])
+    assert merged2[0]["count"] == 2
+
+    # Position-only hints at different pages stay separate
+    pos_hint_p3 = {"label": "", "page": 3, "bbox": (100.0, 200.0, 150.0, 210.0), "count": 1}
+    merged3 = _merge_hint_entries(merged2, [pos_hint_p3])
+    assert len(merged3) == 2
+
+
+def test_position_only_hints_dropped_when_bbox_missing() -> None:
+    """A label-less hint without bbox has no useful geometry and must
+    still be rejected — otherwise we'd store empty placeholder entries."""
+    from document_engine.profiles import _merge_hint_entries
+
+    useless = {"label": "", "page": 2, "bbox": None, "count": 1}
+    merged = _merge_hint_entries([], [useless])
+    assert merged == []
+
+
+def test_position_only_hint_boosts_only_bbox_match_not_whole_page() -> None:
+    """Page-only boost is restricted to hints that HAVE a label.
+    A position-only hint (``label=""``) must only boost when bbox matches
+    — otherwise every value on the same page would get a free +150."""
+    from document_engine.engine import _profile_hint_boost
+    from document_engine.models import FieldEvidence
+
+    pos_hint = [{"label": "", "page": 2, "bbox": (541.0, 420.0, 572.0, 429.0), "count": 3}]
+
+    # Candidate at the exact right bbox: full +400 boost
+    ev_near = FieldEvidence(
+        field_name="subtotal_amount", normalized_value="4112.11",
+        page=2, bbox=(541.0, 420.0, 572.0, 429.0),
+    )
+    assert _profile_hint_boost(ev_near, "1 4 112,11", pos_hint) == 400.0
+
+    # Candidate on the same page but completely different position:
+    # must get NO boost — no label to match, no bbox to match.
+    ev_far = FieldEvidence(
+        field_name="subtotal_amount", normalized_value="999.99",
+        page=2, bbox=(100.0, 100.0, 150.0, 110.0),
+    )
+    assert _profile_hint_boost(ev_far, "Random 999,99", pos_hint) == 0.0
+
+
+def test_validate_self_consistency_updates_metadata_after_correction() -> None:
+    """After the user corrects subtotal/vat/total values in the GUI,
+    re-running ``_validate_amount_self_consistency`` must update
+    ``metadata["self_consistent"]`` to reflect the corrected values.
+
+    Before this was wired into ``_save_current``, the flag could remain
+    False (from extraction time) even when the saved values summed
+    correctly. Caught via the explainability metadata.
+    """
+    from document_engine.engine import _validate_amount_self_consistency
+    from document_engine.models import FieldEvidence
+
+    # Initially inconsistent (extraction picked wrong total)
+    evidence = {
+        "subtotal_amount": FieldEvidence(
+            field_name="subtotal_amount", normalized_value="800.00",
+        ),
+        "vat_amount": FieldEvidence(
+            field_name="vat_amount", normalized_value="200.00",
+        ),
+        "total_amount": FieldEvidence(
+            field_name="total_amount", normalized_value="1.00",    # bogus
+        ),
+    }
+    verdict_before = _validate_amount_self_consistency(evidence)
+    assert verdict_before is False
+    assert evidence["total_amount"].metadata["self_consistent"] is False
+
+    # User corrects the total
+    evidence["total_amount"].normalized_value = "1000.00"
+    verdict_after = _validate_amount_self_consistency(evidence)
+    assert verdict_after is True
+    for fname in ("subtotal_amount", "vat_amount", "total_amount"):
+        assert evidence[fname].metadata["self_consistent"] is True, fname
+
+
+def test_field_evidence_carries_explainability_metadata() -> None:
+    """Every extracted evidence must record why/how it was selected.
+
+    Keys: winner_source, pattern_index, segment_index, hint_boost, rank,
+    and optionally bbox_width. This is the first-line debug trail when
+    extraction goes wrong — we can answer "why did it pick that value"
+    by reading the stored metadata rather than re-running the scoring.
+    """
+    import document_engine.engine as engine
+    text = "\n".join([
+        "Fakturanr: INV-2025-001",
+        "Sum eks. mva: 800,00",
+        "MVA: 200,00",
+        "Total: 1 000,00 NOK",
+    ])
+    _, evidence = engine.extract_invoice_fields_from_text(text)
+
+    for fname in ("invoice_number", "subtotal_amount", "vat_amount", "total_amount"):
+        meta = evidence[fname].metadata
+        assert "winner_source" in meta, (fname, meta)
+        assert "pattern_index" in meta, (fname, meta)
+        assert "hint_boost" in meta, (fname, meta)
+        assert "rank" in meta, (fname, meta)
+        assert isinstance(meta["rank"], (int, float))
+
+
+def test_tag_bilagsprint_pages_flags_word_level_segments_correctly() -> None:
+    """Page-level bilagsprint detection must catch word-level segments
+    that individually cannot trip the text-based check.
+
+    Before this fix, ``_is_bilagsprint_segment`` required a single
+    segment to carry BOTH "bilag nummer <digits>" AND a kontering signal.
+    Word-level extractors produce one segment per line, so no single
+    line has both — and the entire cover page leaked into extraction.
+    """
+    from document_engine.engine import _tag_bilagsprint_pages, _segment_is_bilagsprint
+
+    # Word-level cover page: signals are spread across separate lines
+    cover_segs = [
+        TextSegment(text="Bilag nummer 516-2025", source="fitz_words", page=1),
+        TextSegment(text="Firma: Spor Arkitekter AS", source="fitz_words", page=1),
+        TextSegment(text="Konteringssammendrag", source="fitz_words", page=1),
+        TextSegment(text="1 4 112,11", source="fitz_words", page=1),
+    ]
+    # Real invoice page
+    invoice_segs = [
+        TextSegment(text="Norkart AS", source="fitz_words", page=2),
+        TextSegment(text="Fakturanr: 171489", source="fitz_words", page=2),
+        TextSegment(text="Netto: 4 112,11", source="fitz_words", page=2),
+    ]
+    all_segs = cover_segs + invoice_segs
+
+    # Before tagging: none flagged (no single segment hits both signals)
+    for s in all_segs:
+        assert not _segment_is_bilagsprint(s), s.text
+
+    _tag_bilagsprint_pages(all_segs)
+
+    # After tagging: ALL page-1 segments flagged, page-2 untouched
+    for s in cover_segs:
+        assert _segment_is_bilagsprint(s), (s.text, s.page)
+        assert s.is_bilagsprint_page is True
+    for s in invoice_segs:
+        assert not _segment_is_bilagsprint(s), (s.text, s.page)
+        assert s.is_bilagsprint_page is False
+
+
+def test_segment_is_bilagsprint_falls_back_to_text_when_flag_unset() -> None:
+    """Segments that never went through _tag_bilagsprint_pages (e.g.
+    synthetic fixtures) must still be detectable via text content.
+
+    This preserves backwards compat for any test or caller that
+    constructs TextSegment manually without running extraction."""
+    from document_engine.engine import _segment_is_bilagsprint
+
+    # Un-tagged segment with both signals in its text
+    block_seg = TextSegment(
+        text="Bilag nummer 292-2025\nKonteringssammendrag\nSum debet 500",
+        source="fitz_blocks",
+        page=1,
+    )
+    assert block_seg.is_bilagsprint_page is False  # flag unset
+    assert _segment_is_bilagsprint(block_seg) is True  # text check still catches
+
+
+def test_tag_bilagsprint_pages_ignores_page_none_segments() -> None:
+    """Flat-text fallback produces segments with page=None; these must
+    not accidentally be flagged (the concept of a 'page' doesn't apply)."""
+    from document_engine.engine import _tag_bilagsprint_pages
+
+    segs = [
+        TextSegment(
+            text="Bilag nummer 5\nKonteringssammendrag\nSum debet 500",
+            source="text",
+            page=None,
+        ),
+    ]
+    _tag_bilagsprint_pages(segs)
+    assert segs[0].is_bilagsprint_page is False
+
+
+def test_page_level_filter_blocks_word_segment_amount_from_cover_page() -> None:
+    """End-to-end: an amount that only exists on a bilagsprint page must
+    NOT produce a hint, even when the segment is a single word-line."""
+    from document_engine.engine import _tag_bilagsprint_pages
+    from document_engine.models import FieldEvidence
+
+    segs = [
+        # Cover-page word-segments: contain the amount value, but filtered
+        TextSegment(text="Bilag nummer 516-2025", source="fitz_words", page=1),
+        TextSegment(text="Konteringssammendrag", source="fitz_words", page=1),
+        TextSegment(text="2025-12-12 Faktura nummer 171489", source="fitz_words", page=1),
+        TextSegment(text="1 4 112,11", source="fitz_words", page=1),
+        # No invoice-page segment with the amount
+    ]
+    _tag_bilagsprint_pages(segs)
+
+    evidence = {
+        "subtotal_amount": FieldEvidence(
+            field_name="subtotal_amount",
+            normalized_value="4112.11",
+            raw_value="4 112,11",
+            source="user_search",
+            page=1,
+            bbox=(100.0, 100.0, 150.0, 110.0),
+        )
+    }
+    hints = infer_field_hints(
+        "", {"subtotal_amount": "4 112,11"},
+        segments=segs, field_evidence=evidence,
+    )
+    # The user-search-fallback still produces a position-only hint (the
+    # user's click is authoritative), BUT no segment-based label-hint
+    # came through since all segments are flagged as bilagsprint.
+    hint = hints.get("subtotal_amount", [{}])[0] if hints.get("subtotal_amount") else {}
+    if hint:
+        # Position-only fallback is OK; the label must be empty (no label
+        # extracted from the '1 4 112,11'-line, which is filtered anyway).
+        assert hint["label"] == ""
+
+
+def test_infer_field_hints_skips_bilagsprint_segments() -> None:
+    """Tripletex voucher cover pages must never produce hints.
+
+    The cover page contains accounting entries (``Bilag nummer``,
+    ``Sum debet``, ``Konteringssammendrag``) — not the actual invoice.
+    Before this filter, labels like ``bilag nummer`` and ``sum debet``
+    polluted the learned profile and competed with real invoice labels.
+    """
+    bilagsprint = TextSegment(
+        text="\n".join(
+            [
+                "Bilag nummer 292-20250615",
+                "Konteringssammendrag",
+                "Fakturanr: BOGUS-999",
+                "Sum debet 500,00",
+            ]
+        ),
+        source="pdf_text_fitz_blocks",
+        page=1,
+        bbox=(0.0, 0.0, 500.0, 700.0),
+    )
+    invoice = TextSegment(
+        text="\n".join(
+            [
+                "Eksempel Partner AS",
+                "Fakturanr: INV-2025-001",
+                "Til betaling: 500,00 NOK",
+            ]
+        ),
+        source="pdf_text_fitz_blocks",
+        page=2,
+        bbox=(0.0, 0.0, 500.0, 700.0),
+    )
+    fields = {"invoice_number": "INV-2025-001", "total_amount": "500.00"}
+
+    hints = infer_field_hints(
+        "\n".join([bilagsprint.text, invoice.text]),
+        fields,
+        segments=[bilagsprint, invoice],
+    )
+
+    inv_hints = hints.get("invoice_number", [])
+    assert len(inv_hints) == 1
+    assert inv_hints[0]["label"] == "fakturanr"
+    assert inv_hints[0]["page"] == 2, "hint must come from the invoice page, not the cover page"
+
+    total_hints = hints.get("total_amount", [])
+    assert len(total_hints) == 1
+    assert total_hints[0]["label"] == "til betaling"
+    assert total_hints[0]["page"] == 2

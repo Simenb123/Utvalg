@@ -156,6 +156,141 @@ def test_joint_selection_overrides_wrong_independent_pick() -> None:
         assert evidence[fname].metadata.get("selected_by") == "joint_amount_ranking", fname
 
 
+def test_brutto_label_extracted_as_total_amount() -> None:
+    """``Brutto: NOK 1 290,00`` must become ``total_amount`` on any invoice.
+
+    This is the Norkart-style layout — no explicit "total" or "sum"
+    label, only ``Brutto`` as the marker. The extractor must pick it up
+    *without* any supplier profile learning, because we want generic
+    improvement across all vendors.
+    """
+    text = "\n".join(
+        [
+            "Netto: 1 032,00",
+            "MVA: 258,00",
+            "Brutto: NOK 1 290,00",
+        ]
+    )
+    facts, evidence = engine.extract_invoice_fields_from_text(text)
+    assert facts.total_amount == "1290.00"
+    assert facts.subtotal_amount == "1032.00"
+    assert facts.vat_amount == "258.00"
+    assert engine._amounts_self_consistent(evidence) is True
+
+
+def test_brutto_alone_becomes_total_when_stronger_label_absent() -> None:
+    """When the invoice only has ``Brutto`` (no ``total``/``sum`` anywhere),
+    brutto must still win as total_amount."""
+    text = "Brutto 2 309,00 NOK"
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.total_amount == "2309.00"
+
+
+def test_sluttsum_label_extracted_as_total_amount() -> None:
+    """``Sluttsum`` is a common Norwegian synonym for total."""
+    text = "Sluttsum: 5 140,14 NOK"
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.total_amount == "5140.14"
+
+
+def test_brutto_passes_whitelist_as_total_amount_label() -> None:
+    """Semantic label-policy check: ``brutto`` must be a valid
+    total_amount-label so per-vendor learning can reinforce it."""
+    from document_engine.profiles import is_valid_label_for_field
+    assert is_valid_label_for_field("brutto", "total_amount") is True
+    assert is_valid_label_for_field("brutto", "vat_amount") is False  # vat has mva/vat vocab
+    assert is_valid_label_for_field("bruttobeløp", "total_amount") is True
+
+
+def test_herav_mva_extracted_as_vat_amount() -> None:
+    """``Herav MVA`` is a very common Norwegian phrasing for the VAT amount.
+
+    Used on invoices that present the total first and then break out the
+    tax component.
+    """
+    text = "\n".join(
+        [
+            "Netto 1 000,00",
+            "Herav MVA: 250,00",
+            "Total: 1 250,00",
+        ]
+    )
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.subtotal_amount == "1000.00"
+    assert facts.vat_amount == "250.00"
+    assert facts.total_amount == "1250.00"
+
+
+def test_mva_grunnlag_extracted_as_subtotal() -> None:
+    """``MVA-grunnlag`` is the taxable base, i.e. subtotal before VAT."""
+    text = "\n".join(
+        [
+            "MVA-grunnlag: 800,00",
+            "MVA: 200,00",
+            "Sum: 1 000,00",
+        ]
+    )
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.subtotal_amount == "800.00"
+    assert facts.vat_amount == "200.00"
+    assert facts.total_amount == "1000.00"
+
+
+def test_ordrebelop_extracted_as_subtotal() -> None:
+    """Many Norwegian vendors (Intility et al.) use ``Ordrebeløp`` as subtotal."""
+    text = "\n".join(
+        [
+            "Ordrebeløp: 43 641,00",
+            "MVA: 10 910,25",
+            "Sum faktura: 54 551,25",
+        ]
+    )
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.subtotal_amount == "43641.00"
+    assert facts.vat_amount == "10910.25"
+    assert facts.total_amount == "54551.25"
+
+
+def test_grand_total_extracted_as_total_amount() -> None:
+    """``Grand total`` is the canonical English invoice total label."""
+    text = "\n".join(
+        [
+            "Subtotal: 800.00",
+            "VAT: 200.00",
+            "Grand Total: 1,000.00",
+        ]
+    )
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.total_amount == "1000.00"
+
+
+def test_totalt_inkl_mva_extracted_as_total_amount() -> None:
+    """``Totalt inkl. mva`` is common on Norwegian invoices."""
+    text = "\n".join(
+        [
+            "Netto: 800,00",
+            "MVA: 200,00",
+            "Totalt inkl. mva: 1 000,00",
+        ]
+    )
+    facts, _ = engine.extract_invoice_fields_from_text(text)
+    assert facts.total_amount == "1000.00"
+
+
+def test_new_labels_pass_field_vocab() -> None:
+    """Semantic label-policy: the new expressions must be accepted by
+    ``is_valid_label_for_field`` so per-vendor learning can reinforce them."""
+    from document_engine.profiles import is_valid_label_for_field
+    assert is_valid_label_for_field("herav mva", "vat_amount")
+    assert is_valid_label_for_field("mva-grunnlag", "subtotal_amount")
+    assert is_valid_label_for_field("avgiftsgrunnlag", "subtotal_amount")
+    assert is_valid_label_for_field("ordrebeløp", "subtotal_amount")
+    assert is_valid_label_for_field("ordresum", "subtotal_amount")
+    assert is_valid_label_for_field("grand total", "total_amount")
+    assert is_valid_label_for_field("sluttbeløp", "total_amount")
+    assert is_valid_label_for_field("totalt inkl mva", "total_amount")
+
+
 def test_match_is_percentage_helper_flags_rate_tails() -> None:
     """Unit-level sanity check of :func:`_match_is_percentage`."""
     import re

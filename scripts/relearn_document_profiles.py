@@ -464,6 +464,19 @@ def process_store(
                     stats["records_skipped_after_extract"] += 1
             continue
 
+        # Merge pre-existing hints BACK in so relearn is additive — the
+        # counts are cumulative ("how many times has this label been
+        # confirmed across history"), and scrapping them for records not
+        # re-processed in this run would make the store progressively
+        # forget what it already knew.
+        if existing_raw is not None:
+            existing_profile = SupplierProfile.from_dict(existing_raw)
+            if existing_profile is not None and existing_profile.field_hints:
+                for fname, old_hints in existing_profile.field_hints.items():
+                    merged_hints[fname] = _merge_hint_entries(
+                        merged_hints.get(fname, []), list(old_hints or []),
+                    )
+
         accumulator.field_hints = merged_hints
         new_profile_objects[profile_key] = accumulator
         stats["profiles_touched"].add(profile_key)

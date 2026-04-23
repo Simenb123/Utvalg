@@ -69,7 +69,22 @@ _AMOUNT_PATTERNS = [
         rf"|payable\s+amount"
         rf"|til\s+betaling"
         rf"|[åa]\s+betale"
+        rf"|sluttsum"
+        rf"|sluttbel[øo]p"
+        rf"|totalbel[øo]p"
+        rf"|brutto(?:bel[øo]p|sum)?"
+        rf"|totalt\s+inkl(?:usive)?\.?\s*mva"
+        rf"|sum\s+inkl(?:usive)?\.?\s*mva"
+        rf"|grand\s+total"
+        rf"|total\s+due"
         rf")\b[^0-9\-]{{0,80}}({_NUMBER_FRAGMENT})"
+    ),
+    # Secondary: bare ``brutto`` when followed by a currency code or colon/NOK.
+    # Tight window (≤20 chars) so it cannot slurp unrelated nearby numbers.
+    # Ranked below pattern 0 via pattern_index penalty.
+    re.compile(
+        rf"(?is)\bbrutto\b[^0-9\-]{{0,20}}"
+        rf"(?:NOK|SEK|DKK|EUR|USD|GBP|:)?\s*({_NUMBER_FRAGMENT})"
     ),
     re.compile(rf"(?is)\b(?:sum|total)\b[^0-9\-]{{0,40}}({_NUMBER_FRAGMENT})"),
 ]
@@ -80,9 +95,16 @@ _SUBTOTAL_PATTERNS = [
         rf"|(?:bel[øo]p|sum)\s+eks(?:k?l)?\.?\s*mva"
         rf"|eks(?:k?l)?\.?\s*mva"
         rf"|subtotal"
+        rf"|sub\-?total"
         rf"|netto(?:bel[øo]p)?"
         rf"|net\s+amount"
+        rf"|net\s+total"
         rf"|tax\s+exclusive\s+amount"
+        rf"|mva[\s\-]?grunnlag"
+        rf"|avgiftsgrunnlag"
+        rf"|skattegrunnlag"
+        rf"|ordrebel[øo]p"
+        rf"|ordresum"
         rf")\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"
     ),
 ]
@@ -93,10 +115,12 @@ _VAT_PATTERNS = [
         rf"totalt\s+mva\s*bel[øo]p"
         rf"|mva[\s\-]*bel[øo]p"
         rf"|merverdiavgift\s*bel[øo]p"
+        rf"|herav\s+mva"
+        rf"|herav\s+merverdiavgift"
         rf")\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"
     ),
     # Specific VAT-amount labels — allow wider context
-    re.compile(rf"(?is)\b(?:merverdiavgift|tax\s+amount|vat\s+amount)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
+    re.compile(rf"(?is)\b(?:merverdiavgift|tax\s+amount|vat\s+amount|sales\s+tax)\b[^0-9\-]{{0,60}}({_NUMBER_FRAGMENT})"),
     # "mva:" or "vat:" immediately followed by the amount (colon/space only)
     re.compile(rf"(?is)\b(?:mva|vat)\s*[:\-]\s*({_NUMBER_FRAGMENT})"),
     # Generic "mva"/"vat" — tight window to avoid grabbing table base amounts
@@ -212,6 +236,12 @@ class TextSegment:
     # word-level geometry (currently ``pdf_text_fitz_words``); other sources
     # leave this empty so callers must fall back to ``bbox``.
     word_spans: list[tuple[int, int, tuple[float, float, float, float]]] = field(default_factory=list)
+    # True when this segment comes from a page classified as a Tripletex
+    # bilagsprint (accounting cover page). Set by the extractor based on
+    # the *whole page's* text — word-level segments can't detect it on
+    # their own because a single word-line rarely contains both the
+    # "bilag nummer" and "konteringssammendrag" signals.
+    is_bilagsprint_page: bool = False
 
 
 @dataclass
@@ -727,6 +757,10 @@ def _extract_text_from_pdf(
     }
     if redo_requested_but_missing:
         metadata["ocr_redo_requested_but_missing"] = True
+    # Tag segments from Tripletex cover pages (bilagsprint) — the check
+    # runs over each page's *combined* text, so word-level segments that
+    # individually don't carry both signals still get flagged correctly.
+    _tag_bilagsprint_pages(best.segments)
     return ExtractedTextResult(
         text=best.text,
         source=best.source,
@@ -734,6 +768,44 @@ def _extract_text_from_pdf(
         metadata=metadata,
         segments=best.segments,
     )
+
+
+_BILAGSPRINT_NR_RE = re.compile(r"bilag\s+nummer\s+\d")
+_BILAGSPRINT_SIGNAL_RE = re.compile(
+    r"konteringssammendrag|sum\s+debet|sum\s+kredit|kontostrengen"
+)
+
+
+def _tag_bilagsprint_pages(segments: list[TextSegment]) -> None:
+    """Set ``is_bilagsprint_page=True`` on every segment from a Tripletex
+    accounting cover page.
+
+    The classification operates at *page granularity*: all segments on a
+    page are combined, and the page is declared a bilagsprint when the
+    combined text carries both a ``bilag nummer <digits>`` marker and a
+    kontering-summary signal (``konteringssammendrag``, ``sum debet``,
+    ``sum kredit``, ``kontostrengen``). This is the only way to correctly
+    classify word-level extractors: a single word-line almost never
+    contains both signals, so per-segment classification would leak
+    cover-page values into amount-extraction and hint-learning.
+    """
+    if not segments:
+        return
+    pages: dict[int | None, list[TextSegment]] = {}
+    for s in segments:
+        pages.setdefault(s.page, []).append(s)
+    flagged_pages: set[int | None] = set()
+    for page, segs in pages.items():
+        if page is None:
+            continue
+        combined = "\n".join(s.text for s in segs).lower()
+        if _BILAGSPRINT_NR_RE.search(combined) and _BILAGSPRINT_SIGNAL_RE.search(combined):
+            flagged_pages.add(page)
+    if not flagged_pages:
+        return
+    for s in segments:
+        if s.page in flagged_pages:
+            s.is_bilagsprint_page = True
 
 
 def _append_candidate(candidates: list[_TextCandidate], source: str, result: tuple[str, list[TextSegment]], ocr_used: bool) -> None:
@@ -1197,7 +1269,7 @@ def _extract_supplier_from_foretaksregisteret(
     invoicing service "Amili Collection AS" acting on behalf of Lyse Tele).
     """
     for segment in segments:
-        if _is_bilagsprint_segment(segment.text):
+        if _segment_is_bilagsprint(segment):
             continue
         all_lines = _extract_candidate_lines(segment.text, max_lines=500)
         for i, line in enumerate(all_lines):
@@ -1246,7 +1318,7 @@ def _extract_supplier_evidence(text: str, segments: list[TextSegment], source_hi
 
     # Priority 2: explicit label patterns ("Leverandør:", "Supplier:", "Fra: X").
     for segment in seg_list:
-        if _is_bilagsprint_segment(segment.text):
+        if _segment_is_bilagsprint(segment):
             continue
         for pattern in _SUPPLIER_LABEL_PATTERNS:
             match = pattern.search(segment.text)
@@ -1266,7 +1338,7 @@ def _extract_supplier_evidence(text: str, segments: list[TextSegment], source_hi
 
     # Priority 3: header candidate lines (first 20 lines, require company suffix).
     for segment in seg_list:
-        if _is_bilagsprint_segment(segment.text):
+        if _segment_is_bilagsprint(segment):
             continue
         candidate_lines = _extract_candidate_lines(segment.text, max_lines=20)
         for line in candidate_lines:
@@ -1377,7 +1449,7 @@ def _collect_ranked_candidates(
     for segment_index, segment in enumerate(segments or [TextSegment(text=text, source=source_hint)]):
         # Skip bilagsprint segments entirely — these are accounting-system
         # printouts (Tripletex cover pages) and should never provide field values.
-        if _is_bilagsprint_segment(segment.text):
+        if _segment_is_bilagsprint(segment):
             continue
         for pattern_index, pattern in enumerate(patterns):
             for match in pattern.finditer(segment.text):
@@ -1404,6 +1476,26 @@ def _collect_ranked_candidates(
                     profile_hints=profile_hints or [],
                     segment_text=segment.text,
                 )
+                # Explainability metadata — written here because this is the
+                # single gate every candidate passes through. Downstream
+                # code can inspect ``evidence.metadata`` to see *why* a
+                # value was selected without re-running the scoring.
+                hint_boost = _profile_hint_boost(
+                    evidence, segment.text, profile_hints or [],
+                )
+                bbox_width = None
+                if match_bbox is not None:
+                    try:
+                        bbox_width = float(match_bbox[2]) - float(match_bbox[0])
+                    except (IndexError, TypeError, ValueError):
+                        bbox_width = None
+                evidence.metadata["winner_source"] = segment.source or source_hint
+                evidence.metadata["pattern_index"] = pattern_index
+                evidence.metadata["segment_index"] = segment_index
+                evidence.metadata["hint_boost"] = round(float(hint_boost), 2)
+                evidence.metadata["rank"] = round(float(rank), 2)
+                if bbox_width is not None:
+                    evidence.metadata["bbox_width"] = round(bbox_width, 2)
                 candidates.append((rank, evidence))
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates
@@ -1479,10 +1571,17 @@ def _profile_hint_boost(
 
     Scoring (before weighting):
         page match only          → +150
-        label match only         → +200
+        label match only         → +200  (disabled for amount fields)
         page + label match       → +500
         page + bbox near         → +400
         page + label + bbox near → +700 (strongest — exact position confirmed)
+
+    **Amount fields** (subtotal / vat / total) never receive a label-only
+    boost. On invoices with repeated labels like ``sum`` or ``total``, a
+    label-only match has no way of distinguishing the correct row from a
+    cover-page summary or a tax-base figure. Amount fields must be
+    confirmed by page (or page + bbox) before any learned hint can lift
+    their rank.
 
     All bonuses are weighted by confirmation count; weight saturates at
     count=3 (weight=1.0) so a profile with 20 saves does not drown out the
@@ -1492,6 +1591,7 @@ def _profile_hint_boost(
         return 0.0
 
     seg_text_norm = re.sub(r"\s+", " ", segment_text).lower()
+    is_amount_field = evidence.field_name in _AMOUNT_FIELDS
     best = 0.0
 
     for hint in hints:
@@ -1512,9 +1612,13 @@ def _profile_hint_boost(
             boost = 500.0 * weight
         elif page_match and bbox_near:
             boost = 400.0 * weight
-        elif page_match:
+        elif page_match and hint_label:
+            # Page-only boost is restricted to hints that DO have a
+            # label — position-only hints (``hint_label == ""``) already
+            # got their full +400 above via bbox_near, and must not
+            # boost unrelated values on the same page.
             boost = 150.0 * weight
-        elif label_match:
+        elif label_match and not is_amount_field:
             boost = 200.0 * weight
         else:
             boost = 0.0
@@ -1594,19 +1698,32 @@ def _segment_invoice_priority(segment: TextSegment) -> float:
 
 
 def _is_bilagsprint_segment(text: str) -> bool:
-    """Return True if this page segment is a Tripletex accounting summary (bilagsprint).
+    """Return True when *text* itself carries both bilagsprint signals.
 
-    Bilagsprint pages are generated by Tripletex and show the accounting entries
-    for the voucher — they are NOT the actual vendor invoice and should be
-    skipped during field extraction.
+    This is the fallback check used when only the text of a segment is
+    available. Single word-level lines rarely satisfy both conditions at
+    once, so callers that have a :class:`TextSegment` should prefer
+    :func:`_segment_is_bilagsprint` — it consults the segment's
+    ``is_bilagsprint_page`` flag first, which is set per-page during
+    extraction and correctly covers word-level segments too.
     """
     lowered = text.lower()
-    has_bilag_nr = bool(re.search(r"bilag\s+nummer\s+\d", lowered))
-    has_kontering = bool(re.search(
-        r"konteringssammendrag|sum\s+debet|sum\s+kredit|kontostrengen",
-        lowered,
-    ))
+    has_bilag_nr = bool(_BILAGSPRINT_NR_RE.search(lowered))
+    has_kontering = bool(_BILAGSPRINT_SIGNAL_RE.search(lowered))
     return has_bilag_nr and has_kontering
+
+
+def _segment_is_bilagsprint(segment: TextSegment) -> bool:
+    """Return True if *segment* belongs to a Tripletex bilagsprint page.
+
+    Checks the per-page flag set by :func:`_tag_bilagsprint_pages`
+    first; falls back to text-level detection for segments produced
+    without a full extraction pipeline (e.g. synthetic test fixtures
+    or the rare case where ``_tag_bilagsprint_pages`` was skipped).
+    """
+    if getattr(segment, "is_bilagsprint_page", False):
+        return True
+    return _is_bilagsprint_segment(segment.text)
 
 
 def _segment_bonus_count(text: str, patterns: tuple[re.Pattern[str], ...] | list[re.Pattern[str]]) -> int:

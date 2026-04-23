@@ -21,6 +21,12 @@ LEARNABLE_FIELDS = (
     "currency",
 )
 STATIC_FIELDS = ("supplier_name", "supplier_orgnr", "currency")
+# Amount fields are sensitive to wrong-position matches — we never store
+# page=None hints for them, and label-only hint-boost is disabled
+# downstream in engine._profile_hint_boost.
+_AMOUNT_FIELD_NAMES: frozenset[str] = frozenset(
+    {"subtotal_amount", "vat_amount", "total_amount"}
+)
 
 
 def normalize_profile_name(value: str) -> str:
@@ -246,17 +252,45 @@ def infer_field_hints(
             ev = (field_evidence or {}).get(field_name)
             ev_page = _ev_attr(ev, "page")
             ev_bbox = _ev_attr(ev, "bbox")
+            ev_source = str(_ev_attr(ev, "source") or "")
             hint = _find_hint_in_segments(
                 segments, field_name, value,
                 evidence_page=ev_page, evidence_bbox=ev_bbox,
             )
-            if hint:
+            if hint and is_valid_label_for_field(hint.get("label", ""), field_name):
                 hints.setdefault(field_name, []).append(hint)
+                continue
+            # Fallback: if the user explicitly confirmed a position via
+            # user_search, record a label-less geometry hint so we at
+            # least learn the POSITION. This matters for table-layout
+            # invoices (BRAGE, Norkart, ...) where no label-prefix
+            # precedes the amount column and the label-extractor can't
+            # produce anything useful. An empty-label hint wins by
+            # page+bbox_near matching in `_profile_hint_boost` (+400).
+            if (
+                ev_source == "user_search"
+                and ev_page is not None
+                and ev_bbox is not None
+            ):
+                hints.setdefault(field_name, []).append({
+                    "label": "",
+                    "page": int(ev_page),
+                    "bbox": _coerce_bbox(ev_bbox),
+                    "context": "",
+                    "count": 1,
+                })
         return hints
 
-    # Fallback: flat text (no page info)
+    # Fallback: flat text (no page info).
+    # Amount fields are intentionally excluded from this path: a page=None
+    # hint with no geometry can later give label-only hint-boost to the
+    # wrong occurrence of "sum"/"total" on invoices with repeated labels.
+    # Per-supplier learning for amount fields must go through the segment
+    # branch (which has page + bbox) via _upsert_profile_with_hints.
     lines = _candidate_lines(raw_text)
     for field_name in LEARNABLE_FIELDS:
+        if field_name in _AMOUNT_FIELD_NAMES:
+            continue
         value = (fields.get(field_name, "") or "").strip()
         if not value:
             continue
@@ -264,7 +298,7 @@ def infer_field_hints(
         if not line or not marker:
             continue
         label = _extract_label_from_line(line, marker)
-        if label:
+        if label and is_valid_label_for_field(label, field_name):
             ev = (field_evidence or {}).get(field_name)
             ev_bbox = _ev_attr(ev, "bbox")
             hints.setdefault(field_name, []).append(
@@ -298,10 +332,17 @@ def _find_hint_in_segments(
     This is the key fix: instead of always returning the first text match,
     we return the match closest to where the user actually pointed.
     """
+    # Lazy import to avoid circular dependency (engine imports profiles).
+    from .engine import _segment_is_bilagsprint
+
     markers = _value_markers(field_name, value)
     # Collect ALL matches, then pick the best one.
     candidates: list[dict[str, Any]] = []
     for segment in segments:
+        if _segment_is_bilagsprint(segment):
+            # Skip Tripletex voucher cover pages — they contain accounting
+            # entries, not the actual invoice, and should never produce hints.
+            continue
         seg_text: str = getattr(segment, "text", "") or ""
         seg_page: int | None = getattr(segment, "page", None)
         seg_bbox: tuple | None = getattr(segment, "bbox", None)
@@ -371,16 +412,114 @@ def _pick_best_candidate(
     return min(same_page, key=bbox_distance)
 
 
+_LABEL_WORD_RE = re.compile(r"[a-zæøå]{3,}")
+
+
 def normalize_hint_label(value: str) -> str:
+    """Normalise and validate a hint label.
+
+    Accepted labels must:
+      * be 3-40 chars after normalisation,
+      * contain at most 3 consecutive digits (no invoice numbers / zip codes),
+      * contain at least one 3+ letter word so that pure-number fragments
+        (``27``, ``1 00``, ``as 2``) and terse abbreviations never become
+        labels. Real invoice labels always carry a descriptive word
+        (``fakturanr``, ``netto``, ``mva``, ``total``, ``beløp``, ...).
+    """
     value = re.sub(r"\s+", " ", value or "").strip().lower()
     value = value.strip(":.- ")
     value = re.sub(r"[^a-z0-9æøå /-]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
-    if len(value) < 2 or len(value) > 40:
+    if len(value) < 3 or len(value) > 40:
         return ""
     if re.search(r"\d{4,}", value):
         return ""
+    if not _LABEL_WORD_RE.search(value):
+        return ""
     return value
+
+
+# ---------------------------------------------------------------------------
+# Semantic label policy
+# ---------------------------------------------------------------------------
+#
+# The scan of the live store (``scripts/scan_profile_labels.py``) showed
+# that cover-page artefacts like ``sum debet`` and ``bilag nummer`` had
+# accumulated high counts on real profiles. The universal blacklist
+# below catches those regardless of field. The per-field vocabulary
+# below is deliberately permissive: it only requires that a label
+# contains *one* of its field's substrings, so vendor-specific phrasing
+# (``ordrebeløp``, ``totalt beløp eks mva``, ``å betale nok``) still
+# passes — we want to block wrong-field learning, not dictate phrasing.
+
+# Substring match — any label containing these is rejected.
+_LABEL_BLACKLIST: tuple[str, ...] = (
+    "sum debet",
+    "sum kredit",
+    "bilag nummer",
+    "konteringssammendrag",
+    "regnskapslinje",
+    "sist endret",
+)
+
+# Exact-match (post-normalisation) noise words.
+_LABEL_BLACKLIST_EXACT: frozenset[str] = frozenset({
+    "side",
+    "firma",
+    "oslo",
+})
+
+# Per-field vocabulary. A label must contain at least one of these
+# substrings to be accepted for that field. ``currency`` is intentionally
+# narrow — the scan showed it held significantly more noise (SWIFT/BIC
+# headers, amount fragments) than any other field.
+_FIELD_VOCAB: dict[str, tuple[str, ...]] = {
+    "invoice_number": (
+        "faktura", "invoice", "referanse", "reference",
+        "kid", "ordre", "order",
+    ),
+    "invoice_date": ("dato", "date", "utstedt", "issued"),
+    "due_date": ("forfall", "due", "betal", "payable"),
+    "subtotal_amount": (
+        "netto", "grunnlag", "eks", "ekskl", "subtotal", "net",
+        "beløp eksl", "ordrebel", "ordresum", "sum eks",
+        "avgiftsgrunnlag", "skattegrunnlag",
+    ),
+    "vat_amount": ("mva", "merverdiavgift", "vat", "tax"),
+    "total_amount": (
+        "total", "sum", "betal", "beløp", "grand", "sluttsum", "brutto",
+    ),
+    "currency": (
+        "valuta", "currency",
+        "nok", "sek", "dkk", "eur", "usd", "gbp",
+    ),
+}
+
+
+def is_valid_label_for_field(label: str, field: str | None) -> bool:
+    """Return True if *label* is a plausible hint label for *field*.
+
+    Three-step gate:
+        1. structural check via :func:`normalize_hint_label`,
+        2. universal blacklist (cover-page + generic noise),
+        3. per-field vocabulary match (when *field* is given).
+
+    When *field* is ``None`` only the structural and blacklist checks
+    run — used by generic call-paths where the field is not known.
+    """
+    normalized = normalize_hint_label(label)
+    if not normalized:
+        return False
+    if normalized in _LABEL_BLACKLIST_EXACT:
+        return False
+    for bad in _LABEL_BLACKLIST:
+        if bad in normalized:
+            return False
+    if field and field in _FIELD_VOCAB:
+        vocab = _FIELD_VOCAB[field]
+        if not any(token in normalized for token in vocab):
+            return False
+    return True
 
 
 def _candidate_lines(raw_text: str) -> list[str]:
@@ -427,13 +566,29 @@ def _value_markers(field_name: str, value: str) -> list[str]:
 
 
 def _merge_hint_entries(existing: list[dict[str, Any]], new_entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge hint entries by ``(label, page)``.
+
+    Labels are normalised through :func:`normalize_hint_label` which
+    enforces structural rules. A deliberate exception: an **empty label**
+    plus a non-None page is allowed through. These are "position-only"
+    hints produced by user_search on table-layout invoices (BRAGE,
+    Norkart, ...) where no label-prefix precedes the amount column. The
+    hint still has page + bbox — enough to drive bbox_near matching via
+    :func:`engine._profile_hint_boost` on the next invoice from the same
+    supplier.
+    """
     # Key = (label, page) so the same label on different pages is kept separate.
     merged: dict[tuple[str, Any], dict[str, Any]] = {}
     for entry in existing + new_entries:
-        label = normalize_hint_label(str(entry.get("label", "")))
-        if not label:
-            continue
+        raw_label = str(entry.get("label", "") or "")
         page = entry.get("page")  # None or int
+        if raw_label.strip() == "" and page is not None and entry.get("bbox"):
+            # Accept position-only hint — no label, but geometry is solid.
+            label = ""
+        else:
+            label = normalize_hint_label(raw_label)
+            if not label:
+                continue
         key = (label, page)
         if key not in merged:
             merged[key] = {"label": label, "page": page, "bbox": None, "count": 0}
@@ -445,13 +600,28 @@ def _merge_hint_entries(existing: list[dict[str, Any]], new_entries: list[dict[s
     return sorted(merged.values(), key=lambda item: (-int(item.get("count", 0)), item["label"]))
 
 
+_LABEL_MAX_WORDS = 3
+
+
 def _extract_label_from_line(line: str, marker: str) -> str:
+    """Extract the invoice-label text that sits immediately before *marker*.
+
+    Real invoice labels are short — usually 1-3 words (``fakturanr``,
+    ``til betaling``, ``totalt mva beløp``). If the prefix is longer we
+    keep only the last :data:`_LABEL_MAX_WORDS` so that noisy lines like
+    ``MVA 25.00% av 940.00 = 235.00`` don't produce per-invoice-unique
+    labels such as ``mva 25 00 av 940 00`` which can never match a
+    future invoice.
+    """
     idx = line.lower().find(marker.lower())
     if idx < 0:
         return ""
     prefix = line[:idx].strip(" :-\u00a0")
     if not prefix and ":" in line:
         prefix = line.split(":", 1)[0]
+    words = prefix.split()
+    if len(words) > _LABEL_MAX_WORDS:
+        prefix = " ".join(words[-_LABEL_MAX_WORDS:])
     return normalize_hint_label(prefix)
 
 

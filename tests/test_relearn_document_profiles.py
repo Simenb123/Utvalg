@@ -704,3 +704,60 @@ def test_apply_regenerates_global_profile(
             for h in (entries or [])
         }
         assert "STALE" not in all_labels, written["profiles"]["__global__"]
+
+
+def test_relearn_preserves_pre_existing_hint_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Relearn must add to existing hint counts, never reset them.
+
+    Simulates the BRAGE case observed in prod: a profile had
+    ``fakturanr`` count=52 from historical saves. After a relearn round
+    where only 1 new record is re-processed, the count for the stable
+    label must be **at least 52** (52 preserved + 1 newly confirmed = 53),
+    never dropped to 1. Without this guard, re-runs of relearn
+    progressively forget what the store already knows.
+    """
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    rec = _make_record(pdf)
+    monkeypatch.setattr(
+        relearn_document_profiles, "extract_text_from_file",
+        _stub_extract({str(pdf): _FakeExtractResult("", _segments_from_fields(rec["fields"]))}),
+    )
+
+    # Seed the profile with pre-existing high-count hints (the historical
+    # 52-count state).
+    profiles = dict(_PROFILES)
+    profiles["orgnr:965004211"] = {
+        **_PROFILES["orgnr:965004211"],
+        "sample_count": 52,
+        "field_hints": {
+            "invoice_number": [{"label": "fakturanr", "page": 1, "bbox": None, "count": 52}],
+            "invoice_date": [{"label": "fakturadato", "page": 1, "bbox": None, "count": 34}],
+        },
+    }
+
+    store = _make_store(
+        {"c::2026::b1": rec}, profiles, tmp_path / "store.json",
+    )
+    process_store(store, apply=True)
+
+    written = json.loads(store.read_text(encoding="utf-8"))
+    updated = written["profiles"]["orgnr:965004211"]
+    hints = updated.get("field_hints", {}) or {}
+
+    def _count(field: str, label: str, page) -> int:
+        for h in hints.get(field, []) or []:
+            if str(h.get("label", "")).lower() == label and h.get("page") == page:
+                return int(h.get("count", 0) or 0)
+        return 0
+
+    # Pre-existing count=52 must have been carried through. The new record
+    # can add to it, but never reset it.
+    assert _count("invoice_number", "fakturanr", 1) >= 52, (
+        f"fakturanr count reset — got {_count('invoice_number', 'fakturanr', 1)}, "
+        f"expected ≥52. Full hints: {hints!r}"
+    )
+    # Label not re-confirmed in this run should also be preserved as-is.
+    assert _count("invoice_date", "fakturadato", 1) == 34, hints

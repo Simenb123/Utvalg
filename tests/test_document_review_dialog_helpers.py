@@ -196,3 +196,140 @@ def test_parse_amount_does_not_misread_two_digit_fractions() -> None:
     # so they must stay decimal.
     assert _parse_amount("1,23") == pytest.approx(1.23)
     assert _parse_amount("1.23") == pytest.approx(1.23)
+
+
+# ----------------------------------------------------------------------
+# _is_dirty — auto-save dirty-check logic
+# ----------------------------------------------------------------------
+#
+# The method is bound to the Tkinter dialog, so we exercise it through
+# a minimal fake-instance that carries the same state dicts / StringVars
+# the real dialog uses. The method only reads state; no window required.
+
+from document_control_review_dialog import DocumentControlReviewDialog, FIELD_DEFS
+
+
+class _FakeStringVar:
+    def __init__(self, value: str = "") -> None:
+        self._value = value
+
+    def get(self) -> str:
+        return self._value
+
+    def set(self, value: str) -> None:
+        self._value = value
+
+
+class _FakeText:
+    def __init__(self, value: str = "") -> None:
+        self._value = value
+
+    def get(self, _start: str, _end: str) -> str:
+        return self._value
+
+    def set(self, value: str) -> None:
+        self._value = value
+
+
+def _make_dialog_stub(
+    *,
+    saved_fields=None,
+    notes="",
+    saved_notes="",
+    saved_evidence=None,
+    gui_values=None,
+    gui_notes="",
+    field_evidence=None,
+    edited_bilag=None,
+) -> DocumentControlReviewDialog:
+    """Build a minimal stand-in for DocumentControlReviewDialog with just
+    the attributes ``_is_dirty`` reads."""
+    stub = DocumentControlReviewDialog.__new__(DocumentControlReviewDialog)
+    stub._current_index = 0
+    stub._results = [object()]   # one placeholder bilag
+    stub._saved_fields = [saved_fields]
+    stub._notes_state = [saved_notes]
+    stub._saved_evidence = [saved_evidence]
+    stub._field_evidence = dict(field_evidence or {})
+    stub._edited_bilag = set(edited_bilag or [])
+    stub.pdf_vars = {
+        key: _FakeStringVar((gui_values or {}).get(key, ""))
+        for key, _ in FIELD_DEFS
+    }
+    stub._txt_notes = _FakeText(gui_notes)
+    return stub
+
+
+def test_is_dirty_never_saved_without_user_edit_returns_false() -> None:
+    """A fresh bilag with extraction-filled values but no user action
+    must not be considered dirty — auto-save shouldn't fire on idle
+    navigation."""
+    stub = _make_dialog_stub(
+        saved_fields=None,
+        gui_values={"invoice_number": "INV-1"},  # filled by auto_analyse
+    )
+    assert stub._is_dirty() is False
+
+
+def test_is_dirty_never_saved_with_user_edit_returns_true() -> None:
+    """Same scenario, but the user has touched the bilag — auto-save
+    should fire to persist their work."""
+    stub = _make_dialog_stub(
+        saved_fields=None,
+        gui_values={"invoice_number": "INV-1"},
+        edited_bilag=[0],
+    )
+    assert stub._is_dirty() is True
+
+
+def test_is_dirty_saved_with_identical_gui_returns_false() -> None:
+    """GUI matches disk byte-for-byte → not dirty."""
+    fields = {"invoice_number": "INV-1", "total_amount": "1 000,00"}
+    stub = _make_dialog_stub(
+        saved_fields=fields,
+        gui_values=fields,
+    )
+    assert stub._is_dirty() is False
+
+
+def test_is_dirty_saved_with_differing_value_returns_true() -> None:
+    stub = _make_dialog_stub(
+        saved_fields={"invoice_number": "INV-1"},
+        gui_values={"invoice_number": "INV-2"},
+    )
+    assert stub._is_dirty() is True
+
+
+def test_is_dirty_saved_with_changed_notes_returns_true() -> None:
+    stub = _make_dialog_stub(
+        saved_fields={"invoice_number": "INV-1"},
+        gui_values={"invoice_number": "INV-1"},
+        saved_notes="old note",
+        gui_notes="new note",
+    )
+    assert stub._is_dirty() is True
+
+
+def test_is_dirty_saved_with_changed_bbox_returns_true() -> None:
+    """User cycled to a different PDF hit — the evidence bbox differs
+    from what was saved, so navigating away MUST persist the new pick."""
+    from document_engine.models import FieldEvidence
+
+    saved_ev = {
+        "total_amount": {"page": 2, "bbox": [100.0, 100.0, 150.0, 110.0]},
+    }
+    current_ev = {
+        "total_amount": FieldEvidence(
+            field_name="total_amount",
+            normalized_value="1000.00",
+            page=2,
+            bbox=(200.0, 200.0, 250.0, 210.0),  # different bbox
+        ),
+    }
+    stub = _make_dialog_stub(
+        saved_fields={"total_amount": "1000.00"},
+        gui_values={"total_amount": "1000.00"},
+        saved_evidence=saved_ev,
+        field_evidence=current_ev,
+    )
+    assert stub._is_dirty() is True

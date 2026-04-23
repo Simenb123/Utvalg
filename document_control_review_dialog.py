@@ -134,8 +134,16 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._var_status_bar = tk.StringVar()
         self._var_file_path  = tk.StringVar()
         self._match_labels:  dict[str, tk.Label] = {}
+        # Navigation arrows around the saved-status label. Left/right cycle
+        # through PDF hits for the field; the status label itself shows
+        # "Lagret" / "ikke lagret" and jumps to the current hit position.
+        self._prev_arrows:   dict[str, tk.Label] = {}
+        self._next_arrows:   dict[str, tk.Label] = {}
+        # Backwards-compatible aliases — the existing code paths still
+        # read/write these dicts for styling. Both now point at the
+        # status-label in the middle of the navigation row.
         self._page_labels:   dict[str, tk.Label] = {}
-        self._saved_labels:  dict[str, tk.Label] = {}  # disk-saved indicator per field
+        self._saved_labels:  dict[str, tk.Label] = {}
         self._field_evidence: dict[str, Any]     = {}  # populated after re-analysis
         # All PDF search hits per field: list of (page, bbox)
         self._field_hits:      dict[str, list[tuple[int, tuple]]] = {}
@@ -143,6 +151,11 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._suppress_pdf_search: bool = False  # avoid searching during programmatic set
         self._search_timers: dict[str, str] = {}  # after() IDs for debounced PDF search
         self._pinned_fields: set[str] = set()  # fields where user has explicitly chosen a hit
+        # Track which bilag the user has actively edited this session.
+        # Used by _is_dirty() to decide whether auto-save-before-nav
+        # should fire — idle navigation should NOT bump sample_count or
+        # overwrite saved state with identical values.
+        self._edited_bilag: set[int] = set()
 
         # Live match update on each PDF var change
         for key, _ in FIELD_DEFS:
@@ -400,20 +413,48 @@ class DocumentControlReviewDialog(tk.Toplevel):
                            command=lambda k=key: self._copy_hb_to_pdf(k)).grid(
                     row=r, column=4, padx=(4, 4), pady=1)
 
-            # Page badge — shows which PDF page the value was extracted from.
-            # Click cycles through hits; the chosen position is pinned.
-            page_lbl = tk.Label(inner, text="", fg="#999", font=("Segoe UI", 8),
-                                width=8, anchor="w", cursor="hand2")
-            page_lbl.grid(row=r, column=5, sticky="w", padx=(0, 2))
-            page_lbl.bind("<Button-1>", lambda _e, k=key: self._focus_pdf_field(k))
-            self._page_labels[key] = page_lbl
+            # Navigation row: [◀]  Lagret / ikke lagret  [▶]
+            #   ◀  = previous PDF hit for this field
+            #   ▶  = next PDF hit
+            #   Middle status-label is clickable — jumps to the current hit.
+            nav_frame = tk.Frame(inner)
+            nav_frame.grid(row=r, column=5, columnspan=2, sticky="w", padx=(0, 4))
 
-            # Saved indicator — shows disk-saved value, click to navigate to saved PDF position
-            saved_lbl = tk.Label(inner, text="", fg="#999", font=("Segoe UI", 7),
-                                  anchor="w", cursor="hand2")
-            saved_lbl.grid(row=r, column=6, sticky="w", padx=(0, 4))
-            saved_lbl.bind("<Button-1>", lambda _e, k=key: self._goto_saved_position(k))
-            self._saved_labels[key] = saved_lbl
+            prev_arrow = tk.Label(
+                nav_frame, text="◀", font=("Segoe UI", 9),
+                fg="#ccc", width=2, cursor="arrow",
+            )
+            prev_arrow.pack(side="left")
+            prev_arrow.bind(
+                "<Button-1>",
+                lambda _e, k=key: self._focus_pdf_field(k, direction=-1),
+            )
+            self._prev_arrows[key] = prev_arrow
+
+            status_lbl = tk.Label(
+                nav_frame, text="", fg="#b0b0b0", font=("Segoe UI", 8),
+                width=12, anchor="center", cursor="hand2",
+            )
+            status_lbl.pack(side="left", padx=(2, 2))
+            status_lbl.bind(
+                "<Button-1>",
+                lambda _e, k=key: self._focus_pdf_field(k, direction=0),
+            )
+            # Same widget fronts both page-label and saved-label refresh
+            # paths so existing logic keeps working.
+            self._page_labels[key] = status_lbl
+            self._saved_labels[key] = status_lbl
+
+            next_arrow = tk.Label(
+                nav_frame, text="▶", font=("Segoe UI", 9),
+                fg="#ccc", width=2, cursor="arrow",
+            )
+            next_arrow.pack(side="left")
+            next_arrow.bind(
+                "<Button-1>",
+                lambda _e, k=key: self._focus_pdf_field(k, direction=+1),
+            )
+            self._next_arrows[key] = next_arrow
 
             # Bind mousewheel on each entry too
             hb_ent.bind("<MouseWheel>", _on_wheel)
@@ -443,6 +484,13 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._txt_notes.grid(row=notes_r, column=1, columnspan=3,
                              sticky="ew", pady=(0, 3))
         self._txt_notes.bind("<MouseWheel>", _on_wheel)
+        # Any user keypress in the notes field marks the bilag as dirty.
+        # <KeyPress> fires before the char lands, which is safe here —
+        # we only care about intent, not content.
+        self._txt_notes.bind(
+            "<KeyPress>",
+            lambda _e: self._edited_bilag.add(self._current_index),
+        )
 
         # Tall Lagre-button alongside Avvik/Notater — close to the fields
         # the user is editing, no scrolling or mouse trip needed.
@@ -723,6 +771,8 @@ class DocumentControlReviewDialog(tk.Toplevel):
         self._update_match(key)
         if self._suppress_pdf_search:
             return
+        # User-initiated change → bilag is now dirty
+        self._edited_bilag.add(self._current_index)
         # Text changed → unpin the field so the search picks the best match
         self._pinned_fields.discard(key)
         # Cancel any pending search for this field
@@ -811,11 +861,14 @@ class DocumentControlReviewDialog(tk.Toplevel):
                 bbox=bbox,
             )
 
-    def _focus_pdf_field(self, key: str) -> None:
+    def _focus_pdf_field(self, key: str, direction: int = 1) -> None:
         """Navigate the PDF viewer to where *key* was found.
 
-        If multiple hits exist, cycle to the next one on each click.
-        The chosen position is pinned so automated searches won't overwrite it.
+        ``direction``: ``+1`` cycles to the next hit, ``-1`` to the
+        previous one, ``0`` just re-highlights the current hit (used by
+        the status-label click so you jump to where the field is
+        currently pointing). The chosen position is pinned so automated
+        searches won't overwrite it.
         """
         # Cancel any pending debounce search so it doesn't overwrite our
         # hit index right after the user explicitly picks a position.
@@ -824,10 +877,11 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self.after_cancel(prev_timer)
 
         hits = self._field_hits.get(key, [])
-        if len(hits) > 1:
-            # Cycle to next hit
+        if direction and len(hits) > 1:
+            # User is actively picking a different hit → bilag is dirty.
+            self._edited_bilag.add(self._current_index)
             idx = self._field_hit_index.get(key, 0)
-            idx = (idx + 1) % len(hits)
+            idx = (idx + direction) % len(hits)
             self._field_hit_index[key] = idx
             page, bbox = hits[idx]
             self._update_evidence_location(key, page, bbox)
@@ -841,32 +895,58 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._preview.set_highlight(target)
 
     def _update_page_label_for(self, key: str) -> None:
-        """Update the page badge for a single field."""
-        lbl = self._page_labels.get(key)
+        """Refresh the navigation arrows + status label for a single field.
+
+        The left/right arrows are enabled only when the field has more
+        than one PDF hit to cycle through. The middle status label
+        (Lagret / ikke lagret) is refreshed too so a new hit selection
+        immediately re-colours the saved-vs-current comparison.
+        """
+        hits = self._field_hits.get(key, [])
+        has_multiple = len(hits) > 1
+        for arrow_map in (self._prev_arrows, self._next_arrows):
+            arrow = arrow_map.get(key)
+            if arrow is None:
+                continue
+            if has_multiple:
+                arrow.configure(fg="#555", cursor="hand2")
+            else:
+                arrow.configure(fg="#d0d0d0", cursor="arrow")
+        self._update_status_label_for(key)
+
+    def _update_status_label_for(self, key: str) -> None:
+        """Update the middle status label — text + colour.
+
+        Text: ``Lagret`` when a disk value exists; ``ikke lagret`` when
+        no disk value has been persisted yet.
+
+        Colour: green when disk value equivalent to current GUI value,
+        orange when disk value differs, grey when nothing is saved.
+        """
+        lbl = self._saved_labels.get(key)
         if lbl is None:
             return
-        evidence = self._field_evidence.get(key)
-        hits = self._field_hits.get(key, [])
-        n_hits = len(hits)
-        is_pinned = key in self._pinned_fields
+        idx = self._current_index
+        saved = self._saved_fields[idx] if 0 <= idx < len(self._saved_fields) else None
+        disk_val = ""
+        if saved is not None:
+            disk_val = str(saved.get(key, "") or "").strip()
 
-        if evidence is not None:
-            page = getattr(evidence, "page", None) if not isinstance(evidence, dict) else evidence.get("page")
-            if page:
-                badge = f"s.{page}"
-                if n_hits > 1:
-                    hit_idx = self._field_hit_index.get(key, 0)
-                    badge = f"s.{page} {hit_idx+1}/{n_hits}"
-                if is_pinned:
-                    badge += " \u2713"  # ✓ checkmark for pinned
-                lbl.configure(
-                    text=badge,
-                    fg="#1a7a1a" if is_pinned else "#c07a00",
-                    cursor="hand2",
-                    font=("Segoe UI", 8, "bold" if is_pinned else "underline"),
-                )
-                return
-        lbl.configure(text="", fg="#ccc", cursor="arrow", font=("Segoe UI", 8))
+        if not disk_val:
+            lbl.configure(text="ikke lagret", fg="#b0b0b0", font=("Segoe UI", 8))
+            return
+
+        gui_val = self.pdf_vars[key].get().strip()
+        equivalent = disk_val == gui_val or (
+            bool(gui_val) and _field_matches(key, disk_val, gui_val)
+        )
+        colour = "#1a7a1a" if equivalent else "#cc6600"
+        lbl.configure(
+            text="Lagret",
+            fg=colour,
+            font=("Segoe UI", 8, "bold" if equivalent else "normal"),
+        )
+
 
     def _update_page_labels(self) -> None:
         """Refresh page-badge labels for all fields."""
@@ -874,70 +954,73 @@ class DocumentControlReviewDialog(tk.Toplevel):
             self._update_page_label_for(key)
 
     def _update_saved_indicators(self) -> None:
-        """Show disk-saved value next to each field for comparison."""
-        idx = self._current_index
-        saved = self._saved_fields[idx] if 0 <= idx < len(self._saved_fields) else None
-        saved_ev = self._saved_evidence[idx] if 0 <= idx < len(self._saved_evidence) else None
+        """Refresh the middle status label for every field."""
         for key, _ in FIELD_DEFS:
-            lbl = self._saved_labels.get(key)
-            if lbl is None:
-                continue
-            if saved is None:
-                lbl.configure(text="", fg="#b0b0b0", font=("Segoe UI", 7))
-                continue
-            disk_val = str(saved.get(key, "") or "").strip()
-            gui_val = self.pdf_vars[key].get().strip()
-            has_pos = saved_ev and key in saved_ev and saved_ev[key].get("page") is not None
-            page_str = f" s.{saved_ev[key]['page']}" if has_pos else ""
-            if not disk_val:
-                lbl.configure(text="", fg="#b0b0b0", font=("Segoe UI", 7))
-                continue
-            # Consider equivalent values (e.g. "1 175,00" vs "1,175.00" or
-            # "NO 965 004 211 MVA" vs "965004211") as a match so the saved
-            # indicator goes green on format differences.
-            equivalent = disk_val == gui_val or (
-                bool(gui_val) and _field_matches(key, disk_val, gui_val)
-            )
-            color = "#1a7a1a" if equivalent else "#cc6600"
-            lbl.configure(
-                text=f"Lagret{page_str}: {disk_val[:20]}",
-                fg=color,
-                font=("Segoe UI", 7, "underline") if has_pos else ("Segoe UI", 7),
-            )
-
-    def _goto_saved_position(self, key: str) -> None:
-        """Navigate PDF viewer to the saved position for this field."""
-        idx = self._current_index
-        saved_ev = self._saved_evidence[idx] if 0 <= idx < len(self._saved_evidence) else None
-        if not saved_ev:
-            return
-        ev = saved_ev.get(key)
-        if not ev or not isinstance(ev, dict):
-            return
-        page = ev.get("page")
-        if page is None:
-            return
-        bbox = ev.get("bbox")
-        bbox_t = tuple(bbox) if bbox and isinstance(bbox, (list, tuple)) and len(bbox) >= 4 else None
-        label = next((lbl for k, lbl in FIELD_DEFS if k == key), key)
-        target = PreviewTarget(
-            field_name=key,
-            page=page,
-            bbox=bbox_t,
-            label=label,
-            source="saved",
-            raw_value=ev.get("raw_value", ""),
-            normalized_value=ev.get("normalized_value", ""),
-        )
-        self._preview.set_highlight(target)
+            self._update_status_label_for(key)
 
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
 
+    def _is_dirty(self) -> bool:
+        """Return True when the current bilag has unsaved user edits.
+
+        Two cases count as dirty:
+
+        1. **Bilag has a disk-saved state** — any diff between the GUI
+           (pdf_vars, notes) and the saved snapshot means the user has
+           changed something since last save.
+        2. **Bilag has never been saved** — only dirty if the user has
+           *explicitly interacted* (edited a field, clicked arrow navs,
+           typed in notes). Extraction-filled values without user
+           action do NOT count — auto-saving those would blow up
+           sample_count and bake untrusted values into the profile.
+        """
+        idx = self._current_index
+        if not (0 <= idx < len(self._results)):
+            return False
+
+        saved_fields = self._saved_fields[idx] if 0 <= idx < len(self._saved_fields) else None
+        if saved_fields is None:
+            return idx in self._edited_bilag
+
+        # Compare GUI pdf_vars with the saved snapshot
+        for key, _ in FIELD_DEFS:
+            gui_val = self.pdf_vars[key].get().strip()
+            saved_val = str(saved_fields.get(key, "") or "").strip()
+            if gui_val != saved_val:
+                return True
+
+        # Compare notes
+        saved_notes = (self._notes_state[idx] or "").strip()
+        current_notes = self._txt_notes.get("1.0", "end").strip()
+        if current_notes != saved_notes:
+            return True
+
+        # Compare evidence bboxes — user may have cycled to a different PDF hit
+        saved_ev = self._saved_evidence[idx] if 0 <= idx < len(self._saved_evidence) else None
+        saved_ev_map = saved_ev if isinstance(saved_ev, dict) else {}
+        for key, _ in FIELD_DEFS:
+            cur_ev = self._field_evidence.get(key)
+            cur_bbox = None
+            if cur_ev is not None:
+                cur_bbox = getattr(cur_ev, "bbox", None) if not isinstance(cur_ev, dict) else cur_ev.get("bbox")
+            saved_entry = saved_ev_map.get(key) if isinstance(saved_ev_map, dict) else None
+            saved_bbox = saved_entry.get("bbox") if isinstance(saved_entry, dict) else None
+            if tuple(cur_bbox) if cur_bbox else None != (tuple(saved_bbox) if saved_bbox else None):
+                return True
+        return False
+
     def _auto_save_before_nav(self) -> None:
-        """Silently persist current edits before navigating away."""
+        """Silently persist current edits before navigating away.
+
+        No-op when the bilag has no unsaved changes — prevents
+        double-counting sample_count and writing redundant saves every
+        time the user navigates past a bilag they didn't touch.
+        """
         if not self._results:
+            return
+        if not self._is_dirty():
             return
         self._save_current(advance=False, silent=True)
 
@@ -1015,6 +1098,27 @@ class DocumentControlReviewDialog(tk.Toplevel):
                 f"{idx + 1} / {len(self._results)}  ({'OK' if new_status == 'ok' else 'Avvik'})"
             )
 
+        # Sync corrected GUI values back into field_evidence so amount
+        # self-consistency is re-checked against what the user actually
+        # entered (not the stale extraction-time values). Without this,
+        # evidence.metadata["self_consistent"] could report False even
+        # when subtotal + vat == total after the user's corrections.
+        for fn in ("subtotal_amount", "vat_amount", "total_amount"):
+            gui_val = fields.get(fn, "").strip()
+            ev = self._field_evidence.get(fn)
+            if ev is not None and gui_val:
+                if hasattr(ev, "normalized_value"):
+                    ev.normalized_value = gui_val
+                    ev.raw_value = gui_val
+                elif isinstance(ev, dict):
+                    ev["normalized_value"] = gui_val
+                    ev["raw_value"] = gui_val
+        try:
+            from document_engine.engine import _validate_amount_self_consistency
+            _validate_amount_self_consistency(self._field_evidence)
+        except Exception:
+            pass
+
         # Persist to store — pass segments for coordinate-based profile learning
         file_path = r.extracted_path or self._var_file_path.get().strip()
         try:
@@ -1041,6 +1145,9 @@ class DocumentControlReviewDialog(tk.Toplevel):
                 elif isinstance(v, dict):
                     ev_snapshot[k] = dict(v)
             self._saved_evidence[idx] = ev_snapshot if ev_snapshot else None
+            # Saved successfully — bilag is no longer dirty, so the next
+            # navigation won't trigger a redundant auto-save.
+            self._edited_bilag.discard(idx)
             if not silent:
                 self._var_status_bar.set(
                     f"Lagret bilag {r.bilag_nr} ({new_status.upper()})  —  klient={self._client or '?'}, år={self._year or '?'}"
@@ -1175,9 +1282,26 @@ class DocumentControlReviewDialog(tk.Toplevel):
         idx = self._current_index
         self._results[idx] = _replace_extracted_path(self._results[idx], path)
         self._preview.load_file(path)
+        # Drop stale location-context from the previous file BEFORE reload.
+        # Without this, a subsequent save could persist hints with page/bbox
+        # from the old PDF attached to the new file. Only geometry state is
+        # cleared — PDF text fields the user has edited are kept intact.
+        self._field_evidence = {}
+        self._field_hits = {}
+        self._field_hit_index = {}
+        self._pinned_fields.clear()
         # Reload segments AND raw text so saving without a follow-up "Les oppl."
         # still persists the correct excerpt/coordinates for the new file.
         self._reload_segments_for(path)
+        # Re-run analysis silently to repopulate evidence + hits against the
+        # new document. Without this, the page badges and the save path
+        # would have no position context at all until the user clicks
+        # "Les oppl." manually.
+        self._auto_analyse(path, idx)
+        # Status labels (Lagret / ikke lagret) and page badges reflect the
+        # freshly reset state.
+        self._update_page_labels()
+        self._update_saved_indicators()
 
     def _auto_analyse(self, file_path: str, expected_idx: int) -> None:
         """Run analysis silently on bilag load to populate page badges.
@@ -1208,12 +1332,18 @@ class DocumentControlReviewDialog(tk.Toplevel):
         analysis_segments = getattr(analysis, "segments", None)
         if analysis_segments:
             self._last_segments = list(analysis_segments)
-        # Merge analysis evidence but preserve existing entries that have bbox
-        # (e.g. restored from disk or user-confirmed positions)
+        # Merge analysis evidence but preserve existing entries that
+        # represent *trusted* positions: user-confirmed picks
+        # (source="user_search") or values restored from disk ("saved").
+        # Stale extraction evidence from a previous analysis run MUST be
+        # overwritten so that an updated supplier profile (from a save
+        # in the same session) can raise a new auto-pick here.
+        _TRUSTED_SOURCES = {"user_search", "saved", "profile"}
         new_evidence = dict(analysis.field_evidence or {})
         for key, ev in self._field_evidence.items():
             ev_bbox = getattr(ev, "bbox", None) if not isinstance(ev, dict) else ev.get("bbox")
-            if ev_bbox is not None:
+            ev_src = getattr(ev, "source", "") if not isinstance(ev, dict) else ev.get("source", "")
+            if ev_bbox is not None and str(ev_src or "") in _TRUSTED_SOURCES:
                 new_evidence[key] = ev
         self._field_evidence = new_evidence
 
