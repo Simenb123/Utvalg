@@ -331,28 +331,18 @@ def test_build_saldobalanse_df_adds_payroll_columns_and_filters(monkeypatch) -> 
     row_5000 = df.loc[df["Konto"] == "5000"].iloc[0]
     row_5210 = df.loc[df["Konto"] == "5210"].iloc[0]
 
+    # Assertions restricted to columns that remain in ALL_COLUMNS after the
+    # A07-workflow cleanup — payroll-suggestion columns (A07-forslag,
+    # A07 OK, RF-1022-forslag, RF-1022 OK, Flagg-forslag, Matchgrunnlag)
+    # are no longer part of the Saldobalanse schema and get reindexed out.
     assert row_5000["A07-kode"] == "fastloenn"
-    assert row_5000["A07-forslag"] == "fastloenn"
-    assert row_5000["A07 OK"] == "✓"
     assert "Post 100" in row_5000["RF-1022-post"]
-    assert "Post 100" in row_5000["RF-1022-forslag"]
-    assert row_5000["RF-1022 OK"] == "✓"
     assert row_5000["Kol"] == "UB"
     assert row_5000["Lønnsstatus"] == "Manuell"
-    assert "A07:" in row_5000["Matchgrunnlag"]
     assert row_5210["A07-kode"] == ""
-    assert row_5210["A07-forslag"] == "elektroniskKommunikasjon"
-    assert row_5210["A07 OK"] == ""
-    if True:
-        assert row_5210["RF-1022-post"] == ""
-        assert "Post 111" in row_5210["RF-1022-forslag"]
-        assert row_5210["RF-1022 OK"] == ""
-        assert row_5210["Kol"] == "UB"
-        assert "Naturalytelse" in row_5210["Flagg-forslag"]
-        assert row_5210["Lønnsstatus"] == "Forslag"
-        assert "A07: konto-intervall" in row_5210["Matchgrunnlag"]
-        assert "RF-1022:" in row_5210["Matchgrunnlag"]
-        assert "Flagg:" in row_5210["Matchgrunnlag"]
+    assert row_5210["RF-1022-post"] == ""
+    assert row_5210["Kol"] == "UB"
+    assert row_5210["Lønnsstatus"] == "Forslag"
     assert row_5210["Problem"] != ""
     assert only_suggested["Konto"].tolist() == ["5210"]
 
@@ -649,9 +639,6 @@ def test_build_saldobalanse_df_leaves_payroll_columns_blank_for_weak_irrelevant_
 
     row = df.iloc[0]
     assert row["A07-kode"] == ""
-    assert row["A07-forslag"] == ""
-    assert row["A07 OK"] == ""
-    assert row["RF-1022 OK"] == ""
     assert row["Lønnsstatus"] == ""
     assert row["Problem"] == ""
 
@@ -691,11 +678,7 @@ def test_build_saldobalanse_df_can_skip_payroll_enrichment(monkeypatch) -> None:
     assert called == []
     row = df.iloc[0]
     assert row["A07-kode"] == ""
-    assert row["A07-forslag"] == ""
-    assert row["A07 OK"] == ""
-    assert row["RF-1022 OK"] == ""
     assert row["Lønnsstatus"] == ""
-    assert row["Matchgrunnlag"] == ""
     assert row["Problem"] == ""
 
 
@@ -785,17 +768,21 @@ def test_should_include_payroll_payload_depends_on_scope_or_visible_columns() ->
     assert page_saldobalanse.SaldobalansePage._should_include_payroll_payload(dummy) is True
 
 
-def test_payroll_preset_includes_ib_column() -> None:
+def test_payroll_preset_contains_core_columns() -> None:
     import page_saldobalanse
     import saldobalanse_payload
 
-    assert "IB" in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
-    assert "A07-forslag" in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
-    assert "A07 OK" in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
-    assert "RF-1022-forslag" in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
-    assert "RF-1022 OK" in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
-    assert "Status" in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
-    assert "Lønnsstatus" not in page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
+    # A07-workflow tracking columns (A07-forslag, A07 OK, RF-1022-forslag,
+    # RF-1022 OK, Status) are no longer part of the Saldobalanse schema — the
+    # classification workflow lives in the A07 tab. The payroll preset keeps
+    # the reference identifiers the auditor still cares about when reviewing
+    # accounts from Saldobalanse.
+    preset = page_saldobalanse.COLUMN_PRESETS["Lønnsklassifisering"]
+    assert "IB" in preset
+    assert "A07-kode" in preset
+    assert "RF-1022-post" in preset
+    for removed in ("A07-forslag", "A07 OK", "RF-1022-forslag", "RF-1022 OK", "Status"):
+        assert removed not in preset
 
 
 def test_apply_best_suggestions_updates_only_actionable_deltas() -> None:
