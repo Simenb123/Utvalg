@@ -201,6 +201,10 @@ class DummyCheckbutton(DummyWidget):
     pass
 
 
+class DummyRadiobutton(DummyWidget):
+    pass
+
+
 class DummySpinbox(DummyWidget):
     pass
 
@@ -290,6 +294,7 @@ class DummyTtkModule:
     Button = DummyButton
     Menubutton = DummyMenubutton
     Checkbutton = DummyCheckbutton
+    Radiobutton = DummyRadiobutton
     Spinbox = DummySpinbox
     Separator = DummySeparator
     Treeview = DummyTreeview

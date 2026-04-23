@@ -117,21 +117,30 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     pivot_header = ttk.Frame(pivot_frame)
     pivot_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 2))
 
-    ttk.Label(pivot_header, text="Aggregering:").grid(row=0, column=0, padx=(0, 4))
-    cmb_agg = ttk.Combobox(
-        pivot_header,
-        textvariable=var_agg,
-        values=["Saldobalanse", "Regnskapslinje"],
-        width=16,
-        state="readonly",
-    )
-    cmb_agg.grid(row=0, column=1, sticky="w")
+    ttk.Label(pivot_header, text="Aggregering:").grid(row=0, column=0, padx=(0, 6))
     _agg_changed = getattr(page, "_on_aggregering_changed", None)
-    if callable(_agg_changed):
-        cmb_agg.bind("<<ComboboxSelected>>", lambda _e: _agg_changed())
-    page._cmb_agg = cmb_agg
+    _agg_cb = (lambda: _agg_changed()) if callable(_agg_changed) else None
+    rb_agg_sb = ttk.Radiobutton(
+        pivot_header,
+        text="Saldobalanse",
+        variable=var_agg,
+        value="Saldobalanse",
+        command=_agg_cb,
+    )
+    rb_agg_sb.grid(row=0, column=1, sticky="w", padx=(0, 8))
+    rb_agg_rl = ttk.Radiobutton(
+        pivot_header,
+        text="Regnskapslinje",
+        variable=var_agg,
+        value="Regnskapslinje",
+        command=_agg_cb,
+    )
+    rb_agg_rl.grid(row=0, column=2, sticky="w")
+    page._cmb_agg = None  # tidligere Combobox — beholdes som None for bakoverkompat
+    page._rb_agg_sb = rb_agg_sb
+    page._rb_agg_rl = rb_agg_rl
 
-    ttk.Label(pivot_header, text="Type:").grid(row=0, column=2, padx=(12, 4))
+    ttk.Label(pivot_header, text="Type:").grid(row=0, column=3, padx=(12, 4))
     cmb_rb = ttk.Combobox(
         pivot_header,
         textvariable=var_rb,
@@ -139,7 +148,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         width=10,
         state="readonly",
     )
-    cmb_rb.grid(row=0, column=3, sticky="w")
+    cmb_rb.grid(row=0, column=4, sticky="w")
     _rb_changed = (
         getattr(page, "_on_rb_filter_changed", None)
         or getattr(page, "_schedule_apply_filters", None)
@@ -149,8 +158,8 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     page._cmb_rb = cmb_rb
 
     # Sammendragsetikett (f.eks. "74 kontoer | Sum UB: -12 643 322,74")
-    pivot_header.columnconfigure(4, weight=1)
-    lbl_tx_summary.grid(in_=pivot_header, row=0, column=5, sticky="e", padx=(8, 0))
+    pivot_header.columnconfigure(5, weight=1)
+    lbl_tx_summary.grid(in_=pivot_header, row=0, column=6, sticky="e", padx=(8, 0))
 
     # Søkefelt over pivot-treet (Ctrl+F fokuserer hit)
     _pivot_search_var = tk.StringVar()
@@ -401,85 +410,10 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     else:
         ttk.Label(tx_header, text="Hovedbok").grid(row=0, column=1, sticky="w")
 
-    # Knapp: Klassifiser kontoer (åpner konto-gruppe editor)
-    def _open_klassifisering() -> None:
-        try:
-            import session as _session
-            import views_konto_klassifisering as _vkk
-            _client = getattr(_session, "client", None) or ""
-            _year = getattr(_session, "year", None)
-            _sb_df = getattr(page, "_rl_sb_df", None)
-            kontoer: Any = []
-            if _sb_df is not None and not _sb_df.empty:
-                import pandas as pd
-                from page_analyse_sb import _resolve_sb_columns
-                _col_map = _resolve_sb_columns(_sb_df)
-                _k = _col_map.get("konto", "")
-                _n = _col_map.get("kontonavn", "")
-                if _k:
-                    selected_cols: list[str] = [_k]
-                    if _n:
-                        selected_cols.append(_n)
-                    numeric_targets = {
-                        "IB": _col_map.get("ib", ""),
-                        "Endring": _col_map.get("endring", ""),
-                        "UB": _col_map.get("ub", ""),
-                    }
-                    for src in numeric_targets.values():
-                        if src:
-                            selected_cols.append(src)
-
-                    kontoer = _sb_df[selected_cols].copy()
-                    rename_map = {_k: "Konto"}
-                    if _n:
-                        rename_map[_n] = "Navn"
-                    for target, src in numeric_targets.items():
-                        if src:
-                            rename_map[src] = target
-                    kontoer = kontoer.rename(columns=rename_map)
-
-                    if "Navn" not in kontoer.columns:
-                        kontoer["Navn"] = ""
-                    for target in ("IB", "Endring", "UB"):
-                        if target not in kontoer.columns:
-                            kontoer[target] = 0.0
-                        kontoer[target] = pd.to_numeric(kontoer[target], errors="coerce").fillna(0.0)
-
-                    kontoer["Konto"] = kontoer["Konto"].astype(str).str.strip()
-                    kontoer["Navn"] = kontoer["Navn"].astype(str).str.strip()
-                    kontoer = kontoer[kontoer["Konto"] != ""]
-                    kontoer = (
-                        kontoer.groupby(["Konto", "Navn"], as_index=False)[["IB", "Endring", "UB"]]
-                        .sum()
-                    )
-                    kontoer = kontoer.sort_values(
-                        by="Konto",
-                        key=lambda series: pd.to_numeric(series, errors="coerce").fillna(10**12),
-                    ).reset_index(drop=True)
-            _vkk.open_klassifisering_editor(
-                page,
-                client=_client,
-                kontoer=kontoer,
-                year=_year,
-                on_save=lambda: _refresh_sb_after_klassifisering(page),
-            )
-        except Exception as _e:
-            import logging
-            logging.getLogger(__name__).warning("Klassifisering feilet: %s", _e)
-
-    def _refresh_sb_after_klassifisering(p: Any) -> None:
-        """Refresh SB-visning etter at klassifisering er lagret."""
-        try:
-            from page_analyse_sb import refresh_sb_view
-            refresh_sb_view(page=p)
-        except Exception:
-            pass
-
-    ttk.Button(
-        tx_header,
-        text="Klassifiser kontoer\u2026",
-        command=_open_klassifisering,
-    ).grid(row=0, column=2, padx=(12, 0), sticky="w")
+    # "Klassifiser kontoer..."-knappen er fjernet fra Analyse-fanen.
+    # Saldobalanse-fanen har fortsatt sin egen "Avansert klassifisering"-handling
+    # (saldobalanse_actions.open_advanced_classification) som bruker samme
+    # views_konto_klassifisering-modulen.
 
     # Desimal-toggle
     _var_dec = getattr(page, "_var_decimals", None)
