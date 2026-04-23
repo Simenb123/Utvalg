@@ -224,14 +224,16 @@ class ManagedTreeview:
             pinned_cols=self._pinned,
             pref_prefix=pref_prefix,
         )
+        # _apply_specs sets heading + column configs (width comes from
+        # self._widths), so the subsequent _apply_saved_widths call that
+        # used to live here was fully redundant — 34+ duplicated Tcl
+        # round-trips per init on a full Saldobalanse page.
         self._apply_specs()
-        self._apply_saved_widths()
         sortable_cols = [spec.id for spec in self._specs if spec.sortable]
         if enable_treeview_sorting is not None and sortable_cols:
             enable_treeview_sorting(tree, columns=sortable_cols)
         if auto_bind:
             self.bind_events()
-        self.stabilize_layout()
 
     @staticmethod
     def _normalize_specs(column_specs: Sequence[ColumnSpec | str]) -> list[ColumnSpec]:
@@ -246,10 +248,19 @@ class ManagedTreeview:
         return specs
 
     def _apply_specs(self) -> None:
+        target_columns = [spec.id for spec in self._specs]
         try:
-            self.tree["columns"] = [spec.id for spec in self._specs]
+            current_columns = [str(c) for c in self.tree["columns"]]
         except Exception:
-            pass
+            current_columns = []
+        if current_columns != target_columns:
+            # Only reassign when it actually differs — setting tree["columns"]
+            # tears down heading/column state and resets displaycolumns, which
+            # is expensive and makes the subsequent apply_visible() necessary.
+            try:
+                self.tree["columns"] = target_columns
+            except Exception:
+                pass
         for spec in self._specs:
             try:
                 self.tree.heading(spec.id, text=spec.heading or spec.id)
@@ -265,7 +276,12 @@ class ManagedTreeview:
                 )
             except Exception:
                 pass
-        self.column_manager.update_columns([spec.id for spec in self._specs])
+        # Re-apply visibility — assigning tree["columns"] resets
+        # displaycolumns. Call apply_visible() directly rather than
+        # update_columns(), which also clobbers _default_visible and forces
+        # the "Standard" reset menu item to pick *all* columns instead of
+        # the caller's intended default set.
+        self.column_manager.apply_visible()
 
     def _apply_saved_widths(self) -> None:
         for spec in self._specs:
@@ -283,14 +299,22 @@ class ManagedTreeview:
         self.tree.bind("<Escape>", self._on_escape, add="+")
 
     def stabilize_layout(self) -> None:
+        """Queue an idle-time re-apply of visibility + saved widths.
+
+        Used after runtime changes (reorder, column chooser) where Tk may
+        briefly lay out columns with stretched widths before our saved
+        widths are honored. Not called from ``__init__`` — a freshly-built
+        tree is already in the right state after ``_apply_specs`` and the
+        extra idle pass was adding visible lag on big pages.
+        """
         self._stabilize_generation += 1
         generation = self._stabilize_generation
         try:
-            self.tree.after_idle(lambda: self._stabilize_once(generation, second_pass=False))
+            self.tree.after_idle(lambda: self._stabilize_once(generation))
         except Exception:
-            self._stabilize_once(generation, second_pass=False)
+            self._stabilize_once(generation)
 
-    def _stabilize_once(self, generation: int, *, second_pass: bool) -> None:
+    def _stabilize_once(self, generation: int) -> None:
         if generation != self._stabilize_generation:
             return
         self.column_manager.apply_visible()
@@ -299,14 +323,6 @@ class ManagedTreeview:
             self.tree.update_idletasks()
         except Exception:
             pass
-        # Some Treeview layouts briefly paint body/header with stale geometry on
-        # first render. One extra idle pass stabilizes widths/displaycolumns
-        # without changing data or interaction semantics.
-        if not second_pass and generation == self._stabilize_generation:
-            try:
-                self.tree.after_idle(lambda: self._stabilize_once(generation, second_pass=True))
-            except Exception:
-                pass
 
     def update_columns(self, column_specs: Sequence[ColumnSpec | str], *, default_visible: Sequence[str] | None = None) -> None:
         self._specs = self._normalize_specs(column_specs)

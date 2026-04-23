@@ -1196,73 +1196,97 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         suggestion_set = {"Forslag", "Klar til forslag", "Historikk tilgjengelig"}
         problem_set = {"Umappet", "Sumpost"}
 
-        columns = [col for col in ALL_COLUMNS if col in df.columns]
-        missing_cols = [col for col in ALL_COLUMNS if col not in df.columns]
+        missing_cols = {col for col in ALL_COLUMNS if col not in df.columns}
+        row_count = int(len(df.index))
+        if row_count == 0:
+            return
 
-        try:
-            konto_series = df["Konto"].astype(str).tolist()
-        except Exception:
-            konto_series = ["" for _ in range(len(df.index))]
-        mapping_series = (
-            df["Mappingstatus"].astype(str).tolist() if "Mappingstatus" in df.columns else ["" for _ in konto_series]
-        )
-        status_series = (
-            df["Status"].astype(str).tolist() if "Status" in df.columns else ["" for _ in konto_series]
-        )
-        locked_series = (
-            df["Låst"].astype(str).tolist() if "Låst" in df.columns else ["" for _ in konto_series]
-        )
-
-        column_values: dict[str, list[Any]] = {col: df[col].tolist() for col in columns}
-        row_count = len(konto_series)
-
-        for idx in range(row_count):
-            mapping_status = mapping_series[idx]
-            payroll_status = status_series[idx]
-            locked = (locked_series[idx] or "").strip()
-            if locked:
-                tags: tuple[str, ...] = ("payroll_locked",)
-            elif payroll_status in unclear_set:
-                tags = ("payroll_unclear",)
-            elif payroll_status in suggestion_set:
-                tags = ("payroll_suggestion",)
-            elif mapping_status in problem_set:
-                tags = ("problem",)
-            elif mapping_status == "Overstyrt":
-                tags = ("override",)
-            else:
-                tags = ()
-
-            values: list[str] = []
-            for col in ALL_COLUMNS:
-                if col in missing_cols:
-                    values.append("")
-                    continue
-                value = column_values[col][idx]
-                if col in amount_cols:
-                    values.append(fmt_amount(value))
-                elif col == "Antall":
-                    if value is None or pd.isna(value):
-                        values.append("")
-                    else:
-                        try:
-                            ivalue = int(value or 0)
-                        except Exception:
-                            ivalue = 0
-                        values.append(format_int_no(value) if ivalue else "")
-                elif col == "Regnr":
-                    if value is None or pd.isna(value):
-                        values.append("")
-                    else:
-                        try:
-                            values.append(str(int(value)))
-                        except Exception:
-                            values.append("")
-                else:
-                    values.append(str(value or ""))
-
+        def _series_as_str_list(column: str) -> list[str]:
+            if column not in df.columns:
+                return [""] * row_count
             try:
-                tree.insert("", "end", iid=konto_series[idx], values=tuple(values), tags=tags)
+                return df[column].astype(str).tolist()
+            except Exception:
+                return [""] * row_count
+
+        konto_series = _series_as_str_list("Konto")
+        mapping_series = _series_as_str_list("Mappingstatus")
+        status_series = _series_as_str_list("Status")
+        locked_series = _series_as_str_list("Låst")
+
+        # Pre-format every column's values up front so the per-row loop
+        # only has to zip the already-string lists together. This skips
+        # 34-lookup-per-row dict access plus format dispatch inside the
+        # hot loop — the bulk of Python-side render time on a full page.
+        empty_col: list[str] = [""] * row_count
+        formatted: dict[str, list[str]] = {}
+        for col in ALL_COLUMNS:
+            if col in missing_cols:
+                formatted[col] = empty_col
+                continue
+            try:
+                raw = df[col].tolist()
+            except Exception:
+                formatted[col] = empty_col
+                continue
+            if col in amount_cols:
+                formatted[col] = [fmt_amount(v) for v in raw]
+            elif col == "Antall":
+                out: list[str] = []
+                for v in raw:
+                    if v is None or (isinstance(v, float) and v != v):  # NaN check
+                        out.append("")
+                        continue
+                    try:
+                        ivalue = int(v or 0)
+                    except Exception:
+                        ivalue = 0
+                    out.append(format_int_no(v) if ivalue else "")
+                formatted[col] = out
+            elif col == "Regnr":
+                out = []
+                for v in raw:
+                    if v is None or (isinstance(v, float) and v != v):
+                        out.append("")
+                        continue
+                    try:
+                        out.append(str(int(v)))
+                    except Exception:
+                        out.append("")
+                formatted[col] = out
+            else:
+                formatted[col] = ["" if v is None else str(v or "") for v in raw]
+
+        # Pre-resolve per-row tag tuples so the insert loop stays thin.
+        def _row_tags(mapping_status: str, payroll_status: str, locked_raw: str) -> tuple[str, ...]:
+            if locked_raw and locked_raw.strip():
+                return ("payroll_locked",)
+            if payroll_status in unclear_set:
+                return ("payroll_unclear",)
+            if payroll_status in suggestion_set:
+                return ("payroll_suggestion",)
+            if mapping_status in problem_set:
+                return ("problem",)
+            if mapping_status == "Overstyrt":
+                return ("override",)
+            return ()
+
+        tag_list = [
+            _row_tags(mapping_series[i], status_series[i], locked_series[i])
+            for i in range(row_count)
+        ]
+        column_lists = [formatted[col] for col in ALL_COLUMNS]
+
+        insert = tree.insert
+        for idx in range(row_count):
+            try:
+                insert(
+                    "",
+                    "end",
+                    iid=konto_series[idx],
+                    values=tuple(col[idx] for col in column_lists),
+                    tags=tag_list[idx],
+                )
             except Exception:
                 continue
 
