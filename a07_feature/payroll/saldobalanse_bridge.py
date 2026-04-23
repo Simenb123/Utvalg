@@ -335,7 +335,7 @@ def has_strict_suggestions_for_selected_accounts(page) -> bool:
         return False
     for account in accounts:
         item = page._workspace_item_for_account(account)
-        if _suggested_update_for_item(item):
+        if _saldobalanse_payload._suggested_update_for_item(item):
             return True
     return False
 
