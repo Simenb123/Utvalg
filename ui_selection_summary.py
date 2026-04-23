@@ -174,6 +174,19 @@ def _tree_get_heading_text(tree: Any, col_id: str) -> str:
         return str(col_id)
 
 
+def _tree_item_has_tag(tree: Any, iid: str, tag: str) -> bool:
+    try:
+        tags = tree.item(iid, option="tags") or ()
+    except Exception:
+        try:
+            tags = tree.item(iid, "tags") or ()
+        except Exception:
+            tags = ()
+    if isinstance(tags, str):
+        return tags == tag
+    return str(tag) in {str(value) for value in tags}
+
+
 def _tree_get_displaycolumns(tree: Any) -> Optional[set[str]]:
     """Returner sett av aktive displaycolumns, eller None om alle vises."""
     try:
@@ -351,6 +364,11 @@ def treeview_selection_sums(tree: Any) -> tuple[int, dict[str, float]]:
         selected = list(tree.selection())
     except Exception:
         selected = []
+    selected = [
+        str(iid)
+        for iid in selected
+        if not _tree_item_has_tag(tree, str(iid), "summary_total")
+    ]
 
     if not selected:
         return 0, {}

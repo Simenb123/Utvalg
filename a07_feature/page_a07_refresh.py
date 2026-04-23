@@ -338,6 +338,7 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
         self._refresh_in_progress = True
         self._pending_session_refresh = False
         self._pending_support_refresh = False
+        self._a07_refresh_warnings = []
         self._support_requested = False
         cancel_job = getattr(self, "_cancel_scheduled_job", None)
         if callable(cancel_job):

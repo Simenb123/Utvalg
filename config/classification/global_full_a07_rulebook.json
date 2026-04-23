@@ -1,62 +1,9 @@
 {
-  "aliases": {
-    "feriepenger": [
-      "skyldig feriepenger",
-      "påløpte feriepenger",
-      "pålopte feriepenger",
-      "feriepengegjeld"
-    ],
-    "tilskuddogpremietilpensjon": [
-      "pensjon",
-      "otp"
-    ],
-    "sumavgiftsgrunnlagrefusjon": [
-      "refusjon",
-      "sykepengerefusjon",
-      "foreldrepengerefusjon"
-    ],
-    "elektroniskkommunikasjon": [
-      "telefon",
-      "mobil",
-      "ekom"
-    ],
-    "skattepliktigdelforsikringer": [
-      "forsikring",
-      "helseforsikring"
-    ],
-    "styrehonoraroggodtgjoerelseverv": [
-      "styrehonorar",
-      "styre",
-      "verv"
-    ],
-    "bil": [
-      "fri bil",
-      "firmabil"
-    ],
-    "yrkebiltjenstligbehovlistepris": [
-      "yrkebil",
-      "listepris",
-      "fri bil",
-      "firmabil"
-    ],
-    "fastloenn": [
-      "lønn",
-      "lonn",
-      "fastlønn",
-      "fastlonn"
-    ],
-    "forskuddstrekk": [
-      "trekk",
-      "forskuddstrekk"
-    ],
-    "aga": [
-      "arbeidsgiveravgift",
-      "aga"
-    ]
-  },
   "rules": {
     "fastloenn": {
       "label": "Fastlønn",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
       "keywords": [
         "lønn",
         "lonn",
@@ -65,12 +12,22 @@
         "fastlønn",
         "fastlonn",
         "etterlønn",
-        "Etterlønn /uferiepenger"
+        "Etterlønn /uferiepenger",
+        "loenn",
+        "fastloenn",
+        "timelonn",
+        "timeloenn",
+        "overtid",
+        "bonus"
       ],
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
         "forskuddstrekk",
+        "feriepenger",
+        "feriepengegjeld",
+        "otp",
+        "pensjon",
         "Forsikring - Ansvar og rettshjelp",
         "Annen leiekostnad",
         "Lys, varme",
@@ -83,16 +40,25 @@
       "boost_accounts": [
         5000
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "feriepenger": {
       "label": "Feriepenger",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
       "keywords": [
         "feriepenger",
-        "Feriepenger",
         "skyldig feriepenger",
         "Periodisering av feriepenger",
-        "kostnadsførte feriepenger"
+        "kostnadsførte feriepenger",
+        "feriepengegjeld",
+        "påløpte feriepenger",
+        "pålopte feriepenger",
+        "palopte feriepenger",
+        "påløpt feriepenger",
+        "avsatt feriepenger",
+        "skyldige feriepenger",
+        "Feriepenger over 60 år"
       ],
       "exclude_keywords": [
         "aga",
@@ -109,7 +75,15 @@
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "fri bil",
+        "firmabil",
+        "otp",
+        "pensjon",
+        "revisjon",
+        "revisjonshonorar",
+        "uferiepenger",
+        "uten feriepenger"
       ],
       "allowed_ranges": [
         "5002",
@@ -128,7 +102,10 @@
       "basis": "UB",
       "special_add": [
         {
-          "account": "2940",
+          "account": "2900-2999",
+          "keywords": [
+            "feriepenger"
+          ],
           "basis": "Endring",
           "weight": 1.0
         }
@@ -136,9 +113,16 @@
     },
     "tilskuddOgPremieTilPensjon": {
       "label": "Pensjon",
+      "rf1022_group": "112_pensjon",
+      "aga_pliktig": false,
       "keywords": [
         "pensjon",
-        "otp"
+        "otp",
+        "Obligatorisk Tjeneste Pensjon",
+        "Obligatorisk Tjenestepensjon",
+        "innberetning otp",
+        "premie pensjon",
+        "OTP Innberettet"
       ],
       "exclude_keywords": [
         "aga",
@@ -148,7 +132,11 @@
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "refusjon",
+        "feriepenger",
+        "fri bil",
+        "telefon"
       ],
       "allowed_ranges": [
         "5420-5429",
@@ -159,21 +147,30 @@
         5952,
         5953
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "sumAvgiftsgrunnlagRefusjon": {
       "label": "Refusjon",
+      "rf1022_group": "100_refusjon",
+      "aga_pliktig": false,
       "keywords": [
         "refusjon",
         "sykepenger",
         "foreldrepenger",
-        "refusjon av sykepenger"
+        "refusjon av sykepenger",
+        "sykepengerefusjon",
+        "foreldrepengerefusjon",
+        "nav refusjon"
       ],
       "exclude_keywords": [
         "aga",
         "arbeidsgiveravgift",
         "forskuddstrekk",
         "annen refusjon",
+        "pensjon",
+        "bil",
+        "telefon",
+        "forsikring",
         "Forsikring - Ansvar og rettshjelp",
         "Annen leiekostnad",
         "Lys, varme",
@@ -186,15 +183,18 @@
       "boost_accounts": [
         5800
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "elektroniskKommunikasjon": {
       "label": "Elektronisk kommunikasjon",
+      "rf1022_group": "111_naturalytelser",
+      "aga_pliktig": true,
       "keywords": [
         "telefon",
         "mobil",
         "ekom",
-        "fri telefon"
+        "fri telefon",
+        "elektronisk kommunikasjon"
       ],
       "exclude_keywords": [
         "aga",
@@ -204,7 +204,12 @@
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "bil",
+        "firmabil",
+        "yrkebil",
+        "pensjon",
+        "revisjon"
       ],
       "allowed_ranges": [
         "5210-5219"
@@ -212,13 +217,17 @@
       "boost_accounts": [
         5210
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "skattepliktigDelForsikringer": {
       "label": "Skattepliktig del forsikringer",
+      "rf1022_group": "111_naturalytelser",
+      "aga_pliktig": true,
       "keywords": [
         "forsikring",
-        "helseforsikring"
+        "helseforsikring",
+        "behandlingsforsikring",
+        "personalforsikring"
       ],
       "exclude_keywords": [
         "aga",
@@ -236,7 +245,19 @@
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "revisjon",
+        "advokat",
+        "pensjon",
+        "telefon",
+        "bil",
+        "skyldig arbeidsgiveravgift",
+        "skyldig aga",
+        "arb avg",
+        "arb.giv.avg",
+        "OTP",
+        "Obligatorisk Tjeneste Pensjon",
+        "Obligatorisk Tjenestepensjon"
       ],
       "allowed_ranges": [
         "5250-5259",
@@ -248,16 +269,22 @@
         5280,
         5320
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "styrehonorarOgGodtgjoerelseVerv": {
       "label": "Styrehonorar og godtgjørelse verv",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
       "keywords": [
         "styre",
         "styrehonorar",
         "honorar",
         "verv",
-        "Godtgjørelse til styre- og bedriftsforsamling"
+        "Godtgjørelse til styre- og bedriftsforsamling",
+        "påløpt styrehonorar",
+        "skyldig styrehonorar",
+        "avsatt styrehonorar",
+        "godtgjorelse verv"
       ],
       "exclude_keywords": [
         "aga",
@@ -265,7 +292,12 @@
         "forskuddstrekk",
         "revisjonshonorar",
         "advokathonorar",
-        "regnskapshonorar"
+        "regnskapshonorar",
+        "revisjon",
+        "revisor",
+        "advokat",
+        "konsulent",
+        "firmabil"
       ],
       "allowed_ranges": [
         "5330-5339",
@@ -275,14 +307,32 @@
         5330,
         5390
       ],
-      "basis": "Endring"
+      "basis": "UB",
+      "special_add": [
+        {
+          "account": "2900-2999",
+          "keywords": [
+            "styrehonorar",
+            "styre",
+            "honorar",
+            "verv"
+          ],
+          "basis": "Endring",
+          "weight": 1.0
+        }
+      ]
     },
     "bil": {
       "label": "Bil",
+      "rf1022_group": "111_naturalytelser",
+      "aga_pliktig": true,
       "keywords": [
         "bil",
         "fri bil",
-        "firmabil"
+        "firmabil",
+        "bilfordel",
+        "fordel fri fimabil",
+        "fri firmabil"
       ],
       "exclude_keywords": [
         "aga",
@@ -292,7 +342,18 @@
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "yrkebil",
+        "listepris",
+        "drivstoff",
+        "bom",
+        "parkering",
+        "leasing",
+        "verksted",
+        "revisjon",
+        "revisjonshonorar",
+        "advokat",
+        "forsikring"
       ],
       "allowed_ranges": [
         "5200-5209"
@@ -300,15 +361,20 @@
       "boost_accounts": [
         5200
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "yrkebilTjenstligbehovListepris": {
       "label": "Yrkebil tjenstlig behov listepris",
+      "rf1022_group": "111_naturalytelser",
+      "aga_pliktig": true,
       "keywords": [
         "yrkebil",
         "listepris",
         "fri bil",
-        "firmabil"
+        "firmabil",
+        "yrkesbil",
+        "yrkebil listepris",
+        "yrkebil tjenstlig behov"
       ],
       "exclude_keywords": [
         "aga",
@@ -318,7 +384,17 @@
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "revisjon",
+        "revisjonshonorar",
+        "advokat",
+        "drivstoff",
+        "bom",
+        "parkering",
+        "leasing",
+        "verksted",
+        "telefon",
+        "forsikring"
       ],
       "allowed_ranges": [
         "5200-5209"
@@ -326,53 +402,12 @@
       "boost_accounts": [
         5200
       ],
-      "basis": "Endring"
-    },
-    "forskuddstrekk": {
-      "label": "Forskuddstrekk",
-      "keywords": [
-        "trekk",
-        "forskuddstrekk"
-      ],
-      "exclude_keywords": [
-        "aga",
-        "arbeidsgiveravgift",
-        "forskuddstrekk"
-      ],
-      "allowed_ranges": [
-        "2600-2699"
-      ],
-      "boost_accounts": [
-        2600
-      ],
-      "basis": "UB",
-      "expected_sign": -1
-    },
-    "aga": {
-      "label": "Arbeidsgiveravgift",
-      "keywords": [
-        "arbeidsgiveravgift",
-        "aga"
-      ],
-      "exclude_keywords": [
-        "Forsikring - Ansvar og rettshjelp",
-        "Annen leiekostnad",
-        "Lys, varme",
-        "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
-      ],
-      "allowed_ranges": [
-        "2770-2799"
-      ],
-      "boost_accounts": [
-        2770,
-        2785
-      ],
-      "basis": "UB",
-      "expected_sign": -1
+      "basis": "UB"
     },
     "annet": {
       "label": "annet",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
       "keywords": [
         "naturalytelser",
         "annen lønnsytelse",
@@ -384,12 +419,21 @@
         "arbeidsgiveravgift",
         "forskuddstrekk",
         "Honorar for juridisk bistand, fradragsberettiget",
-        "Annen kontorkostnad"
+        "Annen kontorkostnad",
+        "revisjon",
+        "revisjonshonorar",
+        "leie",
+        "leie maskiner",
+        "advokathonorar",
+        "rettshjelp",
+        "Kantine m.v. ansatte"
       ],
-      "basis": "Endring"
+      "basis": "UB"
     },
     "timeloenn": {
-      "label": "timeloenn",
+      "label": "timelønn",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
       "exclude_keywords": [
         "Honorar for juridisk bistand, fradragsberettiget",
         "Forsikringer personal",
@@ -398,18 +442,99 @@
         "Lys, varme",
         "Leie datasystemer"
       ],
-      "basis": "Endring"
+      "allowed_ranges": [
+        "5000-5200"
+      ],
+      "basis": "UB"
     },
     "overtidsgodtgjoerelse": {
-      "label": "overtidsgodtgjoerelse",
+      "label": "overtidsgodtgjørelse",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
+      "keywords": [
+        "Overtidsgodtgjørelse"
+      ],
       "exclude_keywords": [
         "Forsikring - Ansvar og rettshjelp",
         "Annen leiekostnad",
         "Lys, varme",
         "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget"
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "OTP",
+        "Obligatorisk Tjeneste Pensjon",
+        "Obligatorisk Tjenestepensjon"
       ],
-      "basis": "Endring"
+      "allowed_ranges": [
+        "5000-5200"
+      ],
+      "basis": "UB"
+    },
+    "trekkILoennForFerie": {
+      "label": "Trekk i lonn for ferie",
+      "rf1022_group": "100_loenn_ol",
+      "aga_pliktig": true,
+      "keywords": [
+        "trekk i lonn for ferie",
+        "trekk loenn ferie",
+        "trekk lonn ferie",
+        "trekkLoennForFerie",
+        "trekkloennForFerie",
+        "ferietrekk",
+        "trekk ferie"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk",
+        "pensjon",
+        "otp",
+        "fri bil",
+        "firmabil",
+        "telefon",
+        "forsikring"
+      ],
+      "allowed_ranges": [
+        "5000-5099",
+        "5200-5399"
+      ],
+      "basis": "UB"
+    },
+    "kilometergodtgjoerelsePassasjertillegg": {
+      "label": "kilometergodtgjoerelsePassasjertillegg",
+      "rf1022_group": "uavklart_rf1022",
+      "aga_pliktig": false,
+      "exclude_keywords": [
+        "OTP"
+      ],
+      "allowed_ranges": [
+        "7000-7999"
+      ],
+      "basis": "UB"
+    },
+    "kilometergodtgjoerelseBil": {
+      "label": "kilometergodtgjoerelseBil",
+      "rf1022_group": "uavklart_rf1022",
+      "aga_pliktig": false,
+      "exclude_keywords": [
+        "Leie kontormaskiner/utstyr",
+        "Rentekostnader"
+      ],
+      "allowed_ranges": [
+        "7000-7999"
+      ],
+      "basis": "UB"
+    },
+    "yrkebilTjenestligbehovListepris": {
+      "label": "yrkebilTjenestligbehovListepris",
+      "exclude_keywords": [
+        "Annen fremmed tjeneste"
+      ]
+    },
+    "A07_GROUP:bil+yrkebilTjenestligbehovListepris": {
+      "label": "A07_GROUP:bil+yrkebilTjenestligbehovListepris",
+      "exclude_keywords": [
+        "Revisjonshonorar"
+      ]
     }
   }
 }

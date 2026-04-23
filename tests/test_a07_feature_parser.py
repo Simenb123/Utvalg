@@ -37,6 +37,31 @@ def test_parse_a07_json_prefers_summary_nodes_without_double_counting(tmp_path):
     assert df.loc[df["Kode"] == "bonus", "Belop"].iloc[0] == Decimal("10.00")
 
 
+def test_parse_a07_json_carries_aga_pliktig_flag(tmp_path):
+    payload = {
+        "inntekter": [
+            {
+                "loennsinntekt": {
+                    "beskrivelse": "fastloenn",
+                    "inngaarIGrunnlagForArbeidsgiveravgift": True,
+                },
+                "beloep": 100,
+            },
+            {
+                "loennsinntekt": {"beskrivelse": "bil", "agaPliktig": "nei"},
+                "beloep": 50,
+            },
+        ]
+    }
+    path = tmp_path / "a07.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    df = parse_a07_json(path, top_n=50)
+
+    assert bool(df.loc[df["Kode"] == "fastloenn", "AgaPliktig"].iloc[0]) is True
+    assert bool(df.loc[df["Kode"] == "bil", "AgaPliktig"].iloc[0]) is False
+
+
 def test_build_monthly_summary_groups_multiple_submissions_by_month(tmp_path):
     payload = {
         "mottatt": {

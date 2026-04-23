@@ -14,7 +14,6 @@ from typing import Any
 import pandas as pd
 
 import account_detail_classification
-import classification_config
 import classification_workspace
 import konto_klassifisering
 import payroll_classification
@@ -436,46 +435,7 @@ def append_selected_account_to_a07_boost(page, code: str) -> None:
     page._after_rule_learning_saved(f"La til konto {account_no} som A07-boost for {code_s} ({result.path.name})")
 
 def append_selected_account_name_to_rf1022_alias(page, group_id: str) -> None:
-    group_s = str(group_id or "").strip()
-    _account_no, account_name = page._selected_account()
-    alias_text = str(account_name or "").strip()
-    if not group_s or not alias_text:
-        page._set_status("Velg én konto med kontonavn for å legge til RF-1022-alias.")
-        return
-    document = classification_config.load_catalog_document()
-    raw_groups = document.get("groups")
-    if isinstance(raw_groups, list):
-        groups = raw_groups
-    elif isinstance(raw_groups, dict):
-        groups = list(raw_groups.values())
-    else:
-        groups = []
-    payload = next(
-        (
-            entry
-            for entry in groups
-            if isinstance(entry, dict) and str(entry.get("id", "") or "").strip() == group_s
-        ),
-        None,
-    )
-    if payload is None:
-        payload = {
-            "id": group_s,
-            "label": group_s,
-            "active": True,
-            "sort_order": 9999,
-            "applies_to": ["analyse", "a07", "kontrolloppstilling"],
-            "aliases": [],
-            "category": "payroll_rf1022_group",
-        }
-        groups.append(payload)
-    aliases = [str(value).strip() for value in payload.get("aliases", []) if str(value).strip()]
-    if alias_text not in aliases:
-        aliases.append(alias_text)
-    payload["aliases"] = aliases
-    document["groups"] = groups
-    path = classification_config.save_catalog_document(document)
-    page._after_rule_learning_saved(f"La til kontonavn som RF-1022-alias for {group_s}: {alias_text} ({path.name})")
+    page._set_status("RF-1022-aliaser er fjernet. Vedlikehold RF-1022-post på A07-regelen i Admin.")
 
 def after_rule_learning_saved(page, message: str) -> None:
     try:

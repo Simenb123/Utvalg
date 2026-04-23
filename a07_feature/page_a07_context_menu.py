@@ -4,25 +4,11 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable
 
-from .control.data import RF1022_UNKNOWN_GROUP, rf1022_group_label
-from .page_a07_constants import (
-    _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL,
-    _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL,
-)
+from .page_a07_constants import _SUMMARY_TOTAL_TAG
+from .control.data import rf1022_group_label
 
 
 class A07PageContextMenuMixin:
-    def _rf1022_auto_menu_state(self) -> str:
-        try:
-            group_getter = getattr(self, "_selected_rf1022_group", None)
-            if callable(group_getter) and str(group_getter() or "").strip() == RF1022_UNKNOWN_GROUP:
-                return "disabled"
-            candidates = self._all_rf1022_candidate_df()
-            counts = self._rf1022_candidate_action_counts(candidates)
-        except Exception:
-            return "disabled"
-        return "normal" if int(counts.get("actionable", 0) or 0) > 0 else "disabled"
-
     def _prepare_tree_context_selection(
         self,
         tree: ttk.Treeview,
@@ -34,6 +20,13 @@ class A07PageContextMenuMixin:
         iid = self._tree_iid_from_event(tree, event)
         if not iid:
             return None
+        tag_checker = getattr(self, "_tree_item_has_tag", None)
+        if callable(tag_checker):
+            try:
+                if tag_checker(tree, iid, _SUMMARY_TOTAL_TAG):
+                    return None
+            except Exception:
+                pass
 
         try:
             current_selection = tuple(str(value).strip() for value in tree.selection())
@@ -185,27 +178,59 @@ class A07PageContextMenuMixin:
             command=self._focus_linked_code_for_selected_gl_account,
             state=("normal" if can_focus_mapped_code else "disabled"),
         )
-        scope_menu = tk.Menu(menu, tearoff=0)
-        scope_keys = _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL.get(work_level, _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL["rf1022"])
-        scope_labels = _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL.get(work_level, _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL["rf1022"])
-        for scope_key in scope_keys:
-            scope_menu.add_command(
-                label=scope_labels.get(scope_key, scope_key),
-                command=lambda scope_key=scope_key: self._set_control_gl_scope(scope_key),
-            )
-        menu.add_separator()
-        menu.add_cascade(label="Vis i venstre liste", menu=scope_menu)
+        learning_context_getter = getattr(self, "_selected_control_gl_learning_context", None)
+        try:
+            learning_context = learning_context_getter() if callable(learning_context_getter) else {}
+        except Exception:
+            learning_context = {}
+        learning_enabled = bool(learning_context.get("enabled")) if isinstance(learning_context, dict) else False
+        remove_learning_enabled = bool(learning_context.get("remove_enabled")) if isinstance(learning_context, dict) else False
+        code_label = (
+            str(learning_context.get("code_label") or "A07-kode").strip()
+            if isinstance(learning_context, dict)
+            else "A07-kode"
+        )
+        multi = len(accounts) > 1
+        learning_state = "normal" if accounts and learning_enabled else "disabled"
+        append_gl_alias = getattr(self, "_append_selected_control_gl_names_to_a07_alias", lambda: None)
+        exclude_gl_alias = getattr(self, "_exclude_selected_control_gl_names_from_a07_code", lambda: None)
+        remove_gl_alias = getattr(self, "_remove_selected_control_gl_accounts_and_exclude_alias", lambda: None)
+        learn_menu = tk.Menu(menu, tearoff=0)
+        learn_menu.add_command(
+            label=(
+                f"Laer valgte kontonavn som alias for {code_label}"
+                if multi
+                else f"Laer kontonavn som alias for {code_label}"
+            ),
+            command=append_gl_alias,
+            state=learning_state,
+        )
+        learn_menu.add_command(
+            label=(
+                f"Ekskluder valgte kontonavn fra {code_label}"
+                if multi
+                else f"Ekskluder kontonavn fra {code_label}"
+            ),
+            command=exclude_gl_alias,
+            state=learning_state,
+        )
+        learn_menu.add_separator()
+        learn_menu.add_command(
+            label=(
+                f"Fjern mapping og ekskluder valgte kontonavn fra {code_label}"
+                if multi
+                else f"Fjern mapping og ekskluder kontonavn fra {code_label}"
+            ),
+            command=remove_gl_alias,
+            state=("normal" if learning_enabled and remove_learning_enabled else "disabled"),
+        )
+        menu.add_cascade(label="Laer regel", menu=learn_menu)
         menu.add_separator()
         if work_level == "rf1022":
             menu.add_command(
                 label="Vis RF-1022-kandidater",
                 command=self._run_selected_control_action,
                 state=("normal" if selected_group else "disabled"),
-            )
-            menu.add_command(
-                label="Kjør trygg auto-matching",
-                command=self._apply_rf1022_candidate_suggestions,
-                state=A07PageContextMenuMixin._rf1022_auto_menu_state(self),
             )
         else:
             menu.add_command(
@@ -231,6 +256,62 @@ class A07PageContextMenuMixin:
                 initial_code=code,
             ),
             state=("normal" if accounts else "disabled"),
+        )
+        return self._post_context_menu(menu, event)
+
+    def _show_control_suggestions_context_menu(self, event: tk.Event) -> str | None:
+        event_widget = getattr(event, "widget", None)
+        control_tree = getattr(self, "tree_control_suggestions", None)
+        legacy_tree = getattr(self, "tree_suggestions", None)
+        tree = event_widget if event_widget in (control_tree, legacy_tree) else control_tree
+        if tree is None:
+            return None
+        iid = self._prepare_tree_context_selection(
+            tree,
+            event,
+            preserve_existing_selection=True,
+            on_selected=getattr(self, "_on_suggestion_selected", None),
+        )
+        if not iid:
+            return None
+
+        row = self._selected_suggestion_row_from_tree(tree)
+        if row is None:
+            return None
+
+        try:
+            code = str(row.get("Kode") or "").strip() or str(self._selected_control_code() or "").strip()
+        except Exception:
+            code = ""
+        try:
+            accounts = list(self._selected_control_suggestion_accounts())
+        except Exception:
+            accounts = []
+
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(
+            label="Bruk forslag",
+            command=self._apply_selected_suggestion,
+            state="normal",
+        )
+        menu.add_command(
+            label="Vis foreslatt konto i GL" if len(accounts) <= 1 else "Vis forste foreslatte konto i GL",
+            command=lambda account=(accounts[0] if accounts else ""): self._focus_mapping_account(account),
+            state=("normal" if accounts else "disabled"),
+        )
+        menu.add_command(
+            label="Ga til A07-kode",
+            command=lambda code=code: self._focus_control_code(code),
+            state=("normal" if code else "disabled"),
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="Avansert mapping...",
+            command=lambda account=(accounts[0] if accounts else None), code=(code or None): self._open_manual_mapping_clicked(
+                initial_account=account,
+                initial_code=code,
+            ),
+            state=("normal" if accounts or code else "disabled"),
         )
         return self._post_context_menu(menu, event)
 
@@ -280,34 +361,37 @@ class A07PageContextMenuMixin:
         learn_menu = tk.Menu(menu, tearoff=0)
         learn_menu.add_command(
             label=(
-                f"Legg valgte navn til {code_label} som A07-alias"
+                f"Laer valgte kontonavn som alias for {code_label}"
                 if multi
-                else f"Legg navn til {code_label} som A07-alias"
+                else f"Laer kontonavn som alias for {code_label}"
             ),
             command=self._append_selected_control_account_names_to_a07_alias,
             state=learning_state,
         )
         learn_menu.add_command(
-            label=f"Ekskluder valgte navn fra {code_label}" if multi else f"Ekskluder navn fra {code_label}",
+            label=(
+                f"Ekskluder valgte kontonavn fra {code_label}"
+                if multi
+                else f"Ekskluder kontonavn fra {code_label}"
+            ),
             command=self._exclude_selected_control_account_names_from_a07_code,
             state=learning_state,
         )
         learn_menu.add_separator()
         learn_menu.add_command(
             label=(
-                f"Fjern mapping og ekskluder valgte navn fra {code_label}"
+                f"Fjern mapping og ekskluder valgte kontonavn fra {code_label}"
                 if multi
-                else f"Fjern mapping og ekskluder navn fra {code_label}"
+                else f"Fjern mapping og ekskluder kontonavn fra {code_label}"
             ),
             command=self._remove_selected_control_accounts_and_exclude_alias,
             state=learning_state,
         )
         menu.add_cascade(
-            label="Laer av valgte kontonavn" if multi else "Laer av kontonavn",
+            label="Laer regel",
             menu=learn_menu,
             state=("normal" if accounts else "disabled"),
         )
-        menu.add_separator()
         menu.add_command(
             label="Avansert mapping...",
             command=lambda account=(accounts[0] if accounts else None): self._open_manual_mapping_clicked(
@@ -353,8 +437,7 @@ class A07PageContextMenuMixin:
         is_group = code.startswith("A07_GROUP:")
         selected_codes = self._groupable_selected_control_codes()
         selected_accounts = self._selected_control_gl_accounts()
-        advanced_groups_visible = bool(getattr(self, "_control_advanced_visible", False))
-        has_group_selection = len(selected_codes) >= 2 and advanced_groups_visible
+        has_group_selection = len(selected_codes) >= 2
         has_account_mapping = any(str(self._effective_mapping().get(account) or "").strip() for account in selected_accounts)
         is_locked = code in self._locked_codes()
         selected_work_level = getattr(self, "_selected_control_work_level", None)
@@ -405,11 +488,6 @@ class A07PageContextMenuMixin:
                 command=self._run_selected_control_action,
                 state=("normal" if group_id else "disabled"),
             )
-            menu.add_command(
-                label="Kjør trygg auto-matching",
-                command=self._apply_rf1022_candidate_suggestions,
-                state=A07PageContextMenuMixin._rf1022_auto_menu_state(self),
-            )
             return self._post_context_menu(menu, event)
 
         menu.add_command(
@@ -449,7 +527,7 @@ class A07PageContextMenuMixin:
         )
         menu.add_separator()
         menu.add_command(
-            label="Opprett A07-gruppe fra valgte koder (avansert)",
+            label="Opprett A07-gruppe fra valgte koder",
             command=self._create_group_from_selection,
             state=("normal" if has_group_selection else "disabled"),
         )

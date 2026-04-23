@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
 
 
 from page_admin_helpers import (
-    _CATALOG_AREA_PAYROLL_GROUPS,
+    _CATALOG_AREA_PAYROLL_TAGS,
     _catalog_area_config,
     _catalog_area_matches,
     _catalog_area_options,
@@ -42,9 +42,9 @@ class _CatalogEditor(ttk.Frame):  # type: ignore[misc]
         self._selected_key = ""
         self._path_var = tk.StringVar(value="") if tk is not None else None
         self._search_var = tk.StringVar(value="") if tk is not None else None
-        self._area_var = tk.StringVar(value=_CATALOG_AREA_PAYROLL_GROUPS) if tk is not None else None
+        self._area_var = tk.StringVar(value=_CATALOG_AREA_PAYROLL_TAGS) if tk is not None else None
         self._description_var = (
-            tk.StringVar(value=_catalog_area_config(_CATALOG_AREA_PAYROLL_GROUPS)["description"]) if tk is not None else None
+            tk.StringVar(value=_catalog_area_config(_CATALOG_AREA_PAYROLL_TAGS)["description"]) if tk is not None else None
         )
         self._id_var = tk.StringVar(value="") if tk is not None else None
         self._label_var = tk.StringVar(value="") if tk is not None else None

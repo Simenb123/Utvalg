@@ -4,18 +4,27 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import app_paths
 import classification_config
 
-from .suggest.alias_library import normalize_alias_term
-from .suggest.rulebook import load_rulebook
+from .suggest.rulebook import clear_rulebook_cache, load_rulebook
 
 
 def _normal_key(value: object) -> str:
-    text = normalize_alias_term(value)
-    for old, new in (("ø", "oe"), ("æ", "ae"), ("å", "aa")):
+    text = str(value or "").strip().lower()
+    for old, new in (
+        ("ø", "oe"),
+        ("æ", "ae"),
+        ("å", "aa"),
+        ("Ã¸", "oe"),
+        ("Ã¦", "ae"),
+        ("Ã¥", "aa"),
+        ("ÃƒÂ¸", "oe"),
+        ("ÃƒÂ¦", "ae"),
+        ("ÃƒÂ¥", "aa"),
+        ("_", " "),
+    ):
         text = text.replace(old, new)
-    return text
+    return " ".join(text.split())
 
 
 @dataclass(frozen=True)
@@ -69,15 +78,7 @@ def _int_list(values: object) -> list[int]:
 
 
 def _save_rulebook_document(document: dict[str, Any]) -> Path:
-    path = classification_config.save_rulebook_document(document)
-    try:
-        classification_config.save_json(
-            app_paths.data_dir() / "a07" / "global_full_a07_rulebook.json",
-            document,
-        )
-    except Exception:
-        pass
-    return path
+    return classification_config.save_rulebook_document(document)
 
 
 def _ensure_rule_payload(document: dict[str, Any], code: str) -> dict[str, Any]:
@@ -146,6 +147,7 @@ def append_a07_rule_keywords(
         result_payloads.append((code_s, term_s, changed))
 
     path = _save_rulebook_document(document)
+    clear_rulebook_cache()
     results = tuple(
         A07RuleLearningResult(
             code=code_s,
@@ -188,6 +190,7 @@ def append_a07_rule_boost_account(code: object, account: object) -> A07RuleLearn
         boost_accounts.append(account_i)
     payload["boost_accounts"] = sorted(boost_accounts)
     path = _save_rulebook_document(document)
+    clear_rulebook_cache()
     return A07RuleLearningResult(
         code=code_s,
         term=str(account_i),

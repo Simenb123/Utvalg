@@ -50,7 +50,8 @@ def _empty_history_df() -> pd.DataFrame:
 
 
 def _empty_groups_df() -> pd.DataFrame:
-    return pd.DataFrame(columns=[c[0] for c in _GROUP_COLUMNS])
+    columns = ["GroupId", *[c[0] for c in _GROUP_COLUMNS]]
+    return pd.DataFrame(columns=list(dict.fromkeys(columns)))
 
 
 def _empty_control_statement_df() -> pd.DataFrame:

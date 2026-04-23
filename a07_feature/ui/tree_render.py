@@ -49,6 +49,9 @@ class A07PageTreeRenderMixin:
                 if tag:
                     tags = (str(tag),)
             self._insert_tree_row(tree, iid=iid, values=values, tags=tags)
+        apply_sort = getattr(self, "_apply_tree_sort_if_active", None)
+        if callable(apply_sort):
+            apply_sort(tree)
         self._diag(
             f"fill_tree done tree={tree_name} rows={row_count} elapsed_ms={(time.perf_counter() - start_ts) * 1000:.1f}"
         )
@@ -171,6 +174,9 @@ class A07PageTreeRenderMixin:
                 self._tree_fill_jobs[key] = self.after(1, _run_batch)
                 return
             self._tree_fill_jobs.pop(key, None)
+            apply_sort = getattr(self, "_apply_tree_sort_if_active", None)
+            if callable(apply_sort):
+                apply_sort(tree)
             self._diag(
                 f"fill_tree_chunked done tree={tree_name} rows={total} elapsed_ms={(time.perf_counter() - start_ts) * 1000:.1f}"
             )

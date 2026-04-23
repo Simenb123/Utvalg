@@ -5,7 +5,6 @@ from typing import Any
 
 import pandas as pd
 
-import app_paths
 import classification_config
 import regnskapslinje_suggest
 import session
@@ -47,18 +46,6 @@ def _effective_sb_rows(analyse_page: Any) -> pd.DataFrame:
     return rows[["Konto", "Kontonavn", "IB", "Endring", "UB"]].reset_index(drop=True)
 
 
-def _mirror_rulebook_to_a07_storage(source_path: str | None) -> None:
-    source = str(source_path or "").strip()
-    if not source:
-        return
-    target = app_paths.data_dir() / "a07" / "global_full_a07_rulebook.json"
-    try:
-        document = classification_config.load_json(source, fallback={})
-        classification_config.save_json(target, document if isinstance(document, dict) else {})
-    except Exception:
-        return
-
-
 def _clean_text(value: object) -> str:
     return str(value or "").strip()
 
@@ -86,6 +73,12 @@ def _string_list(values: object) -> list[str]:
     return out
 
 
+def _inline_string_list(values: object) -> list[str]:
+    if isinstance(values, str):
+        values = values.replace(",", "\n")
+    return _string_list(values)
+
+
 def _int_list(values: object) -> list[int]:
     out: list[int] = []
     for item in _string_list(values):
@@ -96,6 +89,19 @@ def _int_list(values: object) -> list[int]:
         if parsed not in out:
             out.append(parsed)
     return out
+
+
+def _optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    text = _clean_text(value).casefold()
+    if text in {"1", "true", "ja", "j", "yes", "y"}:
+        return True
+    if text in {"0", "false", "nei", "n", "no"}:
+        return False
+    return None
 
 
 def _normalize_alias_document(document: Any) -> dict[str, Any]:
@@ -126,10 +132,27 @@ def _parse_special_add_lines(value: object) -> list[dict[str, Any]]:
         if not account:
             continue
         row: dict[str, Any] = {"account": account}
-        basis = _clean_text(parts[1] if len(parts) > 1 else "")
+        basis_values = {"ub", "ib", "endring", "debet", "kredit"}
+        if len(parts) >= 4:
+            keywords = _inline_string_list(parts[1])
+            basis = _clean_text(parts[2])
+            weight_text = _clean_text(parts[3])
+        elif (
+            len(parts) == 3
+            and _clean_text(parts[1]).casefold() not in basis_values
+            and _clean_text(parts[2]).casefold() in basis_values
+        ):
+            keywords = _inline_string_list(parts[1])
+            basis = _clean_text(parts[2])
+            weight_text = ""
+        else:
+            keywords = []
+            basis = _clean_text(parts[1] if len(parts) > 1 else "")
+            weight_text = _clean_text(parts[2] if len(parts) > 2 else "")
+        if keywords:
+            row["keywords"] = keywords
         if basis:
             row["basis"] = basis
-        weight_text = _clean_text(parts[2] if len(parts) > 2 else "")
         if weight_text:
             try:
                 row["weight"] = float(weight_text.replace(",", "."))
@@ -149,9 +172,12 @@ def _format_special_add_lines(values: object) -> str:
         account = _clean_text(entry.get("account"))
         if not account:
             continue
+        keywords = _inline_string_list(entry.get("keywords") or entry.get("name_keywords"))
         basis = _clean_text(entry.get("basis"))
         weight = entry.get("weight")
         parts = [account]
+        if keywords:
+            parts.append(", ".join(keywords))
         if basis or weight not in (None, ""):
             parts.append(basis or "")
         if weight not in (None, ""):
@@ -166,6 +192,7 @@ def _format_special_add_lines(values: object) -> str:
 
 def _normalize_rulebook_document(document: Any) -> dict[str, Any]:
     base = dict(document) if isinstance(document, dict) else {}
+    base.pop("aliases", None)
     raw_rules = base.get("rules", {})
     rules_out: dict[str, dict[str, Any]] = {}
     if isinstance(raw_rules, dict):
@@ -180,6 +207,12 @@ def _normalize_rulebook_document(document: Any) -> dict[str, Any]:
             category = _clean_text(payload.get("category"))
             if category:
                 normalized["category"] = category
+            rf1022_group = _clean_text(payload.get("rf1022_group"))
+            if rf1022_group:
+                normalized["rf1022_group"] = rf1022_group
+            aga_pliktig = _optional_bool(payload.get("aga_pliktig"))
+            if aga_pliktig is not None:
+                normalized["aga_pliktig"] = aga_pliktig
             keywords = _string_list(payload.get("keywords"))
             if keywords:
                 normalized["keywords"] = keywords
@@ -243,30 +276,20 @@ def _normalize_catalog_document(document: Any) -> dict[str, Any]:
     return base
 
 
-_CATALOG_AREA_PAYROLL_GROUPS = "RF-1022-grupper"
 _CATALOG_AREA_PAYROLL_TAGS = "Payroll-flagg"
 _CATALOG_AREA_LEGACY_GROUPS = "Legacy analysegrupper"
-_CATALOG_AREA_CONTROL_TAGS = "Kontrollflagg"
 
 
 def _catalog_area_options() -> tuple[str, ...]:
     return (
-        _CATALOG_AREA_PAYROLL_GROUPS,
         _CATALOG_AREA_PAYROLL_TAGS,
         _CATALOG_AREA_LEGACY_GROUPS,
-        _CATALOG_AREA_CONTROL_TAGS,
     )
 
 
 def _catalog_area_config(area: object) -> dict[str, Any]:
     area_text = _clean_text(area)
     mapping: dict[str, dict[str, Any]] = {
-        _CATALOG_AREA_PAYROLL_GROUPS: {
-            "bucket": "groups",
-            "categories": ("payroll_rf1022_group",),
-            "default_category": "payroll_rf1022_group",
-            "description": "Vedlikehold payroll RF-1022-grupper her. Endringene påvirker katalog og forslag, ikke lagrede klientprofiler.",
-        },
         _CATALOG_AREA_PAYROLL_TAGS: {
             "bucket": "tags",
             "categories": ("payroll_tag",),
@@ -279,14 +302,8 @@ def _catalog_area_config(area: object) -> dict[str, Any]:
             "default_category": "legacy_group",
             "description": "Vedlikehold legacy analysegrupper her. Endringene påvirker katalog og forslag, ikke lagrede klientprofiler.",
         },
-        _CATALOG_AREA_CONTROL_TAGS: {
-            "bucket": "tags",
-            "categories": ("control_tag",),
-            "default_category": "control_tag",
-            "description": "Vedlikehold kontrollflagg her. Endringene påvirker katalog og forslag, ikke lagrede klientprofiler.",
-        },
     }
-    return dict(mapping.get(area_text, mapping[_CATALOG_AREA_PAYROLL_GROUPS]))
+    return dict(mapping.get(area_text, mapping[_CATALOG_AREA_PAYROLL_TAGS]))
 
 
 def _catalog_area_matches(entry: object, allowed_categories: tuple[str, ...]) -> bool:

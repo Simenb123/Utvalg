@@ -67,7 +67,6 @@ Brukes når du vil:
 
 ## Oppfrisk etter Admin-endringer
 Hvis du endrer noe i `Admin`, for eksempel:
-- `Konseptaliaser`
 - `A07-regler`
 - `RF-1022 og flagg`
 

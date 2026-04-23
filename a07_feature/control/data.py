@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Mapping, Sequence
 
 import pandas as pd
@@ -40,6 +41,7 @@ from .basis import (
 )
 from .rf1022_bridge import (
     RF1022_A07_BRIDGE as _RF1022_A07_BRIDGE,
+    RF1022_GROUP_LABELS as _RF1022_GROUP_LABELS,
     RF1022_UNKNOWN_GROUP,
     a07_group_member_codes,
     resolve_a07_rf1022_group,
@@ -50,6 +52,8 @@ from ..rule_learning import evaluate_a07_rule_name_status
 from ..suggest.rulebook import load_rulebook
 from ..suggest.models import EXCLUDED_A07_CODES
 
+
+_LOG = logging.getLogger(__name__)
 
 _CONTROL_HIDDEN_CODES = {
     "aga",
@@ -79,14 +83,6 @@ _RF1022_POST_RULES = (
     (130, "Naturalytelser og styrehonorar", {"Naturalytelse", "Styrehonorar"}),
 )
 
-_RF1022_GROUP_LABELS: dict[str, str] = {
-    "100_loenn_ol": "Post 100 Lonn o.l.",
-    "100_refusjon": "Post 100 Refusjon",
-    "111_naturalytelser": "Post 111 Naturalytelser",
-    "112_pensjon": "Post 112 Pensjon",
-    "uavklart_rf1022": "Uavklart RF-1022",
-}
-
 _WORK_FAMILY_BY_GROUP = {
     "100_loenn_ol": "payroll",
     "100_refusjon": "refund",
@@ -95,7 +91,7 @@ _WORK_FAMILY_BY_GROUP = {
     "uavklart_rf1022": "unknown",
 }
 
-_CONTROL_COLUMNS = ("A07Post", "A07_Belop", "GL_Belop", "Diff")
+_CONTROL_COLUMNS = ("A07Post", "AgaPliktig", "A07_Belop", "GL_Belop", "Diff")
 _CONTROL_EXTRA_COLUMNS = (
     "Kode",
     "Navn",
@@ -478,7 +474,9 @@ def format_rf1022_treatment_text(
 
 
 def _empty_a07_df() -> pd.DataFrame:
-    return pd.DataFrame(columns=["Kode", "Navn", "Belop", "GL_Belop", "Diff", "AntallKontoer", "Status", "Kontoer"])
+    return pd.DataFrame(
+        columns=["Kode", "Navn", "Belop", "AgaPliktig", "GL_Belop", "Diff", "AntallKontoer", "Status", "Kontoer"]
+    )
 
 
 def _empty_history_df() -> pd.DataFrame:
@@ -497,6 +495,40 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _optional_bool(value: object) -> bool | str | None:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    text = str(value or "").strip().casefold()
+    if text in {"1", "true", "ja", "j", "yes", "y"}:
+        return True
+    if text in {"0", "false", "nei", "n", "no"}:
+        return False
+    if text in {"blandet", "mixed"}:
+        return "Blandet"
+    return None
+
+
+def _format_aga_pliktig(value: object) -> str:
+    parsed = _optional_bool(value)
+    if parsed is True:
+        return "Ja"
+    if parsed is False:
+        return "Nei"
+    if parsed == "Blandet":
+        return "Blandet"
+    return ""
+
+
+def _rulebook_aga_pliktig(rulebook: Mapping[str, object], code: object) -> bool | str | None:
+    code_s = str(code or "").strip()
+    if not code_s:
+        return None
+    rule = rulebook.get(code_s) if isinstance(rulebook, Mapping) else None
+    return getattr(rule, "aga_pliktig", None)
 
 
 def _account_int(value: object) -> int | None:
@@ -553,6 +585,7 @@ def build_control_statement_export_df(
     reconcile_df: pd.DataFrame | None = None,
     mapping_current: dict[str, str] | None = None,
     include_unclassified: bool = False,
+    warning_collector: list[dict[str, str]] | None = None,
 ) -> pd.DataFrame:
     client_s = str(client or "").strip()
     if not client_s or gl_df is None or gl_df.empty:
@@ -585,7 +618,16 @@ def build_control_statement_export_df(
             gl_df,
             include_unclassified=bool(include_unclassified),
         )
-    except Exception:
+    except Exception as exc:
+        _LOG.exception("A07 control statement rows could not be built")
+        if warning_collector is not None:
+            warning_collector.append(
+                {
+                    "scope": "control_statement",
+                    "message": "Kontrolloppstilling kunne ikke bygges.",
+                    "detail": str(exc),
+                }
+            )
         return _empty_control_statement_df()
 
     export_rows: list[dict[str, object]] = []
@@ -688,6 +730,12 @@ def build_rf1022_statement_df(
 
     gl_col = basis_col if basis_col in control_statement_df.columns else "Endring"
     rows_by_group: dict[str, dict[str, object]] = {}
+
+    def _rf1022_display_values(group_key: str, label_text: str, post_no: int, post_label: str) -> tuple[str, str, str]:
+        if str(group_key).strip() == "uavklart_rf1022":
+            return "", "Må fordeles", "A07 uten RF-1022-post"
+        return str(post_no), post_label, label_text
+
     for _, row in control_statement_df.iterrows():
         group_id = str(row.get("Gruppe") or "").strip()
         label = str(row.get("Navn") or "").strip() or group_id
@@ -695,6 +743,7 @@ def build_rf1022_statement_df(
             continue
         post_no, post_label = rf1022_post_for_group(group_id, label)
         key = group_id or label
+        display_post, display_area, display_label = _rf1022_display_values(key, label, post_no, post_label)
         gl_amount = _safe_float(row.get(gl_col)) or 0.0
         a07_amount = a07_totals.get(key)
         if a07_amount is None:
@@ -702,9 +751,9 @@ def build_rf1022_statement_df(
         diff_amount = (float(a07_amount) - gl_amount) if a07_amount is not None else row.get("Diff")
         rows_by_group[key] = {
             "GroupId": key,
-            "Post": str(post_no),
-            "Omraade": post_label,
-            "Kontrollgruppe": label,
+            "Post": display_post,
+            "Omraade": display_area,
+            "Kontrollgruppe": display_label,
             "GL_Belop": gl_amount,
             "A07": a07_amount,
             "Diff": diff_amount,
@@ -718,11 +767,13 @@ def build_rf1022_statement_df(
         if group_id in rows_by_group:
             continue
         post_no, post_label = rf1022_post_for_group(group_id, rf1022_group_label(group_id))
+        label = rf1022_group_label(group_id) or group_id
+        display_post, display_area, display_label = _rf1022_display_values(group_id, label, post_no, post_label)
         rows_by_group[group_id] = {
             "GroupId": group_id,
-            "Post": str(post_no),
-            "Omraade": post_label,
-            "Kontrollgruppe": rf1022_group_label(group_id) or group_id,
+            "Post": display_post,
+            "Omraade": display_area,
+            "Kontrollgruppe": display_label,
             "GL_Belop": 0.0,
             "A07": a07_amount,
             "Diff": a07_amount,
@@ -975,6 +1026,7 @@ def build_a07_overview_df(a07_df: pd.DataFrame, reconcile_df: pd.DataFrame) -> p
                 "Kode": code,
                 "Navn": navn,
                 "Belop": belop,
+                "AgaPliktig": row.get("AgaPliktig"),
                 "GL_Belop": gl_belop,
                 "Diff": diff,
                 "AntallKontoer": account_count,
@@ -1228,10 +1280,17 @@ def build_control_queue_df(
         suggestions_df = decorate_suggestions_for_display(suggestions_df, gl_df)
 
     locked = {str(code).strip() for code in (locked_codes or set()) if str(code).strip()}
+    try:
+        effective_rulebook = load_rulebook(None)
+    except Exception:
+        effective_rulebook = {}
     rows: list[dict[str, object]] = []
     for _, row in a07_overview_df.iterrows():
         code = str(row.get("Kode") or "").strip()
         navn = str(row.get("Navn") or "").strip()
+        aga_value = _optional_bool(row.get("AgaPliktig"))
+        if aga_value is None:
+            aga_value = _rulebook_aga_pliktig(effective_rulebook, code)
         rf1022_group_id = a07_code_rf1022_group(code)
         work_family = work_family_for_rf1022_group(rf1022_group_id)
         reconcile_status = str(row.get("Status") or "").strip()
@@ -1371,6 +1430,12 @@ def build_control_queue_df(
                 next_action = "Tildel RF-1022-post i Saldobalanse."
             else:
                 next_action = "Fullfor lonnsflagg i Saldobalanse."
+        elif has_explicit_mapping and best_row is not None and reconcile_status != "OK":
+            guided_status = "Har forslag"
+            display_status = "Har forslag"
+            recommended = "Se forslag"
+            guided_next = "Se forslag"
+            next_action = suggestion_guardrail_reason or "Se forslag for valgt kode."
         elif has_explicit_mapping:
             guided_status = "Kontroller kobling"
             display_status = "Kontroller kobling"
@@ -1393,6 +1458,7 @@ def build_control_queue_df(
                 "A07Post": display_name,
                 "Kode": code,
                 "Navn": navn,
+                "AgaPliktig": _format_aga_pliktig(aga_value),
                 "A07_Belop": row.get("Belop"),
                 "GL_Belop": row.get("GL_Belop"),
                 "Diff": row.get("Diff"),
@@ -1518,6 +1584,13 @@ _AUDIT_NON_PAYROLL_SCOPE_TOKENS = (
     "regnskap",
     "juridisk",
     "advokat",
+    "salg",
+    "salgsinntekt",
+    "inntekt",
+    "fakturert",
+    "opptjent",
+    "kunde",
+    "kundefordring",
     "husleie",
     "leie",
     "renhold",
@@ -1566,6 +1639,9 @@ def _audit_account_text(account: object, name: object) -> str:
 
 
 def _audit_is_non_payroll_scope(account: object, name: object) -> bool:
+    account_s = str(account or "").strip()
+    if account_s.startswith("3"):
+        return True
     text = _audit_account_text(account, name)
     if not text:
         return False
@@ -1684,13 +1760,13 @@ def _audit_status_for_mapping(
     excluded_codes = {str(item or "").strip().casefold() for item in EXCLUDED_A07_CODES}
     if code.casefold() in excluded_codes:
         return "Uavklart", "Teknisk/ekskludert A07-kode."
-    if a07_group_member_codes(code):
-        return "Uavklart", "A07-gruppe er legacy/avansert og regnes ikke som trygg kobling."
     if current_group == RF1022_UNKNOWN_GROUP:
+        if a07_group_member_codes(code):
+            return "Uavklart", "A07-gruppen har medlemmer som ikke peker til samme RF-1022-post."
         return "Uavklart", "A07-koden mangler avklart RF-1022-bro."
 
     if current_group == "100_loenn_ol" and _audit_is_non_payroll_scope(account, name):
-        return "Feil", "Kontoen ser ut som drifts-/honorarkostnad utenfor A07-lonn."
+        return "Feil", "Kontoen ser ut til aa ligge utenfor A07-lonn."
     if current_group == "100_refusjon" and _audit_is_generic_refund(account, name):
         return "Mistenkelig", "Generisk refusjon uten NAV/sykepenger/foreldrepenger."
     if expected_group and current_group and expected_group != current_group:
@@ -1714,8 +1790,9 @@ def _audit_status_for_mapping(
     if evidence <= {"manual", "historikk"} and "historikk" in evidence:
         return "Mistenkelig", "Historikk alene er ikke nok til trygg mapping."
     if current_group:
-        family = infer_semantic_family(f"{code} {name}")
-        if family:
+        account_family = infer_semantic_family(f"{account} {name}")
+        code_family = infer_semantic_family(code)
+        if account_family and code_family and account_family == code_family:
             return "Trygg", "Konto og A07-kode har samme fagfamilie."
         return "Uavklart", "Koblingen mangler tydelig faglig evidens."
     return "Uavklart", "Koblingen mangler RF-1022-gruppe."
@@ -2308,10 +2385,6 @@ def build_global_auto_mapping_plan(
             action = "invalid"
             status = "Ugyldig"
             reason = "Kandidaten mangler konto eller A07-kode."
-        elif a07_group_member_codes(code):
-            action = "review"
-            status = "Uavklart/Gruppe"
-            reason = "A07-grupper er legacy/avansert og brukes ikke i trygg auto."
         elif not strict:
             action = "review"
             status = "Maa vurderes"
@@ -2682,8 +2755,6 @@ def build_rf1022_candidate_df(
     rows_by_account: dict[str, dict[str, object]] = {}
     for _, row in suggestions_df.iterrows():
         code = str(row.get("Kode") or "").strip()
-        if a07_group_member_codes(code):
-            continue
         if not code or a07_code_rf1022_group(code) != group_s:
             continue
         if _suggestion_text(row, "SuggestionGuardrail").lower() == "blocked":
@@ -2791,6 +2862,8 @@ def filter_control_gl_df(
     control_gl_df: pd.DataFrame,
     *,
     search_text: object = "",
+    mapping_filter: object = "alle",
+    account_series: object = "alle",
     only_unmapped: bool = False,
     active_only: bool = False,
 ) -> pd.DataFrame:
@@ -2812,6 +2885,18 @@ def filter_control_gl_df(
             filtered = filtered.loc[has_activity].copy()
     if only_unmapped and "Kode" in filtered.columns:
         filtered = filtered.loc[filtered["Kode"].astype(str).str.strip() == ""].copy()
+    mapping_filter_s = str(mapping_filter or "alle").strip().casefold()
+    if mapping_filter_s == "mappede" and "Kode" in filtered.columns:
+        filtered = filtered.loc[filtered["Kode"].astype(str).str.strip() != ""].copy()
+    elif mapping_filter_s == "umappede" and "Kode" in filtered.columns:
+        filtered = filtered.loc[filtered["Kode"].astype(str).str.strip() == ""].copy()
+
+    account_series_s = str(account_series or "alle").strip().lower()
+    if account_series_s and account_series_s != "alle" and account_series_s[0:1].isdigit() and "Konto" in filtered.columns:
+        prefix = account_series_s[0]
+        filtered = filtered.loc[
+            filtered["Konto"].fillna("").astype(str).str.strip().str.startswith(prefix)
+        ].copy()
 
     search_s = str(search_text or "").strip().casefold()
     if search_s:
@@ -2948,6 +3033,28 @@ def control_family_tree_tag(row: pd.Series) -> str:
         row.get("Status"),
         row.get("Rf1022GroupId"),
     )
+    if status_tag == "family_warning":
+        return status_tag
+    try:
+        diff_value = pd.to_numeric(row.get("Diff"), errors="coerce")
+    except Exception:
+        diff_value = float("nan")
+    try:
+        gl_value = pd.to_numeric(row.get("GL_Belop"), errors="coerce")
+    except Exception:
+        gl_value = float("nan")
+    try:
+        account_count = int(pd.to_numeric(row.get("AntallKontoer"), errors="coerce") or 0)
+    except Exception:
+        account_count = 0
+    mapping_text = str(row.get("DagensMapping") or row.get("Kontoer") or "").strip()
+    has_linked_gl = (
+        account_count > 0
+        or bool(mapping_text)
+        or (pd.notna(gl_value) and abs(float(gl_value)) > 0.005)
+    )
+    if has_linked_gl and pd.notna(diff_value) and abs(float(diff_value)) <= 0.005:
+        return "suggestion_ok"
     if status_tag is not None:
         return status_tag
     suspicious = bool(row.get("CurrentMappingSuspicious", False))
@@ -3101,16 +3208,34 @@ def control_queue_tree_tag(row: pd.Series) -> str:
         row.get("Status"),
         row.get("Rf1022GroupId"),
     )
-    if status_tag == "suggestion_ok":
-        return "control_done"
-    if status_tag == "suggestion_review":
-        return "control_review"
     if status_tag == "family_warning":
         return "control_manual"
     try:
         diff_value = pd.to_numeric(row.get("Diff"), errors="coerce")
     except Exception:
         diff_value = float("nan")
+    try:
+        gl_value = pd.to_numeric(row.get("GL_Belop"), errors="coerce")
+    except Exception:
+        gl_value = float("nan")
+    try:
+        account_count = int(pd.to_numeric(row.get("AntallKontoer"), errors="coerce") or 0)
+    except Exception:
+        account_count = 0
+    mapping_text = str(row.get("DagensMapping") or row.get("Kontoer") or "").strip()
+    has_linked_gl = (
+        account_count > 0
+        or bool(mapping_text)
+        or (pd.notna(gl_value) and abs(float(gl_value)) > 0.005)
+    )
+    if has_linked_gl and pd.notna(diff_value) and abs(float(diff_value)) <= 0.005:
+        return "control_done"
+    if status_tag == "suggestion_ok":
+        return "control_done"
+    if status_tag == "suggestion_review":
+        return "control_review"
+    if status_tag == "family_warning":
+        return "control_manual"
     if pd.notna(diff_value) and abs(float(diff_value)) <= 0.005:
         return "control_done"
     status_s = str(row.get("GuidetStatus") or row.get("Arbeidsstatus") or row.get("Status") or "").strip()

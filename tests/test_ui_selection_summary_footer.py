@@ -28,6 +28,7 @@ class DummyTree:
         headings: Optional[dict[str, str]] = None,
         widths: Optional[dict[str, int]] = None,
         displaycolumns: Optional[list[str]] = None,
+        tags: Optional[dict[str, tuple[str, ...]]] = None,
     ) -> None:
         self._columns = list(columns)
         self._values = values
@@ -36,6 +37,7 @@ class DummyTree:
         self._headings = dict(headings) if headings else {c: c for c in columns}
         self._widths = dict(widths) if widths else {c: 100 for c in columns}
         self._displaycolumns = displaycolumns
+        self._tags = dict(tags) if tags else {}
 
     def __getitem__(self, key: str):
         if key == "columns":
@@ -60,6 +62,13 @@ class DummyTree:
 
     def set(self, iid: str, col: str):
         return self._values.get(iid, {}).get(col, "")
+
+    def item(self, iid: str, option: str = None):
+        if option == "tags":
+            return self._tags.get(iid, ())
+        if option == "values":
+            return tuple(self._values.get(iid, {}).get(col, "") for col in self._columns)
+        return {}
 
     def get_children(self, item: str = ""):
         return tuple(self._children)
@@ -120,6 +129,29 @@ def test_register_treeview_uses_explicit_columns() -> None:
     assert set(sums.keys()) == {"IB", "UB", "Antall"}
     assert abs(sums["IB"] - 150) < 1e-9
     assert abs(sums["UB"] - 700) < 1e-9
+
+
+def test_treeview_selection_summary_ignores_summary_total_rows() -> None:
+    tree = DummyTree(
+        columns=["A07_Belop", "GL_Belop", "Diff"],
+        values={
+            "a": {"A07_Belop": "100,00", "GL_Belop": "95,00", "Diff": "5,00"},
+            "__a07_total__": {"A07_Belop": "999,00", "GL_Belop": "999,00", "Diff": "999,00"},
+        },
+        tags={"__a07_total__": ("summary_total",)},
+    )
+    ui_selection_summary.register_treeview_selection_summary(
+        tree,
+        columns=("A07_Belop", "GL_Belop", "Diff"),
+    )
+    tree.selection_set(["a", "__a07_total__"])
+
+    n, sums = ui_selection_summary.treeview_selection_sums(tree)
+
+    assert n == 1
+    assert sums["A07_Belop"] == 100.0
+    assert sums["GL_Belop"] == 95.0
+    assert sums["Diff"] == 5.0
 
 
 def test_explicit_columns_override_heuristic() -> None:

@@ -53,7 +53,24 @@ from ..page_a07_runtime_helpers import default_global_rulebook_path
 from ..page_paths import default_a07_source_path, suggest_default_mapping_path
 
 
+def _page_safe_auto_matching_is_active(page: object) -> bool:
+    try:
+        return bool(getattr(page, "_safe_auto_matching_enabled", lambda: False)())
+    except Exception:
+        return False
+
+
+def _batch_auto_button_text_for(page: object) -> str:
+    return "Kjør trygg auto-matching" if _page_safe_auto_matching_is_active(page) else "Auto-matching av"
+
+
 class A07PageSupportRenderMixin:
+    def _safe_auto_matching_is_active(self) -> bool:
+        return _page_safe_auto_matching_is_active(self)
+
+    def _batch_auto_button_text(self) -> str:
+        return _batch_auto_button_text_for(self)
+
     def _mapping_filter_key_from_label(self, value: object) -> str:
         raw = str(value or "").strip()
         if not raw:
@@ -85,7 +102,7 @@ class A07PageSupportRenderMixin:
         try:
             work_level = self._selected_control_work_level()
         except Exception:
-            work_level = "rf1022"
+            work_level = "a07"
         try:
             rf_group = self._selected_rf1022_group() if work_level == "rf1022" else ""
         except Exception:
@@ -199,6 +216,8 @@ class A07PageSupportRenderMixin:
                 batch_enabled = bool(int(summary.get("actionable", 0) or 0))
             except Exception:
                 batch_enabled = False
+        if not _page_safe_auto_matching_is_active(self):
+            batch_enabled = False
 
         best_button = getattr(self, "btn_control_best", None)
         if best_button is not None:
@@ -210,7 +229,7 @@ class A07PageSupportRenderMixin:
         batch_button = getattr(self, "btn_control_batch_suggestions", None)
         if batch_button is not None:
             try:
-                batch_button.configure(text="Kjør trygg auto-matching")
+                batch_button.configure(text=_batch_auto_button_text_for(self))
                 batch_button.state(["!disabled"] if batch_enabled else ["disabled"])
             except Exception:
                 pass
@@ -326,7 +345,7 @@ class A07PageSupportRenderMixin:
                     if button_name == "btn_control_best":
                         button.configure(text="Bruk trygg kandidat")
                     else:
-                        button.configure(text="Kjør trygg auto-matching")
+                        button.configure(text=_batch_auto_button_text_for(self))
                     button.state(["disabled"])
                 except Exception:
                     pass
@@ -456,8 +475,8 @@ class A07PageSupportRenderMixin:
             batch_button = getattr(self, "btn_control_batch_suggestions", None)
             if batch_button is not None:
                 try:
-                    batch_button.configure(text="Kjør trygg auto-matching")
-                    batch_button.state(["!disabled"] if actionable_count else ["disabled"])
+                    batch_button.configure(text=_batch_auto_button_text_for(self))
+                    batch_button.state(["!disabled"] if actionable_count and _page_safe_auto_matching_is_active(self) else ["disabled"])
                 except Exception:
                     pass
             self._reconfigure_tree_columns(self.tree_control_suggestions, _RF1022_CANDIDATE_COLUMNS)
@@ -509,7 +528,7 @@ class A07PageSupportRenderMixin:
         batch_button = getattr(self, "btn_control_batch_suggestions", None)
         if batch_button is not None:
             try:
-                batch_button.configure(text="Kjør trygg auto-matching")
+                batch_button.configure(text=_batch_auto_button_text_for(self))
             except Exception:
                 pass
         suggestions_df = self._ensure_suggestion_display_fields()
@@ -586,7 +605,7 @@ class A07PageSupportRenderMixin:
                         actionable_count = int(action_counter(all_candidate_getter()).get("actionable", 0))
                     except Exception:
                         actionable_count = 0
-                batch_button.state(["!disabled"] if actionable_count else ["disabled"])
+                batch_button.state(["!disabled"] if actionable_count and _page_safe_auto_matching_is_active(self) else ["disabled"])
         except Exception:
             pass
         if self._selected_control_alternative_mode() == "suggestions":
@@ -743,16 +762,51 @@ class A07PageSupportRenderMixin:
             return "mapping"
         return None
 
-    def _refresh_groups_tree(self) -> None:
+    def _refresh_groups_tree(self, *, force: bool = False) -> None:
         tree_groups = getattr(self, "tree_groups", None)
         if tree_groups is None:
             return
+        df = getattr(self, "groups_df", None)
+        if df is None:
+            signature: tuple[tuple[object, ...], ...] = ()
+        elif df.empty:
+            signature = ()
+        else:
+            signature = tuple(
+                tuple(str(row.get(column, "") or "") for column, *_rest in _GROUP_COLUMNS)
+                for _, row in df.iterrows()
+            )
+        try:
+            children = tuple(tree_groups.get_children())
+        except Exception:
+            children = ()
+        if (
+            not force
+            and getattr(self, "_groups_tree_signature", None) == signature
+            and (children or not signature)
+        ):
+            sync_groups_panel_visibility = getattr(self, "_sync_groups_panel_visibility", None)
+            if callable(sync_groups_panel_visibility):
+                sync_groups_panel_visibility()
+            return
+        try:
+            selected = tuple(str(value) for value in tree_groups.selection())
+        except Exception:
+            selected = ()
+        self._groups_tree_signature = signature
         self._fill_tree(
             tree_groups,
-            self.groups_df,
+            df,
             _GROUP_COLUMNS,
             iid_column="GroupId",
         )
+        try:
+            new_children = set(str(value) for value in tree_groups.get_children())
+            kept = [value for value in selected if value in new_children]
+            if kept:
+                tree_groups.selection_set(tuple(kept))
+        except Exception:
+            pass
         sync_groups_panel_visibility = getattr(self, "_sync_groups_panel_visibility", None)
         if callable(sync_groups_panel_visibility):
             sync_groups_panel_visibility()
@@ -1185,7 +1239,7 @@ class A07PageSupportRenderMixin:
                 else:
                     history_button.state(["disabled"])
             if batch_button is not None:
-                batch_button.configure(text="Kjør trygg auto-matching")
+                batch_button.configure(text=_batch_auto_button_text_for(self))
         except Exception:
             pass
         self._update_a07_action_button_state()

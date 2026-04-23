@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from itertools import combinations
+import re
 from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
+from ..groups import a07_code_aliases
 from .helpers import (
     _auto_basis_for_code,
     _get_series,
@@ -38,6 +40,65 @@ def _effective_target_value(target: float, rule: Optional[RulebookRule]) -> floa
     return -abs(float(target))
 
 
+def _a07_group_members(code: object) -> tuple[str, ...]:
+    code_s = str(code or "").strip()
+    prefix = "A07_GROUP:"
+    if not code_s.casefold().startswith(prefix.casefold()):
+        return ()
+    tail = code_s[len(prefix) :]
+    members: list[str] = []
+    for raw in tail.replace(";", "+").replace(",", "+").split("+"):
+        member = raw.strip()
+        if member:
+            members.append(member)
+    return tuple(members)
+
+
+def _lookup_rule(rulebook: dict[str, RulebookRule], code: object) -> RulebookRule | None:
+    code_s = str(code or "").strip()
+    if not code_s:
+        return None
+    for alias in a07_code_aliases(code_s):
+        found = rulebook.get(alias) or rulebook.get(alias.strip()) or rulebook.get(alias.lower())
+        if found is not None:
+            return found
+    members = _a07_group_members(code_s)
+    if not members:
+        return None
+    member_rules = [_lookup_rule(rulebook, member) for member in members]
+    member_rules = [rule for rule in member_rules if rule is not None]
+    if not member_rules:
+        return None
+
+    def _uniq(values: list[object]) -> tuple:
+        out: list[object] = []
+        seen: set[str] = set()
+        for value in values:
+            key = repr(value)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(value)
+        return tuple(out)
+
+    rf_groups = {str(rule.rf1022_group or "").strip() for rule in member_rules if str(rule.rf1022_group or "").strip()}
+    basis_values = {str(rule.basis or "").strip() for rule in member_rules if str(rule.basis or "").strip()}
+    aga_values = {rule.aga_pliktig for rule in member_rules if rule.aga_pliktig is not None}
+    return RulebookRule(
+        label=" + ".join(str(rule.label or "").strip() or member for rule, member in zip(member_rules, members)),
+        category="a07_group",
+        rf1022_group=next(iter(rf_groups)) if len(rf_groups) == 1 else None,
+        aga_pliktig=next(iter(aga_values)) if len(aga_values) == 1 else None,
+        allowed_ranges=_uniq([rng for rule in member_rules for rng in rule.allowed_ranges]),
+        keywords=_uniq([kw for rule in member_rules for kw in (rule.keywords or ())] + list(members)),
+        exclude_keywords=_uniq([kw for rule in member_rules for kw in (rule.exclude_keywords or ())]),
+        boost_accounts=_uniq([acct for rule in member_rules for acct in (rule.boost_accounts or ())]),
+        special_add=_uniq([item for rule in member_rules for item in (rule.special_add or ())]),
+        basis=next(iter(basis_values)) if len(basis_values) == 1 else None,
+        expected_sign=None,
+    )
+
+
 def _special_add_total(
     gl_df: pd.DataFrame,
     *,
@@ -54,6 +115,47 @@ def _special_add_total(
         exclude_accounts=exclude_accounts,
     )
     return total
+
+
+def _special_add_ranges(account_expr: str) -> tuple[tuple[int, int], ...]:
+    ranges: list[tuple[int, int]] = []
+    for part in re.split(r"[|;,\n]+", str(account_expr or "")):
+        text = part.strip()
+        if not text:
+            continue
+        range_match = re.match(r"^(\d+)\s*-\s*(\d+)$", text)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2))
+            ranges.append((min(start, end), max(start, end)))
+            continue
+        single_match = re.match(r"^(\d+)$", text)
+        if single_match:
+            value = int(single_match.group(1))
+            ranges.append((value, value))
+    return tuple(ranges)
+
+
+def _special_add_matches_row(item: Any, row: pd.Series) -> bool:
+    account_expr = str(getattr(item, "account", "") or "").strip()
+    if not account_expr:
+        return False
+    ranges = _special_add_ranges(account_expr)
+    if not ranges or not _konto_in_ranges(row.get("Konto"), ranges):
+        return False
+
+    keywords = tuple(str(value or "").strip() for value in getattr(item, "keywords", ()) if str(value or "").strip())
+    if not keywords:
+        return True
+    keyword_tokens: set[str] = set()
+    for keyword in keywords:
+        keyword_tokens |= _tokenize(keyword)
+    if not keyword_tokens:
+        return True
+    name_tokens = row.get("__tokens")
+    if not isinstance(name_tokens, set):
+        name_tokens = _tokenize(str(row.get("Navn") or ""))
+    return bool(keyword_tokens & set(name_tokens))
 
 
 def _special_add_details(
@@ -77,28 +179,39 @@ def _special_add_details(
     gl_lookup["Konto"] = gl_lookup["Konto"].astype(str).str.strip()
     total = 0.0
     accounts: List[str] = []
+    if "__tokens" not in gl_lookup.columns:
+        gl_lookup["__tokens"] = (
+            gl_lookup["Navn"].map(_tokenize)
+            if "Navn" in gl_lookup.columns
+            else [set()] * len(gl_lookup)
+        )
+
     for item in rule.special_add:
-        account = str(item.account).strip()
-        if not account:
-            continue
-        if include is not None and account not in include:
-            continue
-        if account in exclude:
-            continue
         basis_name = str(item.basis or selected_basis or BASIS_UB).strip() or BASIS_UB
         series = _get_series(gl_lookup, basis_name)
-        mask = gl_lookup["Konto"] == account
+        mask = gl_lookup.apply(lambda gl_row: _special_add_matches_row(item, gl_row), axis=1)
+        if include is not None:
+            mask = mask & gl_lookup["Konto"].isin(include)
+        if exclude:
+            mask = mask & ~gl_lookup["Konto"].isin(exclude)
+        if accounts:
+            mask = mask & ~gl_lookup["Konto"].isin(accounts)
         if not bool(mask.any()):
             continue
-        try:
-            subtotal = float(series.loc[mask].sum())
-        except Exception:
-            subtotal = 0.0
-        if abs(subtotal) <= 0.000001:
-            continue
-        total += float(item.weight) * subtotal
-        if account not in accounts:
-            accounts.append(account)
+        matched = gl_lookup.loc[mask, ["Konto"]].copy()
+        matched["__amount"] = series.loc[mask]
+        for account, group in matched.groupby("Konto", sort=False):
+            account_s = str(account).strip()
+            if not account_s or account_s in accounts:
+                continue
+            try:
+                subtotal = float(group["__amount"].sum())
+            except Exception:
+                subtotal = 0.0
+            if abs(subtotal) <= 0.000001:
+                continue
+            total += float(item.weight) * subtotal
+            accounts.append(account_s)
     return float(total), tuple(accounts)
 
 
@@ -339,7 +452,9 @@ def suggest_mappings(
         target = float(row.get("A07_Belop", 0.0))
 
         code_tokens = _tokenize(code) | _tokenize(code_name)
-        rule = rulebook.get(code) or rulebook.get(code.strip()) or rulebook.get(code.lower())
+        for member_code in _a07_group_members(code):
+            code_tokens |= _tokenize(member_code)
+        rule = _lookup_rule(rulebook, code)
         if rule and rule.keywords:
             for keyword in rule.keywords:
                 code_tokens |= _tokenize(keyword)
@@ -365,27 +480,22 @@ def suggest_mappings(
         historical_for_code = historical_code_to_accounts.get(code_l, set())
         series_all = _series_for_basis(selected_basis)
         target_effective = _effective_target_value(target, rule)
-        special_accounts_for_rule = {
-            str(item.account).strip()
-            for item in (rule.special_add if rule else ())
-            if str(item.account).strip()
-        }
-
-        current_raw = 0.0
-        if mapped_for_code:
-            try:
-                ordinary_mapped_accounts = set(mapped_for_code) - special_accounts_for_rule
-                mask = gl_all["Konto"].isin(ordinary_mapped_accounts)
-                current_raw = float(series_all[mask].sum())
-            except Exception:
-                current_raw = 0.0
-
-        special_current_raw = _special_add_total(
+        special_current_raw, special_current_accounts = _special_add_details(
             gl_all,
             rule=rule,
             selected_basis=selected_basis,
             include_accounts=set(mapped_for_code),
         )
+
+        current_raw = 0.0
+        if mapped_for_code:
+            try:
+                ordinary_mapped_accounts = set(mapped_for_code) - set(special_current_accounts)
+                mask = gl_all["Konto"].isin(ordinary_mapped_accounts)
+                current_raw = float(series_all[mask].sum())
+            except Exception:
+                current_raw = 0.0
+
         special_proposal_raw, special_proposal_accounts = _special_add_details(
             gl_all,
             rule=rule,
@@ -394,11 +504,15 @@ def suggest_mappings(
         )
         current_total = float(current_raw + special_current_raw)
         target_abs = abs(float(target_effective))
-        current_abs = abs(float(current_total))
         tol = max(float(eff_cfg.tolerance_abs), float(eff_cfg.tolerance_rel) * max(target_abs, 1.0))
         diff_current = float(target_effective - current_total)
         within_current = abs(diff_current) <= tol
-        if eff_cfg.hide_solved_codes and within_current:
+        diff_with_special = float(target_effective - (current_total + special_proposal_raw))
+        special_improves_current = bool(
+            special_proposal_accounts
+            and abs(diff_with_special) + 0.01 < abs(diff_current)
+        )
+        if eff_cfg.hide_solved_codes and within_current and not special_improves_current:
             continue
 
         residual_target = float(target_effective)
@@ -441,6 +555,7 @@ def suggest_mappings(
                 )
             ].copy()
 
+        special_accounts_for_rule = set(special_current_accounts) | set(special_proposal_accounts)
         if special_accounts_for_rule:
             gl_pool = gl_pool[~gl_pool["Konto"].isin(special_accounts_for_rule)].copy()
 

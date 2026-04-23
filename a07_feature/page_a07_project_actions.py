@@ -344,6 +344,20 @@ class A07PageProjectActionsMixin:
             self._notify_inline("Marker minst to A07-koder for Ã¥ opprette en gruppe.", focus_widget=self.tree_a07)
             return None
 
+        existing_group_getter = getattr(self, "_existing_group_id_for_codes", None)
+        existing_group_id = (
+            str(existing_group_getter(codes) or "").strip()
+            if callable(existing_group_getter)
+            else ""
+        )
+        if existing_group_id:
+            self._refresh_core(focus_code=existing_group_id)
+            self._focus_control_code(existing_group_id)
+            group = getattr(self.workspace, "groups", {}).get(existing_group_id)
+            group_name = str(getattr(group, "group_name", "") or existing_group_id).strip()
+            self.status_var.set(f"A07-gruppen finnes allerede: {group_name}.")
+            return existing_group_id
+
         default_name = self._default_group_name(codes)
         group_name = default_name
         if prompt_for_name:
@@ -416,6 +430,8 @@ class A07PageProjectActionsMixin:
         self.status_var.set(f"OpplÃ¸ste A07-gruppe {group_id}.")
 
     def _on_group_selection_changed(self) -> None:
+        if bool(getattr(self, "_suspend_selection_sync", False)):
+            return
         sync_groups_panel_visibility = getattr(self, "_sync_groups_panel_visibility", None)
         if callable(sync_groups_panel_visibility):
             sync_groups_panel_visibility()
@@ -424,6 +440,12 @@ class A07PageProjectActionsMixin:
     def _focus_selected_group_code(self) -> None:
         group_id = self._selected_group_id()
         if not group_id:
+            return
+        try:
+            current_code = str(self._selected_control_code() or "").strip()
+        except Exception:
+            current_code = ""
+        if current_code == group_id:
             return
         self._focus_control_code(group_id)
 
@@ -467,9 +489,18 @@ class A07PageProjectActionsMixin:
             show_rulebook = getattr(admin_page, "show_a07_rulebook", None)
             if callable(show_rulebook):
                 try:
-                    show_rulebook()
+                    current_code_getter = getattr(self, "_selected_control_code", None)
+                    rule_id = current_code_getter() if callable(current_code_getter) else None
+                    show_rulebook(rule_id=rule_id)
                     self.status_var.set("Åpnet Admin > A07-regler.")
                     return
+                except TypeError:
+                    try:
+                        show_rulebook()
+                        self.status_var.set("Ã…pnet Admin > A07-regler.")
+                        return
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         self._open_matcher_admin()

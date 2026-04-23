@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from ui_selection_summary import build_selection_summary_text
+
 from .data import build_control_accounts_summary
 
 
@@ -90,6 +92,97 @@ def build_gl_selection_status_message(
     return f"{len(selected)} kontoer er valgt med {len(mapped_codes)} ulike A07-koder."
 
 
+def _parse_amount(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+    low = text.lower()
+    if low in {"nan", "none", "null", "na"}:
+        return None
+
+    negative = False
+    if text.startswith("(") and text.endswith(")"):
+        negative = True
+        text = text[1:-1].strip()
+
+    text = text.replace("\xa0", " ").replace(" ", "")
+    if "," in text and "." in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "," in text:
+        text = text.replace(",", ".")
+
+    try:
+        parsed = float(text)
+    except Exception:
+        return None
+    return -abs(parsed) if negative else parsed
+
+
+def build_gl_selection_amount_summary(
+    *,
+    control_gl_df: pd.DataFrame | None,
+    selected_accounts: list[str] | tuple[str, ...],
+) -> str:
+    if control_gl_df is None or control_gl_df.empty or "Konto" not in control_gl_df.columns:
+        return ""
+
+    selected: list[str] = []
+    seen: set[str] = set()
+    for value in selected_accounts or ():
+        account = str(value or "").strip()
+        if not account or account in seen:
+            continue
+        selected.append(account)
+        seen.add(account)
+    if not selected:
+        return ""
+
+    amount_columns = [column for column in ("IB", "Endring", "UB") if column in control_gl_df.columns]
+    if not amount_columns:
+        return ""
+
+    try:
+        accounts = control_gl_df["Konto"].astype(str).str.strip()
+        matches = control_gl_df.loc[accounts.isin(set(selected))]
+    except Exception:
+        return ""
+    if matches.empty:
+        return ""
+
+    sums: dict[str, float] = {}
+    for column in amount_columns:
+        total = 0.0
+        parsed_count = 0
+        for raw in matches[column].tolist():
+            parsed = _parse_amount(raw)
+            if parsed is None:
+                continue
+            total += parsed
+            parsed_count += 1
+        if parsed_count:
+            sums[column] = total
+
+    if not sums:
+        return ""
+
+    return build_selection_summary_text(
+        len(selected),
+        sums,
+        row_noun="kontoer",
+        priority=("IB", "Endring", "UB"),
+        max_items=3,
+        hide_zero=False,
+    )
+
+
 def build_control_panel_state(
     *,
     code: object,
@@ -158,6 +251,9 @@ def build_control_panel_state(
     if current_mapping_suspicious and suggestion_count > 0:
         action_label = "Se forslag"
         action_target = "suggestions"
+    elif best_suggestion is not None and status_text in {"Kontroller kobling", "Maa avklares"}:
+        action_label = "Se forslag"
+        action_target = "suggestions"
     elif status_text == "Lonnskontroll":
         action_label = "Apne lonnsklassifisering"
         action_target = "saldobalanse"
@@ -177,6 +273,8 @@ def build_control_panel_state(
     if not reason_text:
         if current_mapping_suspicious:
             reason_text = "Dagens kobling ser mistenkelig ut."
+        elif best_suggestion is not None and status_text in {"Kontroller kobling", "Maa avklares"}:
+            reason_text = "Det finnes et konkret forslag som kan vurderes."
         elif status_text == "Har forslag":
             reason_text = "Det finnes forslag som kan vurderes."
         elif status_text == "Har historikk":

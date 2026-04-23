@@ -27,10 +27,14 @@ _A07_COLUMNS = (
 
 _CONTROL_COLUMNS = (
     ("A07Post", "A07-post", 320, "w"),
+    ("AgaPliktig", "AGA", 70, "center"),
     ("A07_Belop", "A07", 120, "e"),
     ("GL_Belop", "GL", 120, "e"),
     ("Diff", "Diff", 120, "e"),
 )
+
+_CONTROL_A07_TOTAL_IID = "__a07_total__"
+_SUMMARY_TOTAL_TAG = "summary_total"
 
 _CONTROL_RF1022_COLUMNS = (
     ("Post", "Post", 70, "w"),
@@ -43,8 +47,8 @@ _CONTROL_RF1022_COLUMNS = (
 _CONTROL_GL_COLUMNS = (
     ("Konto", "Konto", 80, "w"),
     ("Navn", "Navn", 240, "w"),
-    ("Rf1022GroupId", "RF-1022", 135, "w"),
     ("Kode", "A07-kode", 155, "w"),
+    ("Rf1022GroupId", "RF-1022", 135, "w"),
     ("AliasStatus", "Alias", 85, "w"),
     ("Kol", "Kol", 70, "w"),
     ("MappingAuditStatus", "Kontroll", 100, "w"),
@@ -81,10 +85,12 @@ _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
 )
 
 _CONTROL_SUGGESTION_COLUMNS = (
-    ("ForslagVisning", "Forslag", 420, "w"),
+    ("ForslagVisning", "Kontoer", 420, "w"),
+    ("A07_Belop", "A07", 110, "e"),
+    ("GL_Sum", "GL forslag", 120, "e"),
+    ("Diff", "Diff", 110, "e"),
     ("Forslagsstatus", "Status", 120, "w"),
     ("HvorforKort", "Hvorfor", 240, "w"),
-    ("Diff", "Diff", 110, "e"),
 )
 
 _RF1022_CANDIDATE_COLUMNS = (
@@ -124,6 +130,24 @@ _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL = {
 
 _CONTROL_GL_SCOPE_ALIASES = {
     "relevante": "koblede",
+}
+
+_CONTROL_GL_MAPPING_LABELS = {
+    "alle": "Alle",
+    "mappede": "Kun mappede",
+}
+
+_CONTROL_GL_SERIES_LABELS = {
+    "alle": "Alle serier",
+    "1": "1xxx",
+    "2": "2xxx",
+    "3": "3xxx",
+    "4": "4xxx",
+    "5": "5xxx",
+    "6": "6xxx",
+    "7": "7xxx",
+    "8": "8xxx",
+    "9": "9xxx",
 }
 
 _MAPPING_FILTER_LABELS = {
@@ -173,22 +197,21 @@ _CONTROL_EXTRA_COLUMNS = (
 )
 
 _GROUP_COLUMNS = (
-    ("GroupId", "Gruppe", 180, "w"),
-    ("Navn", "Navn", 220, "w"),
-    ("Members", "Medlemmer", 280, "w"),
-    ("Locked", "LÃ¥st", 70, "center"),
+    ("Navn", "Gruppe", 260, "w"),
+    ("Members", "A07-koder", 420, "w"),
+    ("Locked", "Låst", 60, "center"),
 )
 
 _SUGGESTION_COLUMNS = (
     ("Kode", "Kode", 140, "w"),
-    ("KodeNavn", "KodeNavn", 220, "w"),
+    ("KodeNavn", "Navn", 220, "w"),
     ("Basis", "Basis", 80, "w"),
-    ("A07_Belop", "A07_Belop", 120, "e"),
-    ("ForslagVisning", "Forslag", 320, "w"),
+    ("A07_Belop", "A07", 120, "e"),
+    ("ForslagVisning", "Kontoer", 320, "w"),
+    ("GL_Sum", "GL forslag", 120, "e"),
+    ("Diff", "Diff", 120, "e"),
     ("Forslagsstatus", "Status", 110, "w"),
     ("HvorforKort", "Hvorfor", 220, "w"),
-    ("Diff", "Diff", 120, "e"),
-    ("GL_Sum", "GL_Sum", 120, "e"),
 )
 
 _RECONCILE_COLUMNS = (
@@ -381,6 +404,7 @@ __all__ = [
     "_A07_FILTER_LABELS",
     "_BASIS_LABELS",
     "_CONTROL_ALTERNATIVE_MODE_LABELS",
+    "_CONTROL_A07_TOTAL_IID",
     "_CONTROL_COLUMNS",
     "_CONTROL_DRAG_IDLE_HINT",
     "_CONTROL_EXTRA_COLUMNS",
@@ -390,6 +414,8 @@ __all__ = [
     "_CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL",
     "_CONTROL_GL_SCOPE_LABELS",
     "_CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL",
+    "_CONTROL_GL_MAPPING_LABELS",
+    "_CONTROL_GL_SERIES_LABELS",
     "_CONTROL_HIDDEN_CODES",
     "_CONTROL_RF1022_COLUMNS",
     "_CONTROL_SELECTED_ACCOUNT_COLUMNS",
@@ -415,6 +441,7 @@ __all__ = [
     "_RF1022_POST_RULES",
     "_SUGGESTION_COLUMNS",
     "_SUGGESTION_SCOPE_LABELS",
+    "_SUMMARY_TOTAL_TAG",
     "_UNMAPPED_COLUMNS",
     "control_statement_view_requires_unclassified",
 ]

@@ -32,9 +32,7 @@ except Exception:  # pragma: no cover
 
 # Helpers flyttet til page_admin_helpers.py (refaktor PR 3).
 from page_admin_helpers import (
-    _CATALOG_AREA_CONTROL_TAGS,
     _CATALOG_AREA_LEGACY_GROUPS,
-    _CATALOG_AREA_PAYROLL_GROUPS,
     _CATALOG_AREA_PAYROLL_TAGS,
     _alias_concept_preview_text,
     _alias_preview_text,
@@ -47,7 +45,6 @@ from page_admin_helpers import (
     _format_amount,
     _format_special_add_lines,
     _int_list,
-    _mirror_rulebook_to_a07_storage,
     _multiline_text,
     _normalize_alias_document,
     _normalize_catalog_document,
@@ -82,7 +79,6 @@ from page_admin_preview import (
 
 # Editor-dialoger er splittet per type (refaktor PR 5).
 from page_admin_actions import _ActionLibraryEditor
-from page_admin_alias import _AliasEditor
 from page_admin_workpapers import _WorkpaperLibraryEditor
 from page_admin_catalog import _CatalogEditor
 from page_admin_detail_class import _DetailClassEditor
@@ -148,13 +144,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         notebook.grid(row=0, column=0, sticky="nsew")
         self._notebook = notebook
 
-        self._aliases_editor = _AliasEditor(
-            notebook,
-            title="Konseptaliaser (avansert/legacy)",
-            loader=self._load_aliases_document,
-            saver=self._save_aliases_document,
-            on_saved=self._notify_rule_change,
-        )
+        self._aliases_editor = None
         self._detail_class_editor = _DetailClassEditor(
             notebook,
             title="Kontoklassifisering",
@@ -171,7 +161,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         )
         self._catalog_editor = _CatalogEditor(
             notebook,
-            title="RF-1022 og flagg",
+            title="Flagg og analysegrupper",
             loader=self._load_catalog_document,
             saver=self._save_catalog_document,
             on_saved=self._notify_rule_change,
@@ -204,10 +194,9 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         except Exception:
             self._brreg_mapping_editor = None  # type: ignore[assignment]
         self._preview_tab = ttk.Frame(notebook)
-        notebook.add(self._aliases_editor, text="Konseptaliaser (legacy)")
         notebook.add(self._detail_class_editor, text="Kontoklassifisering")
         notebook.add(self._rulebook_editor, text="A07-regler")
-        notebook.add(self._catalog_editor, text="RF-1022 og flagg")
+        notebook.add(self._catalog_editor, text="Flagg og grupper")
         notebook.add(self._regnskapslinje_editor, text="Regnskapslinjer")
         notebook.add(self._thresholds_editor, text="Terskler")
         notebook.add(self._actions_editor, text="Handlinger")
@@ -260,7 +249,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
                     "Admin er klar. Preview/Test lastes når fanen åpnes."
                 )
 
-    def show_a07_rulebook(self) -> None:
+    def show_a07_rulebook(self, rule_id: object | None = None) -> None:
         notebook = getattr(self, "_notebook", None)
         rulebook_editor = getattr(self, "_rulebook_editor", None)
         if notebook is not None and rulebook_editor is not None:
@@ -271,7 +260,12 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         reload_editor = getattr(rulebook_editor, "reload", None)
         if callable(reload_editor):
             try:
-                reload_editor()
+                reload_editor(select_key=rule_id)
+            except TypeError:
+                try:
+                    reload_editor()
+                except Exception:
+                    pass
             except Exception:
                 pass
         if self._status_var is not None:
@@ -308,14 +302,6 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         self._preview_loaded_once = True
         self._preview_dirty = False
 
-    def _load_aliases_document(self) -> tuple[Any, str]:
-        document = classification_config.load_alias_library_document()
-        return document, str(classification_config.resolve_alias_path())
-
-    def _save_aliases_document(self, document: Any) -> str:
-        path = classification_config.save_alias_library_document(document)
-        return str(path)
-
     def _load_account_detail_classification_document(self) -> tuple[Any, str]:
         document = classification_config.load_account_detail_classification_document()
         return document, str(classification_config.resolve_account_detail_classification_path())
@@ -338,7 +324,6 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
 
     def _save_rulebook_document(self, document: Any) -> str:
         path = classification_config.save_rulebook_document(document)
-        _mirror_rulebook_to_a07_storage(str(path))
         return str(path)
 
     def _load_thresholds_document(self) -> tuple[Any, str]:

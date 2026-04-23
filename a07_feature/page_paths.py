@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -47,6 +48,13 @@ def _clean_context_value(value: object) -> str | None:
     return text or None
 
 
+def _context_path_slug(value: object) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"[^0-9A-Za-z._-]+", "_", text)
+    text = text.strip("._-")
+    return text or "ukjent"
+
+
 def get_a07_workspace_dir(client: str | None, year: str | int | None) -> Path:
     client_s = _clean_context_value(client)
     year_s = _clean_context_value(year)
@@ -56,6 +64,12 @@ def get_a07_workspace_dir(client: str | None, year: str | int | None) -> Path:
             return client_store.years_dir(client_s, year=str(year_s)) / "a07"
         except Exception:
             pass
+
+    if client_s and year_s:
+        try:
+            return app_paths.data_dir() / "a07" / _context_path_slug(client_s) / _context_path_slug(year_s)
+        except Exception:
+            return Path("a07") / _context_path_slug(client_s) / _context_path_slug(year_s)
 
     try:
         return app_paths.data_dir() / "a07"
@@ -96,18 +110,6 @@ def default_global_rulebook_path() -> Path:
 
 
 def bundled_default_rulebook_path() -> Path | None:
-    project_candidate = Path(__file__).resolve().parent.parent / "a07_rulebook.json"
-    if project_candidate.exists():
-        return project_candidate
-
-    package_candidate = Path(__file__).resolve().parent / "defaults" / "global_full_a07_rulebook.json"
-    if package_candidate.exists():
-        return package_candidate
-
-    sibling_candidate = Path(__file__).resolve().parent.parent / "a07" / "global_full_a07_rulebook.json"
-    if sibling_candidate.exists():
-        return sibling_candidate
-
     return None
 
 
@@ -161,7 +163,7 @@ def suggest_default_mapping_path(
         source = Path(a07_path)
         return source.with_name(f"{source.stem}_mapping.json")
 
-    return app_paths.data_dir() / "a07" / "a07_mapping.json"
+    return Path("a07_mapping.json")
 
 
 def resolve_autosave_mapping_path(
@@ -207,13 +209,12 @@ def resolve_context_source_path(
     client: str | None,
     year: str | int | None,
 ) -> Path | None:
+    if not _clean_context_value(client) or not _clean_context_value(year):
+        return None
+
     default_path = default_a07_source_path(client, year)
     if _safe_exists(default_path):
         return default_path
-
-    legacy_path = legacy_global_a07_source_path()
-    if _safe_exists(legacy_path):
-        return legacy_path
 
     return None
 
@@ -224,13 +225,14 @@ def resolve_context_mapping_path(
     client: str | None,
     year: str | int | None,
 ) -> Path | None:
+    client_s = _clean_context_value(client)
+    year_s = _clean_context_value(year)
+    if not client_s or not year_s:
+        return None
+
     default_path = suggest_default_mapping_path(a07_path, client=client, year=year)
     if _safe_exists(default_path):
         return default_path
-
-    legacy_path = legacy_global_a07_mapping_path()
-    if _safe_exists(legacy_path):
-        return legacy_path
 
     return default_path
 
@@ -488,10 +490,19 @@ def _format_special_add_editor(values: object) -> str:
         account = str(value.get("account") or "").strip()
         if not account:
             continue
+        keywords_raw = value.get("keywords") or value.get("name_keywords") or []
+        if isinstance(keywords_raw, str):
+            keywords = [part.strip() for part in keywords_raw.replace(";", "\n").replace(",", "\n").splitlines() if part.strip()]
+        elif isinstance(keywords_raw, (list, tuple, set)):
+            keywords = [str(part or "").strip() for part in keywords_raw if str(part or "").strip()]
+        else:
+            keywords = []
         basis = str(value.get("basis") or "").strip()
         weight = value.get("weight", 1.0)
         weight_text = str(weight).strip()
         parts = [account]
+        if keywords:
+            parts.append(", ".join(dict.fromkeys(keywords)))
         if basis or weight_text:
             parts.append(basis)
         if weight_text:
@@ -513,13 +524,30 @@ def _parse_special_add_editor(text: object) -> list[dict[str, object]]:
         account = str(parts[0] or "").strip()
         if not account:
             continue
-        basis = str(parts[1] or "").strip() if len(parts) >= 2 else ""
-        weight_raw = str(parts[2] or "").strip() if len(parts) >= 3 else ""
+        basis_values = {"ub", "ib", "endring", "debet", "kredit"}
+        if len(parts) >= 4:
+            keywords = [part.strip() for part in parts[1].replace(";", "\n").replace(",", "\n").splitlines() if part.strip()]
+            basis = str(parts[2] or "").strip()
+            weight_raw = str(parts[3] or "").strip()
+        elif (
+            len(parts) == 3
+            and str(parts[1] or "").strip().casefold() not in basis_values
+            and str(parts[2] or "").strip().casefold() in basis_values
+        ):
+            keywords = [part.strip() for part in parts[1].replace(";", "\n").replace(",", "\n").splitlines() if part.strip()]
+            basis = str(parts[2] or "").strip()
+            weight_raw = ""
+        else:
+            keywords = []
+            basis = str(parts[1] or "").strip() if len(parts) >= 2 else ""
+            weight_raw = str(parts[2] or "").strip() if len(parts) >= 3 else ""
         try:
             weight = float(weight_raw) if weight_raw else 1.0
         except Exception:
             weight = 1.0
         item: dict[str, object] = {"account": account}
+        if keywords:
+            item["keywords"] = list(dict.fromkeys(keywords))
         if basis:
             item["basis"] = basis
         if weight != 1.0:

@@ -10,12 +10,8 @@ import app_paths
 _ROOT_DIR = Path(__file__).resolve().parent
 _REPO_CONFIG_DIR = _ROOT_DIR / "config" / "classification"
 
-_LEGACY_ALIAS_PATH = _ROOT_DIR / "config" / "payroll_alias_library.json"
 _LEGACY_CATALOG_PATH = _ROOT_DIR / "config" / "account_classification_catalog.json"
-_PROJECT_RULEBOOK_PATH = _ROOT_DIR / "a07_rulebook.json"
-_LEGACY_RULEBOOK_PATH = _ROOT_DIR / "a07_feature" / "defaults" / "global_full_a07_rulebook.json"
 
-_APPDATA_RULEBOOK_PATH = app_paths.data_dir() / "a07" / "global_full_a07_rulebook.json"
 _APPDATA_THRESHOLDS_PATH = app_paths.data_dir() / "a07" / "matcher_settings.json"
 
 
@@ -26,26 +22,8 @@ def _path_exists(path: Path) -> bool:
         return False
 
 
-def _rulebook_has_rules(path: Path) -> bool:
-    if not _path_exists(path):
-        return False
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except Exception:
-        return False
-    if not isinstance(data, dict):
-        return False
-    rules = data.get("rules", {})
-    return isinstance(rules, dict) and bool(rules)
-
-
 def repo_dir() -> Path:
     return _REPO_CONFIG_DIR
-
-
-def repo_alias_path() -> Path:
-    return repo_dir() / "payroll_alias_library.json"
 
 
 def repo_catalog_path() -> Path:
@@ -68,13 +46,6 @@ def repo_account_detail_classification_path() -> Path:
     return repo_dir() / "account_detail_classification.json"
 
 
-def resolve_alias_path() -> Path:
-    target = repo_alias_path()
-    if _path_exists(target):
-        return target
-    return _LEGACY_ALIAS_PATH
-
-
 def resolve_catalog_path() -> Path:
     target = repo_catalog_path()
     if _path_exists(target):
@@ -83,18 +54,7 @@ def resolve_catalog_path() -> Path:
 
 
 def resolve_rulebook_path() -> Path:
-    repo_target = repo_rulebook_path()
-    if _path_exists(repo_target):
-        return repo_target
-    if _rulebook_has_rules(_PROJECT_RULEBOOK_PATH):
-        return _PROJECT_RULEBOOK_PATH
-    if _rulebook_has_rules(_APPDATA_RULEBOOK_PATH):
-        return _APPDATA_RULEBOOK_PATH
-    if _path_exists(_PROJECT_RULEBOOK_PATH):
-        return _PROJECT_RULEBOOK_PATH
-    if _path_exists(_APPDATA_RULEBOOK_PATH):
-        return _APPDATA_RULEBOOK_PATH
-    return _LEGACY_RULEBOOK_PATH
+    return repo_rulebook_path()
 
 
 def resolve_thresholds_path() -> Path:
@@ -139,15 +99,6 @@ def save_json(path: str | Path, data: Any) -> Path:
         json.dump(data, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
     return target
-
-
-def load_alias_library_document() -> dict[str, Any]:
-    data = load_json(resolve_alias_path(), fallback={})
-    return data if isinstance(data, dict) else {}
-
-
-def save_alias_library_document(data: Any) -> Path:
-    return save_json(repo_alias_path(), data if isinstance(data, dict) else {})
 
 
 def load_catalog_document() -> dict[str, Any]:

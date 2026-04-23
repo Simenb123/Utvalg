@@ -33,6 +33,7 @@ from a07_feature import (
     AccountUsageFeatures,
     A07WorkspaceData,
     SuggestConfig,
+    a07_group_member_signature,
     apply_groups_to_mapping,
     apply_suggestion_to_mapping,
     build_account_usage_features,
@@ -158,14 +159,18 @@ except Exception:
 from .page_a07_context_menu import A07PageContextMenuMixin
 from .page_a07_constants import (
     _BASIS_LABELS,
+    _CONTROL_A07_TOTAL_IID,
     _CONTROL_ALTERNATIVE_MODE_LABELS,
     _CONTROL_GL_DATA_COLUMNS,
+    _CONTROL_GL_MAPPING_LABELS,
     _CONTROL_GL_SCOPE_ALIASES,
     _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL,
     _CONTROL_GL_SCOPE_LABELS,
     _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL,
+    _CONTROL_GL_SERIES_LABELS,
     _CONTROL_VIEW_LABELS,
     _SUGGESTION_SCOPE_LABELS,
+    _SUMMARY_TOTAL_TAG,
 )
 from .control.statement_ui import A07PageControlStatementMixin
 from .page_a07_dialogs import _parse_konto_tokens
@@ -202,6 +207,23 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
 
     def _selected_code_from_tree(self, tree: ttk.Treeview) -> str | None:
         if tree is getattr(self, "tree_a07", None):
+            def _is_summary_iid(iid: str) -> bool:
+                if str(iid or "").strip() == _CONTROL_A07_TOTAL_IID:
+                    return True
+                tag_checker = getattr(self, "_tree_item_has_tag", None)
+                if callable(tag_checker):
+                    try:
+                        return bool(tag_checker(tree, iid, _SUMMARY_TOTAL_TAG))
+                    except Exception:
+                        pass
+                try:
+                    tags = tree.item(iid, "tags") or ()
+                except Exception:
+                    tags = ()
+                if isinstance(tags, str):
+                    return tags == _SUMMARY_TOTAL_TAG
+                return _SUMMARY_TOTAL_TAG in {str(tag) for tag in tags}
+
             selected_work_level = getattr(self, "_selected_control_work_level", None)
             if callable(selected_work_level):
                 try:
@@ -220,16 +242,28 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
                 except Exception:
                     selection = ()
                 values = tree.item(selection[0], "values") if selection else ()
-            if values:
-                code = str(values[0]).strip()
-                if code:
-                    return code
+            try:
+                selection = tree.selection()
+            except Exception:
+                selection = ()
+            if selection:
+                selected_iid = str(selection[0] or "").strip()
+                if selected_iid:
+                    if _is_summary_iid(selected_iid):
+                        return None
+                    return selected_iid
             try:
                 focused_code = str(tree.focus() or "").strip()
             except Exception:
                 focused_code = ""
             if focused_code:
+                if _is_summary_iid(focused_code):
+                    return None
                 return focused_code or None
+            if values:
+                code = str(values[0]).strip()
+                if code:
+                    return code
         values = self._selected_tree_values(tree)
         if not values:
             return None
@@ -354,7 +388,6 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         self._support_requested = self._control_details_visible
         self._diag(f"set_control_details_visible visible={self._control_details_visible}")
         support_nb = getattr(self, "control_support_nb", None)
-        toggle_button = getattr(self, "btn_control_toggle_details", None)
         if support_nb is not None and self._control_details_visible:
             try:
                 support_nb.update_idletasks()
@@ -369,21 +402,13 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
                     self._schedule_support_refresh()
             except Exception:
                 pass
-        if toggle_button is not None:
-            try:
-                toggle_button.configure(text="Skjul detaljer" if self._control_details_visible else "Vis detaljer")
-            except Exception:
-                pass
-
-    def _toggle_control_details(self) -> None:
-        self._set_control_details_visible(not bool(getattr(self, "_control_details_visible", True)))
 
     def _sync_control_work_level_ui(self) -> None:
         selected_work_level = getattr(self, "_selected_control_work_level", None)
         try:
-            work_level = selected_work_level() if callable(selected_work_level) else "rf1022"
+            work_level = selected_work_level() if callable(selected_work_level) else "a07"
         except Exception:
-            work_level = "rf1022"
+            work_level = "a07"
         view_widget = getattr(self, "a07_filter_widget", None)
         if view_widget is not None:
             try:
@@ -423,12 +448,12 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         if notebook is None:
             return
         selected_work_level = getattr(self, "_selected_control_work_level", None)
-        work_level = "rf1022"
+        work_level = "a07"
         if callable(selected_work_level):
             try:
                 work_level = selected_work_level()
             except Exception:
-                work_level = "rf1022"
+                work_level = "a07"
         try:
             notebook.tab(getattr(self, "tab_suggestions", None), text="Forslag")
             notebook.tab(getattr(self, "tab_mapping", None), text="Koblinger")
@@ -486,6 +511,8 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
             return
 
     def _selected_a07_filter(self) -> str:
+        if getattr(self, "a07_filter_widget", None) is None:
+            return "alle"
         try:
             label = str(self.a07_filter_widget.get() or "").strip()
         except Exception:
@@ -496,7 +523,7 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
                 return key
 
         fallback = str(self.a07_filter_var.get() or "").strip().lower()
-        return fallback or "neste"
+        return fallback or "alle"
 
     def _selected_suggestion_scope(self) -> str:
         try:
@@ -514,18 +541,18 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
     def _control_work_level_for_gl_scope(self) -> str:
         selected_work_level = getattr(self, "_selected_control_work_level", None)
         try:
-            work_level = selected_work_level() if callable(selected_work_level) else "rf1022"
+            work_level = selected_work_level() if callable(selected_work_level) else "a07"
         except Exception:
-            work_level = "rf1022"
-        return work_level if work_level in _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL else "rf1022"
+            work_level = "a07"
+        return work_level if work_level in _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL else "a07"
 
     def _control_gl_scope_keys_for_work_level(self, work_level: str | None = None) -> tuple[str, ...]:
         level = str(work_level or self._control_work_level_for_gl_scope()).strip().lower()
-        return _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL.get(level, _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL["rf1022"])
+        return _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL.get(level, _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL["a07"])
 
     def _control_gl_scope_labels_for_work_level(self, work_level: str | None = None) -> dict[str, str]:
         level = str(work_level or self._control_work_level_for_gl_scope()).strip().lower()
-        return _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL.get(level, _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL["rf1022"])
+        return _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL.get(level, _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL["a07"])
 
     def _normalize_control_gl_scope(self, scope_key: str | None, *, work_level: str | None = None) -> str:
         scope = str(scope_key or "").strip().lower()
@@ -738,8 +765,15 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
             selection = ()
         for item in selection or ():
             code = str(item or "").strip()
-            if not code or code in seen:
+            if not code or code == _CONTROL_A07_TOTAL_IID or code in seen:
                 continue
+            tag_checker = getattr(self, "_tree_item_has_tag", None)
+            if callable(tag_checker):
+                try:
+                    if tag_checker(self.tree_a07, code, _SUMMARY_TOTAL_TAG):
+                        continue
+                except Exception:
+                    pass
             out.append(code)
             seen.add(code)
         return out
@@ -1022,6 +1056,13 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         iid = self._tree_iid_from_event(tree, event)
         if not iid:
             return None
+        tag_checker = getattr(self, "_tree_item_has_tag", None)
+        if callable(tag_checker):
+            try:
+                if tag_checker(tree, iid, _SUMMARY_TOTAL_TAG):
+                    return None
+            except Exception:
+                pass
 
         try:
             current_selection = tuple(str(value).strip() for value in tree.selection())
@@ -1183,6 +1224,9 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
 
     def _next_group_id(self, codes: Sequence[str]) -> str:
         code_tokens = [str(code).strip() for code in codes if str(code).strip()]
+        existing = self._existing_group_id_for_codes(code_tokens)
+        if existing:
+            return existing
         slug = "+".join(code_tokens[:4]) or "group"
         base = f"A07_GROUP:{slug}"
         if base not in self.workspace.groups:
@@ -1191,6 +1235,16 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         while f"{base}:{idx}" in self.workspace.groups:
             idx += 1
         return f"{base}:{idx}"
+
+    def _existing_group_id_for_codes(self, codes: Sequence[str]) -> str | None:
+        wanted = a07_group_member_signature(codes)
+        if not wanted:
+            return None
+        for group_id, group in (getattr(self.workspace, "groups", {}) or {}).items():
+            current = a07_group_member_signature(getattr(group, "member_codes", ()) or ())
+            if current == wanted:
+                return str(group_id)
+        return None
 
     def _notify_inline(self, message: str, *, focus_widget: object | None = None) -> None:
         self.status_var.set(str(message or "").strip())
@@ -1201,11 +1255,39 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
         except Exception:
             return
 
-    def _control_gl_filter_state(self) -> tuple[str, bool, bool]:
+    def _control_gl_label_key(self, labels: dict[str, str], raw_key: object, raw_label: object, default: str) -> str:
+        key_s = str(raw_key or "").strip()
+        if key_s in labels:
+            return key_s
+        label_s = str(raw_label or "").strip()
+        for key, label in labels.items():
+            if label_s == str(label):
+                return key
+        return default
+
+    def _control_gl_filter_state(self) -> tuple[str, str, str, bool, bool]:
         try:
             search_text = str(self.control_gl_filter_var.get() or "")
         except Exception:
             search_text = ""
+        try:
+            mapping_key = self._control_gl_label_key(
+                _CONTROL_GL_MAPPING_LABELS,
+                self.control_gl_mapping_filter_var.get(),
+                self.control_gl_mapping_filter_label_var.get(),
+                "alle",
+            )
+        except Exception:
+            mapping_key = "alle"
+        try:
+            series_key = self._control_gl_label_key(
+                _CONTROL_GL_SERIES_LABELS,
+                self.control_gl_series_filter_var.get(),
+                self.control_gl_series_filter_label_var.get(),
+                "alle",
+            )
+        except Exception:
+            series_key = "alle"
         try:
             only_unmapped = bool(self.control_gl_unmapped_only_var.get())
         except Exception:
@@ -1214,4 +1296,4 @@ class A07PageContextMixin(A07PageContextMenuMixin, A07PageControlStatementMixin)
             active_only = bool(self.control_gl_active_only_var.get())
         except Exception:
             active_only = False
-        return search_text, only_unmapped, active_only
+        return search_text, mapping_key, series_key, only_unmapped, active_only

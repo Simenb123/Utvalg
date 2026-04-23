@@ -130,5 +130,5 @@ matching, RF-1022 og koblingsflyten tryggere i praktisk revisjonsarbeid. Les
 - RF-1022 er aggregert kontroll- og visningsnivaa.
 - Nye A07-aliaser, ekskluderinger og boost-kontoer skal skrives til
   `global_full_a07_rulebook.json`.
-- `payroll_alias_library.json` beholdes som legacy/kompatibilitetslag, men skal
-  ikke vaere hovedflate for nye A07-laeringer.
+- `global_full_a07_rulebook.json` er eneste aktive A07-kildesannhet.
+  Legacy konseptaliasfiler brukes ikke lenger av A07-runtime.

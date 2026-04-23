@@ -156,6 +156,7 @@ except Exception:
 from ..page_a07_constants import _CONTROL_ALTERNATIVE_MODE_LABELS, _CONTROL_WORK_LEVEL_LABELS
 from ..page_a07_frames import _empty_gl_df, _empty_suggestions_df
 from ..control.presenter import (
+    build_gl_selection_amount_summary,
     build_gl_selection_status_message,
     build_selected_code_status_message,
 )
@@ -164,7 +165,7 @@ class A07PageSelectionMixin:
     def _sync_control_work_level_vars(self, level: str | None) -> str:
         level_s = str(level or "").strip().lower()
         if level_s not in _CONTROL_WORK_LEVEL_LABELS:
-            level_s = "rf1022"
+            level_s = "a07"
         try:
             self.control_work_level_var.set(level_s)
         except Exception:
@@ -197,7 +198,7 @@ class A07PageSelectionMixin:
             fallback = str(self.control_work_level_var.get() or "").strip().lower()
         except Exception:
             fallback = ""
-        return fallback if fallback in _CONTROL_WORK_LEVEL_LABELS else "rf1022"
+        return fallback if fallback in _CONTROL_WORK_LEVEL_LABELS else "a07"
 
     def _selected_rf1022_group(self) -> str | None:
         work_level = self._selected_control_work_level()
@@ -693,6 +694,13 @@ class A07PageSelectionMixin:
         if status_var is None:
             return
         try:
+            amount_summary = build_gl_selection_amount_summary(
+                control_gl_df=self.control_gl_df,
+                selected_accounts=selected_accounts,
+            )
+            if amount_summary:
+                status_var.set(amount_summary)
+                return
             status_message = build_gl_selection_status_message(
                 control_gl_df=self.control_gl_df,
                 account=account,

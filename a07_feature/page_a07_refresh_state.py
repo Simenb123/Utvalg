@@ -14,7 +14,6 @@ from .page_a07_constants import (
     _CONTROL_COLUMNS,
     _CONTROL_GL_COLUMNS,
     _CONTROL_GL_DATA_COLUMNS,
-    _CONTROL_RF1022_COLUMNS,
     _CONTROL_SELECTED_ACCOUNT_COLUMNS,
     _CONTROL_STATEMENT_COLUMNS,
     _CONTROL_STATEMENT_VIEW_LABELS,
@@ -364,12 +363,12 @@ class A07PageRefreshStateMixin:
             self.lbl_control_drag.configure(style="Muted.TLabel")
         except Exception:
             pass
-        self.a07_filter_var.set("neste")
-        self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["neste"])
+        self.a07_filter_var.set("alle")
+        self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["alle"])
         self.basis_var.set(_BASIS_LABELS["Endring"])
         self.workspace.basis_col = "Endring"
-        self.control_work_level_var.set("rf1022")
-        self.control_work_level_label_var.set(_CONTROL_WORK_LEVEL_LABELS["rf1022"])
+        self.control_work_level_var.set("a07")
+        self.control_work_level_label_var.set(_CONTROL_WORK_LEVEL_LABELS["a07"])
         self.control_statement_view_var.set(CONTROL_STATEMENT_VIEW_PAYROLL)
         self.control_statement_view_label_var.set(_CONTROL_STATEMENT_VIEW_LABELS[CONTROL_STATEMENT_VIEW_PAYROLL])
         self.control_statement_include_unclassified_var.set(
@@ -378,7 +377,7 @@ class A07PageRefreshStateMixin:
         self.suggestion_scope_var.set("valgt_kode")
         self.suggestion_scope_label_var.set(_SUGGESTION_SCOPE_LABELS["valgt_kode"])
         try:
-            self.a07_filter_widget.set(_CONTROL_VIEW_LABELS["neste"])
+            self.a07_filter_widget.set(_CONTROL_VIEW_LABELS["alle"])
         except Exception:
             pass
         try:
@@ -390,15 +389,15 @@ class A07PageRefreshStateMixin:
         except Exception:
             pass
         try:
-            self.control_work_level_widget.set(_CONTROL_WORK_LEVEL_LABELS["rf1022"])
+            self.control_work_level_widget.set(_CONTROL_WORK_LEVEL_LABELS["a07"])
         except Exception:
             pass
         _fill_optional_tree("tree_control_gl", self.control_gl_df, _CONTROL_GL_COLUMNS)
         _fill_optional_tree(
             "tree_a07",
-            self.rf1022_overview_df,
-            _CONTROL_RF1022_COLUMNS,
-            iid_column="GroupId",
+            self.control_df,
+            _CONTROL_COLUMNS,
+            iid_column="Kode",
         )
         _fill_optional_tree("tree_groups", self.groups_df, _GROUP_COLUMNS, iid_column="GroupId")
         sync_groups_panel_visibility = getattr(self, "_sync_groups_panel_visibility", None)

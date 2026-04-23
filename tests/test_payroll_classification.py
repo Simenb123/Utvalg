@@ -122,7 +122,7 @@ def test_default_catalog_contains_full_payroll_group_and_tag_set() -> None:
     )
 
 
-def test_default_catalog_aliases_support_direct_payroll_control_suggestions() -> None:
+def test_default_catalog_aliases_support_direct_payroll_tag_suggestions_only() -> None:
     catalog = load_account_classification_catalog()
 
     group_suggestion = payroll_classification._suggest_control_group_from_catalog(
@@ -136,9 +136,7 @@ def test_default_catalog_aliases_support_direct_payroll_control_suggestions() ->
         catalog=catalog,
     )
 
-    assert group_suggestion is not None
-    assert group_suggestion.value == "111_naturalytelser"
-    assert "navn/alias: telefon" in str(group_suggestion.reason)
+    assert group_suggestion is None
 
     assert tag_suggestion is not None
     assert "styrehonorar" in tuple(tag_suggestion.value or ())
@@ -454,7 +452,7 @@ def test_suggest_a07_code_suggests_feriepenger_for_periodisering_5096() -> None:
     assert suggestion.value == "feriepenger"
 
 
-def test_classify_payroll_account_keeps_direct_rf1022_for_balance_accounts_without_a07_suggestion() -> None:
+def test_classify_payroll_account_does_not_assign_rf1022_directly_without_a07_suggestion() -> None:
     catalog = payroll_classification.AccountClassificationCatalog.from_dict(
         {
             "groups": [
@@ -479,11 +477,11 @@ def test_classify_payroll_account_keeps_direct_rf1022_for_balance_accounts_witho
     )
 
     assert "a07_code" not in result.suggestions
-    assert result.suggestions["control_group"].value == "100_loenn_ol"
+    assert "control_group" not in result.suggestions
     assert result.payroll_relevant is True
 
 
-def test_classify_payroll_account_keeps_direct_refusjon_group_for_balance_account_without_a07_suggestion() -> None:
+def test_classify_payroll_account_does_not_assign_refusjon_group_without_a07_suggestion() -> None:
     catalog = payroll_classification.AccountClassificationCatalog.from_dict(
         {
             "groups": [
@@ -508,7 +506,7 @@ def test_classify_payroll_account_keeps_direct_refusjon_group_for_balance_accoun
     )
 
     assert "a07_code" not in result.suggestions
-    assert result.suggestions["control_group"].value == "100_refusjon"
+    assert "control_group" not in result.suggestions
     assert result.payroll_relevant is True
 
 
@@ -559,7 +557,7 @@ def test_normalized_phrase_match_blocks_midword_hits_but_keeps_word_affixes() ->
     assert payroll_classification._normalized_phrase_match("pensjonskostnader", "pensjon") is True
 
 
-def test_classify_payroll_account_adds_direct_rf1022_from_catalog_alias(tmp_path) -> None:
+def test_classify_payroll_account_derives_rf1022_from_a07_mapping(tmp_path) -> None:
     rulebook_path = tmp_path / "rulebook.json"
     rulebook_path.write_text(
         """
@@ -608,8 +606,8 @@ def test_classify_payroll_account_adds_direct_rf1022_from_catalog_alias(tmp_path
 
     assert result.suggestions["a07_code"].value == "tilskuddOgPremieTilPensjon"
     assert result.suggestions["control_group"].value == "112_pensjon"
-    assert str(result.suggestions["control_group"].reason).startswith("Direkte RF-1022:")
-    assert "navn/alias: pensjon" in str(result.suggestions["control_group"].reason)
+    assert not str(result.suggestions["control_group"].reason).startswith("Direkte RF-1022:")
+    assert "Navn/alias: Pensjon" in str(result.suggestions["control_group"].reason)
 
 
 def test_classify_payroll_account_merges_direct_flag_with_a07_standard_tags(tmp_path) -> None:
@@ -830,7 +828,7 @@ def test_detect_rf1022_exclude_blocks_returns_empty_when_no_positive_match() -> 
     assert blocks == []
 
 
-def test_detect_rf1022_exclude_blocks_uses_default_catalog_for_aga_account_5422() -> None:
+def test_default_catalog_no_longer_provides_rf1022_alias_blocks() -> None:
     catalog = load_account_classification_catalog()
 
     blocks = payroll_classification.detect_rf1022_exclude_blocks(
@@ -839,8 +837,7 @@ def test_detect_rf1022_exclude_blocks_uses_default_catalog_for_aga_account_5422(
         catalog=catalog,
     )
 
-    labels = {label for label, _ in blocks}
-    assert "Post 100 Lønn o.l." in labels
+    assert blocks == []
 
 
 def test_exclude_aliases_block_usage_signal_hit() -> None:

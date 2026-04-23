@@ -1294,6 +1294,7 @@ def test_clear_selected_suspicious_payroll_fields_reports_when_nothing_is_flagge
 def test_on_work_mode_changed_resets_and_restores_hidden_filters_for_payroll_mode() -> None:
     import page_saldobalanse
     import saldobalanse_payload
+    calls: list[str] = []
 
     class _Var:
         def __init__(self, value) -> None:
@@ -1305,7 +1306,6 @@ def test_on_work_mode_changed_resets_and_restores_hidden_filters_for_payroll_mod
         def set(self, value) -> None:
             self.value = value
 
-    calls: list[str] = []
     dummy = SimpleNamespace(
         _var_work_mode=_Var(page_saldobalanse.WORK_MODE_PAYROLL),
         _var_mapping_status=_Var("Overstyrt"),
@@ -1586,70 +1586,26 @@ def test_refresh_detail_panel_guides_multi_selection() -> None:
     assert "RF-1022-behandling må vurderes per konto" in dummy._detail_treatment_var.get()
     assert "Åpne klassifisering" in dummy._detail_next_var.get()
     assert statuses[-1] == "2 valgte kontoer | Åpne klassifisering"
-def test_append_selected_account_name_to_rf1022_alias_updates_list_document_and_refreshes(monkeypatch) -> None:
+def test_append_selected_account_name_to_rf1022_alias_is_disabled(monkeypatch) -> None:
     import page_saldobalanse
-    import saldobalanse_payload
 
     saved: dict[str, object] = {}
-    calls: list[str] = []
-    document = {
-        "groups": [
-            {
-                "id": "100_loenn_ol",
-                "label": "Post 100 LÃ¸nn o.l.",
-                "aliases": ["lÃ¸nn"],
-                "category": "payroll_rf1022_group",
-            }
-        ]
-    }
-
-    monkeypatch.setattr(page_saldobalanse.classification_config, "load_catalog_document", lambda: document)
     monkeypatch.setattr(
         page_saldobalanse.classification_config,
         "save_catalog_document",
         lambda data: (saved.setdefault("document", data), Path("account_classification_catalog.json"))[1],
     )
-    monkeypatch.setattr(
-        page_saldobalanse.payroll_classification,
-        "invalidate_runtime_caches",
-        lambda: calls.append("invalidate"),
-    )
-
-    class _Page:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def refresh_from_session(self, _session_obj=None, **_kwargs) -> None:
-            calls.append(self.name)
-
-    monkeypatch.setattr(
-        page_saldobalanse.session,
-        "APP",
-        SimpleNamespace(page_a07=_Page("a07"), page_analyse=_Page("analyse")),
-        raising=False,
-    )
 
     statuses: list[str] = []
     dummy = SimpleNamespace(
-        _selected_account=lambda: ("5002", "EtterlÃ¸nn /uferiepenger"),
-        refresh=lambda: calls.append("refresh"),
+        _selected_account=lambda: ("5002", "Etterl?nn /uferiepenger"),
         _set_status=lambda text: statuses.append(text),
-    )
-    dummy._after_rule_learning_saved = (
-        lambda message: page_saldobalanse.SaldobalansePage._after_rule_learning_saved(dummy, message)
     )
 
     page_saldobalanse.SaldobalansePage._append_selected_account_name_to_rf1022_alias(dummy, "100_loenn_ol")
 
-    saved_doc = saved["document"]
-    assert isinstance(saved_doc, dict)
-    groups = saved_doc["groups"]
-    assert isinstance(groups, list)
-    aliases = next(entry["aliases"] for entry in groups if entry["id"] == "100_loenn_ol")
-    assert "EtterlÃ¸nn /uferiepenger" in aliases
-    assert calls[:4] == ["invalidate", "a07", "analyse", "refresh"]
-    assert "RF-1022-alias" in statuses[-1]
-
+    assert saved == {}
+    assert "RF-1022-aliaser er fjernet" in statuses[-1]
 
 def test_append_selected_account_name_to_a07_alias_refreshes_after_save(monkeypatch) -> None:
     import page_saldobalanse
@@ -1665,16 +1621,6 @@ def test_append_selected_account_name_to_a07_alias_refreshes_after_save(monkeypa
             learned.append((code, term, exclude)),
             SimpleNamespace(path=Path("global_full_a07_rulebook.json")),
         )[1],
-    )
-    monkeypatch.setattr(
-        page_saldobalanse.classification_config,
-        "load_alias_library_document",
-        lambda: {"concepts": {"fastloenn": {"aliases": ["lÃ¸nn"]}}},
-    )
-    monkeypatch.setattr(
-        page_saldobalanse.classification_config,
-        "save_alias_library_document",
-        lambda _data: Path("payroll_alias_library.json"),
     )
     monkeypatch.setattr(
         page_saldobalanse.payroll_classification,

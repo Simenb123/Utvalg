@@ -69,11 +69,8 @@ Det brukes til:
 Etter lagring kan effekten normalt sees etter `Oppfrisk`.
 
 ## Admin-fanene
-### Konseptaliaser
-Styrer hvilke ord og navn som matcher hvilke konsepter.
-
 ### A07-regler
-Styrer scoring, basis og intervaller for A07.
+Styrer A07-aliaser, ekskluderinger, scoring, basis og intervaller.
 
 ### RF-1022 og flagg
 Styrer kontrolloppstilling, RF-1022-katalog og tilhørende flagg.

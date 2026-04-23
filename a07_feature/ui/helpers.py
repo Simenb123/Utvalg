@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import re
 import tkinter as tk
 from tkinter import ttk
 from typing import Sequence
 
 import pandas as pd
 
-from ..page_a07_constants import _CONTROL_DRAG_IDLE_HINT, _CONTROL_GL_COLUMNS, _CONTROL_VIEW_LABELS, _MAPPING_COLUMNS
+from ..page_a07_constants import (
+    _CONTROL_DRAG_IDLE_HINT,
+    _CONTROL_GL_COLUMNS,
+    _CONTROL_GL_MAPPING_LABELS,
+    _CONTROL_GL_SERIES_LABELS,
+    _CONTROL_VIEW_LABELS,
+    _MAPPING_COLUMNS,
+    _SUMMARY_TOTAL_TAG,
+)
 from ..page_a07_dialogs import remove_mapping_accounts
 from ..page_a07_env import messagebox
 
@@ -17,9 +26,7 @@ class A07PageUiHelpersMixin:
         frame.pack(fill="both", expand=True)
 
         tree = ttk.Treeview(frame, columns=[c[0] for c in columns], show="headings")
-        for column_id, heading, width, anchor in columns:
-            tree.heading(column_id, text=heading)
-            tree.column(column_id, width=width, anchor=anchor)
+        self._configure_sortable_tree_columns(tree, columns)
 
         ybar = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         xbar = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)
@@ -30,6 +37,19 @@ class A07PageUiHelpersMixin:
         xbar.pack(side="bottom", fill="x")
         return tree
 
+    def _configure_sortable_tree_columns(
+        self,
+        tree: ttk.Treeview,
+        columns: Sequence[tuple[str, str, int, str]],
+    ) -> None:
+        for column_id, heading, width, anchor in columns:
+            tree.heading(
+                column_id,
+                text=heading,
+                command=lambda col=column_id: self._sort_tree_by_column(tree, col),
+            )
+            tree.column(column_id, width=width, anchor=anchor)
+
     def _reconfigure_tree_columns(
         self,
         tree: ttk.Treeview,
@@ -37,9 +57,99 @@ class A07PageUiHelpersMixin:
     ) -> None:
         column_ids = [column_id for column_id, *_rest in columns]
         tree.configure(columns=column_ids, displaycolumns=column_ids)
-        for column_id, heading, width, anchor in columns:
-            tree.heading(column_id, text=heading)
-            tree.column(column_id, width=width, anchor=anchor, stretch=True)
+        self._configure_sortable_tree_columns(tree, columns)
+        for column_id, _heading, _width, _anchor in columns:
+            tree.column(column_id, stretch=True)
+
+    def _tree_sort_state(self) -> dict[str, tuple[str, bool]]:
+        state = getattr(self, "_tree_sort_state_by_key", None)
+        if not isinstance(state, dict):
+            state = {}
+            setattr(self, "_tree_sort_state_by_key", state)
+        return state
+
+    def _tree_sort_key(self, tree: ttk.Treeview) -> str:
+        try:
+            return str(tree)
+        except Exception:
+            return f"tree-{id(tree)}"
+
+    def _tree_sort_columns(self, tree: ttk.Treeview) -> tuple[str, ...]:
+        try:
+            columns = tree["columns"]
+        except Exception:
+            return ()
+        if isinstance(columns, str):
+            return tuple(part for part in columns.split() if part)
+        return tuple(str(part) for part in columns)
+
+    def _tree_sort_value(self, value: object) -> tuple[int, float | str]:
+        text = str(value or "").strip().replace("\xa0", " ")
+        compact = text.replace(" ", "")
+        if compact:
+            numeric = compact.replace(",", ".")
+            if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", numeric):
+                try:
+                    return (0, float(numeric))
+                except Exception:
+                    pass
+        return (1, text.casefold())
+
+    def _tree_item_has_tag(self, tree: ttk.Treeview, item: str, tag: str) -> bool:
+        try:
+            tags = tree.item(item, "tags") or ()
+        except Exception:
+            tags = ()
+        if isinstance(tags, str):
+            tag_values = {tags}
+        else:
+            tag_values = {str(value) for value in tags}
+        return str(tag) in tag_values
+
+    def _sort_tree_by_column(self, tree: ttk.Treeview, column_id: str) -> None:
+        columns = self._tree_sort_columns(tree)
+        if column_id not in columns:
+            return
+        col_index = columns.index(column_id)
+        tree_key = self._tree_sort_key(tree)
+        current_column, ascending = self._tree_sort_state().get(tree_key, ("", True))
+        next_ascending = not ascending if current_column == column_id else True
+
+        try:
+            children = list(tree.get_children(""))
+        except Exception:
+            children = list(tree.get_children())
+        if not children:
+            self._tree_sort_state()[tree_key] = (column_id, next_ascending)
+            return
+        summary_children = [item for item in children if self._tree_item_has_tag(tree, item, _SUMMARY_TOTAL_TAG)]
+        sortable_children = [item for item in children if item not in summary_children]
+
+        def value_for(item: str) -> tuple[int, float | str]:
+            try:
+                raw = tree.set(item, column_id)
+            except Exception:
+                try:
+                    values = list(tree.item(item, "values") or ())
+                    raw = values[col_index] if len(values) > col_index else ""
+                except Exception:
+                    raw = ""
+            return self._tree_sort_value(raw)
+
+        ordered = sorted(sortable_children, key=value_for, reverse=not next_ascending) + summary_children
+        for index, item in enumerate(ordered):
+            try:
+                tree.move(item, "", index)
+            except Exception:
+                break
+        self._tree_sort_state()[tree_key] = (column_id, next_ascending)
+
+    def _apply_tree_sort_if_active(self, tree: ttk.Treeview) -> None:
+        column, ascending = self._tree_sort_state().get(self._tree_sort_key(tree), ("", True))
+        if not column:
+            return
+        self._tree_sort_state()[self._tree_sort_key(tree)] = (column, not ascending)
+        self._sort_tree_by_column(tree, column)
 
     def _selected_tree_values(self, tree: ttk.Treeview) -> tuple[str, ...]:
         selection = tree.selection()
@@ -85,6 +195,15 @@ class A07PageUiHelpersMixin:
                 return None
 
     def _tree_iid_from_event(self, tree: ttk.Treeview, event: tk.Event | None = None) -> str | None:
+        def _is_summary_iid(iid: str) -> bool:
+            tag_checker = getattr(self, "_tree_item_has_tag", None)
+            if callable(tag_checker):
+                try:
+                    return bool(tag_checker(tree, iid, _SUMMARY_TOTAL_TAG))
+                except Exception:
+                    return False
+            return False
+
         if event is not None:
             identify_row = getattr(tree, "identify_row", None)
             if callable(identify_row):
@@ -93,14 +212,15 @@ class A07PageUiHelpersMixin:
                 except Exception:
                     iid = ""
                 if iid:
-                    return iid
-                return None
+                    return None if _is_summary_iid(iid) else iid
 
         selection = tree.selection()
         if not selection:
             return None
         iid = str(selection[0]).strip()
-        return iid or None
+        if not iid or _is_summary_iid(iid):
+            return None
+        return iid
 
     def _manual_mapping_defaults(
         self,
@@ -182,6 +302,22 @@ class A07PageUiHelpersMixin:
                 changed = False
                 if bool(self.control_gl_unmapped_only_var.get()):
                     self.control_gl_unmapped_only_var.set(False)
+                    changed = True
+                mapping_var = getattr(self, "control_gl_mapping_filter_var", None)
+                mapping_label_var = getattr(self, "control_gl_mapping_filter_label_var", None)
+                if mapping_var is not None and str(mapping_var.get() or "").strip() != "alle":
+                    mapping_var.set("alle")
+                    changed = True
+                if mapping_label_var is not None and str(mapping_label_var.get() or "").strip() != _CONTROL_GL_MAPPING_LABELS["alle"]:
+                    mapping_label_var.set(_CONTROL_GL_MAPPING_LABELS["alle"])
+                    changed = True
+                series_var = getattr(self, "control_gl_series_filter_var", None)
+                series_label_var = getattr(self, "control_gl_series_filter_label_var", None)
+                if series_var is not None and str(series_var.get() or "").strip() != "alle":
+                    series_var.set("alle")
+                    changed = True
+                if series_label_var is not None and str(series_label_var.get() or "").strip() != _CONTROL_GL_SERIES_LABELS["alle"]:
+                    series_label_var.set(_CONTROL_GL_SERIES_LABELS["alle"])
                     changed = True
                 if str(self.control_gl_filter_var.get() or "").strip():
                     self.control_gl_filter_var.set("")
@@ -296,6 +432,27 @@ class A07PageUiHelpersMixin:
             self.tree_control_accounts.selection_set(konto_s)
             self.tree_control_accounts.focus(konto_s)
             self.tree_control_accounts.see(konto_s)
+        except Exception:
+            pass
+
+    def _clear_control_gl_selection(self) -> None:
+        tree = getattr(self, "tree_control_gl", None)
+        if tree is None:
+            return
+        try:
+            selection = tuple(tree.selection())
+        except Exception:
+            selection = ()
+        if selection:
+            try:
+                tree.selection_remove(selection)
+            except Exception:
+                try:
+                    tree.selection_set(())
+                except Exception:
+                    pass
+        try:
+            tree.focus("")
         except Exception:
             pass
 

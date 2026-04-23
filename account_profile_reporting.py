@@ -11,6 +11,7 @@ from account_profile import (
     AccountProfileDocument,
     AccountProfileSuggestion,
 )
+from a07_feature.control.rf1022_bridge import rf1022_group_label
 
 
 def _clean_text(value: object) -> str:
@@ -130,9 +131,11 @@ def build_account_profile_rows(
 def _catalog_label(group_id: str, catalog: AccountClassificationCatalog | None) -> str:
     if not group_id:
         return ""
+    fallback = rf1022_group_label(group_id) or group_id
     if catalog is None:
-        return group_id
-    return catalog.group_label(group_id, fallback=group_id)
+        return fallback
+    label = catalog.group_label(group_id, fallback=fallback)
+    return fallback if label == group_id and fallback != group_id else label
 
 
 def _catalog_sort_key(

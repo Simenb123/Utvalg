@@ -6,6 +6,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import pandas as pd
 
 from a07_feature.suggest.api import AccountUsageFeatures, _tokenize, score_usage_signal
+from a07_feature.control.rf1022_bridge import RF1022_GROUP_LABELS, RF1022_UNKNOWN_GROUP, resolve_a07_rf1022_group
 from account_profile import (
     AccountClassificationCatalog,
     AccountClassificationCatalogEntry,
@@ -13,13 +14,11 @@ from account_profile import (
     AccountProfileDocument,
     AccountProfileSuggestion,
 )
-from a07_feature.suggest.rulebook import RulebookRule, load_rulebook
+from a07_feature.suggest.rulebook import RulebookRule, clear_rulebook_cache, load_rulebook
 
 PAYROLL_RF1022_GROUPS: dict[str, str] = {
-    "100_loenn_ol": "Post 100 Lønn o.l.",
-    "100_refusjon": "Post 100 Refusjon",
-    "111_naturalytelser": "Post 111 Naturalytelser",
-    "112_pensjon": "Post 112 Pensjon",
+    group_id: RF1022_GROUP_LABELS[group_id]
+    for group_id in ("100_loenn_ol", "100_refusjon", "111_naturalytelser", "112_pensjon")
 }
 
 PAYROLL_TAG_LABELS: dict[str, str] = {
@@ -343,6 +342,7 @@ _DEFAULT_RULEBOOK_CACHE: Mapping[str, RulebookRule] | None = None
 def invalidate_runtime_caches() -> None:
     global _DEFAULT_RULEBOOK_CACHE
     _DEFAULT_RULEBOOK_CACHE = None
+    clear_rulebook_cache()
 
 
 def _default_rulebook() -> Mapping[str, RulebookRule]:
@@ -675,13 +675,14 @@ def _suggest_control_tags_from_catalog(
     )
 
 
-def control_group_for_code(code: str | None) -> str | None:
+def control_group_for_code(code: str | None, *, rulebook_path: str | None = None) -> str | None:
     code_s = _clean_text(code)
     if not code_s:
         return None
-    raw = PAYROLL_CODE_DEFAULTS.get(code_s, {}).get("control_group")
-    value = _clean_text(raw)
-    return value or None
+    resolved = resolve_a07_rf1022_group(code_s, rulebook_path=rulebook_path)
+    if resolved and resolved != RF1022_UNKNOWN_GROUP:
+        return resolved
+    return None
 
 
 def required_control_tags_for_code(code: str | None) -> tuple[str, ...]:
@@ -698,9 +699,11 @@ def format_control_group(group_id: str | None, catalog: AccountClassificationCat
     group_s = _clean_text(group_id)
     if not group_s:
         return ""
+    fallback = PAYROLL_RF1022_GROUPS.get(group_s, group_s)
     if catalog is not None:
-        return catalog.group_label(group_s, fallback=PAYROLL_RF1022_GROUPS.get(group_s, group_s))
-    return PAYROLL_RF1022_GROUPS.get(group_s, group_s)
+        label = catalog.group_label(group_s, fallback=fallback)
+        return fallback if label == group_s and fallback != group_s else label
+    return fallback
 
 
 def format_control_tags(tags: Iterable[str] | None, catalog: AccountClassificationCatalog | None = None) -> str:
@@ -1004,15 +1007,6 @@ def classify_payroll_account(
     current_tags = tuple(getattr(current_profile, "control_tags", ()) or ())
     current_tag_set = {tag for tag in current_tags if _clean_text(tag)}
 
-    direct_group_suggestion = _suggest_control_group_from_catalog(
-        account_no=account_no,
-        account_name=account_name,
-        catalog=catalog,
-        usage=usage,
-    )
-    if direct_group_suggestion is not None:
-        suggestions["control_group"] = direct_group_suggestion
-
     direct_tag_suggestion = _suggest_control_tags_from_catalog(
         account_no=account_no,
         account_name=account_name,
@@ -1027,7 +1021,7 @@ def classify_payroll_account(
     if not effective_code and isinstance(suggestions.get("a07_code"), AccountProfileSuggestion):
         effective_code = _clean_text(suggestions["a07_code"].value)
 
-    default_group = control_group_for_code(effective_code)
+    default_group = control_group_for_code(effective_code, rulebook_path=rulebook_path)
     default_tags = required_control_tags_for_code(effective_code)
 
     if default_group and "control_group" not in suggestions:
@@ -1079,7 +1073,7 @@ def classify_payroll_account(
     effective_code = _clean_text(current_profile.a07_code if current_profile else None)
     if not effective_code and isinstance(suggestions.get("a07_code"), AccountProfileSuggestion):
         effective_code = _clean_text(suggestions["a07_code"].value)
-    default_group = control_group_for_code(effective_code)
+    default_group = control_group_for_code(effective_code, rulebook_path=rulebook_path)
     default_tags = required_control_tags_for_code(effective_code)
     missing_default_tags = tuple(tag for tag in default_tags if tag not in current_tag_set)
 

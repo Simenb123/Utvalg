@@ -235,7 +235,7 @@ def test_build_current_infers_payroll_control_group_from_known_a07_code(monkeypa
 
     assert len(rows) == 1
     assert rows[0].group_id == "112_pensjon"
-    assert rows[0].label == "112_pensjon"
+    assert rows[0].label == "Post 112 Pensjon"
     assert rows[0].accounts == ("5930",)
 
 

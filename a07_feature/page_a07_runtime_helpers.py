@@ -94,10 +94,7 @@ def _rulebook_has_rules(path: Path | None) -> bool:
 
 
 def default_global_rulebook_path() -> Path:
-    try:
-        return _env.app_paths.data_dir() / "a07" / "global_full_a07_rulebook.json"
-    except Exception:
-        return Path("a07") / "global_full_a07_rulebook.json"
+    return classification_config.resolve_rulebook_path()
 
 
 def copy_rulebook_to_storage(source_path: str | Path) -> Path:
@@ -124,35 +121,7 @@ def ensure_default_rulebook_exists() -> Path | None:
     target = default_global_rulebook_path()
     if _rulebook_has_rules(target):
         return target
-
-    source_candidates = (
-        bundled_default_rulebook_path(),
-        classification_config.repo_rulebook_path(),
-    )
-    source = None
-    for candidate in source_candidates:
-        candidate_path = Path(candidate) if candidate is not None else None
-        try:
-            same_target = candidate_path is not None and candidate_path.resolve() == target.resolve()
-        except Exception:
-            same_target = False
-        if same_target:
-            continue
-        if _rulebook_has_rules(candidate_path):
-            source = candidate_path
-            break
-    if source is None:
-        return target if _safe_exists(target) else None
-
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        return target
-    except Exception:
-        try:
-            return source if source.exists() else None
-        except Exception:
-            return None
+    return target if _safe_exists(target) else None
 
 
 def resolve_rulebook_path(client: str | None, year: str | int | None) -> Path | None:

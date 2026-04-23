@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +10,7 @@ from a07_feature import A07Group
 from a07_feature import (
     apply_groups_to_mapping,
     build_grouped_a07_df,
+    build_smart_a07_groups,
     load_a07_groups,
     load_locks,
     load_mapping,
@@ -57,6 +59,24 @@ from .page_a07_frames import (
 from .page_a07_runtime_helpers import _build_usage_features_for_a07
 
 
+_LOG = logging.getLogger(__name__)
+
+
+def _append_warning(
+    warnings: list[dict[str, str]],
+    *,
+    scope: str,
+    message: str,
+    exc: BaseException | None = None,
+) -> None:
+    detail = str(exc or "").strip()
+    if exc is not None:
+        _LOG.exception("A07 %s: %s", scope, message)
+    else:
+        _LOG.warning("A07 %s: %s", scope, message)
+    warnings.append({"scope": scope, "message": message, "detail": detail})
+
+
 def build_context_restore_payload(
     *,
     client: str | None,
@@ -67,6 +87,7 @@ def build_context_restore_payload(
     load_previous_year_mapping_cached,
     resolve_rulebook_path_cached,
 ) -> dict[str, object]:
+    warnings: list[dict[str, str]] = []
     gl_df, tb_path = load_active_trial_balance_cached(client, year)
     source_a07_df = _empty_a07_df()
     a07_df = _empty_a07_df()
@@ -77,7 +98,13 @@ def build_context_restore_payload(
             source_a07_df = load_a07_source_cached(source_path)
             a07_df = source_a07_df.copy()
             a07_path = source_path
-        except Exception:
+        except Exception as exc:
+            _append_warning(
+                warnings,
+                scope="a07_source",
+                message="A07-kilden kunne ikke lastes.",
+                exc=exc,
+            )
             source_a07_df = _empty_a07_df()
             a07_df = _empty_a07_df()
             a07_path = None
@@ -98,7 +125,13 @@ def build_context_restore_payload(
                 mapping_exists = False
             if mapping_exists:
                 mapping_path = mapping_candidate
-        except Exception:
+        except Exception as exc:
+            _append_warning(
+                warnings,
+                scope="mapping",
+                message="A07-mapping kunne ikke lastes.",
+                exc=exc,
+            )
             mapping = {}
             mapping_path = None
 
@@ -112,19 +145,37 @@ def build_context_restore_payload(
         try:
             groups_path = default_a07_groups_path(client, year)
             groups = load_a07_groups(groups_path)
-        except Exception:
+        except Exception as exc:
+            _append_warning(
+                warnings,
+                scope="groups",
+                message="A07-grupper kunne ikke lastes.",
+                exc=exc,
+            )
             groups = {}
             groups_path = None
         try:
             locks_path = default_a07_locks_path(client, year)
             locks = load_locks(locks_path)
-        except Exception:
+        except Exception as exc:
+            _append_warning(
+                warnings,
+                scope="locks",
+                message="A07-låser kunne ikke lastes.",
+                exc=exc,
+            )
             locks = set()
             locks_path = None
         try:
             project_path = default_a07_project_path(client, year)
             project_meta = load_project_state(project_path)
-        except Exception:
+        except Exception as exc:
+            _append_warning(
+                warnings,
+                scope="project",
+                message="A07-prosjektstatus kunne ikke lastes.",
+                exc=exc,
+            )
             project_meta = {}
             project_path = None
 
@@ -137,6 +188,17 @@ def build_context_restore_payload(
         previous_mapping_path,
         previous_mapping_year,
     ) = load_previous_year_mapping_cached(client, year)
+
+    rulebook_path: Path | None = None
+    try:
+        rulebook_path = resolve_rulebook_path_cached(client, year)
+    except Exception as exc:
+        _append_warning(
+            warnings,
+            scope="rulebook_path",
+            message="A07-regelboksti kunne ikke løses.",
+            exc=exc,
+        )
 
     return {
         "gl_df": gl_df,
@@ -156,8 +218,9 @@ def build_context_restore_payload(
         "previous_mapping": previous_mapping,
         "previous_mapping_path": previous_mapping_path,
         "previous_mapping_year": previous_mapping_year,
-        "rulebook_path": resolve_rulebook_path_cached(client, year),
+        "rulebook_path": rulebook_path,
         "pending_focus_code": str(project_meta.get("selected_code") or "").strip() or None,
+        "warnings": warnings,
     }
 
 
@@ -178,11 +241,25 @@ def build_core_refresh_payload(
     rulebook_path: Path | None,
     load_code_profile_state,
 ) -> dict[str, object]:
+    warnings: list[dict[str, str]] = []
     matcher_settings = load_matcher_settings()
     try:
         effective_rulebook = load_rulebook(str(rulebook_path) if rulebook_path else None)
-    except Exception:
+    except Exception as exc:
+        _append_warning(
+            warnings,
+            scope="rulebook",
+            message="A07-regelbok kunne ikke lastes.",
+            exc=exc,
+        )
         effective_rulebook = None
+    groups = build_smart_a07_groups(
+        source_a07_df,
+        gl_df,
+        groups,
+        basis_col=basis_col,
+        mapping=mapping,
+    )
     grouped_a07_df, membership = build_grouped_a07_df(source_a07_df, groups)
     effective_mapping = apply_groups_to_mapping(mapping, membership)
     effective_previous_mapping = apply_groups_to_mapping(previous_mapping, membership)
@@ -264,6 +341,7 @@ def build_core_refresh_payload(
         gl_df=gl_df,
         reconcile_df=reconcile_df,
         mapping_current=effective_mapping,
+        warning_collector=warnings,
     )
     control_statement_df = filter_control_statement_df(
         control_statement_base_df,
@@ -283,6 +361,7 @@ def build_core_refresh_payload(
         "previous_mapping_year": previous_mapping_year,
         "effective_mapping": effective_mapping,
         "effective_previous_mapping": effective_previous_mapping,
+        "groups": groups,
         "grouped_a07_df": grouped_a07_df.reset_index(drop=True),
         "membership": membership,
         "suggestions": suggestions,
@@ -299,6 +378,7 @@ def build_core_refresh_payload(
         "control_statement_df": control_statement_df,
         "rf1022_overview_df": rf1022_overview_df,
         "effective_rulebook": effective_rulebook,
+        "warnings": warnings,
     }
 
 

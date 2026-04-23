@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from itertools import combinations
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
 
@@ -35,6 +36,203 @@ def default_a07_groups() -> Dict[str, A07Group]:
     return {}
 
 
+TREKK_LOENN_FOR_FERIE_CODES: tuple[str, ...] = (
+    "trekkILoennForFerie",
+    "trekkLoennForFerie",
+    "trekkloennForFerie",
+    "TrekkILoennForFerie",
+)
+
+SMART_PAYROLL_GROUP_CODES: tuple[str, ...] = (
+    "trekkILoennForFerie",
+    "fastloenn",
+    "fastTillegg",
+    "timeloenn",
+    "overtidsgodtgjoerelse",
+)
+
+
+def a07_code_aliases(code: object) -> tuple[str, ...]:
+    text = str(code or "").strip()
+    if not text:
+        return ()
+
+    aliases = {text}
+    folded = text.casefold()
+    if "godtgjoerelse" in text:
+        aliases.add(text.replace("godtgjoerelse", "godtjoerelse"))
+    if "godtjoerelse" in text:
+        aliases.add(text.replace("godtjoerelse", "godtgjoerelse"))
+    if folded in {value.casefold() for value in TREKK_LOENN_FOR_FERIE_CODES}:
+        aliases.update(TREKK_LOENN_FOR_FERIE_CODES)
+    return tuple(sorted(aliases, key=lambda value: (value.casefold(), value)))
+
+
+def canonical_a07_code(code: object) -> str:
+    text = str(code or "").strip()
+    if not text:
+        return ""
+    if text.casefold() in {value.casefold() for value in TREKK_LOENN_FOR_FERIE_CODES}:
+        return "trekkILoennForFerie"
+    return text
+
+
+def a07_group_member_signature(codes: Iterable[object]) -> tuple[str, ...]:
+    normalized = [canonical_a07_code(code) for code in (codes or ()) if canonical_a07_code(code)]
+    return tuple(sorted(dict.fromkeys(normalized), key=lambda value: value.casefold()))
+
+
+def _number_series(df: pd.DataFrame, column: str) -> pd.Series:
+    if df is None or df.empty or column not in df.columns:
+        return pd.Series(dtype="float64")
+    return pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+
+
+def _payroll_account_mask(gl_df: pd.DataFrame) -> pd.Series:
+    accounts = gl_df.get("Konto", pd.Series("", index=gl_df.index)).fillna("").astype(str).str.strip()
+    names = gl_df.get("Navn", pd.Series("", index=gl_df.index)).fillna("").astype(str).str.casefold()
+    account_hit = accounts.str.startswith(("50", "51", "52", "53", "54", "55", "56", "57", "58", "59"))
+    name_hit = names.str.contains(
+        "lonn|lønn|loenn|ferie|overtid|bonus|godtgj|honorar|trekk",
+        regex=True,
+        na=False,
+    )
+    return account_hit | name_hit
+
+
+def _existing_group_signatures(groups: dict[str, A07Group]) -> set[tuple[str, ...]]:
+    return {
+        a07_group_member_signature(group.member_codes)
+        for group in (groups or {}).values()
+        if a07_group_member_signature(group.member_codes)
+    }
+
+
+def _group_member_codes_from_id(code: object) -> list[str]:
+    text = str(code or "").strip()
+    prefix = "A07_GROUP:"
+    if not text.casefold().startswith(prefix.casefold()):
+        return []
+    tail = text[len(prefix) :]
+    return [part.strip() for part in tail.split("+") if part.strip()]
+
+
+def _add_mapping_backed_groups(out: dict[str, A07Group], mapping: dict[str, str] | None) -> None:
+    signatures = _existing_group_signatures(out)
+    for raw_code in (mapping or {}).values():
+        group_id = str(raw_code or "").strip()
+        members = _group_member_codes_from_id(group_id)
+        signature = a07_group_member_signature(members)
+        if not group_id or not members or not signature or signature in signatures:
+            continue
+        out[group_id] = A07Group(
+            group_id=group_id,
+            group_name=" + ".join(members),
+            member_codes=members,
+        )
+        signatures.add(signature)
+
+
+def build_smart_a07_groups(
+    a07_df: pd.DataFrame,
+    gl_df: pd.DataFrame,
+    groups: dict[str, A07Group] | None,
+    *,
+    basis_col: str = "UB",
+    mapping: dict[str, str] | None = None,
+    tolerance: float = 0.01,
+) -> dict[str, A07Group]:
+    """Add conservative virtual payroll groups when A07 codes sum exactly to GL.
+
+    The solver only considers common salary components and requires an exact
+    single-account amount match in the payroll account area. It returns a new
+    dict and never mutates the caller's group object in place.
+    """
+
+    out = dict(groups or {})
+    _add_mapping_backed_groups(out, mapping)
+    if a07_df is None or a07_df.empty or gl_df is None or gl_df.empty:
+        return out
+    if "Kode" not in a07_df.columns or "Belop" not in a07_df.columns or "Konto" not in gl_df.columns:
+        return out
+
+    a07_work = a07_df.copy()
+    a07_work["Kode"] = a07_work["Kode"].fillna("").astype(str).str.strip()
+    a07_work["Belop"] = _number_series(a07_work, "Belop")
+    code_lookup: dict[str, tuple[str, str, float]] = {}
+    for _, row in a07_work.iterrows():
+        actual_code = str(row.get("Kode") or "").strip()
+        if not actual_code:
+            continue
+        canonical = canonical_a07_code(actual_code)
+        if canonical not in SMART_PAYROLL_GROUP_CODES:
+            continue
+        if canonical in code_lookup:
+            continue
+        code_lookup[canonical] = (
+            actual_code,
+            str(row.get("Navn") or actual_code).strip() or actual_code,
+            float(row.get("Belop") or 0.0),
+        )
+
+    present = [code for code in SMART_PAYROLL_GROUP_CODES if code in code_lookup]
+    if len(present) < 2:
+        return out
+
+    gl_work = gl_df.copy()
+    gl_work["Konto"] = gl_work["Konto"].fillna("").astype(str).str.strip()
+    basis = str(basis_col or "UB").strip() or "UB"
+    if basis not in gl_work.columns:
+        basis = "UB" if "UB" in gl_work.columns else "Endring"
+    gl_work["__amount"] = _number_series(gl_work, basis)
+    gl_work = gl_work.loc[_payroll_account_mask(gl_work)].copy()
+    mapped_accounts = {str(account).strip() for account in (mapping or {}) if str(account).strip()}
+    if mapped_accounts:
+        gl_work = gl_work.loc[~gl_work["Konto"].isin(mapped_accounts)].copy()
+    if gl_work.empty:
+        return out
+
+    signatures = _existing_group_signatures(out)
+    consumed_codes: set[str] = set()
+    combo_rows: list[tuple[float, tuple[str, ...], str]] = []
+    for size in range(min(len(present), 5), 1, -1):
+        for combo in combinations(present, size):
+            if consumed_codes & set(combo):
+                continue
+            signature = a07_group_member_signature(combo)
+            if not signature or signature in signatures:
+                continue
+            amount = float(sum(code_lookup[code][2] for code in combo))
+            if abs(amount) <= tolerance:
+                continue
+            matches = gl_work.loc[(gl_work["__amount"] - amount).abs() <= tolerance]
+            if matches.empty:
+                continue
+            account = str(matches.iloc[0].get("Konto") or "").strip()
+            combo_rows.append((abs(amount), tuple(combo), account))
+
+    for _amount_abs, combo, _account in sorted(combo_rows, reverse=True):
+        if consumed_codes & set(combo):
+            continue
+        actual_codes = [code_lookup[code][0] for code in combo]
+        signature = a07_group_member_signature(actual_codes)
+        if not signature or signature in signatures:
+            continue
+        group_id = "A07_GROUP:" + "+".join(actual_codes)
+        if group_id in out:
+            continue
+        group_name = " + ".join(code_lookup[code][1] for code in combo)
+        out[group_id] = A07Group(
+            group_id=group_id,
+            group_name=group_name or group_id,
+            member_codes=actual_codes,
+        )
+        signatures.add(signature)
+        consumed_codes.update(combo)
+
+    return out
+
+
 def derive_groups_path(mapping_path: str | Path) -> Path:
     return Path(mapping_path).with_name("a07_groups.json")
 
@@ -50,6 +248,17 @@ def load_a07_groups(path: str | Path) -> Dict[str, A07Group]:
         return {}
 
     groups: Dict[str, A07Group] = {}
+    seen_signatures: set[tuple[str, ...]] = set()
+
+    def _add_group(group: A07Group) -> None:
+        members = [str(x).strip() for x in (group.member_codes or []) if str(x).strip()]
+        signature = a07_group_member_signature(members)
+        if not signature or signature in seen_signatures:
+            return
+        seen_signatures.add(signature)
+        group.member_codes = members
+        groups[group.group_id] = group
+
     if isinstance(raw, list):
         for g in raw:
             if not isinstance(g, dict):
@@ -57,10 +266,12 @@ def load_a07_groups(path: str | Path) -> Dict[str, A07Group]:
             gid = str(g.get("group_id") or g.get("id") or "").strip()
             if not gid:
                 continue
-            groups[gid] = A07Group(
-                group_id=gid,
-                group_name=str(g.get("group_name") or g.get("name") or gid),
-                member_codes=[str(x) for x in (g.get("member_codes") or g.get("codes") or [])],
+            _add_group(
+                A07Group(
+                    group_id=gid,
+                    group_name=str(g.get("group_name") or g.get("name") or gid),
+                    member_codes=[str(x) for x in (g.get("member_codes") or g.get("codes") or [])],
+                )
             )
         return groups
 
@@ -70,10 +281,12 @@ def load_a07_groups(path: str | Path) -> Dict[str, A07Group]:
     for gid, g in raw.items():
         if not isinstance(g, dict):
             continue
-        groups[str(gid)] = A07Group(
-            group_id=str(gid),
-            group_name=str(g.get("group_name") or g.get("name") or gid),
-            member_codes=[str(x) for x in (g.get("member_codes") or g.get("codes") or [])],
+        _add_group(
+            A07Group(
+                group_id=str(gid),
+                group_name=str(g.get("group_name") or g.get("name") or gid),
+                member_codes=[str(x) for x in (g.get("member_codes") or g.get("codes") or [])],
+            )
         )
     return groups
 
@@ -92,12 +305,7 @@ def save_a07_groups(groups: Dict[str, A07Group], path: str | Path) -> None:
 
 
 def _code_aliases(code: str) -> List[str]:
-    aliases = {code}
-    if "godtgjoerelse" in code:
-        aliases.add(code.replace("godtgjoerelse", "godtjoerelse"))
-    if "godtjoerelse" in code:
-        aliases.add(code.replace("godtjoerelse", "godtgjoerelse"))
-    return list(aliases)
+    return list(a07_code_aliases(code))
 
 
 def build_grouped_a07_df(

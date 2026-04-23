@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 
 import classification_workspace
 import page_admin
+import page_admin_rulebook
 
 
 def _field(display: str = "", *, provenance: classification_workspace.ClassificationProvenance | None = None) -> classification_workspace.ClassificationFieldState:
@@ -169,11 +171,11 @@ def test_alias_concept_preview_text_summarizes_selected_concept() -> None:
 
 def test_saved_status_text_includes_timestamp_and_path() -> None:
     status = page_admin._saved_status_text(
-        "config/classification/payroll_alias_library.json",
+        "config/classification/global_full_a07_rulebook.json",
         now=page_admin.datetime(2026, 4, 11, 10, 30, 45),
     )
 
-    assert status == "Lagret 2026-04-11 10:30:45 til config/classification/payroll_alias_library.json."
+    assert status == "Lagret 2026-04-11 10:30:45 til config/classification/global_full_a07_rulebook.json."
 
 
 def test_normalize_rulebook_document_cleans_and_preserves_structure() -> None:
@@ -189,8 +191,10 @@ def test_normalize_rulebook_document_cleans_and_preserves_structure() -> None:
                 "boost_accounts": ["5000", "5000", "x", 5001],
                 "basis": "Endring",
                 "expected_sign": "-1",
+                "aga_pliktig": "ja",
+                "rf1022_group": "100_loenn_ol",
                 "special_add": [
-                    {"account": "2940", "basis": "UB", "weight": "1.0"},
+                    {"account": "2900-2999", "keywords": ["feriepenger"], "basis": "Endring", "weight": "1.0"},
                     {"account": "", "basis": "UB"},
                 ],
             }
@@ -200,7 +204,7 @@ def test_normalize_rulebook_document_cleans_and_preserves_structure() -> None:
 
     normalized = page_admin._normalize_rulebook_document(document)
 
-    assert normalized["aliases"] == {"fastloenn": ["lønn"]}
+    assert "aliases" not in normalized
     assert normalized["meta"] == {"version": 2}
     assert normalized["rules"]["fastloenn"]["label"] == "Fastlønn"
     assert normalized["rules"]["fastloenn"]["category"] == "lonn"
@@ -210,19 +214,208 @@ def test_normalize_rulebook_document_cleans_and_preserves_structure() -> None:
     assert normalized["rules"]["fastloenn"]["boost_accounts"] == [5000, 5001]
     assert normalized["rules"]["fastloenn"]["basis"] == "Endring"
     assert normalized["rules"]["fastloenn"]["expected_sign"] == -1
-    assert normalized["rules"]["fastloenn"]["special_add"] == [{"account": "2940", "basis": "UB", "weight": 1.0}]
+    assert normalized["rules"]["fastloenn"]["aga_pliktig"] is True
+    assert normalized["rules"]["fastloenn"]["rf1022_group"] == "100_loenn_ol"
+    assert normalized["rules"]["fastloenn"]["special_add"] == [
+        {"account": "2900-2999", "keywords": ["feriepenger"], "basis": "Endring", "weight": 1.0}
+    ]
 
 
 def test_special_add_helpers_roundtrip_editor_format() -> None:
-    editor_text = "2940 | UB | 1,0\n5092 | Endring"
+    editor_text = "2900-2999 | feriepenger | Endring | 1,0\n5092 | Endring"
 
     parsed = page_admin._parse_special_add_lines(editor_text)
 
     assert parsed == [
-        {"account": "2940", "basis": "UB", "weight": 1.0},
+        {"account": "2900-2999", "keywords": ["feriepenger"], "basis": "Endring", "weight": 1.0},
         {"account": "5092", "basis": "Endring"},
     ]
-    assert "2940 | UB | 1.0" in page_admin._format_special_add_lines(parsed)
+    assert "2900-2999 | feriepenger | Endring | 1.0" in page_admin._format_special_add_lines(parsed)
+
+
+def test_rulebook_special_add_table_roundtrips_json_shape() -> None:
+    rows = page_admin_rulebook._special_add_rows_from_payload(
+        [{"account": "2900-2999", "keywords": ["feriepenger"], "basis": "Endring", "weight": 1.0}]
+    )
+
+    assert rows == [("2900-2999", "feriepenger", "Endring", "1.0")]
+    assert page_admin_rulebook._special_add_payload_from_rows(rows) == [
+        {"account": "2900-2999", "keywords": ["feriepenger"], "basis": "Endring", "weight": 1.0}
+    ]
+
+
+class _RulebookVar:
+    def __init__(self, value: str = "") -> None:
+        self.value = value
+
+    def get(self) -> str:
+        return self.value
+
+    def set(self, value: object) -> None:
+        self.value = str(value)
+
+
+class _RulebookText:
+    def __init__(self, value: str = "") -> None:
+        self.value = value
+
+    def get(self, *_args: object) -> str:
+        return self.value
+
+    def delete(self, *_args: object) -> None:
+        self.value = ""
+
+    def insert(self, _index: object, value: object) -> None:
+        self.value = str(value)
+
+
+class _RulebookTree:
+    def __init__(self, selection: tuple[str, ...] = ()) -> None:
+        self.rows: dict[str, tuple[object, ...]] = {}
+        self._selection = list(selection)
+
+    def get_children(self, *_args: object) -> tuple[str, ...]:
+        return tuple(self.rows)
+
+    def delete(self, item: str) -> None:
+        self.rows.pop(item, None)
+
+    def insert(self, _parent: str, _index: str, *, iid: str, values: tuple[object, ...]) -> None:
+        self.rows[iid] = tuple(values)
+
+    def exists(self, item: str) -> bool:
+        return item in self.rows
+
+    def selection(self) -> tuple[str, ...]:
+        return tuple(self._selection)
+
+    def selection_set(self, item: str) -> None:
+        self._selection = [item]
+
+    def selection_remove(self, *_args: object) -> None:
+        self._selection = []
+
+    def focus(self, *_args: object) -> None:
+        return None
+
+    def see(self, *_args: object) -> None:
+        return None
+
+    def item(self, item: str, option: str | None = None, **kwargs: object) -> tuple[object, ...] | None:
+        if "values" in kwargs:
+            self.rows[item] = tuple(kwargs["values"])  # type: ignore[arg-type]
+            return None
+        if option == "values":
+            return self.rows.get(item, ())
+        return self.rows.get(item, ())
+
+
+def _rulebook_editor_stub(document: dict[str, object], *, selected: str = "fastloenn") -> tuple[object, list[dict[str, object]]]:
+    saved: list[dict[str, object]] = []
+    editor = page_admin_rulebook._RulebookEditor.__new__(page_admin_rulebook._RulebookEditor)
+    editor._title = "A07"
+    editor._loader = lambda: (document, "global_full_a07_rulebook.json")
+    editor._saver = lambda data: (saved.append(data), "global_full_a07_rulebook.json")[1]
+    editor._on_saved = None
+    editor._document = deepcopy(document)
+    editor._selected_key = selected
+    editor._dirty = False
+    editor._suspend_dirty = False
+    editor._path_var = _RulebookVar()
+    editor._status_var = _RulebookVar()
+    editor._search_var = _RulebookVar()
+    editor._rule_var = _RulebookVar(selected)
+    rule = document["rules"][selected]  # type: ignore[index]
+    editor._label_var = _RulebookVar(rule.get("label", ""))  # type: ignore[union-attr]
+    editor._category_var = _RulebookVar(rule.get("category", ""))  # type: ignore[union-attr]
+    editor._basis_var = _RulebookVar(rule.get("basis", "UB"))  # type: ignore[union-attr]
+    editor._expected_sign_var = _RulebookVar("Ingen")
+    editor._aga_pliktig_var = _RulebookVar(page_admin_rulebook._display_aga_pliktig(rule.get("aga_pliktig")))  # type: ignore[union-attr]
+    editor._rf1022_group_var = _RulebookVar(page_admin_rulebook._display_rf1022_group(rule.get("rf1022_group")))  # type: ignore[union-attr]
+    editor._special_account_var = _RulebookVar()
+    editor._special_keywords_var = _RulebookVar()
+    editor._special_basis_var = _RulebookVar("Endring")
+    editor._special_weight_var = _RulebookVar("1.0")
+    editor._keywords_text = _RulebookText("\n".join(rule.get("keywords", [])))  # type: ignore[union-attr]
+    editor._exclude_text = _RulebookText("\n".join(rule.get("exclude_keywords", [])))  # type: ignore[union-attr]
+    editor._ranges_text = _RulebookText("\n".join(rule.get("allowed_ranges", [])))  # type: ignore[union-attr]
+    editor._boost_text = _RulebookText("\n".join(str(x) for x in rule.get("boost_accounts", [])))  # type: ignore[union-attr]
+    editor._special_tree = _RulebookTree()
+    for index, values in enumerate(page_admin_rulebook._special_add_rows_from_payload(rule.get("special_add")), start=1):  # type: ignore[union-attr]
+        editor._special_tree.insert("", "end", iid=str(index), values=values)
+    editor._tree = _RulebookTree(selection=(selected,))
+    return editor, saved
+
+
+def test_rulebook_editor_does_not_save_alias_changes_until_save() -> None:
+    editor, saved = _rulebook_editor_stub(
+        {"rules": {"fastloenn": {"label": "Fastlønn", "keywords": ["lønn"], "basis": "Endring"}}}
+    )
+
+    editor._keywords_text.value = "lønn\nfastlønn"
+    assert editor._commit_form(show_errors=True) is True
+
+    assert saved == []
+    assert editor._document["rules"]["fastloenn"]["keywords"] == ["lønn", "fastlønn"]
+
+    editor.save()
+
+    assert len(saved) == 1
+    assert saved[0]["rules"]["fastloenn"]["keywords"] == ["lønn", "fastlønn"]
+
+
+def test_rulebook_editor_commits_selection_change_without_saving_to_disk() -> None:
+    editor, saved = _rulebook_editor_stub(
+        {
+            "rules": {
+                "fastloenn": {"label": "Fastlønn", "keywords": ["lønn"], "basis": "Endring"},
+                "feriepenger": {"label": "Feriepenger", "keywords": ["feriepenger"], "basis": "UB"},
+            }
+        },
+        selected="fastloenn",
+    )
+    editor._keywords_text.value = "lønn\nfastlønn"
+    editor._tree._selection = ["feriepenger"]
+
+    editor._handle_tree_select()
+
+    assert saved == []
+    assert editor._selected_key == "feriepenger"
+    assert editor._document["rules"]["fastloenn"]["keywords"] == ["lønn", "fastlønn"]
+
+
+def test_rulebook_editor_reload_discards_working_copy_and_clears_dirty_status() -> None:
+    document = {"rules": {"fastloenn": {"label": "Fastlønn", "keywords": ["lønn"], "basis": "Endring"}}}
+    editor, _saved = _rulebook_editor_stub(document)
+    editor._document["rules"]["fastloenn"]["keywords"] = ["endret"]
+    editor._set_dirty(True)
+
+    editor.reload()
+
+    assert editor._dirty is False
+    assert editor._status_var.get() == "Lagret"
+    assert editor._document["rules"]["fastloenn"]["keywords"] == ["lønn"]
+
+
+def test_rulebook_editor_reload_can_focus_requested_rule() -> None:
+    document = {
+        "rules": {
+            "fastloenn": {"label": "Fastlonn", "keywords": ["lonn"], "basis": "UB"},
+            "tilskuddOgPremieTilPensjon": {
+                "label": "Pensjon",
+                "keywords": ["pensjon", "OTP Innberettet"],
+                "basis": "UB",
+            },
+        }
+    }
+    editor, _saved = _rulebook_editor_stub(document)
+
+    editor.reload(select_key="tilskuddOgPremieTilPensjon")
+
+    assert editor._selected_key == "tilskuddOgPremieTilPensjon"
+    assert editor._rule_var.get() == "tilskuddOgPremieTilPensjon"
+    assert "OTP Innberettet" in editor._keywords_text.get()
+    assert editor._dirty is False
 
 
 def test_normalize_catalog_document_cleans_groups_and_tags() -> None:
@@ -284,37 +477,28 @@ def test_normalize_catalog_document_cleans_groups_and_tags() -> None:
 
 def test_catalog_area_options_prioritize_payroll_areas() -> None:
     assert page_admin._catalog_area_options() == (
-        "RF-1022-grupper",
         "Payroll-flagg",
         "Legacy analysegrupper",
-        "Kontrollflagg",
     )
 
 
 def test_catalog_area_config_defaults_and_separates_clean_areas() -> None:
-    payroll_groups = page_admin._catalog_area_config("RF-1022-grupper")
     payroll_tags = page_admin._catalog_area_config("Payroll-flagg")
     legacy_groups = page_admin._catalog_area_config("Legacy analysegrupper")
-    control_tags = page_admin._catalog_area_config("Kontrollflagg")
     fallback = page_admin._catalog_area_config("ukjent")
 
-    assert payroll_groups["bucket"] == "groups"
-    assert payroll_groups["categories"] == ("payroll_rf1022_group",)
-    assert payroll_groups["default_category"] == "payroll_rf1022_group"
     assert payroll_tags["bucket"] == "tags"
     assert payroll_tags["categories"] == ("payroll_tag",)
     assert legacy_groups["categories"] == ("legacy_group",)
-    assert control_tags["categories"] == ("control_tag",)
-    assert fallback["default_category"] == "payroll_rf1022_group"
+    assert fallback["default_category"] == "payroll_tag"
 
 
 def test_catalog_area_matches_filters_entries_by_category() -> None:
-    payroll_group = {"id": "100_loenn_ol", "category": "payroll_rf1022_group"}
     payroll_tag = {"id": "opplysningspliktig", "category": "payroll_tag"}
     legacy_group = {"id": "Skyldig MVA", "category": "legacy_group"}
 
-    assert page_admin._catalog_area_matches(payroll_group, ("payroll_rf1022_group",))
-    assert not page_admin._catalog_area_matches(payroll_tag, ("payroll_rf1022_group",))
+    assert page_admin._catalog_area_matches(payroll_tag, ("payroll_tag",))
+    assert not page_admin._catalog_area_matches(legacy_group, ("payroll_tag",))
     assert page_admin._catalog_area_matches(legacy_group, ("legacy_group",))
     assert page_admin._catalog_area_matches({}, ())
 
@@ -2136,7 +2320,7 @@ def test_detail_class_editor_init_exposes_selection_guard_attribute() -> None:
 def test_detail_class_editor_uses_richer_form_fields() -> None:
     import inspect
 
-    source = inspect.getsource(page_admin._DetailClassEditor.__init__)
+    source = inspect.getsource(page_admin._DetailClassEditor)
     # Kategori, sortering og aktiv-flagg må være til stede
     assert "_category_var" in source
     assert "_sort_var" in source
@@ -2145,13 +2329,19 @@ def test_detail_class_editor_uses_richer_form_fields() -> None:
     assert "_aliases_text" in source
     assert "_exclude_text" in source
     assert "_ranges_text" in source
+    assert 'text="Grunnregel"' in source
+    assert 'text="Kontoer"' in source
+    assert 'text="Aliaser"' in source
+    assert '"Forkast endringer"' in source
 
 
 def test_detail_class_editor_tree_columns_cover_id_navn_kategori_intervall() -> None:
     import inspect
 
     source = inspect.getsource(page_admin._DetailClassEditor.__init__)
-    assert '("Id", "Navn", "Kategori", "Intervall", "Aktiv", "Sort")' in source
+    assert '("class_id", "name", "category", "accounts", "active", "sort")' in source
+    assert '"Klasse-id"' in source
+    assert '"Kontoer"' in source
 
 
 def test_detail_class_editor_saves_via_classification_config() -> None:

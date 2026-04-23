@@ -22,21 +22,7 @@ from account_profile_reporting import (
 )
 
 from .. import mapping_source
-
-
-_PAYROLL_A07_TO_CONTROL_GROUP = {
-    "fastloenn": "100_loenn_ol",
-    "timeloenn": "100_loenn_ol",
-    "overtidsgodtgjoerelse": "100_loenn_ol",
-    "feriepenger": "100_loenn_ol",
-    "trekkloennForFerie": "100_loenn_ol",
-    "styrehonorarOgGodtgjoerelseVerv": "100_loenn_ol",
-    "annet": "100_loenn_ol",
-    "sumAvgiftsgrunnlagRefusjon": "100_refusjon",
-    "elektroniskKommunikasjon": "111_naturalytelser",
-    "skattepliktigDelForsikringer": "111_naturalytelser",
-    "tilskuddOgPremieTilPensjon": "112_pensjon",
-}
+from .rf1022_bridge import RF1022_UNKNOWN_GROUP, resolve_a07_rf1022_group
 
 
 def load_current_catalog() -> AccountClassificationCatalog | None:
@@ -70,8 +56,8 @@ def _document_with_inferred_payroll_control_groups(
     for account_no, profile in document.profiles.items():
         if profile.control_group:
             continue
-        inferred_group = _PAYROLL_A07_TO_CONTROL_GROUP.get(str(profile.a07_code or "").strip())
-        if not inferred_group:
+        inferred_group = resolve_a07_rf1022_group(str(profile.a07_code or "").strip())
+        if not inferred_group or inferred_group == RF1022_UNKNOWN_GROUP:
             continue
         updated_profiles[account_no] = profile.with_updates(control_group=inferred_group)
         changed = True

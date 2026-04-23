@@ -28,6 +28,19 @@ _AGA_GRUNNLAG_EXTRAS_MAP: dict[str, tuple[str, str]] = {
     ),
 }
 
+_AGA_BOOL_KEYS = {
+    "agapliktig",
+    "arbeidsgiveravgiftpliktig",
+    "arbeidsgiveravgiftspliktig",
+    "avgiftspliktig",
+    "inngaarigrunnlagforarbeidsgiveravgift",
+    "inngarigrunnlagforarbeidsgiveravgift",
+    "skalmedigrunnlagforarbeidsgiveravgift",
+    "skalmidiagrunnlagforarbeidsgiveravgift",
+}
+_TRUE_STRINGS = {"1", "true", "ja", "j", "yes", "y"}
+_FALSE_STRINGS = {"0", "false", "nei", "n", "no"}
+
 
 def _get(d: Any, path: list[str], default: Any = None) -> Any:
     cur = d
@@ -36,6 +49,60 @@ def _get(d: Any, path: list[str], default: Any = None) -> Any:
             return default
         cur = cur.get(p)
     return default if cur is None else cur
+
+
+def _normalize_bool_key(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    replacements = {
+        "ø": "o",
+        "æ": "a",
+        "å": "a",
+        "Ã¸": "o",
+        "Ã¦": "a",
+        "Ã¥": "a",
+    }
+    for before, after in replacements.items():
+        text = text.replace(before, after)
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def _coerce_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    text = str(value or "").strip().casefold()
+    if text in _TRUE_STRINGS:
+        return True
+    if text in _FALSE_STRINGS:
+        return False
+    return None
+
+
+def _extract_aga_pliktig(*nodes: Any) -> bool | None:
+    stack = [node for node in nodes if node is not None]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            for key, value in current.items():
+                normalized_key = _normalize_bool_key(key)
+                if normalized_key in _AGA_BOOL_KEYS:
+                    parsed = _coerce_bool(value)
+                    if parsed is not None:
+                        return parsed
+                if isinstance(value, (dict, list, tuple)):
+                    stack.append(value)
+        elif isinstance(current, (list, tuple)):
+            stack.extend(current)
+    return None
+
+
+def _add_aga_flag(flags: dict[str, set[bool]], code: str, value: object) -> None:
+    parsed = _coerce_bool(value)
+    code = (code or "").strip()
+    if not code or parsed is None:
+        return
+    flags.setdefault(code, set()).add(parsed)
 
 
 def _add_amount(
@@ -135,6 +202,7 @@ def parse_a07_json(
 
     totals: dict[str, Decimal] = {}
     names: dict[str, str] = {}
+    aga_flags: dict[str, set[bool]] = {}
     special_code_map = _SPECIAL_CODE_MAP if include_special_codes else {}
 
     inntekter = data.get("inntekter")
@@ -148,6 +216,7 @@ def parse_a07_json(
             code = str(li.get("type") or li.get("beskrivelse") or "").strip()
             name = str(li.get("beskrivelse") or code).strip()
             _add_amount(totals, names, code, name, it.get("beloep"))
+            _add_aga_flag(aga_flags, code, _extract_aga_pliktig(li, it))
 
         per = data.get("periode")
         if isinstance(per, dict):
@@ -164,6 +233,7 @@ def parse_a07_json(
             code = str(li.get("type") or li.get("beskrivelse") or "").strip()
             name = str(li.get("beskrivelse") or code).strip()
             _add_amount(totals, names, code, name, it.get("beloep"))
+            _add_aga_flag(aga_flags, code, _extract_aga_pliktig(li, it))
 
         pay = _get(data, ["mottatt", "oppgave", "betalingsinformasjon"], {})
         if isinstance(pay, dict):
@@ -205,11 +275,21 @@ def parse_a07_json(
 
     rows: list[dict[str, Any]] = []
     for code, bel in totals.items():
+        code_flags = aga_flags.get(code) or set()
+        if code_flags == {True}:
+            aga_pliktig: bool | str | None = True
+        elif code_flags == {False}:
+            aga_pliktig = False
+        elif code_flags:
+            aga_pliktig = "Blandet"
+        else:
+            aga_pliktig = None
         rows.append(
             {
                 "Kode": code,
                 "Navn": names.get(code, code),
                 "Belop": dec_round(bel),
+                "AgaPliktig": aga_pliktig,
                 "Diff": Decimal("0"),
             }
         )
@@ -223,7 +303,7 @@ def parse_a07_json(
         if n > 0:
             rows = rows[:n]
 
-    return pd.DataFrame(rows, columns=["Kode", "Navn", "Belop", "Diff"])
+    return pd.DataFrame(rows, columns=["Kode", "Navn", "Belop", "AgaPliktig", "Diff"])
 
 
 def build_monthly_summary(path: str | Path) -> pd.DataFrame:

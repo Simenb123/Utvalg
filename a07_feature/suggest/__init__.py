@@ -11,6 +11,7 @@ from .api import (
     suggest_mapping_candidates,
     suggest_mappings,
 )
+from .rulebook import clear_rulebook_cache
 from .select import (
     UiSuggestionRow,
     select_batch_suggestions,
@@ -25,6 +26,7 @@ __all__ = [
     "UiSuggestionRow",
     "apply_suggestion_to_mapping",
     "build_account_usage_features",
+    "clear_rulebook_cache",
     "load_rulebook",
     "score_usage_signal",
     "select_batch_suggestions",

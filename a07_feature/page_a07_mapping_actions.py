@@ -290,6 +290,128 @@ def _notify_locked_conflicts_for(
 
 
 class A07PageMappingActionsMixin:
+    def _safe_auto_matching_enabled(self) -> bool:
+        return True
+
+    def _strict_auto_amount_is_exact(self, row: pd.Series | dict[str, object]) -> bool:
+        getter = getattr(row, "get", None)
+        if not callable(getter):
+            return False
+        evidence = str(getter("AmountEvidence", "") or "").strip().casefold()
+        if evidence == "exact":
+            return True
+        try:
+            diff = pd.to_numeric(pd.Series([getter("Diff", None)]), errors="coerce").iloc[0]
+        except Exception:
+            diff = None
+        try:
+            return bool(pd.notna(diff) and abs(float(diff)) <= 0.01)
+        except Exception:
+            return False
+
+    def _auto_apply_strict_a07_suggestions(self) -> dict[str, object]:
+        ensure_display = getattr(self, "_ensure_suggestion_display_fields", None)
+        if callable(ensure_display):
+            suggestions_df = ensure_display()
+        else:
+            suggestions_df = getattr(getattr(self, "workspace", None), "suggestions", None)
+            if not isinstance(suggestions_df, pd.DataFrame):
+                suggestions_df = _empty_suggestions_df()
+        if suggestions_df is None or suggestions_df.empty or "Kode" not in suggestions_df.columns:
+            return {"codes": [], "accounts": [], "autosaved": False, "focus_code": ""}
+
+        workspace = getattr(self, "workspace", None)
+        if workspace is None:
+            return {"codes": [], "accounts": [], "autosaved": False, "focus_code": ""}
+        if not isinstance(getattr(workspace, "mapping", None), dict):
+            workspace.mapping = {}
+
+        locked = _locked_codes_for(self)
+        try:
+            effective_mapping = {
+                str(account).strip(): str(code).strip()
+                for account, code in dict(self._effective_mapping() or {}).items()
+                if str(account).strip()
+            }
+        except Exception:
+            effective_mapping = {
+                str(account).strip(): str(code).strip()
+                for account, code in dict(workspace.mapping or {}).items()
+                if str(account).strip()
+            }
+
+        codes = [
+            str(code or "").strip()
+            for code in suggestions_df["Kode"].dropna().astype(str).tolist()
+            if str(code or "").strip()
+        ]
+        applied_codes: list[str] = []
+        applied_accounts: list[str] = []
+        reserved_accounts: set[str] = set()
+
+        for code in dict.fromkeys(codes):
+            if not code or code in locked:
+                continue
+            best_row = best_suggestion_row_for_code(suggestions_df, code, locked_codes=locked)
+            if best_row is None:
+                continue
+            if not a07_suggestion_is_strict_auto(best_row):
+                continue
+            amount_checker = getattr(self, "_strict_auto_amount_is_exact", None)
+            if callable(amount_checker):
+                amount_is_exact = bool(amount_checker(best_row))
+            else:
+                amount_is_exact = bool(A07PageMappingActionsMixin._strict_auto_amount_is_exact(self, best_row))
+            if not amount_is_exact:
+                continue
+
+            accounts = [account for account in _split_mapping_accounts(best_row.get("ForslagKontoer")) if account]
+            if not accounts:
+                continue
+            if any(account in reserved_accounts for account in accounts):
+                continue
+            conflict = False
+            for account in accounts:
+                current_code = str(effective_mapping.get(account) or "").strip()
+                if current_code and current_code != code:
+                    conflict = True
+                    break
+            if conflict:
+                continue
+
+            before = {str(k): str(v) for k, v in workspace.mapping.items()}
+            apply_suggestion_to_mapping(workspace.mapping, best_row)
+            changed = [
+                account
+                for account in accounts
+                if str(workspace.mapping.get(account) or "").strip() == code
+                and str(before.get(account) or "").strip() != code
+            ]
+            if not changed:
+                continue
+
+            applied_codes.append(code)
+            applied_accounts.extend(changed)
+            reserved_accounts.update(accounts)
+            for account in changed:
+                effective_mapping[account] = code
+
+        if not applied_accounts:
+            return {"codes": [], "accounts": [], "autosaved": False, "focus_code": ""}
+
+        autosaved = False
+        try:
+            autosaved = bool(self._autosave_mapping(source="auto", confidence=1.0))
+        except Exception:
+            autosaved = False
+        focus_code = applied_codes[0] if applied_codes else ""
+        return {
+            "codes": applied_codes,
+            "accounts": applied_accounts,
+            "autosaved": autosaved,
+            "focus_code": focus_code,
+        }
+
     def _rf1022_group_menu_choices(self) -> list[tuple[str, str]]:
         choices: list[tuple[str, str]] = []
         seen: set[str] = set()
@@ -1070,7 +1192,7 @@ class A07PageMappingActionsMixin:
         mapping = getattr(workspace, "mapping", None) or {}
         return str(mapping.get(account_s) or "").strip()
 
-    def _notify_a07_rule_learning_changed(self) -> None:
+    def _notify_a07_rule_learning_changed(self, focus_code: object | None = None) -> None:
         app = getattr(session, "APP", None)
         for attr_name in ("page_admin", "page_saldobalanse", "page_analyse"):
             other_page = getattr(app, attr_name, None)
@@ -1079,12 +1201,18 @@ class A07PageMappingActionsMixin:
             refresh = getattr(other_page, "refresh_from_session", None)
             if callable(refresh):
                 try:
-                    refresh(session)
+                    refresh(session, defer_heavy=True)
                     continue
                 except TypeError:
                     try:
-                        refresh()
+                        refresh(session)
                         continue
+                    except TypeError:
+                        try:
+                            refresh()
+                            continue
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                 except Exception:
@@ -1100,7 +1228,12 @@ class A07PageMappingActionsMixin:
         reload_editor = getattr(rulebook_editor, "reload", None)
         if callable(reload_editor):
             try:
-                reload_editor()
+                reload_editor(select_key=focus_code)
+            except TypeError:
+                try:
+                    reload_editor()
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -1170,16 +1303,23 @@ class A07PageMappingActionsMixin:
             )
             removed_count = len(removed)
 
-        try:
-            self._refresh_all()
-        except Exception:
-            self._refresh_core(focus_code=learned[0][0])
+        focus_code = learned[0][0] if learned else None
         notify_admin = getattr(self, "_notify_a07_rule_learning_changed", None)
         if callable(notify_admin):
             try:
-                notify_admin()
+                notify_admin(focus_code=focus_code)
+            except TypeError:
+                try:
+                    notify_admin()
+                except Exception:
+                    pass
             except Exception:
                 pass
+
+        try:
+            self._refresh_all()
+        except Exception:
+            self._refresh_core(focus_code=focus_code)
 
         changed_count = sum(1 for _code, _name, changed in learned if changed)
         action = "ekskludert fra" if exclude else "lagt til som alias for"
@@ -1200,6 +1340,175 @@ class A07PageMappingActionsMixin:
 
     def _remove_selected_control_accounts_and_exclude_alias(self) -> None:
         self._learn_selected_control_account_names(exclude=True, remove_mapping=True)
+
+    def _selected_control_gl_learning_context(self) -> dict[str, object]:
+        accounts_getter = getattr(self, "_selected_control_gl_accounts", None)
+        try:
+            accounts = accounts_getter() if callable(accounts_getter) else []
+        except Exception:
+            accounts = []
+        accounts = [str(account or "").strip() for account in accounts if str(account or "").strip()]
+        if not accounts:
+            return {
+                "enabled": False,
+                "code_label": "A07-kode",
+                "accounts": [],
+                "pairs": [],
+                "remove_enabled": False,
+            }
+
+        selected_code_getter = getattr(self, "_selected_control_code", None)
+        try:
+            selected_code = str(selected_code_getter() if callable(selected_code_getter) else "").strip()
+        except Exception:
+            selected_code = ""
+        if selected_code.startswith("A07_GROUP:"):
+            selected_code = ""
+
+        name_lookup = getattr(self, "_control_account_name_lookup", None)
+        try:
+            names = name_lookup(accounts) if callable(name_lookup) else {}
+        except Exception:
+            names = {}
+        code_getter = getattr(self, "_mapped_a07_code_for_account", None)
+
+        pairs: list[tuple[str, str, str]] = []
+        codes: list[str] = []
+        mapped_accounts: list[str] = []
+        for account in accounts:
+            try:
+                mapped_code = str(code_getter(account) if callable(code_getter) else "").strip()
+            except Exception:
+                mapped_code = ""
+            if mapped_code:
+                mapped_accounts.append(account)
+            code = selected_code or mapped_code
+            name = str((names or {}).get(account) or "").strip()
+            if code and name:
+                pairs.append((account, code, name))
+                if code not in codes:
+                    codes.append(code)
+
+        if selected_code:
+            code_label = selected_code
+        elif len(codes) == 1:
+            code_label = codes[0]
+        elif len(codes) > 1:
+            code_label = "valgte A07-koder"
+        else:
+            code_label = "A07-kode"
+
+        return {
+            "enabled": bool(pairs),
+            "code_label": code_label,
+            "accounts": accounts,
+            "pairs": pairs,
+            "remove_enabled": bool(mapped_accounts),
+        }
+
+    def _learn_selected_control_gl_account_names(
+        self,
+        *,
+        exclude: bool,
+        remove_mapping: bool = False,
+    ) -> None:
+        context_getter = getattr(self, "_selected_control_gl_learning_context", None)
+        try:
+            context = context_getter() if callable(context_getter) else {}
+        except Exception:
+            context = {}
+        if not isinstance(context, dict):
+            context = {}
+
+        accounts = [str(account or "").strip() for account in context.get("accounts", []) if str(account or "").strip()]
+        pairs = [
+            (str(code or "").strip(), str(name or "").strip())
+            for _account, code, name in context.get("pairs", [])
+            if str(code or "").strip() and str(name or "").strip()
+        ]
+        if not accounts:
+            self._notify_inline(
+                "Velg en eller flere kontoer til venstre forst.",
+                focus_widget=getattr(self, "tree_control_gl", None),
+            )
+            return
+        if not pairs:
+            self._notify_inline(
+                "Velg en A07-kode til hoyre, eller velg kontoer som allerede er koblet.",
+                focus_widget=getattr(self, "tree_a07", None),
+            )
+            return
+
+        if remove_mapping:
+            conflicts = _locked_mapping_conflicts_for(self, accounts)
+            if _notify_locked_conflicts_for(self, conflicts, focus_widget=getattr(self, "tree_control_gl", None)):
+                return
+
+        try:
+            batch_result = append_a07_rule_keywords(pairs, exclude=exclude)
+        except Exception as exc:
+            messagebox.showerror("A07", f"Kunne ikke oppdatere A07-regler:\n{exc}")
+            return
+        learned = [(result.code, result.term, bool(result.changed)) for result in batch_result.results]
+
+        try:
+            payroll_classification.invalidate_runtime_caches()
+        except Exception:
+            pass
+
+        removed_count = 0
+        if remove_mapping:
+            remover = getattr(self, "_remove_mapping_accounts_checked", None)
+            removed = (
+                remover(
+                    accounts,
+                    focus_widget=getattr(self, "tree_control_gl", None),
+                    refresh="none",
+                    source_label="Fjernet mapping fra",
+                )
+                if callable(remover)
+                else []
+            )
+            removed_count = len(removed)
+
+        focus_code = learned[0][0] if learned else None
+        notify_admin = getattr(self, "_notify_a07_rule_learning_changed", None)
+        if callable(notify_admin):
+            try:
+                notify_admin(focus_code=focus_code)
+            except TypeError:
+                try:
+                    notify_admin()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        try:
+            self._refresh_core(focus_code=focus_code)
+        except Exception:
+            try:
+                self._refresh_all()
+            except Exception:
+                pass
+
+        changed_count = sum(1 for _code, _name, changed in learned if changed)
+        action = "ekskludert fra" if exclude else "lagt til som alias for"
+        if remove_mapping:
+            self.status_var.set(
+                f"{changed_count} kontonavn {action} A07-regel, {removed_count} mapping(er) fjernet."
+            )
+        else:
+            self.status_var.set(f"{changed_count} kontonavn {action} A07-regel.")
+
+    def _append_selected_control_gl_names_to_a07_alias(self) -> None:
+        self._learn_selected_control_gl_account_names(exclude=False, remove_mapping=False)
+
+    def _exclude_selected_control_gl_names_from_a07_code(self) -> None:
+        self._learn_selected_control_gl_account_names(exclude=True, remove_mapping=False)
+
+    def _remove_selected_control_gl_accounts_and_exclude_alias(self) -> None:
+        self._learn_selected_control_gl_account_names(exclude=True, remove_mapping=True)
 
     def _selected_control_account_learning_context(self) -> dict[str, object]:
         accounts_getter = getattr(self, "_selected_control_account_ids", None)
@@ -1316,6 +1625,16 @@ class A07PageMappingActionsMixin:
         except Exception:
             pass
         self.status_var.set("Velg en A07-kode til hoyre for du tildeler kontoer fra GL-listen.")
+
+    def _link_selected_control_rows(self) -> None:
+        try:
+            accounts = self._selected_control_gl_accounts()
+        except Exception:
+            accounts = []
+        if accounts:
+            self._run_selected_control_gl_action()
+            return
+        self._run_selected_control_action()
 
     def _clear_selected_control_mapping(self) -> None:
         accounts = self._selected_control_gl_accounts()
@@ -1656,6 +1975,16 @@ class A07PageMappingActionsMixin:
         return applied_codes, applied_accounts, skipped_codes
 
     def _magic_match_clicked(self) -> None:
+        try:
+            auto_enabled = bool(getattr(self, "_safe_auto_matching_enabled", lambda: False)())
+        except Exception:
+            auto_enabled = False
+        if not auto_enabled:
+            self._notify_inline(
+                "Trygg auto-matching er midlertidig deaktivert mens A07-kontrollene strammes inn. Bruk forslag manuelt.",
+                focus_widget=self,
+            )
+            return
         if self.workspace.gl_df.empty:
             self._sync_active_trial_balance(refresh=False)
 
@@ -1741,12 +2070,6 @@ class A07PageMappingActionsMixin:
             code = str(row.get("Kode") or "").strip() or self._selected_control_code()
             if code in _locked_codes_for(self):
                 self._notify_inline("Valgt kode er låst. Lås opp før du bruker forslag.", focus_widget=self.tree_a07)
-                return
-            if code.startswith("A07_GROUP:"):
-                self._notify_inline(
-                    "A07-grupper er satt i avansert/legacy-modus og kan ikke brukes med trygg auto.",
-                    focus_widget=self.tree_control_suggestions,
-                )
                 return
             if not a07_suggestion_is_strict_auto(row):
                 reason = str(row.get("SuggestionGuardrailReason") or "").strip()
@@ -1847,6 +2170,16 @@ class A07PageMappingActionsMixin:
             messagebox.showerror("A07", f"Kunne ikke bruke sikre historikkmappinger:\n{exc}")
 
     def _apply_batch_suggestions_clicked(self) -> None:
+        try:
+            auto_enabled = bool(getattr(self, "_safe_auto_matching_enabled", lambda: False)())
+        except Exception:
+            auto_enabled = False
+        if not auto_enabled:
+            self._notify_inline(
+                "Trygg auto-matching er midlertidig deaktivert. Bruk trygg kandidat manuelt per A07-kode.",
+                focus_widget=getattr(self, "tree_control_suggestions", None),
+            )
+            return
         self._apply_rf1022_candidate_suggestions()
 
     def _remove_selected_mapping(self) -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+import pandas as pd
+
 from ..control import status as a07_control_status
 from ..control.data import (
     control_family_tree_tag,
@@ -12,9 +14,77 @@ from ..control.data import (
     preferred_rf1022_overview_group,
     rf1022_overview_tree_tag,
 )
-from ..page_a07_constants import _CONTROL_COLUMNS, _CONTROL_GL_COLUMNS, _CONTROL_RF1022_COLUMNS, _CONTROL_VIEW_LABELS
+from ..page_a07_constants import (
+    _CONTROL_A07_TOTAL_IID,
+    _CONTROL_COLUMNS,
+    _CONTROL_GL_COLUMNS,
+    _CONTROL_GL_MAPPING_LABELS,
+    _CONTROL_GL_SERIES_LABELS,
+    _CONTROL_RF1022_COLUMNS,
+    _CONTROL_VIEW_LABELS,
+    _SUMMARY_TOTAL_TAG,
+)
 from .support_render import A07PageSupportRenderMixin
 from .tree_render import A07PageTreeRenderMixin
+
+
+_A07_TOTAL_COLUMNS = ("A07_Belop", "GL_Belop", "Diff")
+
+
+def _numeric_total(df: pd.DataFrame, column: str) -> float:
+    if df is None or df.empty or column not in df.columns:
+        return 0.0
+    total = 0.0
+    for value in df[column].tolist():
+        if value is None:
+            continue
+        try:
+            if pd.isna(value):
+                continue
+        except Exception:
+            pass
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            total += float(value)
+            continue
+        text = str(value).strip().replace("\u00a0", " ").replace(" ", "")
+        if not text or text.lower() in {"nan", "none", "null", "na"}:
+            continue
+        if "," in text and "." in text:
+            text = text.replace(".", "").replace(",", ".")
+        elif "," in text:
+            text = text.replace(",", ".")
+        try:
+            total += float(text)
+        except Exception:
+            continue
+    return total
+
+
+def _append_a07_total_row(df: pd.DataFrame | None) -> pd.DataFrame | None:
+    if df is None or df.empty:
+        return df
+    display_df = df.copy()
+    total_row = {column: "" for column in display_df.columns}
+    total_row["Kode"] = _CONTROL_A07_TOTAL_IID
+    total_row["A07Post"] = f"Sum viste A07-poster ({len(display_df.index)})"
+    total_row["AgaPliktig"] = ""
+    for column in _A07_TOTAL_COLUMNS:
+        total_row[column] = _numeric_total(display_df, column)
+    total_row["Status"] = "Sum"
+    total_row["Locked"] = True
+    return pd.concat([display_df, pd.DataFrame([total_row])], ignore_index=True)
+
+
+def _control_a07_row_tag(row: pd.Series) -> str | None:
+    try:
+        code = str(row.get("Kode") or "").strip()
+    except Exception:
+        code = ""
+    if code == _CONTROL_A07_TOTAL_IID:
+        return _SUMMARY_TOTAL_TAG
+    return control_family_tree_tag(row)
 
 
 class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
@@ -57,16 +127,19 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
                     pass
                 filtered = a07_control_status.filter_control_queue_df(filter_control_visible_codes_df(self.control_df), "ferdig")
                 filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
+            display_df = _append_a07_total_row(filtered)
             self._reconfigure_tree_columns(self.tree_a07, _CONTROL_COLUMNS)
             self._fill_tree(
                 self.tree_a07,
-                filtered,
+                display_df,
                 _CONTROL_COLUMNS,
                 iid_column="Kode",
-                row_tag_fn=control_family_tree_tag,
+                row_tag_fn=_control_a07_row_tag,
             )
 
         children = self.tree_a07.get_children()
+        if work_level != "rf1022":
+            children = tuple(child for child in children if str(child) != _CONTROL_A07_TOTAL_IID)
         if not children:
             return
 
@@ -117,12 +190,15 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
                 filtered = filter_control_search_df(filtered, self.control_code_filter_var.get())
             columns = _CONTROL_COLUMNS
             iid_column = "Kode"
-            row_tag_fn = control_family_tree_tag
+            row_tag_fn = _control_a07_row_tag
+            filtered = _append_a07_total_row(filtered)
         self._reconfigure_tree_columns(self.tree_a07, columns)
 
         def _after_fill() -> None:
             if not bool(getattr(self, "_refresh_in_progress", False)):
                 children = self.tree_a07.get_children()
+                if work_level != "rf1022":
+                    children = tuple(child for child in children if str(child) != _CONTROL_A07_TOTAL_IID)
                 if children:
                     if work_level == "rf1022":
                         target = preferred_rf1022_overview_group(
@@ -160,16 +236,15 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
 
     def _refresh_control_gl_tree(self) -> None:
         selected_account = self._selected_control_gl_account()
-        selected_code = self._selected_control_code()
-        suggested_accounts = self._selected_control_suggestion_accounts()
-        search_text, only_unmapped, active_only = self._control_gl_filter_state()
+        search_text, mapping_filter, account_series, only_unmapped, active_only = self._control_gl_filter_state()
         filtered_gl_df = filter_control_gl_df(
             self.control_gl_df,
             search_text=search_text,
+            mapping_filter=mapping_filter,
+            account_series=account_series,
             only_unmapped=only_unmapped,
             active_only=active_only,
         )
-        filtered_gl_df = self._apply_control_gl_scope(filtered_gl_df, selected_code=selected_code)
         self._fill_tree(
             self.tree_control_gl,
             filtered_gl_df,
@@ -189,16 +264,15 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
 
     def _refresh_control_gl_tree_chunked(self, *, on_complete: Callable[[], None] | None = None) -> None:
         selected_account = self._selected_control_gl_account()
-        selected_code = self._selected_control_code()
-        suggested_accounts = self._selected_control_suggestion_accounts()
-        search_text, only_unmapped, active_only = self._control_gl_filter_state()
+        search_text, mapping_filter, account_series, only_unmapped, active_only = self._control_gl_filter_state()
         filtered_gl_df = filter_control_gl_df(
             self.control_gl_df,
             search_text=search_text,
+            mapping_filter=mapping_filter,
+            account_series=account_series,
             only_unmapped=only_unmapped,
             active_only=active_only,
         )
-        filtered_gl_df = self._apply_control_gl_scope(filtered_gl_df, selected_code=selected_code)
 
         def _after_fill() -> None:
             if not bool(getattr(self, "_refresh_in_progress", False)):
@@ -239,14 +313,15 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
         if not children:
             return False
 
-        search_text, only_unmapped, active_only = self._control_gl_filter_state()
+        search_text, mapping_filter, account_series, only_unmapped, active_only = self._control_gl_filter_state()
         filtered_gl_df = filter_control_gl_df(
             self.control_gl_df,
             search_text=search_text,
+            mapping_filter=mapping_filter,
+            account_series=account_series,
             only_unmapped=only_unmapped,
             active_only=active_only,
         )
-        filtered_gl_df = self._apply_control_gl_scope(filtered_gl_df, selected_code=self._selected_control_code())
         if filtered_gl_df is None or filtered_gl_df.empty:
             return False
 
@@ -261,8 +336,6 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
         except Exception:
             return False
 
-        selected_code = self._selected_control_code()
-        suggested_accounts = self._selected_control_suggestion_accounts()
         try:
             for _, row in filtered_gl_df.iterrows():
                 iid = str(row.get("Konto") or "").strip()
@@ -277,6 +350,22 @@ class A07PageRenderMixin(A07PageSupportRenderMixin, A07PageTreeRenderMixin):
     def _on_control_gl_filter_changed(self) -> None:
         if bool(getattr(self, "_refresh_in_progress", False)):
             return
+        try:
+            mapping_label = str(self.control_gl_mapping_filter_label_var.get() or "").strip()
+            for key, label in _CONTROL_GL_MAPPING_LABELS.items():
+                if mapping_label == label:
+                    self.control_gl_mapping_filter_var.set(key)
+                    break
+        except Exception:
+            pass
+        try:
+            series_label = str(self.control_gl_series_filter_label_var.get() or "").strip()
+            for key, label in _CONTROL_GL_SERIES_LABELS.items():
+                if series_label == label:
+                    self.control_gl_series_filter_var.set(key)
+                    break
+        except Exception:
+            pass
         self._schedule_control_gl_refresh()
         self._update_control_transfer_buttons()
 

@@ -550,6 +550,25 @@ def _row_account_display(
     return str(row.get(raw_key) or "").strip()
 
 
+def _format_present_amount(row: pd.Series | None, key: str) -> str:
+    if row is None:
+        return ""
+    try:
+        if hasattr(row, "index") and key not in row.index:
+            return ""
+    except Exception:
+        pass
+    value = row.get(key)
+    if value is None or value == "":
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return _format_picker_amount(value)
+
+
 def _row_flag(row: pd.Series, name: str, *, explain_token: str | None = None) -> bool:
     try:
         if name in row.index:
@@ -667,8 +686,16 @@ def build_control_suggestion_summary(code: str | None, suggestions_df: pd.DataFr
     row = selected_row if selected_row is not None else suggestions_df.iloc[0]
     accounts = _row_account_display(row, raw_key="ForslagKontoer", display_key="ForslagVisning") or "-"
     diff = _format_picker_amount(row.get("Diff")) or "-"
+    a07_amount = _format_present_amount(row, "A07_Belop")
+    gl_amount = _format_present_amount(row, "GL_Sum")
+    amount_parts = []
+    if a07_amount:
+        amount_parts.append(f"A07 {a07_amount}")
+    if gl_amount:
+        amount_parts.append(f"GL forslag {gl_amount}")
+    amount_parts.append(f"Diff {diff}")
     status = build_suggestion_status_label(row) or "Vurder"
-    return f"Beste forslag for {code_s} | {count} kandidat(er) | Naa valgt: {accounts} | {status} | Diff {diff}"
+    return f"Beste forslag for {code_s} | {count} kandidat(er) | Naa valgt: {accounts} | {status} | {' | '.join(amount_parts)}"
 
 
 def build_control_suggestion_effect_summary(
@@ -693,13 +720,22 @@ def build_control_suggestion_effect_summary(
     if not suggested_text:
         suggested_text = ",".join(suggested)
     diff = _format_picker_amount(selected_row.get("Diff")) or "-"
+    a07_amount = _format_present_amount(selected_row, "A07_Belop")
+    gl_amount = _format_present_amount(selected_row, "GL_Sum")
+    amount_parts = []
+    if a07_amount:
+        amount_parts.append(f"A07 {a07_amount}")
+    if gl_amount:
+        amount_parts.append(f"GL forslag {gl_amount}")
+    amount_parts.append(f"Diff {diff}")
+    amount_text = " | ".join(amount_parts)
     status_text = build_suggestion_status_label(selected_row) or "Vurder"
 
     if current and set(current) == set(suggested):
-        return f"Matcher dagens mapping: {suggested_text} | {status_text} | Diff {diff}"
+        return f"Matcher dagens mapping: {suggested_text} | {status_text} | {amount_text}"
     if not current:
-        return f"Vil mappe {suggested_text} til {code_s} | {status_text} | Diff {diff}"
-    return f"Vil erstatte {current_text} med {suggested_text} | {status_text} | Diff {diff}"
+        return f"Vil mappe {suggested_text} til {code_s} | {status_text} | {amount_text}"
+    return f"Vil erstatte {current_text} med {suggested_text} | {status_text} | {amount_text}"
 
 
 def preferred_support_tab_key(

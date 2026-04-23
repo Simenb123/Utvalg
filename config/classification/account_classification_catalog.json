@@ -382,128 +382,6 @@
       "aliases": [],
       "exclude_aliases": [],
       "category": "legacy_group"
-    },
-    {
-      "id": "100_loenn_ol",
-      "label": "Post 100 Lønn o.l.",
-      "active": true,
-      "sort_order": 1000,
-      "applies_to": [
-        "analyse",
-        "a07",
-        "kontrolloppstilling"
-      ],
-      "aliases": [
-        "lønn",
-        "lonn",
-        "fastlonn",
-        "timelonn",
-        "feriepenger",
-        "bonus",
-        "provisjon",
-        "lonnskostnad",
-        "etterlønn",
-        "utbetalte feriepenger",
-        "kostnadsførte feriepenger",
-        "lønnskostnad",
-        "fastlønn",
-        "lønn til ansatte"
-      ],
-      "exclude_aliases": [
-        "aga",
-        "arbeidsgiveravgift",
-        "forskuddstrekk",
-        "Refusjon av arbeidsgiveravgift",
-        "refusjon",
-        "arb. giv. avgift"
-      ],
-      "category": "payroll_rf1022_group"
-    },
-    {
-      "id": "100_refusjon",
-      "label": "Post 100 Refusjon",
-      "active": true,
-      "sort_order": 1010,
-      "applies_to": [
-        "analyse",
-        "a07",
-        "kontrolloppstilling"
-      ],
-      "aliases": [
-        "refusjon",
-        "sykepengerrefusjon",
-        "sykepenger refusjon",
-        "nav refusjon",
-        "foreldrepengerefusjon",
-        "foreldrepenger refusjon"
-      ],
-      "exclude_aliases": [
-        "aga",
-        "arbeidsgiveravgift",
-        "forskuddstrekk"
-      ],
-      "category": "payroll_rf1022_group"
-    },
-    {
-      "id": "111_naturalytelser",
-      "label": "Post 111 Naturalytelser",
-      "active": true,
-      "sort_order": 1020,
-      "applies_to": [
-        "analyse",
-        "a07",
-        "kontrolloppstilling"
-      ],
-      "aliases": [
-        "naturalytelse",
-        "naturalytelser",
-        "telefon",
-        "mobil",
-        "ekom",
-        "elektronisk kommunikasjon",
-        "fri bil",
-        "firmabil",
-        "bilfordel",
-        "forsikring",
-        "helseforsikring"
-      ],
-      "exclude_aliases": [
-        "aga",
-        "arbeidsgiveravgift",
-        "forskuddstrekk",
-        "Refusjon av arbeidsgiveravgift",
-        "refusjon",
-        "arb. giv. avgift"
-      ],
-      "category": "payroll_rf1022_group"
-    },
-    {
-      "id": "112_pensjon",
-      "label": "Post 112 Pensjon",
-      "active": true,
-      "sort_order": 1030,
-      "applies_to": [
-        "analyse",
-        "a07",
-        "kontrolloppstilling"
-      ],
-      "aliases": [
-        "pensjon",
-        "otp",
-        "obligatorisk tjenestepensjon",
-        "innskuddspensjon",
-        "pensjonspremie",
-        "pensjonskostnad"
-      ],
-      "exclude_aliases": [
-        "aga",
-        "arbeidsgiveravgift",
-        "forskuddstrekk",
-        "Refusjon av arbeidsgiveravgift",
-        "refusjon",
-        "arb. giv. avgift"
-      ],
-      "category": "payroll_rf1022_group"
     }
   ],
   "tags": [
@@ -527,19 +405,6 @@
       "category": "payroll_tag"
     },
     {
-      "id": "oppgavepliktig",
-      "label": "Oppgavepliktig",
-      "active": true,
-      "sort_order": 20,
-      "applies_to": [
-        "a07",
-        "kontrolloppstilling"
-      ],
-      "aliases": [],
-      "exclude_aliases": [],
-      "category": "control_tag"
-    },
-    {
       "id": "opplysningspliktig",
       "label": "Opplysningspliktig",
       "active": true,
@@ -556,30 +421,6 @@
       ],
       "exclude_aliases": [],
       "category": "payroll_tag"
-    },
-    {
-      "id": "feriepenger_gjeld",
-      "label": "Skyldig feriepenger",
-      "active": true,
-      "sort_order": 30,
-      "applies_to": [
-        "kontrolloppstilling"
-      ],
-      "aliases": [],
-      "exclude_aliases": [],
-      "category": "control_tag"
-    },
-    {
-      "id": "aga_gjeld",
-      "label": "Skyldig arbeidsgiveravgift",
-      "active": true,
-      "sort_order": 40,
-      "applies_to": [
-        "kontrolloppstilling"
-      ],
-      "aliases": [],
-      "exclude_aliases": [],
-      "category": "control_tag"
     },
     {
       "id": "pensjon",
@@ -701,18 +542,6 @@
       ],
       "exclude_aliases": [],
       "category": "payroll_tag"
-    },
-    {
-      "id": "utbytte",
-      "label": "Utbytte",
-      "active": true,
-      "sort_order": 90,
-      "applies_to": [
-        "kontrolloppstilling"
-      ],
-      "aliases": [],
-      "exclude_aliases": [],
-      "category": "control_tag"
     }
   ]
 }

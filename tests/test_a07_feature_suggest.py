@@ -4,6 +4,7 @@ import json
 
 import pandas as pd
 
+import classification_config
 from a07_feature import (
     SuggestConfig,
     apply_suggestion_to_mapping,
@@ -12,6 +13,13 @@ from a07_feature import (
     suggest_mappings,
 )
 from a07_feature.page_paths import build_suggest_config
+
+
+def test_global_rulebook_excludes_control_only_tax_codes():
+    rulebook = load_rulebook(str(classification_config.resolve_rulebook_path()))
+
+    assert "aga" not in rulebook
+    assert "forskuddstrekk" not in rulebook
 
 
 def test_suggest_excludes_aga_and_ignores_mapping_to_excluded_codes():
@@ -129,15 +137,12 @@ def test_build_suggest_config_lets_rule_basis_override_ui_fallback(tmp_path):
     rulebook_path.write_text(
         """
 {
-  "aliases": {
-    "lonn": ["wages"]
-  },
   "rules": {
     "fastloenn": {
       "label": "Fastlonn",
       "basis": "UB",
       "allowed_ranges": ["5000"],
-      "keywords": ["lonn"]
+      "keywords": ["lonn", "wages"]
     }
   }
 }
@@ -234,7 +239,7 @@ def test_suggestconfig_accepts_top_per_code_alias():
     assert cfg.top_suggestions_per_code == 7
 
 
-def test_load_rulebook_supports_pipe_ranges_aliases_and_special_add(tmp_path):
+def test_load_rulebook_supports_pipe_ranges_and_special_add(tmp_path):
     rulebook_path = tmp_path / "a07_rulebook.json"
     rulebook_path.write_text(
         json.dumps(
@@ -243,13 +248,12 @@ def test_load_rulebook_supports_pipe_ranges_aliases_and_special_add(tmp_path):
                     "fastloenn": {
                         "label": "Fast loenn",
                         "allowed_ranges": ["5000-5099 | 5190", "5290"],
-                        "keywords": ["loenn"],
-                        "special_add": [{"account": "2940", "basis": "Endring", "weight": -1.0}],
+                        "keywords": ["loenn", "maanedsloenn", "fastlonn"],
+                        "special_add": [
+                            {"account": "2940", "keywords": ["feriepenger"], "basis": "Endring", "weight": -1.0}
+                        ],
                         "expected_sign": 1,
                     }
-                },
-                "aliases": {
-                    "loenn": ["maanedsloenn", "fastlonn"],
                 },
             },
             ensure_ascii=False,
@@ -265,6 +269,7 @@ def test_load_rulebook_supports_pipe_ranges_aliases_and_special_add(tmp_path):
     assert "maanedsloenn" in rule.keywords
     assert len(rule.special_add) == 1
     assert rule.special_add[0].account == "2940"
+    assert rule.special_add[0].keywords == ("feriepenger",)
     assert rule.expected_sign == 1
 
 
@@ -371,6 +376,64 @@ def test_suggest_mappings_keeps_unmapped_special_add_as_mapping_candidate(tmp_pa
     assert row["ForslagKontoer"] == "2940"
     assert row["GL_Sum"] == 900.0
     assert bool(row["WithinTolerance"]) is True
+
+
+def test_suggest_mappings_special_add_can_match_balance_range_by_name(tmp_path):
+    rulebook_path = tmp_path / "a07_rulebook.json"
+    rulebook_path.write_text(
+        json.dumps(
+            {
+                "rules": {
+                    "feriepenger": {
+                        "basis": "UB",
+                        "allowed_ranges": ["5020"],
+                        "keywords": ["feriepenger"],
+                        "special_add": [
+                            {
+                                "account": "2900-2999",
+                                "keywords": ["feriepenger"],
+                                "basis": "Endring",
+                                "weight": 1.0,
+                            }
+                        ],
+                    }
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    a07 = pd.DataFrame([{"Kode": "feriepenger", "Navn": "Feriepenger", "Belop": 900.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5020", "Navn": "Feriepenger", "UB": 1000.0, "Endring": 1000.0},
+            {"Konto": "2941", "Navn": "Skyldig feriepenger", "UB": -1100.0, "Endring": -100.0},
+            {"Konto": "2960", "Navn": "Annen palopt kostnad", "UB": -300.0, "Endring": -300.0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07,
+        gl,
+        mapping={"5020": "feriepenger"},
+        max_combo=1,
+        candidates_per_code=10,
+        top_suggestions_per_code=3,
+        filter_mode="a07",
+        basis_strategy="per_code",
+        basis="UB",
+        tolerance_rel=0.001,
+        tolerance_abs=1.0,
+        rulebook_path=str(rulebook_path),
+    )
+
+    row = df.loc[df["Kode"] == "feriepenger"].iloc[0]
+    assert row["ForslagKontoer"] == "2941"
+    assert row["GL_Sum"] == 900.0
+    assert bool(row["WithinTolerance"]) is True
+    assert bool(row["UsedSpecialAdd"]) is True
 
 
 def test_suggest_mappings_expected_sign_prefers_negative_match(tmp_path):

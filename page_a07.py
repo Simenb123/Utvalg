@@ -51,6 +51,8 @@ _CONTROL_DRAG_IDLE_HINT = _shared._CONTROL_DRAG_IDLE_HINT
 _CONTROL_VIEW_LABELS = _shared._CONTROL_VIEW_LABELS
 _CONTROL_WORK_LEVEL_LABELS = _shared._CONTROL_WORK_LEVEL_LABELS
 _CONTROL_GL_SCOPE_LABELS = _shared._CONTROL_GL_SCOPE_LABELS
+_CONTROL_GL_MAPPING_LABELS = _shared._CONTROL_GL_MAPPING_LABELS
+_CONTROL_GL_SERIES_LABELS = _shared._CONTROL_GL_SERIES_LABELS
 _MAPPING_FILTER_LABELS = _shared._MAPPING_FILTER_LABELS
 _CONTROL_ALTERNATIVE_MODE_LABELS = _shared._CONTROL_ALTERNATIVE_MODE_LABELS
 _CONTROL_STATEMENT_VIEW_LABELS = _shared._CONTROL_STATEMENT_VIEW_LABELS
@@ -354,6 +356,7 @@ class A07Page(A07PageMethodsMixin, ttk.Frame):
         self._refresh_in_progress = False
         self._pending_session_refresh = False
         self._pending_support_refresh = False
+        self._a07_refresh_warnings: list[dict[str, str]] = []
         self._support_views_ready = False
         self._support_views_dirty = True
         self._history_compare_ready = False
@@ -409,18 +412,22 @@ class A07Page(A07PageMethodsMixin, ttk.Frame):
         self.control_drag_var = tk.StringVar(value=_CONTROL_DRAG_IDLE_HINT)
         self.control_bucket_var = tk.StringVar(value="0 åpne")
         self.basis_var = tk.StringVar(value=_BASIS_LABELS["Endring"])
-        self.control_work_level_var = tk.StringVar(value="rf1022")
-        self.control_work_level_label_var = tk.StringVar(value=_CONTROL_WORK_LEVEL_LABELS["rf1022"])
-        self.a07_filter_var = tk.StringVar(value="neste")
-        self.a07_filter_label_var = tk.StringVar(value=_CONTROL_VIEW_LABELS["neste"])
+        self.control_work_level_var = tk.StringVar(value="a07")
+        self.control_work_level_label_var = tk.StringVar(value=_CONTROL_WORK_LEVEL_LABELS["a07"])
+        self.a07_filter_var = tk.StringVar(value="alle")
+        self.a07_filter_label_var = tk.StringVar(value=_CONTROL_VIEW_LABELS["alle"])
         self.control_code_filter_var = tk.StringVar(value="")
         self.control_gl_filter_var = tk.StringVar(value="")
         self.control_gl_scope_var = tk.StringVar(value="alle")
         self.control_gl_scope_label_var = tk.StringVar(value=_CONTROL_GL_SCOPE_LABELS["alle"])
+        self.control_gl_mapping_filter_var = tk.StringVar(value="alle")
+        self.control_gl_mapping_filter_label_var = tk.StringVar(value=_CONTROL_GL_MAPPING_LABELS["alle"])
+        self.control_gl_series_filter_var = tk.StringVar(value="alle")
+        self.control_gl_series_filter_label_var = tk.StringVar(value=_CONTROL_GL_SERIES_LABELS["alle"])
         self.mapping_filter_var = tk.StringVar(value="alle")
         self.mapping_filter_label_var = tk.StringVar(value=_MAPPING_FILTER_LABELS["alle"])
         self._mapping_filter_user_selected = False
-        self.control_gl_active_only_var = tk.BooleanVar(value=True)
+        self.control_gl_active_only_var = tk.BooleanVar(value=False)
         self.control_gl_unmapped_only_var = tk.BooleanVar(value=False)
         self.control_alternative_mode_var = tk.StringVar(value="suggestions")
         self.control_alternative_mode_label_var = tk.StringVar(value=_CONTROL_ALTERNATIVE_MODE_LABELS["suggestions"])

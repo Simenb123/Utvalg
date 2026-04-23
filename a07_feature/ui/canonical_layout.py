@@ -3,14 +3,15 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+import ui_selection_summary
+
 from ..page_a07_constants import (
     CONTROL_STATEMENT_VIEW_PAYROLL,
     _BASIS_LABELS,
     _CONTROL_COLUMNS,
     _CONTROL_GL_COLUMNS,
-    _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL,
-    _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL,
-    _CONTROL_PRIMARY_VIEW_KEYS,
+    _CONTROL_GL_MAPPING_LABELS,
+    _CONTROL_GL_SERIES_LABELS,
     _CONTROL_RF1022_COLUMNS,
     _CONTROL_SELECTED_ACCOUNT_COLUMNS,
     _CONTROL_STATEMENT_COLUMNS,
@@ -73,10 +74,10 @@ class A07PageCanonicalUiMixin:
         tools_menu.add_command(label="Last mapping", command=self._load_mapping_clicked)
         tools_menu.add_command(label="Lagre mapping", command=self._save_mapping_clicked)
         tools_menu.add_command(label="Vis mappinger", command=self._open_mapping_overview)
-        tools_menu.add_command(label="Last regelsett", command=self._load_rulebook_clicked)
+        advanced_menu = tk.Menu(tools_menu, tearoff=0)
+        advanced_menu.add_command(label="Last regelsett", command=self._load_rulebook_clicked)
+        tools_menu.add_cascade(label="Avansert", menu=advanced_menu)
         tools_menu.add_command(label="A07-regler...", command=self._open_a07_rulebook_admin)
-        tools_menu.add_separator()
-        tools_menu.add_command(label="Kjør trygg auto-matching...", command=self._magic_match_clicked)
         tools_btn["menu"] = tools_menu
         tools_btn.pack(side="left", padx=(12, 0))
         ttk.Label(
@@ -146,15 +147,11 @@ class A07PageCanonicalUiMixin:
         control_top.pack(fill="both", expand=True)
 
         control_gl_panel = ttk.LabelFrame(control_top, text="1. Saldobalansekontoer", padding=(6, 6))
-        control_assign_panel = ttk.Frame(control_top, width=34, padding=(0, 6, 0, 0))
         control_a07_panel = ttk.LabelFrame(control_top, text="2. Velg A07-kode", padding=(6, 6))
         control_top.add(control_gl_panel, weight=4)
-        control_top.add(control_assign_panel, weight=0)
         control_top.add(control_a07_panel, weight=5)
-        try:
-            control_assign_panel.pack_propagate(False)
-        except Exception:
-            pass
+        self.btn_control_assign = None
+        self.btn_control_clear = None
 
         control_gl_filters = ttk.Frame(control_gl_panel)
         control_gl_filters.pack(fill="x", pady=(0, 4))
@@ -166,36 +163,42 @@ class A07PageCanonicalUiMixin:
         )
         self.entry_control_gl_filter.pack(side="left", padx=(6, 8))
         self.entry_control_gl_filter.bind("<KeyRelease>", lambda _event: self._on_control_gl_filter_changed())
-        ttk.Checkbutton(
-            control_gl_filters,
-            text="Kun aktive",
-            variable=self.control_gl_active_only_var,
-            command=self._on_control_gl_filter_changed,
-        ).pack(side="left")
-        ttk.Checkbutton(
-            control_gl_filters,
-            text="Kun umappede",
-            variable=self.control_gl_unmapped_only_var,
-            command=self._on_control_gl_filter_changed,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Label(control_gl_filters, text="Vis kontoer:").pack(side="left", padx=(12, 0))
-        initial_gl_scope_labels = _CONTROL_GL_SCOPE_LABELS_BY_WORK_LEVEL["rf1022"]
-        control_gl_scope = ttk.Combobox(
+        ttk.Label(control_gl_filters, text="Vis:").pack(side="left")
+        control_gl_mapping_filter = ttk.Combobox(
             control_gl_filters,
             state="readonly",
-            width=24,
-            values=[
-                initial_gl_scope_labels[key]
-                for key in _CONTROL_GL_SCOPE_KEYS_BY_WORK_LEVEL["rf1022"]
-            ],
-            textvariable=self.control_gl_scope_label_var,
+            width=12,
+            values=list(_CONTROL_GL_MAPPING_LABELS.values()),
+            textvariable=self.control_gl_mapping_filter_label_var,
         )
-        control_gl_scope.pack(side="left", padx=(6, 0))
-        self.control_gl_scope_widget = control_gl_scope
-        control_gl_scope.set(initial_gl_scope_labels["alle"])
-        control_gl_scope.bind("<<ComboboxSelected>>", lambda _event: self._on_control_gl_scope_changed())
+        control_gl_mapping_filter.pack(side="left", padx=(6, 8))
+        self.control_gl_mapping_filter_widget = control_gl_mapping_filter
+        control_gl_mapping_filter.set(_CONTROL_GL_MAPPING_LABELS["alle"])
+        control_gl_mapping_filter.bind("<<ComboboxSelected>>", lambda _event: self._on_control_gl_filter_changed())
+        ttk.Label(control_gl_filters, text="Kontoserie:").pack(side="left")
+        control_gl_series_filter = ttk.Combobox(
+            control_gl_filters,
+            state="readonly",
+            width=11,
+            values=list(_CONTROL_GL_SERIES_LABELS.values()),
+            textvariable=self.control_gl_series_filter_label_var,
+        )
+        control_gl_series_filter.pack(side="left", padx=(6, 8))
+        self.control_gl_series_filter_widget = control_gl_series_filter
+        control_gl_series_filter.set(_CONTROL_GL_SERIES_LABELS["alle"])
+        control_gl_series_filter.bind("<<ComboboxSelected>>", lambda _event: self._on_control_gl_filter_changed())
+        self.control_gl_scope_widget = None
+        try:
+            self.control_gl_scope_var.set("alle")
+        except Exception:
+            pass
         self.tree_control_gl = self._build_tree_tab(control_gl_panel, _CONTROL_GL_COLUMNS)
         self.tree_control_gl.configure(selectmode="extended")
+        self._register_selection_summary_tree(
+            self.tree_control_gl,
+            columns=("IB", "Endring", "UB"),
+            row_noun="kontoer",
+        )
         self._configure_tree_tags(
             self.tree_control_gl,
             {
@@ -217,32 +220,17 @@ class A07PageCanonicalUiMixin:
 
         control_a07_filters = ttk.Frame(control_a07_panel)
         control_a07_filters.pack(fill="x", pady=(0, 4))
-        ttk.Label(control_a07_filters, text="Arbeidsnivå:").pack(side="left")
-        control_work_level = ttk.Combobox(
-            control_a07_filters,
-            state="readonly",
-            width=12,
-            values=[_CONTROL_WORK_LEVEL_LABELS[key] for key in ("rf1022", "a07")],
-            textvariable=self.control_work_level_label_var,
-        )
-        control_work_level.pack(side="left", padx=(6, 12))
-        self.control_work_level_widget = control_work_level
-        control_work_level.set(_CONTROL_WORK_LEVEL_LABELS["rf1022"])
-        control_work_level.bind("<<ComboboxSelected>>", lambda _event: self._on_control_work_level_changed())
-        self.lbl_control_view_caption = ttk.Label(control_a07_filters, text="Vis:")
-        self.lbl_control_view_caption.pack(side="left")
-        a07_filter = ttk.Combobox(
-            control_a07_filters,
-            state="readonly",
-            width=16,
-            values=[_CONTROL_VIEW_LABELS[key] for key in _CONTROL_PRIMARY_VIEW_KEYS],
-            textvariable=self.a07_filter_label_var,
-        )
-        a07_filter.pack(side="left", padx=(6, 0))
-        self.a07_filter_widget = a07_filter
-        a07_filter.set(_CONTROL_VIEW_LABELS["neste"])
-        a07_filter.bind("<<ComboboxSelected>>", lambda _event: self._on_a07_filter_changed())
-        ttk.Label(control_a07_filters, text="Søk:").pack(side="left", padx=(12, 0))
+        self.control_work_level_widget = None
+        try:
+            self.control_work_level_var.set("a07")
+            self.control_work_level_label_var.set(_CONTROL_WORK_LEVEL_LABELS["a07"])
+            self.a07_filter_var.set("alle")
+            self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["alle"])
+        except Exception:
+            pass
+        self.lbl_control_view_caption = None
+        self.a07_filter_widget = None
+        ttk.Label(control_a07_filters, text="Søk:").pack(side="left")
         self.entry_control_code_filter = ttk.Entry(
             control_a07_filters,
             textvariable=self.control_code_filter_var,
@@ -256,12 +244,6 @@ class A07PageCanonicalUiMixin:
             command=self._toggle_control_advanced,
         )
         self.btn_control_toggle_advanced.pack(side="right", padx=(6, 0))
-        self.btn_control_toggle_details = ttk.Button(
-            control_a07_filters,
-            text="Detaljer",
-            command=self._toggle_control_details,
-        )
-        self.btn_control_toggle_details.pack(side="right")
         ttk.Label(
             control_a07_filters,
             textvariable=self.control_bucket_var,
@@ -272,6 +254,12 @@ class A07PageCanonicalUiMixin:
 
         self.tree_a07 = self._build_tree_tab(control_a07_panel, _CONTROL_COLUMNS)
         self.tree_a07.configure(selectmode="extended")
+        self._register_selection_summary_tree(
+            self.tree_a07,
+            columns=("A07_Belop", "A07", "GL_Belop", "Diff"),
+            row_noun="poster",
+            priority_columns=("A07_Belop", "A07", "GL_Belop", "Diff"),
+        )
         self._configure_tree_tags(
             self.tree_a07,
             {
@@ -287,25 +275,9 @@ class A07PageCanonicalUiMixin:
                 "family_warning": ("NEG_SOFT", "NEG_TEXT"),
                 "suggestion_ok": ("POS_SOFT", "POS_TEXT"),
                 "suggestion_review": ("WARN_SOFT", "WARN_TEXT"),
+                "summary_total": ("BG_SAND", "TEXT_PRIMARY"),
             },
         )
-
-        self.btn_control_assign = ttk.Button(
-            control_assign_panel,
-            text="Koble ->",
-            width=9,
-            command=self._assign_selected_control_mapping,
-        )
-        self.btn_control_assign.pack(fill="x", pady=(28, 0))
-        self.btn_control_clear = ttk.Button(
-            control_assign_panel,
-            text="<- Fjern",
-            width=9,
-            command=self._clear_selected_control_mapping,
-        )
-        self.btn_control_clear.pack(fill="x", pady=(8, 0))
-        for button in (self.btn_control_assign, self.btn_control_clear):
-            button.state(["disabled"])
 
     def _build_control_status_panel(self, control_lower: ttk.Frame) -> None:
         self._compact_control_status = True
@@ -398,6 +370,11 @@ class A07PageCanonicalUiMixin:
 
         self.tree_control_suggestions = self._build_tree_tab(self.tab_suggestions, _CONTROL_SUGGESTION_COLUMNS)
         self.tree_control_suggestions.configure(height=6)
+        self._register_selection_summary_tree(
+            self.tree_control_suggestions,
+            columns=("A07_Belop", "GL_Sum", "Diff"),
+            row_noun="forslag",
+        )
         self._configure_tree_tags(
             self.tree_control_suggestions,
             {
@@ -457,6 +434,11 @@ class A07PageCanonicalUiMixin:
         ).pack(side="left", fill="x", expand=True, padx=(12, 0))
         self.tree_control_accounts = self._build_tree_tab(control_accounts_panel, _CONTROL_SELECTED_ACCOUNT_COLUMNS)
         self.tree_control_accounts.configure(height=6, selectmode="extended")
+        self._register_selection_summary_tree(
+            self.tree_control_accounts,
+            columns=("IB", "Endring", "UB"),
+            row_noun="kontoer",
+        )
         self._configure_tree_tags(
             self.tree_control_accounts,
             {
@@ -483,6 +465,11 @@ class A07PageCanonicalUiMixin:
             _CONTROL_SELECTED_ACCOUNT_COLUMNS,
         )
         self.tree_control_statement_accounts.configure(height=5)
+        self._register_selection_summary_tree(
+            self.tree_control_statement_accounts,
+            columns=("IB", "Endring", "UB"),
+            row_noun="kontoer",
+        )
         self._configure_tree_tags(
             self.tree_control_statement_accounts,
             {
@@ -565,7 +552,8 @@ class A07PageCanonicalUiMixin:
         self.tree_control_gl.bind("<Button-3>", self._show_control_gl_context_menu, add="+")
         self.tree_control_gl.bind("<B1-Motion>", self._start_control_gl_drag, add="+")
         self.tree_a07.bind("<<TreeviewSelect>>", lambda _event: self._on_control_selection_changed())
-        self.tree_a07.bind("<Double-1>", lambda _event: self._run_selected_control_action())
+        self.tree_a07.bind("<Double-1>", lambda _event: self._link_selected_control_rows())
+        self.tree_a07.bind("<Return>", lambda _event: self._link_selected_control_rows())
         self.tree_a07.bind("<Button-3>", self._show_control_code_context_menu, add="+")
         self.tree_a07.bind("<Motion>", self._track_unmapped_drop_target, add="+")
         self.tree_a07.bind("<ButtonRelease-1>", self._drop_unmapped_on_control, add="+")
@@ -574,9 +562,11 @@ class A07PageCanonicalUiMixin:
         self.tree_control_suggestions.bind("<Double-1>", lambda _event: self._apply_selected_suggestion())
         self.tree_control_suggestions.bind("<Return>", lambda _event: self._apply_selected_suggestion())
         self.tree_control_suggestions.bind("<<TreeviewSelect>>", lambda _event: self._on_suggestion_selected())
+        self.tree_control_suggestions.bind("<Button-3>", self._show_control_suggestions_context_menu, add="+")
         self.tree_suggestions.bind("<Double-1>", lambda _event: self._apply_selected_suggestion())
         self.tree_suggestions.bind("<Return>", lambda _event: self._apply_selected_suggestion())
         self.tree_suggestions.bind("<<TreeviewSelect>>", lambda _event: self._on_suggestion_selected())
+        self.tree_suggestions.bind("<Button-3>", self._show_control_suggestions_context_menu, add="+")
         self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._update_a07_action_button_state())
         self.tree_control_accounts.bind("<Double-1>", lambda _event: self._open_manual_mapping_clicked())
         self.tree_control_accounts.bind("<Delete>", lambda _event: self._remove_selected_control_accounts())
@@ -593,6 +583,26 @@ class A07PageCanonicalUiMixin:
         self.tree_groups.bind("<Button-3>", self._show_group_context_menu, add="+")
         self.tree_mapping.bind("<Double-1>", lambda _event: self._open_manual_mapping_clicked())
         self.tree_mapping.bind("<Delete>", lambda _event: self._remove_selected_mapping())
+
+    def _register_selection_summary_tree(
+        self,
+        tree: ttk.Treeview,
+        *,
+        columns: tuple[str, ...],
+        row_noun: str,
+        priority_columns: tuple[str, ...] | None = None,
+    ) -> None:
+        try:
+            ui_selection_summary.register_treeview_selection_summary(
+                tree,
+                columns=columns,
+                row_noun=row_noun,
+                max_items=3,
+                hide_zero=False,
+                priority_columns=priority_columns or columns,
+            )
+        except Exception:
+            pass
 
     def _configure_tree_tags(
         self,

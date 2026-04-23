@@ -6,7 +6,14 @@ from typing import Sequence
 
 import pandas as pd
 
-from ..page_a07_constants import _CONTROL_DRAG_IDLE_HINT, _CONTROL_GL_COLUMNS, _CONTROL_VIEW_LABELS, _MAPPING_COLUMNS
+from ..page_a07_constants import (
+    _CONTROL_DRAG_IDLE_HINT,
+    _CONTROL_GL_COLUMNS,
+    _CONTROL_GL_MAPPING_LABELS,
+    _CONTROL_GL_SERIES_LABELS,
+    _CONTROL_VIEW_LABELS,
+    _MAPPING_COLUMNS,
+)
 from ..page_a07_dialogs import remove_mapping_accounts
 
 
@@ -79,7 +86,6 @@ class A07PageTreeUiMixin:
                     iid = ""
                 if iid:
                     return iid
-                return None
 
         selection = tree.selection()
         if not selection:
@@ -171,6 +177,22 @@ class A07PageTreeUiMixin:
                 if bool(self.control_gl_unmapped_only_var.get()):
                     self.control_gl_unmapped_only_var.set(False)
                     changed = True
+                mapping_var = getattr(self, "control_gl_mapping_filter_var", None)
+                mapping_label_var = getattr(self, "control_gl_mapping_filter_label_var", None)
+                if mapping_var is not None and str(mapping_var.get() or "").strip() != "alle":
+                    mapping_var.set("alle")
+                    changed = True
+                if mapping_label_var is not None and str(mapping_label_var.get() or "").strip() != _CONTROL_GL_MAPPING_LABELS["alle"]:
+                    mapping_label_var.set(_CONTROL_GL_MAPPING_LABELS["alle"])
+                    changed = True
+                series_var = getattr(self, "control_gl_series_filter_var", None)
+                series_label_var = getattr(self, "control_gl_series_filter_label_var", None)
+                if series_var is not None and str(series_var.get() or "").strip() != "alle":
+                    series_var.set("alle")
+                    changed = True
+                if series_label_var is not None and str(series_label_var.get() or "").strip() != _CONTROL_GL_SERIES_LABELS["alle"]:
+                    series_label_var.set(_CONTROL_GL_SERIES_LABELS["alle"])
+                    changed = True
                 if str(self.control_gl_filter_var.get() or "").strip():
                     self.control_gl_filter_var.set("")
                     changed = True
@@ -258,6 +280,27 @@ class A07PageTreeUiMixin:
             self.tree_control_accounts.selection_set(konto_s)
             self.tree_control_accounts.focus(konto_s)
             self.tree_control_accounts.see(konto_s)
+        except Exception:
+            pass
+
+    def _clear_control_gl_selection(self) -> None:
+        tree = getattr(self, "tree_control_gl", None)
+        if tree is None:
+            return
+        try:
+            selection = tuple(tree.selection())
+        except Exception:
+            selection = ()
+        if selection:
+            try:
+                tree.selection_remove(selection)
+            except Exception:
+                try:
+                    tree.selection_set(())
+                except Exception:
+                    pass
+        try:
+            tree.focus("")
         except Exception:
             pass
 

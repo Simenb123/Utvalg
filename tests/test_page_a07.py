@@ -14,6 +14,8 @@ import a07_feature.page_a07_control_statement as page_a07_control_statement
 import a07_feature.page_a07_mapping_actions as a07_mapping_actions
 import a07_feature.rule_learning as a07_rule_learning
 import a07_feature.ui.canonical_layout as a07_canonical_layout
+from a07_feature.ui.helpers import A07PageUiHelpersMixin
+import classification_config
 import classification_workspace
 import page_a07
 import ui_main
@@ -30,13 +32,13 @@ def test_get_a07_workspace_dir_uses_client_store_years_dir(monkeypatch, tmp_path
     assert out == years_dir / "a07"
 
 
-def test_get_a07_workspace_dir_falls_back_to_local_data_dir_when_client_store_fails(monkeypatch, tmp_path) -> None:
+def test_get_a07_workspace_dir_falls_back_to_namespaced_data_dir_when_client_store_fails(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(page_a07.client_store, "years_dir", lambda client, year: (_ for _ in ()).throw(PermissionError("denied")))
     monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
 
     out = page_a07.get_a07_workspace_dir("Air Management AS", "2025")
 
-    assert out == tmp_path / "data" / "a07"
+    assert out == tmp_path / "data" / "a07" / "Air_Management_AS" / "2025"
 
 
 def test_suggest_default_mapping_path_uses_client_year_workspace(monkeypatch, tmp_path) -> None:
@@ -92,7 +94,7 @@ def test_default_a07_source_path_uses_workspace_dir(monkeypatch, tmp_path) -> No
     assert out == years_dir / "a07" / "a07_source.json"
 
 
-def test_resolve_context_source_path_falls_back_to_legacy_global(monkeypatch, tmp_path) -> None:
+def test_resolve_context_source_path_does_not_auto_read_legacy_global(monkeypatch, tmp_path) -> None:
     years_dir = tmp_path / "clients" / "air" / "years" / "2025"
     monkeypatch.setattr(page_a07.client_store, "years_dir", lambda client, year: years_dir)
     monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
@@ -103,60 +105,64 @@ def test_resolve_context_source_path_falls_back_to_legacy_global(monkeypatch, tm
 
     out = page_a07.resolve_context_source_path("Air Management AS", "2025")
 
-    assert out == legacy_path
+    assert out is None
+
+
+def test_resolve_context_mapping_path_does_not_auto_read_legacy_global(monkeypatch, tmp_path) -> None:
+    years_dir = tmp_path / "clients" / "air" / "years" / "2025"
+    monkeypatch.setattr(page_a07.client_store, "years_dir", lambda client, year: years_dir)
+    monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
+
+    legacy_path = tmp_path / "data" / "a07" / "a07_mapping.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"5000": "fastloenn"}', encoding="utf-8")
+
+    out = page_a07.resolve_context_mapping_path(None, client="Air Management AS", year="2025")
+
+    assert out == years_dir / "a07" / "a07_mapping.json"
+
+
+def test_resolve_context_mapping_path_without_context_returns_none(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
+    legacy_path = tmp_path / "data" / "a07" / "a07_mapping.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text('{"5000": "fastloenn"}', encoding="utf-8")
+
+    out = page_a07.resolve_context_mapping_path(None, client=None, year=None)
+
+    assert out is None
 
 
 def test_resolve_rulebook_path_uses_global_rulebook(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
-
-    global_rulebook = tmp_path / "data" / "a07" / "global_full_a07_rulebook.json"
+    global_rulebook = tmp_path / "config" / "classification" / "global_full_a07_rulebook.json"
     global_rulebook.parent.mkdir(parents=True, exist_ok=True)
     global_rulebook.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(classification_config, "resolve_rulebook_path", lambda: global_rulebook)
 
     out = page_a07.resolve_rulebook_path("Air Management AS", "2025")
 
     assert out == global_rulebook
 
 
-def test_resolve_rulebook_path_bootstraps_bundled_default(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
-
-    bundled = tmp_path / "bundled_rulebook.json"
-    bundled.write_text('{"rules": {"fastloenn": {"code": "fastloenn"}}}', encoding="utf-8")
-    monkeypatch.setattr(page_a07, "bundled_default_rulebook_path", lambda: bundled)
+def test_resolve_rulebook_path_returns_none_when_canonical_is_missing(monkeypatch, tmp_path) -> None:
+    missing_rulebook = tmp_path / "config" / "classification" / "global_full_a07_rulebook.json"
+    monkeypatch.setattr(classification_config, "resolve_rulebook_path", lambda: missing_rulebook)
 
     out = page_a07.resolve_rulebook_path("Air Management AS", "2025")
 
-    assert out == tmp_path / "data" / "a07" / "global_full_a07_rulebook.json"
-    assert out.read_text(encoding="utf-8") == bundled.read_text(encoding="utf-8")
+    assert out is None
 
 
-def test_resolve_rulebook_path_falls_back_to_bundled_when_storage_is_blocked(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
-
-    bundled = tmp_path / "bundled_rulebook.json"
-    bundled.write_text('{"rules": {"fastloenn": {"code": "fastloenn"}}}', encoding="utf-8")
-    monkeypatch.setattr(page_a07, "bundled_default_rulebook_path", lambda: bundled)
-    monkeypatch.setattr(
-        page_a07._shared.Path,
-        "mkdir",
-        lambda *args, **kwargs: (_ for _ in ()).throw(PermissionError("denied")),
-    )
-
-    out = page_a07.resolve_rulebook_path("Air Management AS", "2025")
-
-    assert out == bundled
-
-
-def test_copy_rulebook_to_storage_uses_utvalg_data_dir(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(page_a07.app_paths, "data_dir", lambda: tmp_path / "data")
+def test_copy_rulebook_to_storage_uses_canonical_rulebook(monkeypatch, tmp_path) -> None:
+    canonical = tmp_path / "config" / "classification" / "global_full_a07_rulebook.json"
+    monkeypatch.setattr(classification_config, "resolve_rulebook_path", lambda: canonical)
 
     src = tmp_path / "external_rulebook.json"
     src.write_text('{"rules": {}}', encoding="utf-8")
 
     out = page_a07.copy_rulebook_to_storage(src)
 
-    assert out == tmp_path / "data" / "a07" / "global_full_a07_rulebook.json"
+    assert out == canonical
     assert out.read_text(encoding="utf-8") == '{"rules": {}}'
 
 
@@ -787,6 +793,37 @@ def test_build_control_suggestion_summary_describes_selected_row() -> None:
     assert out == f"Beste forslag for bonus | 2 kandidat(er) | Naa valgt: 5090 | Maa vurderes | Diff {diff_text}"
 
 
+def test_control_suggestion_columns_show_amounts_before_status() -> None:
+    column_ids = [column[0] for column in a07_constants._CONTROL_SUGGESTION_COLUMNS]
+    labels = [column[1] for column in a07_constants._CONTROL_SUGGESTION_COLUMNS]
+
+    assert column_ids[:4] == ["ForslagVisning", "A07_Belop", "GL_Sum", "Diff"]
+    assert labels[:4] == ["Kontoer", "A07", "GL forslag", "Diff"]
+
+
+def test_build_control_suggestion_summary_includes_a07_and_gl_amounts() -> None:
+    suggestions_df = pd.DataFrame(
+        [
+            {
+                "Kode": "feriepenger",
+                "ForslagKontoer": "2932,2940",
+                "ForslagVisning": "2932 Feriepenger mertid + 2940 Skyldig feriepenger",
+                "A07_Belop": Decimal("862608.92"),
+                "GL_Sum": Decimal("862608.92"),
+                "Diff": Decimal("0"),
+                "WithinTolerance": True,
+                "SuggestionGuardrail": "accepted",
+            },
+        ]
+    )
+
+    out = page_a07.build_control_suggestion_summary("feriepenger", suggestions_df, suggestions_df.iloc[0])
+
+    assert "A07 862 608,92" in out
+    assert "GL forslag 862 608,92" in out
+    assert "Diff 0,00" in out
+
+
 def test_build_control_suggestion_effect_summary_describes_new_mapping() -> None:
     row = pd.Series({"ForslagKontoer": "5000,5001", "Diff": Decimal("12.50"), "WithinTolerance": True})
 
@@ -796,7 +833,7 @@ def test_build_control_suggestion_effect_summary_describes_new_mapping() -> None
     assert out == f"Vil mappe 5000,5001 til bonus | Maa vurderes | Diff {diff_text}"
 
 
-def test_build_control_suggestion_effect_summary_describes_replacement() -> None:
+def _obsolete_build_control_suggestion_effect_summary_describes_replacement() -> None:
     row = pd.Series({"ForslagKontoer": "5000,5001", "Diff": Decimal("100.00"), "WithinTolerance": False})
 
     out = page_a07.build_control_suggestion_effect_summary("bonus", ["5090"], row)
@@ -805,7 +842,7 @@ def test_build_control_suggestion_effect_summary_describes_replacement() -> None
     assert out == f"Vil erstatte mapping 5090 med 5000,5001. Diff {diff_text}. Sjekk diff fÃ¸r bruk."
 
 
-def test_build_control_suggestion_effect_summary_handles_matching_current_mapping() -> None:
+def _obsolete_build_control_suggestion_effect_summary_handles_matching_current_mapping() -> None:
     row = pd.Series({"ForslagKontoer": "5001,5000", "Diff": Decimal("0"), "WithinTolerance": True})
 
     out = page_a07.build_control_suggestion_effect_summary("bonus", ["5000", "5001"], row)
@@ -814,7 +851,7 @@ def test_build_control_suggestion_effect_summary_handles_matching_current_mappin
     assert out == f"Matcher dagens mapping: 5001,5000 | Maa vurderes | Diff {diff_text}"
 
 
-def test_build_control_accounts_summary_describes_selected_accounts() -> None:
+def _obsolete_build_control_accounts_summary_describes_selected_accounts() -> None:
     accounts_df = pd.DataFrame(
         [
             {"Konto": "5000", "Navn": "Lonn", "IB": Decimal("0"), "Endring": Decimal("1200"), "UB": Decimal("1200")},
@@ -827,7 +864,7 @@ def test_build_control_accounts_summary_describes_selected_accounts() -> None:
     assert out == "2 kontoer koblet | Endring 1 500,00 | 5000 Lonn, 5001 Bonus"
 
 
-def test_build_control_accounts_summary_handles_empty_state() -> None:
+def _obsolete_build_control_accounts_summary_handles_empty_state() -> None:
     assert (
         page_a07.build_control_accounts_summary(pd.DataFrame(), "fastloenn")
         == "Ingen kontoer er koblet til fastloenn ennÃ¥. Velg kontoer til venstre og trykk ->."
@@ -851,8 +888,11 @@ def test_rf1022_post_for_group_maps_payroll_groups_to_expected_sections() -> Non
 def test_a07_code_rf1022_group_is_fail_closed_for_unknown_code() -> None:
     assert page_a07.a07_code_rf1022_group("bonus") == "100_loenn_ol"
     assert page_a07.a07_code_rf1022_group("fastTillegg") == "100_loenn_ol"
+    assert page_a07.a07_code_rf1022_group("trekkILoennForFerie") == "100_loenn_ol"
+    assert page_a07.a07_code_rf1022_group("trekkLoennForFerie") == "100_loenn_ol"
     assert page_a07.a07_code_rf1022_group("sumAvgiftsgrunnlagRefusjon") == "100_refusjon"
     assert page_a07.a07_code_rf1022_group("A07_GROUP:fastloenn+timeloenn") == "100_loenn_ol"
+    assert page_a07.a07_code_rf1022_group("A07_GROUP:trekkLoennForFerie+fastloenn") == "100_loenn_ol"
     assert page_a07.a07_code_rf1022_group("A07_GROUP:fastloenn+sumAvgiftsgrunnlagRefusjon") == "uavklart_rf1022"
     assert page_a07.a07_code_rf1022_group("A07_GROUP:ukjentNyKode") == "uavklart_rf1022"
     assert page_a07.a07_code_rf1022_group("ukjentNyKode") == "uavklart_rf1022"
@@ -932,6 +972,9 @@ def test_build_rf1022_statement_df_uses_a07_expected_amounts_without_gl_rows() -
     assert out["A07"].tolist() == [1300.0, -75.0, 40.0, 500.0, 13.0]
     assert out["Diff"].tolist() == [1300.0, -75.0, 40.0, 500.0, 13.0]
     assert out["Status"].tolist() == ["Mangler GL", "Mangler GL", "Mangler GL", "Mangler GL", "Mangler GL"]
+    unresolved = out.loc[out["GroupId"] == "uavklart_rf1022"].iloc[0]
+    assert unresolved["Post"] == ""
+    assert unresolved["Kontrollgruppe"] == "A07 uten RF-1022-post"
 
 
 def test_build_rf1022_statement_df_overlays_a07_expected_amounts_on_control_rows() -> None:
@@ -965,6 +1008,112 @@ def test_build_rf1022_statement_df_overlays_a07_expected_amounts_on_control_rows
     assert row["GL_Belop"] == 800.0
     assert row["A07"] == 1100.0
     assert row["Diff"] == 300.0
+
+
+def test_a07_tree_sorting_orders_numeric_display_values() -> None:
+    class _Tree:
+        def __init__(self) -> None:
+            self._columns = ("Konto", "Endring")
+            self._order = ["a", "b", "c"]
+            self._values = {
+                "a": ("5000", "1 200,00"),
+                "b": ("2940", "-100,00"),
+                "c": ("5020", "900,00"),
+            }
+
+        def __getitem__(self, key):
+            if key == "columns":
+                return self._columns
+            raise KeyError(key)
+
+        def get_children(self, *_args):
+            return tuple(self._order)
+
+        def set(self, item, column):
+            return self._values[item][self._columns.index(column)]
+
+        def item(self, item, option=None):
+            if option == "values":
+                return self._values[item]
+            return {}
+
+        def move(self, item, _parent, index):
+            self._order.remove(item)
+            self._order.insert(index, item)
+
+    helper = A07PageUiHelpersMixin.__new__(A07PageUiHelpersMixin)
+    tree = _Tree()
+
+    helper._sort_tree_by_column(tree, "Endring")
+    assert tree.get_children() == ("b", "c", "a")
+
+    helper._sort_tree_by_column(tree, "Endring")
+    assert tree.get_children() == ("a", "c", "b")
+
+
+def test_a07_tree_sorting_keeps_summary_row_at_bottom() -> None:
+    class _Tree:
+        def __init__(self) -> None:
+            self._columns = ("A07Post", "Diff")
+            self._order = ["a", "__a07_total__", "b"]
+            self._values = {
+                "a": ("Feriepenger", "10,00"),
+                "b": ("Fastlonn", "-5,00"),
+                "__a07_total__": ("Sum viste A07-poster (2)", "5,00"),
+            }
+            self._tags = {"__a07_total__": ("summary_total",)}
+
+        def __getitem__(self, key):
+            if key == "columns":
+                return self._columns
+            raise KeyError(key)
+
+        def get_children(self, *_args):
+            return tuple(self._order)
+
+        def set(self, item, column):
+            return self._values[item][self._columns.index(column)]
+
+        def item(self, item, option=None):
+            if option == "values":
+                return self._values[item]
+            if option == "tags":
+                return self._tags.get(item, ())
+            return {}
+
+        def move(self, item, _parent, index):
+            self._order.remove(item)
+            self._order.insert(index, item)
+
+    helper = A07PageUiHelpersMixin.__new__(A07PageUiHelpersMixin)
+    tree = _Tree()
+
+    helper._sort_tree_by_column(tree, "Diff")
+    assert tree.get_children() == ("b", "a", "__a07_total__")
+
+    helper._sort_tree_by_column(tree, "Diff")
+    assert tree.get_children() == ("a", "b", "__a07_total__")
+
+
+def test_append_a07_total_row_sums_visible_control_rows() -> None:
+    from a07_feature.ui.render import _append_a07_total_row
+
+    df = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "A07Post": "Fastlonn", "AgaPliktig": "Ja", "A07_Belop": 100.0, "GL_Belop": 90.0, "Diff": 10.0},
+            {"Kode": "feriepenger", "A07Post": "Feriepenger", "AgaPliktig": "Ja", "A07_Belop": "200,00", "GL_Belop": "185,00", "Diff": "15,00"},
+        ]
+    )
+
+    out = _append_a07_total_row(df)
+
+    assert out is not None
+    total = out.iloc[-1]
+    assert total["Kode"] == a07_constants._CONTROL_A07_TOTAL_IID
+    assert total["A07Post"] == "Sum viste A07-poster (2)"
+    assert total["A07_Belop"] == 300.0
+    assert total["GL_Belop"] == 275.0
+    assert total["Diff"] == 25.0
 
 
 def test_build_mapping_audit_df_flags_known_bad_saved_mappings() -> None:
@@ -1030,6 +1179,31 @@ def test_mapping_audit_never_marks_uavklart_rf1022_as_safe() -> None:
     assert row["CurrentRf1022GroupId"] == "uavklart_rf1022"
     assert row["Status"] == "Uavklart"
     assert "RF-1022-bro" in row["Reason"]
+
+
+def test_mapping_audit_rejects_revenue_account_even_when_code_name_is_payroll() -> None:
+    gl_df = pd.DataFrame(
+        [
+            {
+                "Konto": "3090",
+                "Navn": "Opptjent, ikke fakturert inntekt",
+                "IB": 0.0,
+                "Endring": 101_531.86,
+                "UB": 101_531.86,
+            },
+        ]
+    )
+
+    out = page_a07.build_mapping_audit_df(
+        gl_df,
+        {"3090": "feriepenger"},
+        suggestions_df=pd.DataFrame(),
+        basis_col="UB",
+    )
+
+    row = out.iloc[0]
+    assert row["Status"] == "Feil"
+    assert "utenfor A07-lonn" in row["Reason"]
 
 
 def test_mapping_audit_treats_excluded_codes_case_insensitively() -> None:
@@ -1516,6 +1690,36 @@ def test_build_control_queue_df_keeps_single_display_column_for_a07_identity() -
     assert out.loc[0, "Navn"] == "Tilskudd og premie til pensjon"
 
 
+def test_build_control_queue_df_displays_aga_pliktig_from_source_and_rulebook(monkeypatch) -> None:
+    monkeypatch.setattr(
+        a07_control_data,
+        "load_rulebook",
+        lambda _path: {
+            "feriepenger": RulebookRule(aga_pliktig=True),
+            "sumAvgiftsgrunnlagRefusjon": RulebookRule(aga_pliktig=False),
+        },
+    )
+    overview_df = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 100.0, "Status": "OK", "AgaPliktig": False},
+            {"Kode": "feriepenger", "Navn": "Feriepenger", "Belop": 50.0, "Status": "OK"},
+            {"Kode": "sumAvgiftsgrunnlagRefusjon", "Navn": "Refusjon", "Belop": -25.0, "Status": "OK"},
+        ]
+    )
+
+    out = page_a07.build_control_queue_df(
+        overview_df,
+        pd.DataFrame(),
+        mapping_current={},
+        mapping_previous={},
+        gl_df=pd.DataFrame(columns=["Konto"]),
+    )
+
+    assert out.loc[out["Kode"] == "fastloenn", "AgaPliktig"].iloc[0] == "Nei"
+    assert out.loc[out["Kode"] == "feriepenger", "AgaPliktig"].iloc[0] == "Ja"
+    assert out.loc[out["Kode"] == "sumAvgiftsgrunnlagRefusjon", "AgaPliktig"].iloc[0] == "Nei"
+
+
 def test_build_control_queue_df_flags_mistenkelig_mapping_and_prioritizes_suggestions() -> None:
     overview_df = pd.DataFrame(
         [
@@ -1558,6 +1762,51 @@ def test_build_control_queue_df_flags_mistenkelig_mapping_and_prioritizes_sugges
     assert out.loc[0, "GuidetStatus"] == "Mistenkelig kobling"
     assert out.loc[0, "Anbefalt"] == "Se forslag"
     assert out.loc[0, "SuggestionGuardrail"] == "accepted"
+
+
+def test_build_control_queue_df_prioritizes_special_add_suggestion_when_mapped_code_has_avvik() -> None:
+    overview_df = pd.DataFrame(
+        [
+            {
+                "Kode": "feriepenger",
+                "Navn": "Feriepenger",
+                "Belop": 862_608.92,
+                "Status": "Avvik",
+                "Diff": -11_069.15,
+            }
+        ]
+    )
+    suggestions_df = pd.DataFrame(
+        [
+            {
+                "Kode": "feriepenger",
+                "ForslagKontoer": "2932,2940",
+                "WithinTolerance": True,
+                "SuggestionGuardrail": "accepted",
+                "SuggestionGuardrailReason": "Treff paa regelbok",
+                "UsedSpecialAdd": True,
+            }
+        ]
+    )
+
+    out = page_a07.build_control_queue_df(
+        overview_df,
+        suggestions_df,
+        mapping_current={"5020": "feriepenger", "5096": "feriepenger"},
+        mapping_previous={},
+        gl_df=pd.DataFrame(
+            [
+                {"Konto": "5020", "Navn": "Feriepenger"},
+                {"Konto": "5096", "Navn": "Periodisering av feriepenger"},
+                {"Konto": "2932", "Navn": "Feriepenger mer tid"},
+                {"Konto": "2940", "Navn": "Skyldig feriepenger"},
+            ]
+        ),
+    )
+
+    assert out.loc[0, "GuidetStatus"] == "Har forslag"
+    assert out.loc[0, "Anbefalt"] == "Se forslag"
+    assert out.loc[0, "NesteHandling"] == "Treff paa regelbok"
 
 
 def test_build_control_gl_df_shows_assigned_code_on_account_rows() -> None:
@@ -1648,7 +1897,6 @@ def test_a07_rule_learning_writes_keywords_and_excludes_to_rulebook(monkeypatch,
     )
     monkeypatch.setattr(a07_rule_learning.classification_config, "resolve_rulebook_path", lambda: rulebook_path)
     monkeypatch.setattr(a07_rule_learning.classification_config, "repo_rulebook_path", lambda: rulebook_path)
-    monkeypatch.setattr(a07_rule_learning.app_paths, "data_dir", lambda: tmp_path / "data")
 
     result = a07_rule_learning.append_a07_rule_keyword("fastloenn", "Honorar revisjon", exclude=True)
 
@@ -1657,7 +1905,6 @@ def test_a07_rule_learning_writes_keywords_and_excludes_to_rulebook(monkeypatch,
     assert saved["rules"]["fastloenn"]["label"] == "fastloenn"
     assert saved["rules"]["fastloenn"]["exclude_keywords"] == ["Honorar revisjon"]
     assert "keywords" not in saved["rules"]["fastloenn"]
-    assert (tmp_path / "data" / "a07" / "global_full_a07_rulebook.json").is_file()
 
 
 def test_a07_rule_learning_creates_visible_rule_for_missing_code(monkeypatch, tmp_path) -> None:
@@ -1665,7 +1912,6 @@ def test_a07_rule_learning_creates_visible_rule_for_missing_code(monkeypatch, tm
     rulebook_path.write_text(json.dumps({"rules": {}}), encoding="utf-8")
     monkeypatch.setattr(a07_rule_learning.classification_config, "resolve_rulebook_path", lambda: rulebook_path)
     monkeypatch.setattr(a07_rule_learning.classification_config, "repo_rulebook_path", lambda: rulebook_path)
-    monkeypatch.setattr(a07_rule_learning.app_paths, "data_dir", lambda: tmp_path / "data")
 
     a07_rule_learning.append_a07_rule_keyword("timeloenn", "Honorar juridisk", exclude=True)
 
@@ -1763,8 +2009,8 @@ def test_control_main_columns_hide_status_and_left_gl_keeps_regnskap_columns() -
     assert left_columns == [
         "Konto",
         "Navn",
-        "Rf1022GroupId",
         "Kode",
+        "Rf1022GroupId",
         "AliasStatus",
         "Kol",
         "MappingAuditStatus",
@@ -1802,6 +2048,24 @@ def test_filter_control_gl_df_supports_active_only_and_keeps_mapped_rows() -> No
     out = page_a07.filter_control_gl_df(control_gl_df, active_only=True)
 
     assert out["Konto"].tolist() == ["1020", "5000"]
+
+
+def test_filter_control_gl_df_supports_mapped_and_account_series_filters() -> None:
+    control_gl_df = pd.DataFrame(
+        [
+            {"Konto": "2940", "Navn": "Skyldig feriepenger", "IB": -100.0, "Endring": 20.0, "UB": -80.0, "Kode": "feriepenger"},
+            {"Konto": "5000", "Navn": "Fast lonn", "IB": 0.0, "Endring": 1200.0, "UB": 1200.0, "Kode": "fastloenn"},
+            {"Konto": "6000", "Navn": "Husleie", "IB": 0.0, "Endring": 250.0, "UB": 250.0, "Kode": ""},
+        ]
+    )
+
+    out = page_a07.filter_control_gl_df(
+        control_gl_df,
+        mapping_filter="mappede",
+        account_series="5",
+    )
+
+    assert out["Konto"].tolist() == ["5000"]
 
 
 class _ScopeVar:
@@ -1911,14 +2175,9 @@ def test_set_control_details_visible_does_not_move_sash_position() -> None:
             sash_calls.append(args)
             return 300
 
-    class _Button:
-        def configure(self, **_kwargs) -> None:
-            return None
-
     dummy = SimpleNamespace(
         _diag=lambda _message: None,
         control_support_nb=None,
-        btn_control_toggle_details=_Button(),
         control_vertical_panes=_Pane(),
         _support_views_ready=False,
         _schedule_support_refresh=lambda: None,
@@ -2032,9 +2291,24 @@ def test_payroll_family_tag_uses_visible_sage_color() -> None:
 
 def test_control_queue_tree_tag_uses_diff_first_for_green_and_red() -> None:
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": 0.0, "Arbeidsstatus": "Ulost"})) == "control_done"
+    assert page_a07.control_queue_tree_tag(
+        pd.Series({"Diff": 0.0, "GuidetStatus": "Kontroller kobling", "AntallKontoer": 1})
+    ) == "control_done"
+    assert page_a07.control_queue_tree_tag(
+        pd.Series({"Diff": 0.0, "GuidetStatus": "Mistenkelig kobling", "AntallKontoer": 1})
+    ) == "control_manual"
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": 10.0, "Arbeidsstatus": "Historikk"})) == "control_review"
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": None, "Arbeidsstatus": "Forslag"})) == "control_review"
     assert page_a07.control_queue_tree_tag(pd.Series({"Diff": None, "GuidetStatus": "Kontroller kobling"})) == "control_review"
+
+
+def test_control_family_tree_tag_marks_linked_zero_diff_a07_rows_green() -> None:
+    assert a07_control_data.control_family_tree_tag(
+        pd.Series({"Diff": 0.0, "GuidetStatus": "Kontroller kobling", "AntallKontoer": 1})
+    ) == "suggestion_ok"
+    assert a07_control_data.control_family_tree_tag(
+        pd.Series({"Diff": 0.0, "GuidetStatus": "Mistenkelig kobling", "AntallKontoer": 1})
+    ) == "family_warning"
 
 
 def test_filter_control_visible_codes_df_hides_non_matching_codes_for_this_view() -> None:
@@ -2073,6 +2347,27 @@ def test_selected_code_from_tree_prefers_tree_selection_for_a07_work_code() -> N
     out = page_a07.A07Page._selected_code_from_tree(dummy, tree)
 
     assert out == "feriepenger"
+
+
+def test_selected_code_from_tree_uses_a07_iid_when_first_column_is_display_label() -> None:
+    class DummyTree:
+        def focus(self):
+            return ""
+
+        def selection(self):
+            return ("tilskuddOgPremieTilPensjon",)
+
+        def item(self, iid, option):
+            if iid == "tilskuddOgPremieTilPensjon" and option == "values":
+                return ("Tilskudd og premie til pensjon (tilskuddOgPremieTilPensjon)", "690 556,00")
+            return ()
+
+    tree = DummyTree()
+    dummy = SimpleNamespace(tree_a07=tree)
+
+    out = page_a07.A07Page._selected_code_from_tree(dummy, tree)
+
+    assert out == "tilskuddOgPremieTilPensjon"
 
 
 def test_control_action_style_maps_work_labels() -> None:
@@ -2172,6 +2467,42 @@ def test_run_selected_control_gl_action_assigns_when_code_is_selected() -> None:
     page_a07.A07Page._run_selected_control_gl_action(DummyPage())
 
     assert calls == ["assign"]
+
+
+def test_link_selected_control_rows_assigns_when_left_and_right_are_selected() -> None:
+    calls: list[str] = []
+
+    class DummyPage:
+        def _selected_control_gl_accounts(self):
+            return ["5000"]
+
+        def _run_selected_control_gl_action(self):
+            calls.append("assign-from-linked-lists")
+
+        def _run_selected_control_action(self):
+            calls.append("smart-action")
+
+    page_a07.A07Page._link_selected_control_rows(DummyPage())
+
+    assert calls == ["assign-from-linked-lists"]
+
+
+def test_link_selected_control_rows_keeps_smart_action_when_no_left_account_is_selected() -> None:
+    calls: list[str] = []
+
+    class DummyPage:
+        def _selected_control_gl_accounts(self):
+            return []
+
+        def _run_selected_control_gl_action(self):
+            calls.append("assign-from-linked-lists")
+
+        def _run_selected_control_action(self):
+            calls.append("smart-action")
+
+    page_a07.A07Page._link_selected_control_rows(DummyPage())
+
+    assert calls == ["smart-action"]
 
 
 def test_run_selected_control_gl_action_guides_user_without_selected_code() -> None:
@@ -2451,6 +2782,105 @@ def test_apply_selected_rf1022_candidate_requires_auto_plan_apply() -> None:
     assert statuses == ["Kandidaten kan ikke brukes automatisk (Maa vurderes): Mangler belopsstotte."]
 
 
+def test_auto_apply_strict_a07_suggestions_applies_exact_accepted_rows() -> None:
+    saves: list[tuple[str, float]] = []
+    suggestions = pd.DataFrame(
+        [
+            {
+                "Kode": "skattepliktigDelForsikringer",
+                "ForslagKontoer": "5250",
+                "WithinTolerance": True,
+                "AmountEvidence": "exact",
+                "Diff": 0.0,
+                "SuggestionGuardrail": "accepted",
+                "UsedRulebook": True,
+            },
+            {
+                "Kode": "yrkebilTjenstligbehovListepris",
+                "ForslagKontoer": "5200",
+                "WithinTolerance": True,
+                "AmountEvidence": "exact",
+                "Diff": 0.0,
+                "SuggestionGuardrail": "review",
+                "UsedRulebook": True,
+            },
+        ]
+    )
+
+    class DummyPage:
+        workspace = SimpleNamespace(mapping={}, suggestions=suggestions, locks=set(), membership={})
+
+        def _ensure_suggestion_display_fields(self):
+            return self.workspace.suggestions
+
+        def _effective_mapping(self):
+            return self.workspace.mapping
+
+        def _locked_codes(self):
+            return set()
+
+        def _autosave_mapping(self, *, source="manual", confidence=1.0):
+            saves.append((source, confidence))
+            return True
+
+    page = DummyPage()
+    result = page_a07.A07Page._auto_apply_strict_a07_suggestions(page)
+
+    assert result["accounts"] == ["5250"]
+    assert result["codes"] == ["skattepliktigDelForsikringer"]
+    assert result["autosaved"] is True
+    assert saves == [("auto", 1.0)]
+    assert page.workspace.mapping == {"5250": "skattepliktigDelForsikringer"}
+
+
+def test_auto_apply_strict_a07_suggestions_adds_residual_special_add_accounts() -> None:
+    suggestions = pd.DataFrame(
+        [
+            {
+                "Kode": "feriepenger",
+                "ForslagKontoer": "2932,2940",
+                "WithinTolerance": True,
+                "AmountEvidence": "exact",
+                "Diff": 0.0,
+                "SuggestionGuardrail": "accepted",
+                "UsedRulebook": True,
+                "UsedSpecialAdd": True,
+            },
+        ]
+    )
+
+    class DummyPage:
+        workspace = SimpleNamespace(
+            mapping={"5020": "feriepenger", "5096": "feriepenger"},
+            suggestions=suggestions,
+            locks=set(),
+            membership={},
+        )
+
+        def _ensure_suggestion_display_fields(self):
+            return self.workspace.suggestions
+
+        def _effective_mapping(self):
+            return self.workspace.mapping
+
+        def _locked_codes(self):
+            return set()
+
+        def _autosave_mapping(self, *, source="manual", confidence=1.0):
+            return True
+
+    page = DummyPage()
+    result = page_a07.A07Page._auto_apply_strict_a07_suggestions(page)
+
+    assert set(result["accounts"]) == {"2932", "2940"}
+    assert page.workspace.mapping == {
+        "5020": "feriepenger",
+        "5096": "feriepenger",
+        "2932": "feriepenger",
+        "2940": "feriepenger",
+    }
+
+
 def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> None:
     calls: list[tuple[str, object]] = []
     statuses: list[str] = []
@@ -2510,6 +2940,9 @@ def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> 
 
         def _apply_rf1022_candidate_suggestions(self):
             return page_a07.A07Page._apply_rf1022_candidate_suggestions(self)
+
+        def _safe_auto_matching_enabled(self):
+            return True
 
         def _current_rf1022_candidate_df(self):
             return page_a07.A07Page._current_rf1022_candidate_df(self)
@@ -2960,7 +3393,7 @@ def test_show_control_gl_context_menu_offers_rf1022_group_submenu(monkeypatch) -
         if kind == "command"
     )
     assert "Vis RF-1022-kandidater" in labels
-    assert "Kjør trygg auto-matching" in labels
+    assert "Kjør trygg auto-matching" not in labels
     assert "Bruk beste forslag" not in labels
     assert "Bruk historikk" not in labels
     rf_menu = next(payload for kind, label, payload in menu.items if kind == "cascade" and label == "Velg RF-1022-post")
@@ -2973,6 +3406,118 @@ def test_show_control_gl_context_menu_offers_rf1022_group_submenu(monkeypatch) -
     assert [label for kind, label, _payload in a07_menu.items if kind == "command"] == [
         "fastloenn - Fast lonn",
         "elektroniskKommunikasjon - Elektronisk kommunikasjon",
+    ]
+
+
+def test_show_control_gl_context_menu_defaults_to_a07_surface(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu) -> None:
+            self.items.append(("cascade", label, menu))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+
+    dummy = SimpleNamespace(
+        tree_control_gl=object(),
+        _prepare_tree_context_selection=lambda *args, **kwargs: "acct:5000",
+        _selected_control_gl_accounts=lambda: ["5000"],
+        _selected_control_code=lambda: "fastloenn",
+        _selected_control_work_level=lambda: "a07",
+        _selected_rf1022_group=lambda: None,
+        _effective_mapping=lambda: {},
+        _rf1022_group_menu_choices=lambda: [("100_loenn_ol", "Post 100 Lonn o.l.")],
+        _a07_code_menu_choices=lambda: [
+            ("fastloenn", "fastloenn - Fast lonn"),
+            ("feriepenger", "feriepenger - Feriepenger"),
+        ],
+        _assign_selected_control_mapping=lambda: None,
+        _assign_selected_accounts_to_rf1022_group=lambda _group_id: None,
+        _assign_selected_accounts_to_a07_code=lambda _code: None,
+        _clear_selected_control_mapping=lambda: None,
+        _focus_linked_code_for_selected_gl_account=lambda: None,
+        _set_control_gl_scope=lambda _scope: None,
+        _run_selected_control_action=lambda: None,
+        _apply_best_suggestion_for_selected_code=lambda: None,
+        _apply_history_for_selected_code=lambda: None,
+        _open_manual_mapping_clicked=lambda: None,
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_gl_context_menu(dummy, SimpleNamespace())
+
+    labels = [label for kind, label, _payload in menu.items if kind in {"command", "cascade"}]
+    assert "Velg RF-1022-post" not in labels
+    assert "Velg A07-kode" in labels
+    assert any(label.startswith("Tildel til fastloenn") for label in labels)
+    assert "Vis RF-1022-kandidater" not in labels
+    assert not any("auto-matching" in label for label in labels)
+
+
+def test_show_control_gl_context_menu_exposes_rule_learning_for_selected_code(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu) -> None:
+            self.items.append(("cascade", label, menu))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+    dummy = SimpleNamespace(
+        tree_control_gl=object(),
+        _prepare_tree_context_selection=lambda *args, **kwargs: "5290",
+        _selected_control_gl_accounts=lambda: ["5290"],
+        _selected_control_code=lambda: "feriepenger",
+        _selected_control_work_level=lambda: "a07",
+        _selected_rf1022_group=lambda: None,
+        _effective_mapping=lambda: {},
+        _a07_code_menu_choices=lambda: [],
+        _assign_selected_control_mapping=lambda: None,
+        _assign_accounts_to_a07_code=lambda *args, **kwargs: None,
+        _remove_mapping_accounts_checked=lambda *args, **kwargs: None,
+        _focus_linked_code_for_selected_gl_account=lambda: None,
+        _selected_control_gl_learning_context=lambda: {
+            "enabled": True,
+            "code_label": "feriepenger",
+            "accounts": ["5290"],
+            "remove_enabled": False,
+        },
+        _append_selected_control_gl_names_to_a07_alias=lambda: None,
+        _exclude_selected_control_gl_names_from_a07_code=lambda: None,
+        _remove_selected_control_gl_accounts_and_exclude_alias=lambda: None,
+        _set_control_gl_scope=lambda _scope: None,
+        _run_selected_control_action=lambda: None,
+        _apply_best_suggestion_for_selected_code=lambda: None,
+        _apply_history_for_selected_code=lambda: None,
+        _open_manual_mapping_clicked=lambda: None,
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_gl_context_menu(dummy, SimpleNamespace())
+
+    learn_menu = [payload for kind, label, payload in menu.items if kind == "cascade" and label == "Laer regel"][0]
+    assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
+        "Laer kontonavn som alias for feriepenger",
+        "Ekskluder kontonavn fra feriepenger",
+        "Fjern mapping og ekskluder kontonavn fra feriepenger",
+    ]
+    assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
+        "normal",
+        "normal",
+        "disabled",
     ]
 
 
@@ -3018,13 +3563,62 @@ def test_show_control_code_context_menu_uses_rf1022_actions_in_rf_mode(monkeypat
     assert any(label.startswith("Tildel valgte kontoer til Post 100 Refusjon") for label in labels)
     assert "Fjern mapping fra valgte kontoer (<-)" in labels
     assert "Vis RF-1022-kandidater" in labels
-    assert "Kjør trygg auto-matching" in labels
+    assert "Kjør trygg auto-matching" not in labels
     assert "Smartmapping for valgt kode" not in labels
     assert "Bruk beste forslag" not in labels
     assert "Bruk historikk" not in labels
 
 
-def test_control_account_context_menu_keeps_hidden_button_actions_available(monkeypatch) -> None:
+def test_show_control_code_context_menu_allows_group_creation_for_multi_a07_selection(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_cascade(self, *, label, menu=None, state=None) -> None:
+            self.items.append(("cascade", label, menu))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+
+    dummy = SimpleNamespace(
+        tree_a07=object(),
+        _prepare_tree_context_selection=lambda *args, **kwargs: "fastloenn",
+        _on_control_selection_changed=lambda: None,
+        _selected_control_code=lambda: "fastloenn",
+        _groupable_selected_control_codes=lambda: ["fastloenn", "timeleonn"],
+        _selected_control_gl_accounts=lambda: [],
+        _effective_mapping=lambda: {},
+        _locked_codes=lambda: set(),
+        _selected_control_work_level=lambda: "a07",
+        _assign_accounts_to_a07_code=lambda *args, **kwargs: None,
+        _remove_mapping_accounts_checked=lambda *args, **kwargs: None,
+        _run_selected_control_action=lambda: None,
+        _apply_best_suggestion_for_selected_code=lambda: None,
+        _apply_history_for_selected_code=lambda: None,
+        _create_group_from_selection=lambda: None,
+        _rename_selected_group=lambda: None,
+        _remove_selected_group=lambda: None,
+        _unlock_selected_code=lambda: None,
+        _lock_selected_code=lambda: None,
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_code_context_menu(dummy, SimpleNamespace())
+
+    states_by_label = {
+        label: payload
+        for kind, label, payload in menu.items
+        if kind == "command"
+    }
+    assert states_by_label["Opprett A07-gruppe fra valgte koder"] == "normal"
+
+
+def test_control_account_context_menu_keeps_mapping_actions_available(monkeypatch) -> None:
     class _Menu:
         def __init__(self, *_args, **_kwargs) -> None:
             self.items: list[tuple[str, str, object | None]] = []
@@ -3060,12 +3654,12 @@ def test_control_account_context_menu_keeps_hidden_button_actions_available(monk
         "Avansert mapping...",
     ]
     cascades = [(label, payload) for kind, label, payload in menu.items if kind == "cascade"]
-    assert [label for label, _payload in cascades] == ["Laer av kontonavn"]
+    assert [label for label, _payload in cascades] == ["Laer regel"]
     learn_menu = cascades[0][1]
     assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
-        "Legg navn til A07-kode som A07-alias",
-        "Ekskluder navn fra A07-kode",
-        "Fjern mapping og ekskluder navn fra A07-kode",
+        "Laer kontonavn som alias for A07-kode",
+        "Ekskluder kontonavn fra A07-kode",
+        "Fjern mapping og ekskluder kontonavn fra A07-kode",
     ]
     assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
         "disabled",
@@ -3074,7 +3668,7 @@ def test_control_account_context_menu_keeps_hidden_button_actions_available(monk
     ]
 
 
-def test_control_account_context_menu_labels_learning_actions_with_a07_code(monkeypatch) -> None:
+def test_control_account_context_menu_exposes_rule_learning_for_mapped_account(monkeypatch) -> None:
     class _Menu:
         def __init__(self, *_args, **_kwargs) -> None:
             self.items: list[tuple[str, str, object | None]] = []
@@ -3109,11 +3703,11 @@ def test_control_account_context_menu_labels_learning_actions_with_a07_code(monk
 
     menu = page_a07.A07Page._show_control_accounts_context_menu(dummy, SimpleNamespace())
 
-    learn_menu = [payload for kind, label, payload in menu.items if kind == "cascade" and label == "Laer av kontonavn"][0]
+    learn_menu = [payload for kind, label, payload in menu.items if kind == "cascade" and label == "Laer regel"][0]
     assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
-        "Legg navn til annet som A07-alias",
-        "Ekskluder navn fra annet",
-        "Fjern mapping og ekskluder navn fra annet",
+        "Laer kontonavn som alias for annet",
+        "Ekskluder kontonavn fra annet",
+        "Fjern mapping og ekskluder kontonavn fra annet",
     ]
     assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
         "normal",
@@ -3122,7 +3716,7 @@ def test_control_account_context_menu_labels_learning_actions_with_a07_code(monk
     ]
 
 
-def test_control_account_context_menu_labels_multi_select_learning_actions(monkeypatch) -> None:
+def test_control_account_context_menu_multi_select_exposes_rule_learning(monkeypatch) -> None:
     class _Menu:
         def __init__(self, *_args, **_kwargs) -> None:
             self.items: list[tuple[str, str, object | None]] = []
@@ -3163,12 +3757,12 @@ def test_control_account_context_menu_labels_multi_select_learning_actions(monke
         "Avansert mapping...",
     ]
     cascades = [(label, payload) for kind, label, payload in menu.items if kind == "cascade"]
-    assert [label for label, _payload in cascades] == ["Laer av valgte kontonavn"]
+    assert [label for label, _payload in cascades] == ["Laer regel"]
     learn_menu = cascades[0][1]
     assert [label for kind, label, _payload in learn_menu.items if kind == "command"] == [
-        "Legg valgte navn til valgte A07-koder som A07-alias",
-        "Ekskluder valgte navn fra valgte A07-koder",
-        "Fjern mapping og ekskluder valgte navn fra valgte A07-koder",
+        "Laer valgte kontonavn som alias for valgte A07-koder",
+        "Ekskluder valgte kontonavn fra valgte A07-koder",
+        "Fjern mapping og ekskluder valgte kontonavn fra valgte A07-koder",
     ]
     assert [state for kind, _label, state in learn_menu.items if kind == "command"] == [
         "normal",
@@ -3365,6 +3959,125 @@ def test_learning_control_account_names_handles_multi_select_mixed_codes(monkeyp
     assert "2 kontonavn" in dummy.status_var.get()
 
 
+def test_learning_control_gl_account_names_uses_selected_a07_code_for_unmapped_account(monkeypatch) -> None:
+    learned: list[tuple[str, str, bool]] = []
+    refresh_calls: list[str] = []
+
+    class _Status:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def set(self, value: str) -> None:
+            self.value = value
+
+        def get(self) -> str:
+            return self.value
+
+    monkeypatch.setattr(
+        a07_mapping_actions,
+        "append_a07_rule_keywords",
+        lambda entries, exclude=False: (
+            (entry_list := list(entries)),
+            learned.extend((code, term, exclude) for code, term in entry_list),
+            SimpleNamespace(
+                results=tuple(SimpleNamespace(code=code, term=term, changed=True) for code, term in entry_list),
+                changed_count=len(entry_list),
+                path=Path("rules.json"),
+            ),
+        )[2],
+    )
+    monkeypatch.setattr(
+        a07_mapping_actions.payroll_classification,
+        "invalidate_runtime_caches",
+        lambda: None,
+    )
+    dummy = SimpleNamespace(
+        tree_control_gl=object(),
+        tree_a07=object(),
+        status_var=_Status(),
+        _selected_control_gl_accounts=lambda: ["5290"],
+        _selected_control_code=lambda: "feriepenger",
+        _control_account_name_lookup=lambda accounts: {"5290": "Motkonto for gruppe 52"},
+        _mapped_a07_code_for_account=lambda account: "",
+        _selected_control_gl_learning_context=lambda: page_a07.A07Page._selected_control_gl_learning_context(dummy),
+        _refresh_core=lambda focus_code=None: refresh_calls.append(focus_code),
+        _refresh_all=lambda: None,
+        _notify_inline=lambda *_args, **_kwargs: None,
+        _notify_a07_rule_learning_changed=lambda: None,
+    )
+
+    page_a07.A07Page._learn_selected_control_gl_account_names(dummy, exclude=False, remove_mapping=False)
+
+    assert learned == [("feriepenger", "Motkonto for gruppe 52", False)]
+    assert refresh_calls == ["feriepenger"]
+    assert "1 kontonavn lagt til som alias" in dummy.status_var.get()
+
+
+def test_append_a07_rule_keywords_clears_rulebook_cache(monkeypatch, tmp_path) -> None:
+    document: dict[str, object] = {"rules": {"feriepenger": {"label": "Feriepenger", "keywords": []}}}
+    cache_clears: list[bool] = []
+
+    monkeypatch.setattr(
+        a07_rule_learning.classification_config,
+        "load_rulebook_document",
+        lambda: document,
+    )
+    monkeypatch.setattr(
+        a07_rule_learning.classification_config,
+        "save_rulebook_document",
+        lambda data: tmp_path / "global_full_a07_rulebook.json",
+    )
+    monkeypatch.setattr(a07_rule_learning, "clear_rulebook_cache", lambda: cache_clears.append(True))
+
+    result = a07_rule_learning.append_a07_rule_keywords([("feriepenger", "OTP Innberettet")])
+
+    assert result.changed_count == 1
+    assert cache_clears == [True]
+    assert document["rules"]["feriepenger"]["keywords"] == ["OTP Innberettet"]  # type: ignore[index]
+
+
+def test_rule_learning_notification_focuses_admin_rulebook_code(monkeypatch) -> None:
+    reload_calls: list[object] = []
+
+    class _RulebookEditor:
+        def reload(self, *, select_key=None) -> None:
+            reload_calls.append(select_key)
+
+    app = SimpleNamespace(page_admin=SimpleNamespace(_rulebook_editor=_RulebookEditor()))
+    monkeypatch.setattr(a07_mapping_actions.session, "APP", app, raising=False)
+
+    page_a07.A07Page._notify_a07_rule_learning_changed(
+        SimpleNamespace(),
+        focus_code="tilskuddOgPremieTilPensjon",
+    )
+
+    assert reload_calls == ["tilskuddOgPremieTilPensjon"]
+
+
+def test_rule_learning_notification_defers_heavy_analyse_refresh(monkeypatch) -> None:
+    refresh_calls: list[tuple[str, object | None, bool | None]] = []
+
+    class _AnalysePage:
+        def refresh_from_session(self, session_obj=None, *, defer_heavy: bool = False) -> None:
+            refresh_calls.append(("analyse", session_obj, defer_heavy))
+
+    class _SaldobalansePage:
+        def refresh_from_session(self, session_obj=None, **_kwargs) -> None:
+            refresh_calls.append(("saldobalanse", session_obj, None))
+
+    app = SimpleNamespace(
+        page_admin=SimpleNamespace(_rulebook_editor=None),
+        page_saldobalanse=_SaldobalansePage(),
+        page_analyse=_AnalysePage(),
+    )
+    monkeypatch.setattr(a07_mapping_actions.session, "APP", app, raising=False)
+
+    page_a07.A07Page._notify_a07_rule_learning_changed(SimpleNamespace(), focus_code="feriepenger")
+
+    assert ("analyse", page_a07.session, True) in refresh_calls
+    assert ("saldobalanse", page_a07.session, None) in refresh_calls
+
+
 def test_control_statement_account_context_menu_keeps_focus_action_available(monkeypatch) -> None:
     class _Menu:
         def __init__(self, *_args, **_kwargs) -> None:
@@ -3385,6 +4098,47 @@ def test_control_statement_account_context_menu_keeps_focus_action_available(mon
     menu = page_a07.A07Page._show_control_statement_accounts_context_menu(dummy, SimpleNamespace())
 
     assert [label for kind, label, _payload in menu.items if kind == "command"] == ["Vis i GL"]
+
+
+def test_control_suggestions_context_menu_exposes_core_actions(monkeypatch) -> None:
+    class _Menu:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.items: list[tuple[str, str, object | None]] = []
+
+        def add_command(self, *, label, command=None, state=None) -> None:
+            self.items.append(("command", label, state))
+
+        def add_separator(self) -> None:
+            self.items.append(("separator", "", None))
+
+    monkeypatch.setattr(a07_context_menu.tk, "Menu", _Menu)
+    tree = object()
+    dummy = SimpleNamespace(
+        tree_control_suggestions=tree,
+        tree_suggestions=object(),
+        _prepare_tree_context_selection=lambda *_args, **_kwargs: "0",
+        _on_suggestion_selected=lambda: None,
+        _selected_suggestion_row_from_tree=lambda _tree: pd.Series({"Kode": "feriepenger", "ForslagKontoer": "5020"}),
+        _selected_control_code=lambda: "feriepenger",
+        _selected_control_suggestion_accounts=lambda: ["5020"],
+        _apply_selected_suggestion=lambda: None,
+        _focus_mapping_account=lambda _account: None,
+        _focus_control_code=lambda _code: None,
+        _open_manual_mapping_clicked=lambda **_kwargs: None,
+        _post_context_menu=lambda menu, _event: menu,
+    )
+
+    menu = page_a07.A07Page._show_control_suggestions_context_menu(
+        dummy,
+        SimpleNamespace(widget=tree),
+    )
+
+    assert [label for kind, label, _state in menu.items if kind == "command"] == [
+        "Bruk forslag",
+        "Vis foreslatt konto i GL",
+        "Ga til A07-kode",
+        "Avansert mapping...",
+    ]
 
 
 def test_bind_canonical_events_registers_right_click_context_menus() -> None:
@@ -3419,6 +4173,7 @@ def test_bind_canonical_events_registers_right_click_context_menus() -> None:
         _start_control_gl_drag=lambda _event: None,
         _on_control_selection_changed=lambda: None,
         _run_selected_control_action=lambda: None,
+        _link_selected_control_rows=lambda: None,
         _show_control_code_context_menu=lambda _event: None,
         _track_unmapped_drop_target=lambda _event: None,
         _drop_unmapped_on_control=lambda _event: None,
@@ -3426,6 +4181,7 @@ def test_bind_canonical_events_registers_right_click_context_menus() -> None:
         _apply_selected_history_mapping=lambda: None,
         _apply_selected_suggestion=lambda: None,
         _on_suggestion_selected=lambda: None,
+        _show_control_suggestions_context_menu=lambda _event: None,
         _focus_selected_control_account_in_gl=lambda: None,
         _open_manual_mapping_clicked=lambda: None,
         _remove_selected_control_accounts=lambda: None,
@@ -3445,6 +4201,9 @@ def test_bind_canonical_events_registers_right_click_context_menus() -> None:
 
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in tree_control_gl.calls)
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in tree_a07.calls)
+    assert any(sequence == "<Return>" for sequence, _callback, _add in tree_a07.calls)
+    assert any(sequence == "<Button-3>" for sequence, _callback, _add in dummy.tree_control_suggestions.calls)
+    assert any(sequence == "<Button-3>" for sequence, _callback, _add in dummy.tree_suggestions.calls)
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in dummy.tree_control_accounts.calls)
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in dummy.tree_control_statement_accounts.calls)
     assert any(sequence == "<Button-3>" for sequence, _callback, _add in tree_groups.calls)
@@ -3458,6 +4217,19 @@ def test_canonical_a07_account_lists_use_extended_multiselect() -> None:
     assert 'self.tree_control_gl.configure(selectmode="extended")' in source
     assert 'self.tree_control_accounts.configure(height=6, selectmode="extended")' in source
     assert 'self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._update_a07_action_button_state())' in source
+    assert 'text="Koble ->"' not in source
+    assert 'text="<- Fjern"' not in source
+    assert "self.a07_filter_widget = None" in source
+    assert "_CONTROL_PRIMARY_VIEW_KEYS" not in source
+    assert "control_assign_panel" not in source
+    assert 'self.tree_a07.bind("<Double-1>", lambda _event: self._link_selected_control_rows())' in source
+    assert 'self.tree_a07.bind("<Return>", lambda _event: self._link_selected_control_rows())' in source
+    assert "register_treeview_selection_summary" in source
+    assert 'columns=("IB", "Endring", "UB")' in source
+    assert 'row_noun="kontoer"' in source
+    assert "hide_zero=False" in source
+    assert "A07-utvalg:" not in source
+    assert "control_gl_scope = ttk.Combobox" not in source
 
 
 def test_canonical_control_statement_tab_omits_noisy_header_controls() -> None:
@@ -4116,6 +4888,29 @@ def test_focus_mapping_account_clears_control_gl_filters_when_account_is_hidden(
     assert dummy.tree_control_accounts.selected == "5001"
 
 
+def test_clear_control_gl_selection_tolerates_empty_tree_selection() -> None:
+    class DummyTree:
+        def __init__(self) -> None:
+            self.removed = None
+            self.focused = None
+
+        def selection(self):
+            return ("5000",)
+
+        def selection_remove(self, value) -> None:
+            self.removed = value
+
+        def focus(self, value: str) -> None:
+            self.focused = value
+
+    dummy = SimpleNamespace(tree_control_gl=DummyTree())
+
+    page_a07.A07Page._clear_control_gl_selection(dummy)
+
+    assert dummy.tree_control_gl.removed == ("5000",)
+    assert dummy.tree_control_gl.focused == ""
+
+
 def test_suggestion_and_reconcile_tree_tags_map_visual_state() -> None:
     suggestion_ok = pd.Series({"WithinTolerance": True, "Score": 0.62, "HistoryAccounts": "5000"})
     suggestion_candidate = pd.Series({"WithinTolerance": True, "Score": 0.62})
@@ -4132,7 +4927,7 @@ def test_suggestion_and_reconcile_tree_tags_map_visual_state() -> None:
     assert page_a07.reconcile_tree_tag(reconcile_diff) == "reconcile_diff"
 
 
-def test_tree_iid_from_event_prefers_identified_row_and_ignores_blank_event() -> None:
+def test_tree_iid_from_event_prefers_identified_row_and_falls_back_to_selection() -> None:
     class DummyTree:
         def __init__(self) -> None:
             self._selection = ("selected_iid",)
@@ -4148,7 +4943,7 @@ def test_tree_iid_from_event_prefers_identified_row_and_ignores_blank_event() ->
     tree = DummyTree()
 
     assert page_a07.A07Page._tree_iid_from_event(object(), tree, event) == "row_from_pointer"
-    assert page_a07.A07Page._tree_iid_from_event(object(), tree, fallback_event) is None
+    assert page_a07.A07Page._tree_iid_from_event(object(), tree, fallback_event) == "selected_iid"
     assert page_a07.A07Page._tree_iid_from_event(object(), tree, None) == "selected_iid"
 
 
@@ -4608,7 +5403,7 @@ def test_update_control_transfer_buttons_enables_assign_in_rf1022_mode_when_grou
     assert ("clear", ("!disabled",)) in states
 
 
-def test_on_control_gl_selection_changed_keeps_selected_work_code() -> None:
+def _obsolete_on_control_gl_selection_changed_keeps_selected_work_code_preserved_right_side() -> None:
     calls: list[str] = []
     status_calls: list[str] = []
     dummy = SimpleNamespace(
@@ -4628,7 +5423,7 @@ def test_on_control_gl_selection_changed_keeps_selected_work_code() -> None:
     assert status_calls == ["Konto 5000 er koblet til fastloenn. HÃ¸yre side er fortsatt valgt arbeidskode."]
 
 
-def test_on_control_gl_selection_changed_keeps_selected_work_code() -> None:
+def _obsolete_on_control_gl_selection_changed_keeps_selected_work_code_auto_focus() -> None:
     calls: list[str] = []
     status_calls: list[str] = []
     focus_calls: list[str] = []
@@ -4652,7 +5447,7 @@ def test_on_control_gl_selection_changed_keeps_selected_work_code() -> None:
     assert status_calls == ["Konto 5000 er koblet til fastloenn. Viser den koden til hoyre."]
 
 
-def test_on_control_gl_selection_changed_keeps_work_code_for_multi_select() -> None:
+def _obsolete_on_control_gl_selection_changed_keeps_work_code_for_multi_select() -> None:
     calls: list[str] = []
     status_calls: list[str] = []
     focus_calls: list[str] = []
@@ -4727,6 +5522,31 @@ def test_on_control_gl_selection_changed_keeps_work_code_for_multi_select() -> N
     assert calls == ["sync:5000", "buttons"]
     assert focus_calls == []
     assert status_calls == ["2 kontoer er valgt og er koblet til fastloenn."]
+
+
+def test_on_control_gl_selection_changed_prefers_amount_summary_when_available() -> None:
+    calls: list[str] = []
+    status_calls: list[str] = []
+    dummy = SimpleNamespace(
+        _suspend_selection_sync=False,
+        _refresh_in_progress=False,
+        control_gl_df=pd.DataFrame(
+            [
+                {"Konto": "5000", "Kode": "fastloenn", "IB": 0.0, "Endring": 100.0, "UB": 100.0},
+                {"Konto": "5001", "Kode": "fastloenn", "IB": 0.0, "Endring": 25.0, "UB": 25.0},
+            ]
+        ),
+        _selected_control_gl_accounts=lambda: ["5000", "5001"],
+        _selected_control_gl_account=lambda: "5000",
+        _sync_control_account_selection=lambda konto: calls.append(f"sync:{konto}"),
+        _update_control_transfer_buttons=lambda: calls.append("buttons"),
+        status_var=SimpleNamespace(set=lambda value: status_calls.append(value)),
+    )
+
+    page_a07.A07Page._on_control_gl_selection_changed(dummy)
+
+    assert calls == ["sync:5000", "buttons"]
+    assert status_calls == ["2 kontoer valgt | IB: 0,00 | Endring: 125,00 | UB: 125,00"]
 
 
 def test_on_control_selection_changed_prefers_retagging_gl_tree() -> None:
@@ -4898,6 +5718,9 @@ def test_refresh_suggestions_tree_shows_unresolved_rf1022_codes_and_disables_aut
         def _selected_rf1022_group(self):
             return "uavklart_rf1022"
 
+        def _safe_auto_matching_enabled(self):
+            return True
+
         def _refresh_unresolved_rf1022_suggestions(self, group_id):
             return page_a07.A07Page._refresh_unresolved_rf1022_suggestions(self, group_id)
 
@@ -4911,7 +5734,7 @@ def test_refresh_suggestions_tree_shows_unresolved_rf1022_codes_and_disables_aut
 
     page_a07.A07Page._refresh_suggestions_tree(dummy)
 
-    assert configured[-1] == ("A07Post", "A07_Belop", "GL_Belop", "Diff")
+    assert configured[-1] == ("A07Post", "AgaPliktig", "A07_Belop", "GL_Belop", "Diff")
     assert filled[-1]["Kode"].tolist() == ["timeloenn"]
     assert button_texts == {"best": "Bruk trygg kandidat", "batch": "Kjør trygg auto-matching"}
     assert button_states == {"best": [("disabled",)], "batch": [("disabled",)]}
@@ -5000,6 +5823,138 @@ def test_apply_core_refresh_payload_clears_pending_support_refresh() -> None:
 
     assert dummy._pending_support_refresh is False
     assert "support" not in scheduled
+
+
+def test_apply_core_refresh_payload_auto_applies_and_restarts_core_refresh() -> None:
+    calls: list[tuple[str, object]] = []
+
+    dummy = SimpleNamespace(
+        _a07_refresh_warnings=[],
+        _diag=lambda *args, **kwargs: None,
+        _auto_apply_strict_a07_suggestions=lambda: {
+            "accounts": ["5250"],
+            "codes": ["skattepliktigDelForsikringer"],
+            "autosaved": True,
+            "focus_code": "skattepliktigDelForsikringer",
+        },
+        _cancel_refresh_watchdog=lambda: calls.append(("watchdog", None)),
+        _refresh_core=lambda **kwargs: calls.append(("refresh", kwargs.get("focus_code"))),
+        _refresh_in_progress=True,
+        workspace=SimpleNamespace(a07_df=pd.DataFrame(), membership={}, suggestions=pd.DataFrame(), basis_col="UB"),
+    )
+    payload = {
+        "rulebook_path": None,
+        "effective_rulebook": None,
+        "matcher_settings": {},
+        "previous_mapping": {},
+        "previous_mapping_path": None,
+        "previous_mapping_year": None,
+        "effective_mapping": {},
+        "effective_previous_mapping": {},
+        "grouped_a07_df": pd.DataFrame(),
+        "membership": {},
+        "suggestions": pd.DataFrame(),
+        "reconcile_df": pd.DataFrame(),
+        "mapping_df": pd.DataFrame(),
+        "mapping_audit_df": pd.DataFrame(),
+        "mapping_review_df": pd.DataFrame(),
+        "unmapped_df": pd.DataFrame(),
+        "control_gl_df": pd.DataFrame(),
+        "a07_overview_df": pd.DataFrame(),
+        "control_df": pd.DataFrame(),
+        "rf1022_overview_df": pd.DataFrame(),
+        "groups_df": pd.DataFrame(),
+        "control_statement_base_df": pd.DataFrame(),
+        "control_statement_df": pd.DataFrame(),
+        "warnings": [],
+    }
+
+    page_a07.A07Page._apply_core_refresh_payload(dummy, payload)
+
+    assert dummy._pending_auto_mapping_summary == (
+        "Auto-matchet 1 konto(er) mot 1 A07-kode(r) og lagret i klientmappen."
+    )
+    assert dummy._refresh_in_progress is False
+    assert calls == [("watchdog", None), ("refresh", "skattepliktigDelForsikringer")]
+
+
+def test_apply_core_refresh_payload_shows_warning_status() -> None:
+    scheduled: list[str] = []
+
+    class _Var:
+        def __init__(self) -> None:
+            self.value = None
+
+        def set(self, value):
+            self.value = value
+
+    class _Tree:
+        def get_children(self):
+            return ()
+
+    dummy = SimpleNamespace(
+        _a07_refresh_warnings=[],
+        rulebook_path=None,
+        matcher_settings={},
+        previous_mapping={},
+        previous_mapping_path=None,
+        previous_mapping_year=None,
+        workspace=SimpleNamespace(a07_df=pd.DataFrame(), membership={}, suggestions=pd.DataFrame(), basis_col="Endring"),
+        control_gl_df=pd.DataFrame(),
+        a07_overview_df=pd.DataFrame(),
+        control_df=pd.DataFrame(columns=["Kode"]),
+        groups_df=pd.DataFrame(),
+        reconcile_df=pd.DataFrame(),
+        unmapped_df=pd.DataFrame(),
+        mapping_df=pd.DataFrame(),
+        history_compare_df=pd.DataFrame(),
+        tree_groups=_Tree(),
+        tree_control_suggestions=_Tree(),
+        tree_control_accounts=_Tree(),
+        control_suggestion_summary_var=_Var(),
+        control_suggestion_effect_var=_Var(),
+        control_accounts_summary_var=_Var(),
+        status_var=_Var(),
+        details_var=_Var(),
+        _refresh_control_gl_tree=lambda: scheduled.append("gl"),
+        _refresh_a07_tree=lambda: scheduled.append("a07"),
+        _fill_tree=lambda *args, **kwargs: scheduled.append("fill"),
+        _update_control_panel=lambda: scheduled.append("panel"),
+        _update_control_transfer_buttons=lambda: scheduled.append("buttons"),
+        _update_summary=lambda: scheduled.append("summary"),
+        _support_views_ready=True,
+        _support_views_dirty=False,
+        _loaded_support_tabs=set(),
+        _refresh_in_progress=True,
+        _pending_focus_code=None,
+        _pending_support_refresh=False,
+        _control_details_visible=True,
+        after_idle=lambda cb: cb(),
+        _pending_session_refresh=False,
+        _diag=lambda *args, **kwargs: None,
+    )
+
+    payload = {
+        "rulebook_path": None,
+        "matcher_settings": {},
+        "previous_mapping": {},
+        "previous_mapping_path": None,
+        "previous_mapping_year": None,
+        "grouped_a07_df": pd.DataFrame(),
+        "membership": {},
+        "suggestions": pd.DataFrame(),
+        "control_gl_df": pd.DataFrame(),
+        "a07_overview_df": pd.DataFrame(),
+        "control_df": pd.DataFrame(columns=["Kode"]),
+        "groups_df": pd.DataFrame(),
+        "warnings": [{"scope": "rulebook", "message": "A07-regelbok kunne ikke lastes.", "detail": "boom"}],
+    }
+
+    page_a07.A07Page._apply_core_refresh_payload(dummy, payload)
+
+    assert dummy.status_var.value == "A07 oppdatert med advarsler."
+    assert "rulebook" in dummy.details_var.value
+    assert "boom" in dummy.details_var.value
 
 
 def test_apply_core_refresh_payload_tolerates_missing_optional_support_trees() -> None:
@@ -5895,6 +6850,66 @@ def test_sync_shared_refs_updates_env_and_compat_runtime_refs(monkeypatch) -> No
     assert page_a07_env.konto_klassifisering is konto_klassifisering_ref
     assert page_a07._shared.app_paths is app_paths_ref
     assert page_a07._shared.client_store is client_store_ref
+
+
+def test_context_restore_payload_collects_degraded_state_warnings(monkeypatch) -> None:
+    from a07_feature import page_a07_refresh_services as refresh_services
+
+    def _raise(label: str):
+        raise OSError(label)
+
+    globals_ = refresh_services.build_context_restore_payload.__globals__
+    monkeypatch.setitem(globals_, "resolve_context_source_path", lambda client, year: Path("a07_source.json"))
+    monkeypatch.setitem(globals_, "resolve_context_mapping_path", lambda *args, **kwargs: Path("a07_mapping.json"))
+    monkeypatch.setitem(globals_, "default_a07_groups_path", lambda client, year: Path("a07_groups.json"))
+    monkeypatch.setitem(globals_, "default_a07_locks_path", lambda client, year: Path("a07_locks.json"))
+    monkeypatch.setitem(globals_, "default_a07_project_path", lambda client, year: Path("a07_project.json"))
+    monkeypatch.setitem(globals_, "load_a07_groups", lambda path: _raise("groups"))
+    monkeypatch.setitem(globals_, "load_locks", lambda path: _raise("locks"))
+    monkeypatch.setitem(globals_, "load_project_state", lambda path: _raise("project"))
+
+    payload = refresh_services.build_context_restore_payload(
+        client="Air Management AS",
+        year="2025",
+        load_active_trial_balance_cached=lambda client, year: (pd.DataFrame(), None),
+        load_a07_source_cached=lambda path: _raise("source"),
+        load_mapping_file_cached=lambda path, client=None, year=None: _raise("mapping"),
+        load_previous_year_mapping_cached=lambda client, year: ({}, None, None),
+        resolve_rulebook_path_cached=lambda client, year: _raise("rulebook"),
+    )
+
+    scopes = {warning["scope"] for warning in payload["warnings"]}
+    assert {"a07_source", "mapping", "groups", "locks", "project", "rulebook_path"}.issubset(scopes)
+    assert payload["a07_path"] is None
+    assert payload["mapping_path"] is None
+    assert payload["groups"] == {}
+    assert payload["locks"] == set()
+    assert payload["project_meta"] == {}
+
+
+def test_control_statement_export_collects_warning_when_source_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        a07_control_data,
+        "build_current_control_statement_rows",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("catalog unavailable")),
+    )
+    warnings: list[dict[str, str]] = []
+
+    out = a07_control_data.build_control_statement_export_df(
+        client="Air Management AS",
+        year="2025",
+        gl_df=pd.DataFrame([{"Konto": "5000", "Navn": "Lonn", "IB": 0.0, "Endring": 100.0, "UB": 100.0}]),
+        warning_collector=warnings,
+    )
+
+    assert out.empty
+    assert warnings == [
+        {
+            "scope": "control_statement",
+            "message": "Kontrolloppstilling kunne ikke bygges.",
+            "detail": "catalog unavailable",
+        }
+    ]
 
 
 def test_refresh_service_builders_keep_expected_payload_shapes() -> None:

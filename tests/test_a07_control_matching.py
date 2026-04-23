@@ -333,7 +333,7 @@ def test_strict_auto_requires_explicit_accepted_guardrail() -> None:
     assert not a07_suggestion_is_strict_auto({"WithinTolerance": False, "SuggestionGuardrail": "accepted"})
 
 
-def test_global_auto_plan_keeps_a07_groups_in_review() -> None:
+def test_global_auto_plan_accepts_strict_a07_groups() -> None:
     candidates_df = pd.DataFrame(
         [
             {
@@ -346,6 +346,8 @@ def test_global_auto_plan_keeps_a07_groups_in_review() -> None:
                 "Forslagsstatus": "Trygt forslag",
                 "SuggestionGuardrail": "accepted",
                 "WithinTolerance": True,
+                "UsedRulebook": True,
+                "Matchgrunnlag": "Treff paa regelbok",
             }
         ]
     )
@@ -353,11 +355,11 @@ def test_global_auto_plan_keeps_a07_groups_in_review() -> None:
 
     out = build_global_auto_mapping_plan(candidates_df, gl_df, pd.DataFrame(), {})
 
-    assert out.iloc[0]["Action"] == "review"
-    assert out.iloc[0]["Status"] == "Uavklart/Gruppe"
+    assert out.iloc[0]["Action"] == "apply"
+    assert out.iloc[0]["Status"] == "Trygg"
 
 
-def test_rf1022_candidates_skip_a07_group_codes() -> None:
+def test_rf1022_candidates_include_a07_group_codes() -> None:
     control_gl_df = pd.DataFrame(
         [{"Konto": "5000", "Navn": "Lonn til ansatte", "Endring": 1000.0, "BelopAktiv": 1000.0}]
     )
@@ -377,7 +379,8 @@ def test_rf1022_candidates_skip_a07_group_codes() -> None:
 
     out = build_rf1022_candidate_df(control_gl_df, suggestions_df, "100_loenn_ol")
 
-    assert out.empty
+    assert out["Konto"].tolist() == ["5000"]
+    assert out.iloc[0]["Kode"] == "A07_GROUP:fastloenn+timeloenn"
 
 
 def test_rf1022_combo_amount_does_not_make_each_account_safe() -> None:
