@@ -1226,7 +1226,24 @@ class App(tk.Tk):
                         except Exception:
                             pass
 
+                def _bring_to_front(app=self):
+                    """Løft hovedvinduet til fremst etter at loading er ferdig.
+
+                    Windows skjuler ofte Tk-vinduer bak andre vinduer hvis
+                    start-skjermen overlappet. Bruker kort topmost-toggle
+                    for å tvinge z-order uten å pinne vinduet permanent.
+                    """
+                    try:
+                        app.deiconify()
+                        app.lift()
+                        app.focus_force()
+                        app.attributes("-topmost", True)
+                        app.after(250, lambda: app.attributes("-topmost", False))
+                    except Exception:
+                        pass
+
                 cbs.append(_hide_and_clear)
+                cbs.append(_bring_to_front)
                 page._post_heavy_refresh_callbacks = cbs
                 page._loading_status_text_setter = overlay.set_text
             except Exception:

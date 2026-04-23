@@ -549,7 +549,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         import page_analyse_sb
         sb_frame = page_analyse_sb.create_sb_tree(tx_outer)
         if sb_frame is not None:
-            sb_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+            sb_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
             sb_frame.grid_remove()  # Skjult som standard
             page._sb_frame = sb_frame
             page._sb_tree = getattr(sb_frame, "_sb_tree", None)
@@ -563,7 +563,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # --- NK-frame (nøkkeltall) ---
     try:
         nk_frame = ttk.Frame(tx_outer)
-        nk_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        nk_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
         nk_frame.rowconfigure(1, weight=1)
         nk_frame.columnconfigure(0, weight=1)
         nk_frame.grid_remove()  # Skjult som standard
@@ -610,7 +610,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         import page_analyse_sb as _sb_mod
         mp_frame = _sb_mod.create_mp_tree(tx_outer)
         if mp_frame is not None:
-            mp_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+            mp_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
             mp_frame.grid_remove()
             page._mp_frame = mp_frame
         else:
@@ -623,7 +623,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         import page_analyse_sb as _sb_mod2
         mp_acct_frame = _sb_mod2.create_mp_account_tree(tx_outer)
         if mp_acct_frame is not None:
-            mp_acct_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+            mp_acct_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
             mp_acct_frame.grid_remove()
             page._mp_acct_frame = mp_acct_frame
         else:
