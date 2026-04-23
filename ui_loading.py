@@ -20,12 +20,70 @@ class LoadingOverlay:
       * Bruk `overlay.run_async(...)` for lange operasjoner, slik at GUI ikke fryser.
     """
 
+    # Bredde i piksler for AarVaaken-banneret på loading-overlayen.
+    # Bildets aspekt er 4:1 (2508x627) — høyde beregnes proporsjonalt.
+    _BANNER_WIDTH = 360
+
     def __init__(self, master: tk.Widget):
         self.master = master
         self._win: tk.Toplevel | None = None
         self._lbl: ttk.Label | None = None
         self._pb: ttk.Progressbar | None = None
+        self._banner_photo: object | None = None  # tk.PhotoImage | ImageTk.PhotoImage
         self._count = 0
+
+    def _load_banner(self) -> object | None:
+        """Last AarVaaken-bannerbildet fra doc/pictures (lazy, én gang).
+
+        Krever Pillow for resize. Hvis Pillow eller filen mangler:
+        returnerer None (overlay vises uten bilde).
+
+        Søkerekkefølge:
+          1. PyInstaller-bundle (sys._MEIPASS/doc/pictures)
+          2. Repo-rot relativt til denne filen (dev-kjøring)
+          3. app_paths.sources_dir/data_dir (hvis konfigurert til repo)
+        """
+        if self._banner_photo is not None:
+            return self._banner_photo
+        try:
+            from PIL import Image, ImageTk  # type: ignore[import-untyped]
+        except Exception:
+            return None
+
+        from pathlib import Path
+        import sys
+
+        candidates: list[Path] = []
+        # PyInstaller — datas blir lagt under _MEIPASS
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "doc" / "pictures" / "AarVaaken.png")
+        # Dev-kjøring fra repo
+        candidates.append(Path(__file__).resolve().parent / "doc" / "pictures" / "AarVaaken.png")
+        # Bruker-konfigurert kilde-/data-mappe som siste fallback
+        try:
+            import app_paths
+            for base in (app_paths.sources_dir(), app_paths.data_dir()):
+                if base is None:
+                    continue
+                candidates.append(base / "doc" / "pictures" / "AarVaaken.png")
+        except Exception:
+            pass
+
+        pic_path = next((p for p in candidates if p.exists()), None)
+        if pic_path is None:
+            return None
+
+        try:
+            img = Image.open(str(pic_path))
+            w, h = img.size
+            target_w = self._BANNER_WIDTH
+            target_h = max(1, int(round(target_w * h / w)))
+            img = img.resize((target_w, target_h), Image.LANCZOS)
+            self._banner_photo = ImageTk.PhotoImage(img)
+        except Exception:
+            self._banner_photo = None
+        return self._banner_photo
 
     def show(self, text: str = "Arbeider...") -> None:
         self._count += 1
@@ -41,6 +99,12 @@ class LoadingOverlay:
             win.withdraw()
             frm = ttk.Frame(win, padding=12)
             frm.place(relx=0.5, rely=0.5, anchor="center")
+            # AarVaaken-banner over teksten — vises kun hvis bildet kan lastes.
+            banner = self._load_banner()
+            if banner is not None:
+                banner_lbl = ttk.Label(frm, image=banner)
+                banner_lbl.image = banner  # behold referanse mot GC
+                banner_lbl.pack(pady=(0, 10))
             lbl = ttk.Label(frm, text=text)
             lbl.pack(pady=(0, 8))
             pb = ttk.Progressbar(frm, mode="indeterminate", length=220)
