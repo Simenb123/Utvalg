@@ -192,6 +192,17 @@ def run_heavy_refresh_staged(
             if _PROFILE_REFRESH:
                 timings[_STAGE_NAMES[step_index]] = time.perf_counter() - stage_start
                 _log_refresh_timings(timings, time.perf_counter() - overall_start)
+
+            # Kall registrerte one-shot-callbacks når staged refresh er ferdig.
+            # Brukes f.eks. av ui_main for å skjule LoadingOverlay etter at
+            # Analyse-fanen faktisk er klar (ikke bare når dataset er bygget).
+            cbs = getattr(page, "_post_heavy_refresh_callbacks", None) or []
+            page._post_heavy_refresh_callbacks = []
+            for cb in cbs:
+                try:
+                    cb()
+                except Exception:
+                    log.exception("post_heavy_refresh callback failed")
             return
 
         if _PROFILE_REFRESH and step_index < len(_STAGE_NAMES):

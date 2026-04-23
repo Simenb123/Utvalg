@@ -208,6 +208,15 @@ class App(tk.Tk):
         self._build_global_footer()
         self.nb.pack(fill="both", expand=True)
 
+        # App-nivå LoadingOverlay som dekker hele vinduet. Brukes til å
+        # holde "Bygger Analyse..." synlig fra dataset er ferdig lastet og
+        # til Analyse-fanen faktisk er klar (jf. _on_data_ready).
+        try:
+            from ui_loading import LoadingOverlay
+            self._app_loading_overlay = LoadingOverlay(self)
+        except Exception:
+            self._app_loading_overlay = None
+
         # Pages
         self.page_dataset = DatasetPage(self.nb)
         self.page_analyse = AnalysePage(self.nb)
@@ -807,6 +816,32 @@ class App(tk.Tk):
                         self.page_oversikt.refresh_from_session(session)
             except Exception:
                 log.exception("Oversikt refresh after dataset load failed")
+
+        # Vis app-nivå loading-overlay til Analyse-fanen er faktisk ferdig
+        # bygget (ikke bare når dataset er lastet). Dette dekker tidsvinduet
+        # mellom dataset-bygging og Analyse-refresh — som tar 2-6 sekunder
+        # og ellers gir "looks done but isn't"-UX.
+        overlay = getattr(self, "_app_loading_overlay", None)
+        if overlay is not None:
+            try:
+                overlay.show("Bygger Analyse-fanen...")
+            except Exception:
+                overlay = None
+
+        # Registrer skjul-overlay som callback når Analyse-refresh er ferdig.
+        if overlay is not None:
+            try:
+                page = self.page_analyse
+                cbs = list(getattr(page, "_post_heavy_refresh_callbacks", None) or [])
+                cbs.append(lambda o=overlay: o.hide())
+                page._post_heavy_refresh_callbacks = cbs
+            except Exception:
+                # Hvis vi ikke får registrert callback, skjul overlay
+                # umiddelbart så vi ikke etterlater den hengende.
+                try:
+                    overlay.hide()
+                except Exception:
+                    pass
 
         # Eager: kun Analyse (mål-fanen brukeren bytter til umiddelbart).
         # Lazy: alle andre faner får en "dirty"-markering og refreshes
