@@ -9,6 +9,8 @@ og monkey-patche `page._reload_rl_config` etc.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import Any
 
 import session as _session_default
@@ -16,6 +18,12 @@ import session as _session_default
 import page_analyse_filters_live
 
 log = logging.getLogger(__name__)
+
+# Sett UTVALG_PROFILE_REFRESH=1 i miljøet for å få timing-rapport på
+# hver Analyse-refresh. Default av — vi vil ikke spamme prod-loggen.
+_PROFILE_REFRESH = os.environ.get("UTVALG_PROFILE_REFRESH", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
 
 def refresh_from_session(
@@ -99,14 +107,30 @@ def schedule_heavy_refresh(page: Any) -> None:
         page._run_full_refresh()
 
 
+_STAGE_NAMES = (
+    "0_reload_rl_config",
+    "1_build_filtered_df",
+    "2_refresh_pivot",
+    "3_refresh_transactions_view",
+    "4_refresh_detail_panel",
+    "5_adapt_columns+update_data_level",
+)
+
+
 def run_heavy_refresh_staged(
     page: Any,
     generation: int | None = None,
     *,
     dir_options: Any = None,
 ) -> None:
-    """Kjør første Analyse-render i små steg for å unngå GUI-heng."""
+    """Kjør første Analyse-render i små steg for å unngå GUI-heng.
+
+    Hvis miljøvariabelen UTVALG_PROFILE_REFRESH=1 er satt, måles og logges
+    tiden hvert steg bruker — nyttig for å diagnostisere treghet.
+    """
     token = page._heavy_refresh_generation if generation is None else generation
+    timings: dict[str, float] = {} if _PROFILE_REFRESH else {}
+    overall_start = time.perf_counter() if _PROFILE_REFRESH else 0.0
 
     def _is_stale() -> bool:
         return token != page._heavy_refresh_generation
@@ -114,6 +138,8 @@ def run_heavy_refresh_staged(
     def _run_next(step_index: int = 0) -> None:
         if _is_stale():
             return
+
+        stage_start = time.perf_counter() if _PROFILE_REFRESH else 0.0
 
         if step_index == 0:
             try:
@@ -162,7 +188,14 @@ def run_heavy_refresh_staged(
                 page._update_data_level()
             except Exception:
                 log.exception("Analyse staged refresh: update data level failed")
+
+            if _PROFILE_REFRESH:
+                timings[_STAGE_NAMES[step_index]] = time.perf_counter() - stage_start
+                _log_refresh_timings(timings, time.perf_counter() - overall_start)
             return
+
+        if _PROFILE_REFRESH and step_index < len(_STAGE_NAMES):
+            timings[_STAGE_NAMES[step_index]] = time.perf_counter() - stage_start
 
         try:
             page.after(10, lambda: _run_next(step_index + 1))
@@ -170,3 +203,12 @@ def run_heavy_refresh_staged(
             _run_next(step_index + 1)
 
     _run_next()
+
+
+def _log_refresh_timings(timings: dict[str, float], total: float) -> None:
+    """Log en kortfattet tidsrapport. Kalt kun når UTVALG_PROFILE_REFRESH=1."""
+    parts = ["[REFRESH PROFILE]", f"total={total*1000:.0f}ms"]
+    for stage in _STAGE_NAMES:
+        ms = timings.get(stage, 0.0) * 1000
+        parts.append(f"{stage}={ms:.0f}ms")
+    log.warning(" | ".join(parts))
