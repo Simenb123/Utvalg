@@ -1130,9 +1130,45 @@ class RevisjonshandlingerPage(ttk.Frame):
         row = self._tree.identify_row(event.y)
         if row and row not in self._tree.selection():
             self._tree.selection_set(row)
+
+        # Regnr for aktiv rad (kan være både "RL:<nr>"-gap-rad eller vanlig
+        # handlingsrad) — brukes til "Vis statistikk"-menyvalget.
+        regnr_for_stat = ""
+        rl_name_for_stat = ""
+        if row:
+            if row.startswith("RL:"):
+                regnr_for_stat = row.split(":", 1)[1].strip()
+            try:
+                vals = self._tree.item(row, "values")
+                if vals and len(vals) >= 3:
+                    if not regnr_for_stat:
+                        regnr_for_stat = str(vals[1] or "").strip()
+                    rl_name_for_stat = str(vals[2] or "").strip()
+            except Exception:
+                pass
+
+        menu = tk.Menu(self, tearoff=False)
+
+        # Statistikk-valg (vises når rad har gyldig regnr).
+        if regnr_for_stat.isdigit():
+            label_parts = [regnr_for_stat]
+            if rl_name_for_stat:
+                label_parts.append(rl_name_for_stat)
+            menu.add_command(
+                label=f"Vis statistikk for {' '.join(label_parts)}",
+                command=lambda r=regnr_for_stat: self._open_statistikk_for_regnr(r),
+            )
+            menu.add_separator()
+
         # RL-gap-rader (iid "RL:..." ) skal ikke tilordnes en ansvarlig.
         sel = tuple(s for s in self._tree.selection() if not s.startswith("RL:"))
         if not sel:
+            # Kun statistikk-valget (hvis aktuelt) — vis menyen om den ikke er tom.
+            try:
+                if menu.index("end") is not None:
+                    menu.tk_popup(event.x_root, event.y_root)
+            except Exception:
+                pass
             return
 
         try:
@@ -1141,7 +1177,6 @@ class RevisjonshandlingerPage(ttk.Frame):
         except Exception:
             members = []
 
-        menu = tk.Menu(self, tearoff=False)
         n = len(sel)
         title = f"Tilordne ansvarlig ({n} valgt)" if n > 1 else "Tilordne ansvarlig"
         menu.add_command(label=title, state="disabled")
@@ -1168,6 +1203,32 @@ class RevisjonshandlingerPage(ttk.Frame):
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _open_statistikk_for_regnr(self, regnr: str) -> None:
+        """Åpne Statistikk-fanen og vis oppgitt regnskapslinje.
+
+        Samme mønster som analyse-fanens "Vis statistikk for ..."-høyreklikk.
+        """
+        try:
+            import session as _session
+            app = getattr(_session, "APP", None)
+            if app is None:
+                return
+            stat_page = getattr(app, "page_statistikk", None)
+            if stat_page is None:
+                return
+            nb = getattr(app, "nb", None)
+            if nb is not None:
+                try:
+                    nb.select(stat_page)
+                except Exception:
+                    pass
+            try:
+                stat_page.show_regnr(int(regnr))
+            except (TypeError, ValueError):
+                pass
+        except Exception:
+            pass
 
     def _assign_to(self, action_keys: tuple[str, ...], initials: str) -> None:
         if not self._client or not self._year or not action_keys:
