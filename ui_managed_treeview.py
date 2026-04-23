@@ -450,10 +450,6 @@ class ManagedTreeview:
             ghost = tk.Toplevel(self.tree)
             ghost.wm_overrideredirect(True)
             ghost.wm_attributes("-topmost", True)
-            try:
-                ghost.wm_attributes("-alpha", 0.92)
-            except Exception:
-                pass
             outer = tk.Frame(ghost, background="#1F6FEB", bd=0)
             outer.pack(padx=0, pady=0)
             label = tk.Label(
@@ -467,28 +463,66 @@ class ManagedTreeview:
                 bd=0,
             )
             label.pack(padx=1, pady=1)
+            # Position offscreen before showing to avoid first-paint flicker.
+            ghost.wm_geometry("+-2000+-2000")
             self._drag_state["ghost"] = ghost
             self._drag_state["ghost_label"] = label
+            self._drag_state["ghost_frame"] = outer
         except Exception:
             self._drag_state["ghost"] = None
             self._drag_state["ghost_label"] = None
+            self._drag_state["ghost_frame"] = None
 
         try:
             indicator = tk.Toplevel(self.tree)
             indicator.wm_overrideredirect(True)
             indicator.wm_attributes("-topmost", True)
-            tk.Frame(indicator, background="#1F6FEB", width=3, height=24).pack(
-                fill="both", expand=True
-            )
-            indicator.withdraw()
+            body_h = max(int(self.tree.winfo_height()), 24)
+            y_indicator = int(self.tree.winfo_rooty())
+            inner = tk.Frame(indicator, background="#1F6FEB", width=3, height=body_h)
+            inner.pack(fill="both", expand=True)
+            indicator.wm_geometry(f"3x{body_h}+-2000+{y_indicator}")
+            indicator.lift()
             self._drag_state["indicator"] = indicator
+            self._drag_state["indicator_frame"] = inner
+            self._drag_state["indicator_height"] = body_h
+            self._drag_state["indicator_y"] = y_indicator
         except Exception:
             self._drag_state["indicator"] = None
+            self._drag_state["indicator_frame"] = None
+
+        # Motion-hot-path caches — updated only on real transitions, so
+        # most motion events become a few cheap integer comparisons.
+        self._drag_state["last_drop_x"] = None
+        self._drag_state["last_valid"] = None
+        self._drag_state["last_ghost_pos"] = None
+        self._drag_state["last_target_col"] = None
 
         try:
             self.tree.configure(cursor="fleur")
         except Exception:
             pass
+
+    def _column_bbox_screen_cached(
+        self, drag: dict[str, Any], col: str
+    ) -> tuple[int, int] | None:
+        """Same as ``_column_bbox_screen`` but memoizes the result per
+        target column for the lifetime of the current drag.
+
+        A single horizontal drag sweeps across at most a handful of
+        columns; caching avoids N calls to ``tree.bbox`` and
+        ``tree.column`` per motion event when the user hovers inside the
+        same column for multiple frames.
+        """
+        cache = drag.get("bbox_cache")
+        if not isinstance(cache, dict):
+            cache = {}
+            drag["bbox_cache"] = cache
+        if col in cache:
+            return cache[col]
+        bbox = self._column_bbox_screen(col)
+        cache[col] = bbox
+        return bbox
 
     def _teardown_drag_visuals(self) -> None:
         self._teardown_drag_visuals_state(self._drag_state)
@@ -515,88 +549,107 @@ class ManagedTreeview:
         drag = self._drag_state
         ghost = drag.get("ghost")
         indicator = drag.get("indicator")
-        label = drag.get("ghost_label")
         source = str(drag.get("source") or "")
 
-        # Move the ghost to follow the cursor regardless of whether we're
-        # over a valid target.
         try:
             x_root = int(getattr(event, "x_root", 0) or 0)
             y_root = int(getattr(event, "y_root", 0) or 0)
         except Exception:
             x_root = y_root = 0
-        if ghost is not None:
-            try:
-                ghost.wm_geometry(f"+{x_root + 14}+{y_root + 12}")
-            except Exception:
-                pass
 
-        # Decide target + validity based on header region.
-        target = ""
-        after = False
-        valid = False
+        # Ghost follows cursor — skip the wm_geometry call when it moved
+        # less than 2px (avoids hammering the WM with micro-updates).
+        if ghost is not None:
+            last_pos = drag.get("last_ghost_pos") or (-9999, -9999)
+            gx = x_root + 14
+            gy = y_root + 12
+            if abs(gx - last_pos[0]) >= 2 or abs(gy - last_pos[1]) >= 2:
+                try:
+                    ghost.wm_geometry(f"+{gx}+{gy}")
+                except Exception:
+                    pass
+                drag["last_ghost_pos"] = (gx, gy)
+
+        # Decide target + validity. We ask Tk directly per motion event
+        # (fast — C-level identify_column/region calls) so the math stays
+        # correct when the tree is horizontally scrolled or partially
+        # off-screen. `_column_bbox_screen` is cached by target id for
+        # the duration of the drag to avoid hammering bbox() unchanged.
+        target = _column_id_from_event(self.tree, event)
         try:
             region = str(self.tree.identify_region(event.x, event.y))
         except Exception:
             region = ""
-        if region == "heading":
-            target = _column_id_from_event(self.tree, event)
-            bbox = self._column_bbox_screen(target) if target else None
+
+        after = False
+        valid = False
+        drop_x: int | None = None
+        if region == "heading" and target:
+            bbox = self._column_bbox_screen_cached(drag, target)
             if bbox is not None:
                 left, right = bbox
                 mid = (left + right) // 2
                 after = x_root >= mid
-                valid = self._is_valid_drop(source, target, after)
                 drop_x = right if after else left
-                if indicator is not None:
-                    try:
-                        header_h = self._estimate_header_height()
-                        body_h = max(int(self.tree.winfo_height()), header_h + 12)
-                        y_indicator = self.tree.winfo_rooty()
-                        indicator.wm_geometry(
-                            f"3x{body_h}+{drop_x - 1}+{y_indicator}"
-                        )
-                        fill_color = "#1F6FEB" if valid else "#D92D20"
-                        try:
-                            for child in indicator.winfo_children():
-                                child.configure(background=fill_color)
-                        except Exception:
-                            pass
-                        indicator.deiconify()
-                        indicator.lift()
-                    except Exception:
-                        pass
+                valid = self._is_valid_drop(source, target, after)
             else:
-                if indicator is not None:
-                    try:
-                        indicator.withdraw()
-                    except Exception:
-                        pass
-        else:
-            if indicator is not None:
-                try:
-                    indicator.withdraw()
-                except Exception:
-                    pass
+                target = ""
 
         drag["target"] = target
         drag["after"] = after
         drag["valid"] = valid
 
-        # Cursor feedback.
-        try:
-            self.tree.configure(cursor="fleur" if valid else "X_cursor")
-        except Exception:
-            pass
+        # Only touch the indicator Toplevel when its position or color
+        # needs to change. Tk's Toplevel repositioning on Windows is the
+        # main source of drag lag when unthrottled.
+        if indicator is not None:
+            last_drop_x = drag.get("last_drop_x")
+            last_valid = drag.get("last_valid")
+            if drop_x is None:
+                if last_drop_x is not None:
+                    try:
+                        indicator.wm_geometry(
+                            f"3x{drag.get('indicator_height', 24)}+-2000+"
+                            f"{drag.get('indicator_y', 0)}"
+                        )
+                    except Exception:
+                        pass
+                    drag["last_drop_x"] = None
+            else:
+                if last_drop_x != drop_x:
+                    try:
+                        indicator.wm_geometry(
+                            f"3x{drag.get('indicator_height', 24)}+"
+                            f"{drop_x - 1}+{drag.get('indicator_y', 0)}"
+                        )
+                    except Exception:
+                        pass
+                    drag["last_drop_x"] = drop_x
+                if last_valid != valid:
+                    fill = "#1F6FEB" if valid else "#D92D20"
+                    frame = drag.get("indicator_frame")
+                    if frame is not None:
+                        try:
+                            frame.configure(background=fill)
+                        except Exception:
+                            pass
 
-        # Ghost label tint — subtle red border when invalid.
-        if label is not None:
+        # Cursor + ghost-border — only change on validity transition.
+        if drag.get("last_valid") != valid:
+            cursor = "fleur" if valid or drop_x is None else "X_cursor"
             try:
-                label.configure(foreground="#1F6FEB" if valid else "#D92D20")
-                parent = label.master
-                parent.configure(background="#1F6FEB" if valid else "#D92D20")
+                self.tree.configure(cursor=cursor)
             except Exception:
                 pass
+            ghost_frame = drag.get("ghost_frame")
+            if ghost_frame is not None:
+                try:
+                    ghost_frame.configure(
+                        background="#1F6FEB" if valid or drop_x is None else "#D92D20"
+                    )
+                except Exception:
+                    pass
+            drag["last_valid"] = valid
 
     # ------------------------------------------------------------------
     # Drop-validation + geometry helpers
