@@ -986,16 +986,46 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     # -----------------------------------------------------------------
 
     def _refresh_pivot(self) -> None:
+        # Profile-flagget bryter ned _refresh_pivot pr underkalle slik at
+        # vi vet om treghet ligger i mapping-issues, refresh_pivot, AO-label
+        # eller mapping-warning. Aktiveres med UTVALG_PROFILE_REFRESH=1.
         try:
-            self._refresh_mapping_issues()
+            from page_analyse_refresh import _PROFILE_REFRESH
         except Exception:
-            pass
-        page_analyse_pivot.refresh_pivot(page=self)
-        self._update_ao_count_label()
-        try:
-            self._update_mapping_warning_banner()
-        except Exception:
-            pass
+            _PROFILE_REFRESH = False
+
+        import time as _time
+        _stages: dict[str, float] = {}
+
+        def _step(label: str, fn) -> None:
+            t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
+            try:
+                fn()
+            except Exception:
+                pass
+            if _PROFILE_REFRESH:
+                _stages[label] = (_time.perf_counter() - t0) * 1000
+
+        _step("_refresh_mapping_issues", self._refresh_mapping_issues)
+        _step("refresh_pivot (dispatch)", lambda: page_analyse_pivot.refresh_pivot(page=self))
+        _step("_update_ao_count_label", self._update_ao_count_label)
+        _step("_update_mapping_warning_banner", self._update_mapping_warning_banner)
+
+        if _PROFILE_REFRESH:
+            import logging
+            import sys
+            parts = ["[REFRESH PROFILE: _refresh_pivot]"]
+            for k, v in _stages.items():
+                parts.append(f"{k}={v:.0f}ms")
+            msg = " | ".join(parts)
+            try:
+                logging.getLogger("app").warning(msg)
+            except Exception:
+                pass
+            try:
+                print(msg, file=sys.stderr, flush=True)
+            except Exception:
+                pass
 
     def _refresh_mapping_issues(self) -> None:
         analyse_mapping_ui.refresh_mapping_issues(page=self)
