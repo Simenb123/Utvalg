@@ -20,21 +20,41 @@ def _issue_for_account(page: Any, konto: str):
 
 def refresh_mapping_issues(page: Any) -> None:
     try:
+        from page_analyse_refresh import _PROFILE_REFRESH
+    except Exception:
+        _PROFILE_REFRESH = False
+
+    import time as _time
+    _stages: dict[str, float] = {}
+
+    def _t(label: str, fn):
+        t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
+        try:
+            res = fn()
+        except Exception:
+            res = None
+        if _PROFILE_REFRESH:
+            _stages[label] = (_time.perf_counter() - t0) * 1000
+        return res
+
+    try:
         import analyse_mapping_service
-        issues = analyse_mapping_service.build_page_mapping_issues(page)
-        problems = analyse_mapping_service.problem_mapping_issues(issues)
-        summary = analyse_mapping_service.summarize_mapping_issues(issues)
-        accounts = analyse_mapping_service.get_problem_accounts(issues)
+        issues = _t("build_page_mapping_issues", lambda: analyse_mapping_service.build_page_mapping_issues(page))
+        problems = _t("problem_mapping_issues", lambda: analyse_mapping_service.problem_mapping_issues(issues))
+        summary = _t("summarize_mapping_issues", lambda: analyse_mapping_service.summarize_mapping_issues(issues))
+        accounts = _t("get_problem_accounts", lambda: analyse_mapping_service.get_problem_accounts(issues))
     except Exception:
         issues = []
         problems = []
         summary = ""
         accounts = []
-    page._mapping_issues = list(issues)
-    page._mapping_problem_accounts = list(accounts)
+    page._mapping_issues = list(issues) if issues else []
+    page._mapping_problem_accounts = list(accounts) if accounts else []
 
     # Drift-deteksjon: konto med ulik RL år<->fjor, eller kun i ett år.
-    drifts = _compute_mapping_drifts(page)
+    drifts = _t("_compute_mapping_drifts", lambda: _compute_mapping_drifts(page))
+    if drifts is None:
+        drifts = []
     page._mapping_drifts = list(drifts)
     drift_summary = ""
     if drifts:
@@ -54,7 +74,23 @@ def refresh_mapping_issues(page: Any) -> None:
             page._mapping_warning_var.set(page._mapping_warning)
         except Exception:
             pass
-    update_mapping_warning_banner(page, problem_count=len(problems))
+    update_mapping_warning_banner(page, problem_count=len(problems) if problems else 0)
+
+    if _PROFILE_REFRESH and _stages:
+        import logging
+        import sys
+        parts = ["[REFRESH PROFILE: refresh_mapping_issues]"]
+        for k, v in _stages.items():
+            parts.append(f"{k}={v:.0f}ms")
+        msg = " | ".join(parts)
+        try:
+            logging.getLogger("app").warning(msg)
+        except Exception:
+            pass
+        try:
+            print(msg, file=sys.stderr, flush=True)
+        except Exception:
+            pass
 
 
 def _compute_mapping_drifts(page: Any) -> list:
