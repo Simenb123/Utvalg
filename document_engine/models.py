@@ -198,3 +198,44 @@ class DocumentAnalysisResult:
             "profile_status": self.profile_status,
             "confidence": self.confidence,
         }
+
+@dataclass
+class TextSegment:
+    """A piece of extracted text + geometry on a PDF page.
+
+    Populated by extractors in :mod:`document_engine.extractors` (and
+    re-exported from :mod:`document_engine.engine` for back-compat).
+    Fields with optional word-level geometry and per-page bilagsprint
+    classification live here because the data crosses module boundaries
+    between extraction and scoring.
+    """
+    text: str
+    source: str
+    page: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    # Optional per-token span info (char_start, char_end_exclusive, word_bbox).
+    # char offsets index into ``text``. Only populated by extractors that have
+    # word-level geometry (currently ``pdf_text_fitz_words``); other sources
+    # leave this empty so callers must fall back to ``bbox``.
+    word_spans: list[tuple[int, int, tuple[float, float, float, float]]] = field(default_factory=list)
+    # True when this segment comes from a page classified as a Tripletex
+    # bilagsprint (accounting cover page). Set by the extractor based on
+    # the *whole page's* text — word-level segments can't detect it on
+    # their own because a single word-line rarely contains both the
+    # "bilag nummer" and "konteringssammendrag" signals.
+    is_bilagsprint_page: bool = False
+
+
+@dataclass
+class ExtractedTextResult:
+    """Result of picking the best text-extraction candidate for a PDF.
+
+    Produced by the top-level extraction orchestrator; consumed by the
+    field-matching layer in :mod:`document_engine.engine`.
+    """
+    text: str
+    source: str
+    ocr_used: bool
+    metadata: dict[str, Any] = field(default_factory=dict)
+    segments: list[TextSegment] = field(default_factory=list)
+
