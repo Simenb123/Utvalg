@@ -95,13 +95,30 @@ def load_rl_config() -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     return intervals, regnskapslinjer
 
 
+# Modul-nivå cache for SB-lasting. Profil viste 700-900ms pr kall — kallet
+# skjer i hver Analyse-refresh. SB endres bare når brukeren importerer ny
+# versjon, så vi cacher pr (klient, år, versjon-path, mtime).
+_SB_CACHE: tuple[tuple[str, str, str, float], pd.DataFrame] | None = None
+
+
+def _invalidate_sb_cache() -> None:
+    """Tving re-lesing av SB neste gang. Brukes av tester eller etter
+    eksplisitt SB-re-import."""
+    global _SB_CACHE
+    _SB_CACHE = None
+
+
 def load_sb_for_session() -> Optional[pd.DataFrame]:
     """Last aktiv SB-versjon for gjeldende klient/år.
 
     Bruker session.client og session.year (satt av ui_main ved datalasting).
     Returnerer normalisert DataFrame med kolonnene konto, kontonavn, ib, ub, netto.
     Returnerer None ved manglende konfig eller feil.
+
+    Caches pr (klient, år, versjon-path, mtime). Mtime-sjekken sikrer at
+    cachen invalideres automatisk hvis filen erstattes på disk.
     """
+    global _SB_CACHE
     try:
         import session as _session
         client = getattr(_session, "client", None)
@@ -125,6 +142,16 @@ def load_sb_for_session() -> Optional[pd.DataFrame]:
             log.warning("SB-versjon-fil finnes ikke på disk: %s", sb_path)
             return None
 
+        try:
+            mtime = sb_path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        cache_key = (str(client), str(year), str(sb_path), mtime)
+
+        cached = _SB_CACHE
+        if cached is not None and cached[0] == cache_key:
+            return cached[1].copy()
+
         from trial_balance_reader import read_trial_balance
         df = read_trial_balance(sb_path)
 
@@ -134,6 +161,8 @@ def load_sb_for_session() -> Optional[pd.DataFrame]:
 
         if df is not None and not df.empty:
             log.info("SB lastet: %s (%d kontoer)", sb_path.name, len(df))
+            _SB_CACHE = (cache_key, df)
+            return df.copy()
         return df
 
     except Exception as exc:

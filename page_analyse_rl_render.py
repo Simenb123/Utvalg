@@ -328,6 +328,24 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
 
 def refresh_rl_pivot(*, page: Any) -> None:
     """Fyll pivot_tree med regnskapslinjer (IB, UB, Antall)."""
+    # Per-stage timing samles og logges på slutten når UTVALG_PROFILE_REFRESH=1.
+    # Importert lazy for å unngå sirkulær import.
+    try:
+        from page_analyse_refresh import _PROFILE_REFRESH
+    except Exception:
+        _PROFILE_REFRESH = False
+
+    import time as _time
+    _stage_t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
+    _stages: dict[str, float] = {}
+
+    def _mark(label: str) -> None:
+        if _PROFILE_REFRESH:
+            nonlocal _stage_t0
+            now = _time.perf_counter()
+            _stages[label] = (now - _stage_t0) * 1000
+            _stage_t0 = now
+
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
         return
@@ -336,6 +354,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
 
     # Oppdater headings
     update_pivot_headings(page=page, mode="Regnskapslinje")
+    _mark("setup+headings")
 
     try:
         page._clear_tree(tree)
@@ -425,6 +444,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
     except Exception as exc:
         log.warning("refresh_rl_pivot: feil ved bygging: %s", exc)
         return
+    _mark("build_rl_pivot (hoved)")
 
     # --- Fjorårsdata ---
     sb_prev = ensure_sb_prev_loaded(page=page)
@@ -471,6 +491,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         pass
     # Oppdater headings på nytt: fjor_source og has_prev er nå kjent
     update_pivot_headings(page=page, mode="Regnskapslinje")
+    _mark("fjor+brreg-fallback")
 
     try:
         base_pivot_df = build_rl_pivot(
@@ -495,6 +516,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
     except Exception as exc:
         log.warning("refresh_rl_pivot: AO-sammenligning feilet: %s", exc)
         pivot_df = _add_adjustment_columns(pivot_df)
+    _mark("AO-sammenligning (build_rl_pivot x2)")
 
     # --- BRREG-sammenligning ---
     brreg_data = getattr(page, "_nk_brreg_data", None)
@@ -515,6 +537,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         page._pivot_df_rl = snap
     except Exception:
         pass
+    _mark("brreg+cache_snapshot")
 
     has_sb = sb_df is not None and not sb_df.empty
 
@@ -659,6 +682,8 @@ def refresh_rl_pivot(*, page: Any) -> None:
         except Exception:
             continue
 
+    _mark("tree.insert (alle RL-rader)")
+
     # Auto-juster kolonnene dersom fjorårsdata akkurat ble lastet
     try:
         import page_analyse_columns as _pac
@@ -678,6 +703,13 @@ def refresh_rl_pivot(*, page: Any) -> None:
             page._restore_rl_pivot_selection(selected_regnr)
         except Exception:
             pass
+    _mark("post: column-fit + selection")
+
+    if _PROFILE_REFRESH and _stages:
+        parts = ["[REFRESH PROFILE: refresh_rl_pivot]"]
+        for label, ms in _stages.items():
+            parts.append(f"{label}={ms:.0f}ms")
+        log.warning(" | ".join(parts))
 
 
 def _show_rl_not_configured(tree: Any) -> None:
