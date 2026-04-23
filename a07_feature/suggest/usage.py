@@ -53,9 +53,37 @@ def _top_items(counter: Counter[str], *, limit: int = 6) -> tuple[str, ...]:
     return tuple(out)
 
 
+# Modul-nivå cache. Funksjonen er deterministisk i input-DataFrame, så
+# vi kan trygt returnere cached resultat hvis samme objekt sendes inn.
+# Cache-nøkkel = id(df) + (n_rows, kolonner) som ekstra verifisering
+# slik at vi ikke får falsk hit hvis Python gjenbruker minneadressen.
+# Profil-måling viste at funksjonen tar ~4 sek for 200k rader pga
+# iterrows(), og kalles på hver Analyse-refresh via mapping_issues.
+_USAGE_CACHE: tuple[int, int, tuple, dict] | None = None
+
+
+def _invalidate_usage_cache() -> None:
+    """Tving re-bygging neste gang. For tester eller eksplisitt invalidering."""
+    global _USAGE_CACHE
+    _USAGE_CACHE = None
+
+
 def build_account_usage_features(df_transactions: pd.DataFrame | None) -> dict[str, AccountUsageFeatures]:
     if df_transactions is None or not isinstance(df_transactions, pd.DataFrame) or df_transactions.empty:
         return {}
+
+    global _USAGE_CACHE
+    cache_key_a = id(df_transactions)
+    cache_key_b = len(df_transactions.index)
+    cache_key_c = tuple(str(c) for c in df_transactions.columns)
+    cached = _USAGE_CACHE
+    if (
+        cached is not None
+        and cached[0] == cache_key_a
+        and cached[1] == cache_key_b
+        and cached[2] == cache_key_c
+    ):
+        return cached[3]
 
     konto_col = _resolve_column(df_transactions, _ACCOUNT_ALIASES)
     if not konto_col:
@@ -156,6 +184,7 @@ def build_account_usage_features(df_transactions: pd.DataFrame | None) -> dict[s
             top_counterparty_prefixes=_top_items(counterparty_prefixes.get(str(account_no), Counter())),
         )
 
+    _USAGE_CACHE = (cache_key_a, cache_key_b, cache_key_c, out)
     return out
 
 
