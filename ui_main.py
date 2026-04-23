@@ -195,8 +195,10 @@ class App(tk.Tk):
 
         # --- Normal GUI-init ---
         self.title("Utvalg – revisjonsverktøy")
-        self.geometry("1280x900")
         self.minsize(1100, 780)
+        # Sentrer hovedvinduet på skjermen — gir samme posisjon som splash
+        # slik at fade-overgangen føles som ett sammenhengende vindu.
+        self._center_window_on_screen(1280, 900)
 
         # Splash-vindu først — vises mens resten av app-init kjører.
         # Hovedvinduet skjules midlertidig så brukeren ser kun splash.
@@ -334,6 +336,20 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
 
     _SPLASH_MIN_VISIBLE_MS = 2000
+
+    def _center_window_on_screen(self, width: int, height: int) -> None:
+        """Plasser dette Tk-vinduet sentrert på primær-skjermen."""
+        try:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            x = max(0, (sw - width) // 2)
+            y = max(0, (sh - height) // 2)
+            self.geometry(f"{width}x{height}+{x}+{y}")
+        except Exception:
+            try:
+                self.geometry(f"{width}x{height}")
+            except Exception:
+                pass
 
     def _show_splash(self) -> float:
         """Vis splash-vindu med AarVaaken-banner i app-tema-farger.
