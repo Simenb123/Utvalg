@@ -911,10 +911,24 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         Call this whenever the inputs to classification change (mutations, admin saves,
         explicit ``Oppfrisk``). Pure filter/search/scope changes do NOT invalidate — the
         cached base is reused and only postprocessing is rerun.
+
+        Tømmer også payroll-context-cachen (_profile_document, _history_document,
+        _profile_catalog). Uten dette ville set_owned_company / set_detail_class
+        ikke vises før app-restart fordi ensure_payroll_context_loaded
+        returnerer cached document som ikke har de nye verdiene.
         """
         try:
             self._base_payload_cache = None
             self._base_payload_cache_key = None
+        except Exception:
+            pass
+        # Tving re-lesing av profil-dokument fra disk — dette er kilden
+        # for owned_company_orgnr og detail_class_id i payload-decorate.
+        try:
+            self._profile_document = None
+            self._history_document = None
+            self._profile_catalog = None
+            self._payroll_context_key = None
         except Exception:
             pass
 
