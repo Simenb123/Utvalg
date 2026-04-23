@@ -389,7 +389,11 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # Header for transaksjoner/SB-visning med toggle
     tx_header = ttk.Frame(tx_outer)
     tx_header.grid(row=0, column=0, sticky="ew", pady=(0, 2))
-    tx_header.columnconfigure(1, weight=1)
+    # Spacer-kolonne mellom visning-kontroller (venstre) og Vis-feltet (høyre).
+    # col 1-3: Visning-kontroller (Saldobalanse/Transaksjoner/Annet)
+    # col 4: spacer som tar all overflødig plass
+    # col 5-6: "Vis: <antall>"-spinbox ved høyre kant
+    tx_header.columnconfigure(4, weight=1)
 
     ttk.Label(tx_header, text="Visning:").grid(row=0, column=0, padx=(0, 6))
 
@@ -455,11 +459,10 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         page._tx_view_adv_btn = adv_btn
         page._tx_view_adv_menu = adv_menu
 
-    # "Vis: <antall>" — flyttet hit fra toolbar (rad 2). Bestemmer hvor mange
-    # rader som vises i listen rett under denne headeren.
+    # "Vis: <antall>" — ligger helt til høyre, med spacer-kolonne 4 imellom.
     _var_max_rows = getattr(page, "_var_max_rows", None)
     if _var_max_rows is not None:
-        ttk.Label(tx_header, text="Vis:").grid(row=0, column=2, sticky="e", padx=(12, 4))
+        ttk.Label(tx_header, text="Vis:").grid(row=0, column=5, sticky="e", padx=(12, 4))
         _spn_max = ttk.Spinbox(
             tx_header,
             from_=50,
@@ -469,7 +472,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
             width=8,
             command=page._on_max_rows_changed,
         )
-        _spn_max.grid(row=0, column=3, sticky="e")
+        _spn_max.grid(row=0, column=6, sticky="e")
         _spn_max.bind("<FocusOut>", lambda _e: page._on_max_rows_changed())
         _spn_max.bind("<Return>", lambda _e: page._on_max_rows_changed())
         page._spn_max = _spn_max
@@ -482,12 +485,56 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # Desimaler-toggle og "Eksporter..."-knapp er flyttet til "Visning ▾"-menyen
     # på rad 1 i toolbaren (eksport håndteres via Rapporter-/Handlinger-menyen).
 
-    tx_outer.rowconfigure(1, weight=1)
+    # Søkefelt over høyre listbox — speiler mønsteret fra venstre ("Sok konto...").
+    # Deler _var_search med toolbar-søket, så endring ett sted synkes til begge.
+    _var_search_shared = getattr(page, "_var_search", None)
+    if _var_search_shared is not None:
+        tx_search_entry = ttk.Entry(tx_outer, textvariable=_var_search_shared)
+        tx_search_entry.grid(row=1, column=0, sticky="ew", pady=(0, 2))
+
+        _tx_search_placeholder = [not bool(_var_search_shared.get())]
+
+        def _apply_tx_search_placeholder() -> None:
+            try:
+                if not _var_search_shared.get():
+                    tx_search_entry.insert(0, "Søk i transaksjoner…")
+                    tx_search_entry.configure(foreground="gray")
+                    _tx_search_placeholder[0] = True
+                else:
+                    tx_search_entry.configure(foreground="")
+                    _tx_search_placeholder[0] = False
+            except Exception:
+                pass
+
+        def _tx_search_focus_in(_e=None) -> None:
+            if _tx_search_placeholder[0]:
+                try:
+                    tx_search_entry.delete(0, "end")
+                    tx_search_entry.configure(foreground="")
+                except Exception:
+                    pass
+                _tx_search_placeholder[0] = False
+
+        def _tx_search_focus_out(_e=None) -> None:
+            try:
+                if not _var_search_shared.get().strip():
+                    tx_search_entry.insert(0, "Søk i transaksjoner…")
+                    tx_search_entry.configure(foreground="gray")
+                    _tx_search_placeholder[0] = True
+            except Exception:
+                pass
+
+        tx_search_entry.bind("<FocusIn>", _tx_search_focus_in)
+        tx_search_entry.bind("<FocusOut>", _tx_search_focus_out)
+        _apply_tx_search_placeholder()
+        page._tx_search_entry = tx_search_entry  # type: ignore[attr-defined]
+
+    tx_outer.rowconfigure(2, weight=1)
     tx_outer.columnconfigure(0, weight=1)
 
     # --- TX-frame (transaksjoner) ---
     tx_frame = ttk.Frame(tx_outer)
-    tx_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    tx_frame.grid(row=2, column=0, columnspan=2, sticky="nsew")
     tx_frame.rowconfigure(0, weight=1)
     tx_frame.columnconfigure(0, weight=1)
 
