@@ -162,8 +162,12 @@ class TreeviewColumnManager:
         self.apply_visible()
         self.save_to_preferences()
 
-    def reorder_columns(self, source: str, target: str) -> bool:
-        """Flytt en kolonne foran en annen og bevar pinned-regler."""
+    def reorder_columns(self, source: str, target: str, *, after: bool = False) -> bool:
+        """Flytt ``source`` foran (eller bak) ``target``. Bevarer pinned-regler.
+
+        ``after=True`` slipper kolonnen *etter* ``target`` — brukes av drag-
+        og-slipp når brukeren slipper i høyre halvdel av en målkolonne.
+        """
         source = str(source or "").strip()
         target = str(target or "").strip()
         if not source or not target or source == target:
@@ -176,7 +180,11 @@ class TreeviewColumnManager:
         moved = list(self._order)
         moved.remove(source)
         insert_at = moved.index(target)
+        if after:
+            insert_at += 1
         moved.insert(insert_at, source)
+        if moved == self._order:
+            return False
         self._order = moved
         self._normalize_order()
         self.apply_visible()

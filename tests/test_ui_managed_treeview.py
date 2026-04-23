@@ -305,3 +305,158 @@ class TestBindings:
         assert "<ButtonPress-1>" in bind_events
         assert "<B1-Motion>" in bind_events
         assert "<ButtonRelease-1>" in bind_events
+        assert "<Escape>" in bind_events
+
+
+# ---------------------------------------------------------------------------
+# Drag-reorder (ghost + drop indicator)
+# ---------------------------------------------------------------------------
+
+def _make_event(**overrides):
+    """Minimal event stand-in with widget-relative and screen coords."""
+    defaults = {"x": 10, "y": 5, "x_root": 110, "y_root": 105}
+    defaults.update(overrides)
+    evt = MagicMock()
+    for k, v in defaults.items():
+        setattr(evt, k, v)
+    return evt
+
+
+class TestDragReorder:
+    def test_press_on_pinned_blocks_drag(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [
+            ColumnSpec(id="a", pinned=True),
+            ColumnSpec(id="b"),
+            ColumnSpec(id="c"),
+        ]
+        tree.identify_region = MagicMock(return_value="heading")
+        tree.identify_column = MagicMock(return_value="#1")  # col "a"
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        mt._on_left_press(_make_event())
+        assert mt._drag_state is None  # pinned → no drag started
+
+    def test_press_on_unpinned_starts_pending_drag(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [
+            ColumnSpec(id="a", pinned=True),
+            ColumnSpec(id="b"),
+            ColumnSpec(id="c"),
+        ]
+        tree.identify_region = MagicMock(return_value="heading")
+        tree.identify_column = MagicMock(return_value="#2")  # col "b"
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        mt._on_left_press(_make_event(x=100))
+        assert isinstance(mt._drag_state, dict)
+        assert mt._drag_state["source"] == "b"
+        assert mt._drag_state["active"] is False  # not past threshold yet
+
+    def test_is_valid_drop_rules(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [
+            ColumnSpec(id="a", pinned=True),
+            ColumnSpec(id="b"),
+            ColumnSpec(id="c"),
+        ]
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        # Source pinned → never valid
+        assert mt._is_valid_drop("a", "b", after=True) is False
+        # Same column → not valid
+        assert mt._is_valid_drop("b", "b", after=False) is False
+        # Normal unpinned→unpinned → valid
+        assert mt._is_valid_drop("b", "c", after=False) is True
+        assert mt._is_valid_drop("c", "b", after=True) is True
+        # Dropping BEFORE a pinned column → blocked (pinned must stay first)
+        assert mt._is_valid_drop("b", "a", after=False) is False
+        # Dropping AFTER a pinned column is fine
+        assert mt._is_valid_drop("b", "a", after=True) is True
+
+    def test_finish_drag_invalid_does_not_reorder(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        mt._drag_state = {
+            "source": "b", "target": "b", "after": False, "valid": False,
+            "active": True, "ghost": None, "indicator": None, "ghost_label": None,
+            "start_x": 0,
+        }
+        original = list(mt.column_manager._order)
+        mt._finish_drag(_make_event())
+        assert list(mt.column_manager._order) == original
+
+    def test_finish_drag_valid_reorders(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        assert list(mt.column_manager._order) == ["a", "b", "c"]
+        mt._drag_state = {
+            "source": "a", "target": "c", "after": True, "valid": True,
+            "active": True, "ghost": None, "indicator": None, "ghost_label": None,
+            "start_x": 0,
+        }
+        mt._finish_drag(_make_event())
+        # "a" is not pinned here, so it can end up at the far right.
+        assert list(mt.column_manager._order) == ["b", "c", "a"]
+
+    def test_escape_cancels_active_drag(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        mt._drag_state = {
+            "source": "a", "target": "c", "after": True, "valid": True,
+            "active": True, "ghost": None, "indicator": None, "ghost_label": None,
+            "start_x": 0,
+        }
+        original = list(mt.column_manager._order)
+        mt._on_escape(_make_event())
+        assert mt._drag_state is None
+        # Escape must not trigger the reorder.
+        assert list(mt.column_manager._order) == original
+
+    def test_reorder_columns_after_flag_forwarded(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        tree = _make_tree(("a", "b", "c"))
+        specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree, view_id="t", column_specs=specs, auto_bind=False,
+            )
+        # after=False: insert "c" BEFORE "a" → [c, a, b]
+        assert mt.reorder_columns("c", "a", after=False) is True
+        assert list(mt.column_manager._order) == ["c", "a", "b"]
+        # after=True: insert "c" AFTER "b" (send it to the end) → [a, b, c]
+        assert mt.reorder_columns("c", "b", after=True) is True
+        assert list(mt.column_manager._order) == ["a", "b", "c"]
+        # Re-running the same reorder is a no-op → returns False.
+        assert mt.reorder_columns("c", "b", after=True) is False
