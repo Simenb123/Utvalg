@@ -144,6 +144,21 @@ class LoadingOverlay:
         if self._win is not None:
             self._win.update_idletasks()
 
+    def set_text(self, text: str) -> None:
+        """Oppdater label-tekst uten å vise/skjule. Brukes for å gi
+        brukeren visuell progresjon mens en lang jobb går gjennom flere
+        stadier."""
+        if self._lbl is not None:
+            try:
+                self._lbl.configure(text=text)
+            except Exception:
+                pass
+        if self._win is not None:
+            try:
+                self._win.update_idletasks()
+            except Exception:
+                pass
+
     def hide(self) -> None:
         if self._count > 0:
             self._count -= 1
@@ -204,15 +219,21 @@ class LoadingOverlay:
                     return
                 return
 
-            self.hide()
-            if kind == "ok":
-                on_done(payload)  # type: ignore[arg-type]
-            else:
-                err, tb = payload  # type: ignore[misc]
-                if on_error is not None:
-                    on_error(err, tb)  # type: ignore[arg-type]
+            # Kjør on_done FØR hide. Da kan callbacken vise en ny overlay
+            # (f.eks. App-nivå "Bygger Analyse...") før vår blir borte —
+            # ingen synlig flicker mellom dem. Hvis callback'en feiler,
+            # skjuler vi uansett etterpå.
+            try:
+                if kind == "ok":
+                    on_done(payload)  # type: ignore[arg-type]
                 else:
-                    raise err
+                    err, tb = payload  # type: ignore[misc]
+                    if on_error is not None:
+                        on_error(err, tb)  # type: ignore[arg-type]
+                    else:
+                        raise err
+            finally:
+                self.hide()
 
         try:
             self.master.after(poll_ms, _poll)

@@ -197,6 +197,12 @@ class App(tk.Tk):
         self.title("Utvalg – revisjonsverktøy")
         self.geometry("1280x900")
         self.minsize(1100, 780)
+
+        # Splash-vindu først — vises mens resten av app-init kjører.
+        # Hovedvinduet skjules midlertidig så brukeren ser kun splash.
+        self.withdraw()
+        _splash_started_at = self._show_splash()
+
         try:
             theme.apply_theme(self)
         except Exception:
@@ -317,6 +323,106 @@ class App(tk.Tk):
 
         # Start alltid paa Oversikt ved oppstart
         self._restore_last_tab()
+
+        # Lukk splash etter at hovedvinduet er klart. Minimum visningstid
+        # 2 sekunder så banneret rekker å bli sett — hvis app-init var
+        # raskere, ventes resten av tiden via after().
+        self._close_splash_when_ready(_splash_started_at)
+
+    # ------------------------------------------------------------------
+    # Splash screen — vises ved oppstart mens app-init kjører
+    # ------------------------------------------------------------------
+
+    _SPLASH_MIN_VISIBLE_MS = 2000
+
+    def _show_splash(self) -> float:
+        """Vis splash-vindu med AarVaaken-banner. Returner start-tidspunkt.
+
+        Hovedvinduet skal være withdraw'et før kallet. Splash vises
+        sentrert på skjermen med stort bilde. Returnerer time.perf_counter()
+        for senere min-visningstid-beregning.
+        """
+        import time
+        t0 = time.perf_counter()
+        self._splash_window = None
+        try:
+            from PIL import Image, ImageTk  # type: ignore[import-untyped]
+            from pathlib import Path
+            import sys
+
+            # Finn AarVaaken.png — samme søkerekkefølge som LoadingOverlay
+            candidates = []
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "doc" / "pictures" / "AarVaaken.png")
+            candidates.append(Path(__file__).resolve().parent / "doc" / "pictures" / "AarVaaken.png")
+
+            pic_path = next((p for p in candidates if p.exists()), None)
+            if pic_path is None:
+                return t0
+
+            # Skaler bildet til 60% av skjermbredden, behold aspekt-ratio
+            screen_w = self.winfo_screenwidth()
+            target_w = max(600, int(screen_w * 0.6))
+            img = Image.open(str(pic_path))
+            w, h = img.size
+            target_h = max(1, int(round(target_w * h / w)))
+            img = img.resize((target_w, target_h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+
+            splash = tk.Toplevel(self)
+            splash.overrideredirect(True)  # ingen tittellinje
+            try:
+                splash.attributes("-topmost", True)
+            except Exception:
+                pass
+            try:
+                splash.configure(bg="white")
+            except Exception:
+                pass
+
+            lbl = ttk.Label(splash, image=photo, background="white")
+            lbl.image = photo  # behold referanse mot GC
+            lbl.pack(padx=20, pady=20)
+
+            # Sentrer på skjermen
+            splash.update_idletasks()
+            sw, sh = splash.winfo_screenwidth(), splash.winfo_screenheight()
+            ww, wh = splash.winfo_reqwidth(), splash.winfo_reqheight()
+            x = (sw - ww) // 2
+            y = (sh - wh) // 2
+            splash.geometry(f"{ww}x{wh}+{x}+{y}")
+
+            # Render
+            splash.update()
+            self._splash_window = splash
+        except Exception:
+            self._splash_window = None
+        return t0
+
+    def _close_splash_when_ready(self, started_at: float) -> None:
+        """Lukk splash etter min-visningstid (2 sek), så vis hovedvindu."""
+        import time
+        splash = getattr(self, "_splash_window", None)
+
+        def _done() -> None:
+            if splash is not None:
+                try:
+                    splash.destroy()
+                except Exception:
+                    pass
+            try:
+                self.deiconify()
+                self.lift()
+            except Exception:
+                pass
+
+        try:
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            wait_ms = max(0, self._SPLASH_MIN_VISIBLE_MS - elapsed_ms)
+            self.after(wait_ms, _done)
+        except Exception:
+            _done()
 
     def _build_global_footer(self) -> None:
         """Bygg en diskret footer-linje nederst i hovedvinduet.
@@ -829,12 +935,25 @@ class App(tk.Tk):
                 overlay = None
 
         # Registrer skjul-overlay som callback når Analyse-refresh er ferdig.
+        # Knytt også overlay til page slik at hver stage kan oppdatere
+        # status-tekst for visuell progresjon.
         if overlay is not None:
             try:
                 page = self.page_analyse
                 cbs = list(getattr(page, "_post_heavy_refresh_callbacks", None) or [])
-                cbs.append(lambda o=overlay: o.hide())
+
+                def _hide_and_clear(o=overlay, p=page):
+                    try:
+                        o.hide()
+                    finally:
+                        try:
+                            p._loading_status_text_setter = None
+                        except Exception:
+                            pass
+
+                cbs.append(_hide_and_clear)
                 page._post_heavy_refresh_callbacks = cbs
+                page._loading_status_text_setter = overlay.set_text
             except Exception:
                 # Hvis vi ikke får registrert callback, skjul overlay
                 # umiddelbart så vi ikke etterlater den hengende.

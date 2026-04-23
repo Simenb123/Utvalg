@@ -116,6 +116,18 @@ _STAGE_NAMES = (
     "5_adapt_columns+update_data_level",
 )
 
+# Brukerrettet status-tekst pr stage. Brukes til å oppdatere App-overlay
+# mellom stages slik at brukeren ser tekstprogresjon selv om Tk-
+# progressbaren fryser pga. tung jobb i hovedtråden.
+_STAGE_STATUS_TEXT = (
+    "Laster regnskapsoppsett...",
+    "Filtrerer hovedbok...",
+    "Bygger pivot...",
+    "Bygger transaksjonsvisning...",
+    "Bygger detaljpanel...",
+    "Justerer kolonner...",
+)
+
 
 def run_heavy_refresh_staged(
     page: Any,
@@ -138,6 +150,15 @@ def run_heavy_refresh_staged(
     def _run_next(step_index: int = 0) -> None:
         if _is_stale():
             return
+
+        # Oppdater app-overlay-tekst hvis registrert. Setteren er
+        # typisk LoadingOverlay.set_text fra ui_main App-overlayen.
+        text_setter = getattr(page, "_loading_status_text_setter", None)
+        if callable(text_setter) and 0 <= step_index < len(_STAGE_STATUS_TEXT):
+            try:
+                text_setter(_STAGE_STATUS_TEXT[step_index])
+            except Exception:
+                pass
 
         stage_start = time.perf_counter() if _PROFILE_REFRESH else 0.0
 
