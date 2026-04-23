@@ -398,19 +398,10 @@ def build_toolbar(
         cb = ttk.Checkbutton(series_frame, text=str(i), variable=var, command=page._apply_filters_now)
         cb.grid(row=0, column=i, sticky="w")
 
-    ttk.Label(row2, text="Vis:").grid(row=0, column=2, sticky="w")
-    spn_max = ttk.Spinbox(
-        row2,
-        from_=50,
-        to=5000,
-        increment=50,
-        textvariable=var_max_rows,
-        width=8,
-        command=page._on_max_rows_changed,
-    )
-    spn_max.grid(row=0, column=3, sticky="w", padx=(4, 12))
-    spn_max.bind("<FocusOut>", lambda _e: page._on_max_rows_changed())
-    spn_max.bind("<Return>", lambda _e: page._on_max_rows_changed())
+    # "Vis: <antall>" er flyttet til høyre panels header (over kolonnene).
+    # Widget-referansen beholdes som None — page._var_max_rows leses fortsatt
+    # av filter-logikken, og widget settes på page._spn_max fra panels.py.
+    spn_max = None
 
     # Min/Maks beløp og MVA-filter er flyttet til "Mer filter…"-popup.
     # Widget-referansene beholdes som None — filter-logikken leser StringVars direkte.

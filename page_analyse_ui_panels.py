@@ -410,6 +410,25 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # NB: hadde tidligere en fallback-Label "Hovedbok" når _var_tx_view_mode mangler.
     # Fjernet — Combobox-en speiler datanivå tydelig nok via valgte verdi.
 
+    # "Vis: <antall>" — flyttet hit fra toolbar (rad 2). Bestemmer hvor mange
+    # rader som vises i listen rett under denne headeren.
+    _var_max_rows = getattr(page, "_var_max_rows", None)
+    if _var_max_rows is not None:
+        ttk.Label(tx_header, text="Vis:").grid(row=0, column=2, sticky="e", padx=(12, 4))
+        _spn_max = ttk.Spinbox(
+            tx_header,
+            from_=50,
+            to=5000,
+            increment=50,
+            textvariable=_var_max_rows,
+            width=8,
+            command=page._on_max_rows_changed,
+        )
+        _spn_max.grid(row=0, column=3, sticky="e")
+        _spn_max.bind("<FocusOut>", lambda _e: page._on_max_rows_changed())
+        _spn_max.bind("<Return>", lambda _e: page._on_max_rows_changed())
+        page._spn_max = _spn_max
+
     # "Klassifiser kontoer..."-knappen er fjernet fra Analyse-fanen.
     # Saldobalanse-fanen har fortsatt sin egen "Avansert klassifisering"-handling
     # (saldobalanse_actions.open_advanced_classification) som bruker samme
