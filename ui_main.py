@@ -25,7 +25,7 @@ from page_utvalg_strata import UtvalgStrataPage
 # "Resultat" fanen i dette repoet er implementert via page_utvalg.UtvalgPage
 # (ikke page_resultat, som du nå får ModuleNotFoundError på)
 from page_utvalg import UtvalgPage
-from page_logg import LoggPage
+from src.pages.logg import LoggPage
 from page_consolidation import ConsolidationPage
 from page_ar import ARPage
 from page_regnskap import RegnskapPage
