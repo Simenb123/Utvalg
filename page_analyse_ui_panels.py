@@ -485,48 +485,18 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # Desimaler-toggle og "Eksporter..."-knapp er flyttet til "Visning ▾"-menyen
     # på rad 1 i toolbaren (eksport håndteres via Rapporter-/Handlinger-menyen).
 
-    # Søkefelt over høyre listbox — speiler mønsteret fra venstre ("Sok konto...").
-    # Deler _var_search med toolbar-søket, så endring ett sted synkes til begge.
+    # Søkefelt over høyre listbox — deler _var_search med toolbar-søket slik
+    # at endring ett sted synkes til begge. Bruker liten "Søk:"-label i stedet
+    # for placeholder-tekst (placeholder via Entry.insert ville skrevet teksten
+    # inn i den delte StringVar-en og blitt tolket som filterverdi).
     _var_search_shared = getattr(page, "_var_search", None)
     if _var_search_shared is not None:
-        tx_search_entry = ttk.Entry(tx_outer, textvariable=_var_search_shared)
-        tx_search_entry.grid(row=1, column=0, sticky="ew", pady=(0, 2))
-
-        _tx_search_placeholder = [not bool(_var_search_shared.get())]
-
-        def _apply_tx_search_placeholder() -> None:
-            try:
-                if not _var_search_shared.get():
-                    tx_search_entry.insert(0, "Søk i transaksjoner…")
-                    tx_search_entry.configure(foreground="gray")
-                    _tx_search_placeholder[0] = True
-                else:
-                    tx_search_entry.configure(foreground="")
-                    _tx_search_placeholder[0] = False
-            except Exception:
-                pass
-
-        def _tx_search_focus_in(_e=None) -> None:
-            if _tx_search_placeholder[0]:
-                try:
-                    tx_search_entry.delete(0, "end")
-                    tx_search_entry.configure(foreground="")
-                except Exception:
-                    pass
-                _tx_search_placeholder[0] = False
-
-        def _tx_search_focus_out(_e=None) -> None:
-            try:
-                if not _var_search_shared.get().strip():
-                    tx_search_entry.insert(0, "Søk i transaksjoner…")
-                    tx_search_entry.configure(foreground="gray")
-                    _tx_search_placeholder[0] = True
-            except Exception:
-                pass
-
-        tx_search_entry.bind("<FocusIn>", _tx_search_focus_in)
-        tx_search_entry.bind("<FocusOut>", _tx_search_focus_out)
-        _apply_tx_search_placeholder()
+        tx_search_row = ttk.Frame(tx_outer)
+        tx_search_row.grid(row=1, column=0, sticky="ew", pady=(0, 2))
+        tx_search_row.columnconfigure(1, weight=1)
+        ttk.Label(tx_search_row, text="Søk:").grid(row=0, column=0, sticky="w", padx=(0, 4))
+        tx_search_entry = ttk.Entry(tx_search_row, textvariable=_var_search_shared)
+        tx_search_entry.grid(row=0, column=1, sticky="ew")
         page._tx_search_entry = tx_search_entry  # type: ignore[attr-defined]
 
     tx_outer.rowconfigure(2, weight=1)
