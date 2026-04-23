@@ -428,7 +428,7 @@ def remap_sb_account(*, page: Any, konto: str, kontonavn: str) -> None:
 def show_sb_account_transactions(*, page: Any, konto: str) -> None:
     """Bytt til transaksjonsvisning (Hovedbok) filtrert på en spesifikk konto."""
     try:
-        page._var_tx_view_mode.set("Hovedbok")
+        page._var_tx_view_mode.set("Transaksjoner")
     except Exception:
         pass
     try:

@@ -117,7 +117,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     pivot_header = ttk.Frame(pivot_frame)
     pivot_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 2))
 
-    ttk.Label(pivot_header, text="Aggregering:").grid(row=0, column=0, padx=(0, 6))
+    ttk.Label(pivot_header, text="Visning:").grid(row=0, column=0, padx=(0, 6))
     _agg_changed = getattr(page, "_on_aggregering_changed", None)
     _agg_cb = (lambda: _agg_changed()) if callable(_agg_changed) else None
     rb_agg_sb = ttk.Radiobutton(
@@ -397,7 +397,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         _tx_mode_cb = ttk.Combobox(
             tx_header,
             textvariable=_var_tx_mode,
-            values=["Saldobalanse", "Hovedbok", "Nøkkeltall", "Motposter", "Motposter (kontonivå)"],
+            values=["Saldobalanse", "Transaksjoner", "Nøkkeltall", "Motposter", "Motposter (kontonivå)"],
             state="readonly",
             width=24,
         )
