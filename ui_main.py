@@ -363,7 +363,7 @@ class App(tk.Tk):
             font_family = "Segoe UI"
 
         try:
-            from PIL import Image, ImageTk  # type: ignore[import-untyped]
+            from PIL import Image, ImageChops, ImageTk  # type: ignore[import-untyped]
             from pathlib import Path
             import sys
 
@@ -378,10 +378,25 @@ class App(tk.Tk):
             if pic_path is None:
                 return t0
 
+            img = Image.open(str(pic_path))
+
+            # Auto-crop near-white kanter slik at motivet flukter med
+            # splash-bakgrunnen. PNG-en har hvite marger som ikke er rent
+            # 255,255,255 (typisk 254,254,254), så vi bruker en grayscale-
+            # terskel (250) i stedet for eksakt sammenligning.
+            try:
+                gray = img.convert("L")
+                # bw: 255 der innhold er, 0 der near-white bakgrunn er
+                bw = gray.point(lambda p: 255 if p < 250 else 0)
+                bbox = bw.getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+            except Exception:
+                pass
+
             # Skaler bildet til 50% av skjermbredden, behold aspekt-ratio
             screen_w = self.winfo_screenwidth()
             target_w = max(500, int(screen_w * 0.5))
-            img = Image.open(str(pic_path))
             w, h = img.size
             target_h = max(1, int(round(target_w * h / w)))
             img = img.resize((target_w, target_h), Image.LANCZOS)
