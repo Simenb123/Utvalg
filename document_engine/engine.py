@@ -102,6 +102,19 @@ from .supplier import (
     _normalize_supplier_name,
 )
 
+# Field-value normalizers live in ``normalizers.py``.
+from .normalizers import (
+    _MONTH_NAME_TO_NUM,
+    _TEXT_DATE_NORM_RE,
+    _normalize_amount_text,
+    _normalize_compact_text,
+    _normalize_currency_text,
+    _normalize_date_text,
+    _normalize_field_value,
+    _normalize_orgnr,
+    _parse_amount,
+)
+
 from .bilagsprint import (
     _is_bilagsprint_segment,
     _segment_is_bilagsprint,
@@ -720,19 +733,6 @@ def _segment_bonus_count(text: str, patterns: tuple[re.Pattern[str], ...] | list
     return sum(1 for pattern in patterns if pattern.search(text))
 
 
-def _normalize_compact_text(value: str) -> str:
-    return _normalize_whitespace(value).strip(":.- ")
-
-
-def _normalize_currency_text(value: str) -> str:
-    return _normalize_whitespace(value).upper()
-
-
-def _normalize_orgnr(value: str) -> str:
-    digits = re.sub(r"\D+", "", value or "")
-    return digits[:9] if len(digits) >= 9 else digits
-
-
 _MONTH_NAME_TO_NUM: dict[str, int] = {
     "januar": 1, "februar": 2, "mars": 3, "april": 4,
     "mai": 5, "juni": 6, "juli": 7, "august": 8,
@@ -740,50 +740,6 @@ _MONTH_NAME_TO_NUM: dict[str, int] = {
     "january": 1, "february": 2, "march": 3, "may": 5,
     "june": 6, "july": 7, "october": 10, "december": 12,
 }
-
-_TEXT_DATE_NORM_RE = re.compile(
-    r"(\d{1,2})\.?\s*(" + "|".join(_MONTH_NAME_TO_NUM.keys()) + r")\s+(\d{4})",
-    re.IGNORECASE,
-)
-
-
-def _normalize_date_text(value: str) -> str:
-    text = _normalize_whitespace(value)
-
-    # Try text-month format first (e.g. "5. desember 2025")
-    m = _TEXT_DATE_NORM_RE.search(text)
-    if m:
-        day_s, month_name, year_s = m.group(1), m.group(2).lower(), m.group(3)
-        month_num = _MONTH_NAME_TO_NUM.get(month_name)
-        if month_num:
-            return f"{int(day_s):02d}.{month_num:02d}.{int(year_s):04d}"
-
-    text = text.replace("/", ".").replace("-", ".")
-    parts = text.split(".")
-    if len(parts) != 3:
-        return text
-    if len(parts[0]) == 4:
-        year, month, day = parts
-    else:
-        day, month, year = parts
-    if len(year) == 2:
-        year = f"20{year}"
-    try:
-        day_int = int(day)
-        month_int = int(month)
-        year_int = int(year)
-    except Exception:
-        return text
-    return f"{day_int:02d}.{month_int:02d}.{year_int:04d}"
-
-
-def _normalize_amount_text(value: str) -> str:
-    return _format_normalize_amount_text(value)
-
-
-def _parse_amount(value: Any) -> float | None:
-    return _format_parse_amount(value)
-
 
 def _ev_value(evidence: FieldEvidence | None) -> str:
     if evidence is None:
@@ -882,24 +838,6 @@ def _apply_supplier_profile_learning(
         "profile_applied_fields": applied_fields,
         "profile_hint_fields": hint_fields,
     }
-
-
-def _normalize_field_value(field_name: str, value: str) -> str:
-    if field_name == "supplier_name":
-        return _normalize_supplier_name(value)
-    if field_name == "supplier_orgnr":
-        return _normalize_orgnr(value)
-    if field_name == "invoice_number":
-        return _normalize_compact_text(value)
-    if field_name in {"invoice_date", "due_date"}:
-        return _normalize_date_text(value)
-    if field_name in {"subtotal_amount", "vat_amount", "total_amount"}:
-        return _normalize_amount_text(value)
-    if field_name == "currency":
-        return _normalize_currency_text(value)
-    if field_name in {"description", "period"}:
-        return _normalize_whitespace(value)
-    return _normalize_whitespace(value)
 
 
 def _mark_validation(evidence: FieldEvidence | None, matched: bool, note: str) -> None:
