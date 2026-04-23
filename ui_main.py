@@ -51,7 +51,7 @@ except Exception:
     StatistikkPage = None  # type: ignore
 
 try:
-    from page_oversikt import OversiktPage
+    from src.pages.oversikt import OversiktPage
 except Exception:
     OversiktPage = None  # type: ignore
 

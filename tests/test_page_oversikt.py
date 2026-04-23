@@ -6,7 +6,7 @@ import pytest
 
 def test_oversikt_page_imports() -> None:
     """OversiktPage should be importable."""
-    import page_oversikt
+    from src.pages.oversikt import page_oversikt
     assert hasattr(page_oversikt, "OversiktPage")
 
 
