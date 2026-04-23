@@ -336,15 +336,32 @@ class App(tk.Tk):
     _SPLASH_MIN_VISIBLE_MS = 2000
 
     def _show_splash(self) -> float:
-        """Vis splash-vindu med AarVaaken-banner. Returner start-tidspunkt.
+        """Vis splash-vindu med AarVaaken-banner i app-tema-farger.
 
         Hovedvinduet skal være withdraw'et før kallet. Splash vises
-        sentrert på skjermen med stort bilde. Returnerer time.perf_counter()
-        for senere min-visningstid-beregning.
+        sentrert på skjermen med banner + diskret undertittel.
+        Bakgrunn matcher app-temaet (BG_SAND_SOFT) så overgangen til
+        hovedvinduet blir sammenhengende.
         """
         import time
         t0 = time.perf_counter()
         self._splash_window = None
+
+        # Theme-farger fra vaak_tokens (faller tilbake hvis import feiler)
+        try:
+            import vaak_tokens as _vt
+            bg_color = "#" + _vt.BG_SAND_SOFT
+            border_color = "#" + _vt.SAGE_DARK
+            text_color = "#" + _vt.FOREST
+            text_secondary = "#" + _vt.TEXT_PRIMARY
+            font_family = _vt.FONT_FAMILY_BODY
+        except Exception:
+            bg_color = "#F4EDDC"
+            border_color = "#8CBF7C"
+            text_color = "#325B1E"
+            text_secondary = "#3A1900"
+            font_family = "Segoe UI"
+
         try:
             from PIL import Image, ImageTk  # type: ignore[import-untyped]
             from pathlib import Path
@@ -361,9 +378,9 @@ class App(tk.Tk):
             if pic_path is None:
                 return t0
 
-            # Skaler bildet til 60% av skjermbredden, behold aspekt-ratio
+            # Skaler bildet til 50% av skjermbredden, behold aspekt-ratio
             screen_w = self.winfo_screenwidth()
-            target_w = max(600, int(screen_w * 0.6))
+            target_w = max(500, int(screen_w * 0.5))
             img = Image.open(str(pic_path))
             w, h = img.size
             target_h = max(1, int(round(target_w * h / w)))
@@ -371,19 +388,41 @@ class App(tk.Tk):
             photo = ImageTk.PhotoImage(img)
 
             splash = tk.Toplevel(self)
-            splash.overrideredirect(True)  # ingen tittellinje
+            splash.overrideredirect(True)
             try:
                 splash.attributes("-topmost", True)
             except Exception:
                 pass
-            try:
-                splash.configure(bg="white")
-            except Exception:
-                pass
+            splash.configure(bg=border_color)  # ramme-farge
 
-            lbl = ttk.Label(splash, image=photo, background="white")
-            lbl.image = photo  # behold referanse mot GC
-            lbl.pack(padx=20, pady=20)
+            # Inner frame — gir 2px border via padding på ytre
+            inner = tk.Frame(splash, bg=bg_color)
+            inner.pack(padx=2, pady=2, fill="both", expand=True)
+
+            # Banner
+            banner_lbl = tk.Label(inner, image=photo, bg=bg_color, borderwidth=0)
+            banner_lbl.image = photo  # behold referanse
+            banner_lbl.pack(padx=24, pady=(28, 14))
+
+            # Undertittel — Forest-grønn, samme font som appen
+            subtitle = tk.Label(
+                inner,
+                text="Revisjonsverktøy",
+                bg=bg_color,
+                fg=text_color,
+                font=(font_family, 13, "bold"),
+            )
+            subtitle.pack(pady=(0, 4))
+
+            # Liten "laster..."-tekst i muted brun
+            loading_lbl = tk.Label(
+                inner,
+                text="laster…",
+                bg=bg_color,
+                fg=text_secondary,
+                font=(font_family, 9, "italic"),
+            )
+            loading_lbl.pack(pady=(0, 28))
 
             # Sentrer på skjermen
             splash.update_idletasks()
@@ -393,7 +432,6 @@ class App(tk.Tk):
             y = (sh - wh) // 2
             splash.geometry(f"{ww}x{wh}+{x}+{y}")
 
-            # Render
             splash.update()
             self._splash_window = splash
         except Exception:
@@ -401,28 +439,67 @@ class App(tk.Tk):
         return t0
 
     def _close_splash_when_ready(self, started_at: float) -> None:
-        """Lukk splash etter min-visningstid (2 sek), så vis hovedvindu."""
+        """Lukk splash etter min-visningstid, deretter fade-ut og vis app.
+
+        Bruker -alpha-attributtet (Windows) for myk overgang. Hvis
+        attributtet ikke støttes faller vi tilbake til umiddelbar destroy.
+        """
         import time
         splash = getattr(self, "_splash_window", None)
 
-        def _done() -> None:
-            if splash is not None:
-                try:
-                    splash.destroy()
-                except Exception:
-                    pass
+        def _show_main() -> None:
             try:
                 self.deiconify()
                 self.lift()
             except Exception:
                 pass
 
+        def _fade_step(alpha: float) -> None:
+            if splash is None:
+                _show_main()
+                return
+            try:
+                splash.attributes("-alpha", alpha)
+            except Exception:
+                # Plattform støtter ikke alpha — bare destroy
+                try:
+                    splash.destroy()
+                except Exception:
+                    pass
+                _show_main()
+                return
+            if alpha <= 0.0:
+                try:
+                    splash.destroy()
+                except Exception:
+                    pass
+                _show_main()
+                return
+            try:
+                self.after(30, lambda a=alpha - 0.15: _fade_step(a))
+            except Exception:
+                try:
+                    splash.destroy()
+                except Exception:
+                    pass
+                _show_main()
+
+        def _begin_fade() -> None:
+            # Vis hovedvinduet før fade så det dukker opp under splash
+            _show_main()
+            _fade_step(1.0)
+
         try:
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             wait_ms = max(0, self._SPLASH_MIN_VISIBLE_MS - elapsed_ms)
-            self.after(wait_ms, _done)
+            self.after(wait_ms, _begin_fade)
         except Exception:
-            _done()
+            try:
+                if splash is not None:
+                    splash.destroy()
+            except Exception:
+                pass
+            _show_main()
 
     def _build_global_footer(self) -> None:
         """Bygg en diskret footer-linje nederst i hovedvinduet.
