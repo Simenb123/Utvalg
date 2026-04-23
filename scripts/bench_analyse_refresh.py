@@ -152,8 +152,57 @@ def main():
     # 5. add_previous_year_columns isolert
     base_pivot = build_rl_pivot(df_hb, intervals, regnskapslinjer, sb_df=df_sb)
     measurements.append(time_it(
-        "add_previous_year_columns",
+        "add_previous_year_columns (full)",
         lambda: add_previous_year_columns(base_pivot, df_sb_prev, intervals, regnskapslinjer),
+        args.repeats,
+    ))
+
+    # 5b. Bryt ned add_previous_year_columns
+    from page_analyse_rl import _aggregate_sb_to_regnr
+    measurements.append(time_it(
+        "  -_aggregate_sb_to_regnr (fjor)",
+        lambda: _aggregate_sb_to_regnr(df_sb_prev, intervals),
+        args.repeats,
+    ))
+
+    from regnskap_mapping import compute_sumlinjer, normalize_regnskapslinjer
+    regn_norm = normalize_regnskapslinjer(regnskapslinjer)
+    prev_agg = _aggregate_sb_to_regnr(df_sb_prev, intervals)
+    base_values = {int(r): float(v) for r, v in zip(prev_agg["regnr"], prev_agg["UB"])}
+    measurements.append(time_it(
+        "  -compute_sumlinjer (fjor)",
+        lambda: compute_sumlinjer(base_values=base_values, regnskapslinjer=regn_norm),
+        args.repeats,
+    ))
+
+    measurements.append(time_it(
+        "  -normalize_regnskapslinjer",
+        lambda: normalize_regnskapslinjer(regnskapslinjer),
+        args.repeats,
+    ))
+
+    # Bryt ned _aggregate_sb_to_regnr ytterligere
+    work = df_sb_prev[["konto", "ib", "ub"]].copy()
+    work["konto"] = work["konto"].astype(str).str.strip()
+    work["ib"] = pd.to_numeric(work["ib"], errors="coerce").fillna(0.0)
+    work["ub"] = pd.to_numeric(work["ub"], errors="coerce").fillna(0.0)
+    konto_list_sb = work["konto"].tolist()
+
+    measurements.append(time_it(
+        "  -_resolve_regnr_for_accounts (fra SB)",
+        lambda: _resolve_regnr_for_accounts(konto_list_sb, intervals=intervals, regnskapslinjer=regnskapslinjer),
+        args.repeats,
+    ))
+
+    regnr_lookup = _resolve_regnr_for_accounts(konto_list_sb, intervals=intervals, regnskapslinjer=regnskapslinjer)
+
+    def _merge_step():
+        mapped = work.merge(regnr_lookup, on="konto", how="left")
+        return mapped.dropna(subset=["regnr"]).groupby("regnr", as_index=False).agg(IB=("ib", "sum"), UB=("ub", "sum"))
+
+    measurements.append(time_it(
+        "  -merge + groupby + agg",
+        _merge_step,
         args.repeats,
     ))
 

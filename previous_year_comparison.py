@@ -80,7 +80,13 @@ def add_previous_year_columns(
     prev_overrides = prior_year_overrides if prior_year_overrides is not None else account_overrides
 
     try:
-        prev_ib_ub = _aggregate_sb_to_regnr(sb_prev, intervals, account_overrides=prev_overrides)
+        # Send med regnskapslinjer slik at _resolve_regnr_for_accounts ikke
+        # trenger å laste fra disk (~250ms-overhead per kall — jf. bench).
+        prev_ib_ub = _aggregate_sb_to_regnr(
+            sb_prev, intervals,
+            regnskapslinjer=regnskapslinjer,
+            account_overrides=prev_overrides,
+        )
     except Exception as exc:
         log.warning("add_previous_year_columns: aggregering feilet: %s", exc)
         return _add_empty_prev_cols(pivot_df)
@@ -99,12 +105,15 @@ def add_previous_year_columns(
         if regn["sumpost"].any():
             base_values = {int(r): float(v) for r, v in zip(prev_ub["regnr"], prev_ub["UB_fjor"])}
             computed = compute_sumlinjer(base_values=base_values, regnskapslinjer=regn)
-            sum_rows = pd.DataFrame([
-                {"regnr": int(k), "UB_fjor": float(v)}
+            # Set bygget én gang utenfor løkken (var i comprehension før — N² kostnad)
+            existing_regnr = set(prev_ub["regnr"].astype(int).tolist())
+            new_rows = [
+                (int(k), float(v))
                 for k, v in computed.items()
-                if int(k) not in set(prev_ub["regnr"].tolist())
-            ])
-            if not sum_rows.empty:
+                if int(k) not in existing_regnr
+            ]
+            if new_rows:
+                sum_rows = pd.DataFrame(new_rows, columns=["regnr", "UB_fjor"])
                 prev_ub = pd.concat([prev_ub, sum_rows], ignore_index=True)
     except Exception as exc:
         log.debug("Kunne ikke beregne sumposter for fjorårsdata: %s", exc)
@@ -115,11 +124,12 @@ def add_previous_year_columns(
     result["UB_fjor"] = result["UB_fjor"].fillna(0.0)
     result["Endring_fjor"] = result["UB"] - result["UB_fjor"]
 
-    # Prosentvis endring — unngå div by zero
-    result["Endring_pct"] = result.apply(
-        lambda r: (r["Endring_fjor"] / abs(r["UB_fjor"]) * 100.0) if abs(r["UB_fjor"]) > 0.01 else None,
-        axis=1,
-    )
+    # Prosentvis endring — vektorisert numpy istedenfor row-wise apply.
+    # Tidligere: result.apply(lambda r: ..., axis=1) — flere størrelses-
+    # ordener tregere enn vektorisert variant.
+    ub_fjor_abs = result["UB_fjor"].abs()
+    safe_denom = ub_fjor_abs.where(ub_fjor_abs > 0.01)
+    result["Endring_pct"] = (result["Endring_fjor"] / safe_denom) * 100.0
 
     return result
 

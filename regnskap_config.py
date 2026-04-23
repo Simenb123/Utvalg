@@ -536,29 +536,72 @@ def ensure_json_baseline_from_excel() -> Tuple[bool, bool]:
     return created_r, created_k
 
 
+# Module-level cache for de hyppigst-leste konfig-filene. Disse leses
+# fra disk hver gang en RL-pivot bygges — uten cache gir det ~250-300 ms
+# overhead pr aggregering, som dominerer Analyse-refresh-tid (jf. bench).
+# Cache invalideres når filen på disk endres (mtime sjekk).
+_REGNSKAPSLINJER_CACHE: tuple[float, object] | None = None
+_KONTOPLAN_CACHE: tuple[float, object] | None = None
+
+
+def _path_mtime(path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def load_regnskapslinjer(*, sheet_name: str = "Sheet1"):
     """Les regnskapslinjer (JSON-first; Excel er bootstrap-kilde).
 
-    Returnerer en pandas DataFrame.
+    Returnerer en pandas DataFrame. Caches i minne — invalideres når
+    JSON-filen på disk endres (mtime).
     """
+    global _REGNSKAPSLINJER_CACHE
 
     ensure_json_baseline_from_excel()
 
-    if regnskapslinjer_json_path().exists():
-        return load_regnskapslinjer_json()
+    json_path = regnskapslinjer_json_path()
+    if json_path.exists():
+        mtime = _path_mtime(json_path)
+        cached = _REGNSKAPSLINJER_CACHE
+        if cached is not None and cached[0] == mtime:
+            return cached[1].copy() if hasattr(cached[1], "copy") else cached[1]
+        df = load_regnskapslinjer_json()
+        _REGNSKAPSLINJER_CACHE = (mtime, df)
+        return df.copy() if hasattr(df, "copy") else df
 
     return _read_excel_regnskapslinjer(sheet_name=sheet_name)
 
 
 def load_kontoplan_mapping(*, sheet_name: str = "Intervall"):
-    """Les konto→regnnr intervallmapping (JSON-first; Excel er bootstrap-kilde)."""
+    """Les konto→regnnr intervallmapping (JSON-first; Excel er bootstrap-kilde).
+
+    Caches i minne — invalideres når JSON-filen på disk endres (mtime).
+    """
+    global _KONTOPLAN_CACHE
 
     ensure_json_baseline_from_excel()
 
-    if kontoplan_mapping_json_path().exists():
-        return load_kontoplan_mapping_json()
+    json_path = kontoplan_mapping_json_path()
+    if json_path.exists():
+        mtime = _path_mtime(json_path)
+        cached = _KONTOPLAN_CACHE
+        if cached is not None and cached[0] == mtime:
+            return cached[1].copy() if hasattr(cached[1], "copy") else cached[1]
+        df = load_kontoplan_mapping_json()
+        _KONTOPLAN_CACHE = (mtime, df)
+        return df.copy() if hasattr(df, "copy") else df
 
     return _read_excel_kontoplan_mapping(sheet_name=sheet_name)
+
+
+def _invalidate_config_caches() -> None:
+    """Tving re-lesing fra disk neste gang. Brukes av tester eller etter
+    eksplisitt config-import."""
+    global _REGNSKAPSLINJER_CACHE, _KONTOPLAN_CACHE
+    _REGNSKAPSLINJER_CACHE = None
+    _KONTOPLAN_CACHE = None
 
 
 def _import_with_json_refresh(*, kind: str, src_path: Path) -> Path:
