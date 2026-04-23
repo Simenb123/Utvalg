@@ -591,21 +591,16 @@ class ManagedTreeview:
                     pass
                 drag["last_ghost_pos"] = (gx, gy)
 
-        # Decide target + validity. We ask Tk directly per motion event
-        # (fast — C-level identify_column/region calls) so the math stays
-        # correct when the tree is horizontally scrolled or partially
-        # off-screen. `_column_bbox_screen` is cached by target id for
-        # the duration of the drag to avoid hammering bbox() unchanged.
+        # Decide target + validity. identify_column works for any y inside
+        # the tree (header AND body rows), so we intentionally don't gate
+        # on identify_region — the user can drop a column anywhere
+        # horizontally over its column, not only on the header strip.
         target = _column_id_from_event(self.tree, event)
-        try:
-            region = str(self.tree.identify_region(event.x, event.y))
-        except Exception:
-            region = ""
 
         after = False
         valid = False
         drop_x: int | None = None
-        if region == "heading" and target:
+        if target:
             bbox = self._column_bbox_screen_cached(drag, target)
             if bbox is not None:
                 left, right = bbox
@@ -692,26 +687,40 @@ class ManagedTreeview:
         return True
 
     def _column_bbox_screen(self, col: str) -> tuple[int, int] | None:
+        """Return (screen_x_left, screen_x_right) for a column's display
+        range, or None when the column isn't currently renderable.
+
+        Tries up to a handful of children in case the first few are
+        scrolled out of the viewport — this lets the drag work even when
+        the user has scrolled vertically before starting the drag.
+        """
         if not col:
             return None
         tree = self.tree
         try:
+            root_x = int(tree.winfo_rootx())
+        except Exception:
+            return None
+        try:
             children = tree.get_children("")
         except Exception:
             children = ()
-        if children:
+        for iid in list(children)[:8]:
             try:
-                bbox = tree.bbox(children[0], col)
+                bbox = tree.bbox(iid, col)
             except Exception:
                 bbox = None
-            if bbox:
-                try:
-                    x, _, w, _ = bbox
-                    root_x = int(tree.winfo_rootx())
-                    return (root_x + int(x), root_x + int(x) + int(w))
-                except Exception:
-                    pass
+            if not bbox:
+                continue
+            try:
+                x, _, w, _ = bbox
+                return (root_x + int(x), root_x + int(x) + int(w))
+            except Exception:
+                continue
         # Fallback: accumulate displaycolumn widths from tree origin.
+        # Not scroll-aware, but this branch only triggers when either the
+        # tree is empty or every rendered row failed bbox — both cases
+        # correlate with zero horizontal scroll.
         try:
             cols = list(tree["displaycolumns"])
         except Exception:
@@ -720,10 +729,7 @@ class ManagedTreeview:
             cols = [spec.id for spec in self._specs]
         if col not in cols:
             return None
-        try:
-            left = int(tree.winfo_rootx())
-        except Exception:
-            return None
+        left = root_x
         for c in cols:
             try:
                 w = int(tree.column(c, option="width"))
