@@ -72,26 +72,21 @@ class ScopingPage(ttk.Frame):
         agg.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
         agg.columnconfigure(2, weight=1)
 
-        self._card_pl_var = tk.StringVar(value="Resultat (PL) — ingen data")
-        self._card_bs_var = tk.StringVar(value="Balanse (BS) — ingen data")
-        self._card_pl = ttk.Label(
-            agg, textvariable=self._card_pl_var,
-            font=("Segoe UI", 11, "bold"),
-            padding=(14, 10),
-            relief="solid", borderwidth=1,
-            background="#F5F7FA", foreground="#1F2937",
-            justify="left",
-        )
+        # Metric-kort: tk.Frame med tittel + stort tall + sub-info som
+        # diskrete felt. ttk.Frame støtter ikke background direkte i
+        # vista-themet, så vi bruker tk.Frame for containerne.
+        self._card_pl, self._card_pl_title, self._card_pl_value, self._card_pl_sub = \
+            self._build_metric_card(agg, "Resultat (PL)")
         self._card_pl.grid(row=0, column=0, sticky="w")
-        self._card_bs = ttk.Label(
-            agg, textvariable=self._card_bs_var,
-            font=("Segoe UI", 11, "bold"),
-            padding=(14, 10),
-            relief="solid", borderwidth=1,
-            background="#F5F7FA", foreground="#1F2937",
-            justify="left",
-        )
-        self._card_bs.grid(row=0, column=1, sticky="w", padx=(10, 0))
+
+        self._card_bs, self._card_bs_title, self._card_bs_value, self._card_bs_sub = \
+            self._build_metric_card(agg, "Balanse (BS)")
+        self._card_bs.grid(row=0, column=1, sticky="w", padx=(12, 0))
+
+        # Bakoverkompat-StringVars — brukes ikke lenger direkte men
+        # beholdes for tester/loggere som leser dem.
+        self._card_pl_var = tk.StringVar(value="")
+        self._card_bs_var = tk.StringVar(value="")
 
         self._var_scoping_locked = tk.BooleanVar(value=False)
         self._chk_lock = ttk.Checkbutton(
@@ -233,39 +228,19 @@ class ScopingPage(ttk.Frame):
         self._tree.tag_configure("summary", foreground="#9ca3af")
         self._tree.tag_configure("stripe", background="#f8f9fa")
 
-        # ── Input-rad for valgt linje: Ut av scope + Begrunnelse + Revisjonshandling ──
-        # Den tidligere "Detaljer"-LabelFramen med duplikat tekst-info
-        # er fjernet — radgrid-visningen over inneholder alt brukeren
-        # trenger. Kun inputfeltene for manuell overstyring beholdes i
-        # en flat rad under treet.
-        scope_frame = ttk.Frame(self, padding=(8, 4))
-        scope_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(2, 2))
-
-        # Stringvar-alias for bakoverkompat (tester/oppdaterings­funksjoner
-        # som tidligere skrev til _detail_var).
+        # Input-raden (Ut av scope + Begrunnelse + Revisjonshandling) er
+        # fjernet — manuell overstyring gjøres nå via høyreklikk-meny på
+        # raden i tabellen (eller via tastatursnarveier som fortsatt er
+        # bundet). Attributtene beholdes som None så resten av koden
+        # (som tester hasattr) ikke krasjer.
         self._detail_var = tk.StringVar(value="")
-        self._detail_label = None  # fjernet; beholder attributt for kompat
-
+        self._detail_label = None
         self._scope_var = tk.BooleanVar(value=False)
-        self._chk_scope_ut = ttk.Checkbutton(
-            scope_frame, text="Ut av scope", variable=self._scope_var,
-            command=self._on_scope_changed,
-        )
-        self._chk_scope_ut.pack(side="left", padx=(0, 12))
-
-        ttk.Label(scope_frame, text="Begrunnelse:").pack(side="left")
+        self._chk_scope_ut = None
         self._rationale_var = tk.StringVar(value="")
-        self._ent_rationale = ttk.Entry(scope_frame, textvariable=self._rationale_var, width=30)
-        self._ent_rationale.pack(side="left", padx=(2, 12))
-        self._ent_rationale.bind("<FocusOut>", self._on_rationale_changed)
-        self._ent_rationale.bind("<Return>", self._on_rationale_changed)
-
-        ttk.Label(scope_frame, text="Revisjonshandling:").pack(side="left")
+        self._ent_rationale = None
         self._audit_action_var = tk.StringVar(value="")
-        self._ent_audit_action = ttk.Entry(scope_frame, textvariable=self._audit_action_var, width=30)
-        self._ent_audit_action.pack(side="left", padx=(2, 6))
-        self._ent_audit_action.bind("<FocusOut>", self._on_audit_action_changed)
-        self._ent_audit_action.bind("<Return>", self._on_audit_action_changed)
+        self._ent_audit_action = None
 
     # ------------------------------------------------------------------
     # Data loading
@@ -623,9 +598,7 @@ class ScopingPage(ttk.Frame):
             self._scope_var.set(False)
             self._rationale_var.set("")
             self._audit_action_var.set("")
-            self._chk_scope_ut.configure(state="disabled")
-            self._ent_rationale.configure(state="disabled")
-            self._ent_audit_action.configure(state="disabled")
+            self._disable_scope_controls()
             return
 
         regnr = sel[0]
@@ -642,9 +615,7 @@ class ScopingPage(ttk.Frame):
             self._scope_var.set(False)
             self._rationale_var.set("")
             self._audit_action_var.set("")
-            self._chk_scope_ut.configure(state="disabled")
-            self._ent_rationale.configure(state="disabled")
-            self._ent_audit_action.configure(state="disabled")
+            self._disable_scope_controls()
             return
 
         lines.append(_detail_amount_line(self._resolve_year_int(), line))
@@ -667,13 +638,27 @@ class ScopingPage(ttk.Frame):
 
         self._detail_var.set("\n".join(lines))
 
-        # Oppdater scoping-kontroller
-        self._chk_scope_ut.configure(state="normal")
-        self._ent_rationale.configure(state="normal")
-        self._ent_audit_action.configure(state="normal")
+        # Oppdater scoping-kontroller (hvis de fortsatt finnes i UI)
+        self._enable_scope_controls()
         self._scope_var.set(line.scoping == "ut")
         self._rationale_var.set(line.rationale)
         self._audit_action_var.set(line.audit_action)
+
+    def _disable_scope_controls(self) -> None:
+        for w in (self._chk_scope_ut, self._ent_rationale, self._ent_audit_action):
+            if w is not None:
+                try:
+                    w.configure(state="disabled")
+                except Exception:
+                    pass
+
+    def _enable_scope_controls(self) -> None:
+        for w in (self._chk_scope_ut, self._ent_rationale, self._ent_audit_action):
+            if w is not None:
+                try:
+                    w.configure(state="normal")
+                except Exception:
+                    pass
 
     def _on_double_click(self, event: tk.Event) -> None:
         """Dobbeltklikk på scoping-kolonne → toggle ut/i scope."""
@@ -950,10 +935,8 @@ class ScopingPage(ttk.Frame):
             pass
 
         if not self._result:
-            self._card_pl_var.set("Resultat (PL) — ingen data")
-            self._card_bs_var.set("Balanse (BS) — ingen data")
-            self._set_card_status(self._card_pl, None)
-            self._set_card_status(self._card_bs, None)
+            self._populate_card(which="PL", scoped_out=None, pm=0, n_ut=0)
+            self._populate_card(which="BS", scoped_out=None, pm=0, n_ut=0)
             return
 
         from scoping_engine import scoped_out_totals_by_group
@@ -964,30 +947,15 @@ class ScopingPage(ttk.Frame):
         n_ut = sum(1 for l in non_sum if l.scoping == "ut")
         n_in = len(non_sum) - n_ut
 
-        def _card_text(title: str, scoped_out: float, n_ut: int) -> str:
-            if pm <= 0:
-                return f"{title}   ·   {n_label(n_ut)} ut\nScopet ut: {_fmt(scoped_out)}   (PM ikke satt)"
-            pct = round(scoped_out / pm * 100, 1)
-            return (
-                f"{title}   ·   {n_label(n_ut)} ut\n"
-                f"Scopet ut: {_fmt(scoped_out)}  av PM {_fmt(pm)}   ({pct}%)"
-            )
-
-        # PL-kort
         pl_out = totals.get("PL", 0.0)
-        pl_ok = pm <= 0 or pl_out <= pm
         pl_n = sum(1 for l in non_sum if (l.line_type or "").upper() == "PL" and l.scoping == "ut")
-        self._card_pl_var.set(_card_text("Resultat (PL)", pl_out, pl_n))
-        self._set_card_status(self._card_pl, pl_ok if pm > 0 else None)
+        self._populate_card(which="PL", scoped_out=pl_out, pm=pm, n_ut=pl_n)
 
-        # BS-kort
         bs_out = totals.get("BS", 0.0)
-        bs_ok = pm <= 0 or bs_out <= pm
         bs_n = sum(1 for l in non_sum if (l.line_type or "").upper() == "BS" and l.scoping == "ut")
-        self._card_bs_var.set(_card_text("Balanse (BS)", bs_out, bs_n))
-        self._set_card_status(self._card_bs, bs_ok if pm > 0 else None)
+        self._populate_card(which="BS", scoped_out=bs_out, pm=pm, n_ut=bs_n)
 
-        # Bakoverkompat: behold _agg_var for evt. lesere
+        # Bakoverkompat-_agg_var (ikke vist i UI, men leses av tester)
         total_out = pl_out + bs_out
         self._agg_var.set(
             f"PL: {_fmt(pl_out)} / PM {_fmt(pm)}  |  "
@@ -995,15 +963,84 @@ class ScopingPage(ttk.Frame):
             f"I scope: {n_in}  Ut: {n_ut}  Total ut: {_fmt(total_out)}"
         )
 
-    def _set_card_status(self, card: ttk.Label, ok: bool | None) -> None:
-        """Fargelegg metric-kortet basert på om det er OK, advarsel eller nøytralt."""
+    def _build_metric_card(self, parent, title: str):
+        """Bygg et metric-kort med tittel + stort tall + sub-info.
+
+        Returnerer (frame, title_lbl, value_lbl, sub_lbl) slik at
+        _populate_card kan oppdatere tekstene senere.
+        """
+        bg = "#F5F7FA"
+        card = tk.Frame(parent, relief="solid", borderwidth=1, background=bg)
+        title_lbl = ttk.Label(
+            card, text=title,
+            font=("Segoe UI", 9), foreground="#667085", background=bg,
+        )
+        title_lbl.pack(anchor="w", padx=14, pady=(8, 0))
+        value_lbl = ttk.Label(
+            card, text="—",
+            font=("Segoe UI", 18, "bold"), foreground="#1F2937", background=bg,
+        )
+        value_lbl.pack(anchor="w", padx=14, pady=(0, 0))
+        sub_lbl = ttk.Label(
+            card, text="",
+            font=("Segoe UI", 9), foreground="#4B5563", background=bg,
+        )
+        sub_lbl.pack(anchor="w", padx=14, pady=(2, 10))
+        return card, title_lbl, value_lbl, sub_lbl
+
+    def _populate_card(self, *, which: str, scoped_out: float | None, pm: float, n_ut: int) -> None:
+        """Oppdater innholdet i et metric-kort."""
+        if which == "PL":
+            card = self._card_pl
+            title_lbl = self._card_pl_title
+            value_lbl = self._card_pl_value
+            sub_lbl = self._card_pl_sub
+        else:
+            card = self._card_bs
+            title_lbl = self._card_bs_title
+            value_lbl = self._card_bs_value
+            sub_lbl = self._card_bs_sub
+
+        if scoped_out is None:
+            # Ingen data
+            value_lbl.configure(text="—")
+            sub_lbl.configure(text="ingen data")
+            self._set_card_status(card, title_lbl, value_lbl, sub_lbl, ok=None)
+            return
+
+        value_lbl.configure(text=_fmt(scoped_out))
+        if pm > 0:
+            pct = round(scoped_out / pm * 100, 1)
+            sub_lbl.configure(text=f"av PM {_fmt(pm)}   ·   {pct}%   ·   {n_label(n_ut)} ut")
+            ok = scoped_out <= pm
+        else:
+            sub_lbl.configure(text=f"{n_label(n_ut)} ut   ·   PM ikke satt")
+            ok = None
+
+        self._set_card_status(card, title_lbl, value_lbl, sub_lbl, ok=ok)
+
+    def _set_card_status(self, card, title_lbl, value_lbl, sub_lbl, *, ok: bool | None) -> None:
+        """Fargelegg hele metric-kortet basert på OK/advarsel/nøytral."""
+        if ok is None:
+            bg = "#F5F7FA"
+            title_fg = "#667085"
+            value_fg = "#1F2937"
+            sub_fg = "#4B5563"
+        elif ok:
+            bg = "#E6F4EA"
+            title_fg = "#0B6A38"
+            value_fg = "#065F46"
+            sub_fg = "#2A7A52"
+        else:
+            bg = "#FDECEA"
+            title_fg = "#9F1A1A"
+            value_fg = "#7F1D1D"
+            sub_fg = "#A93232"
         try:
-            if ok is None:
-                card.configure(background="#F5F7FA", foreground="#1F2937")
-            elif ok:
-                card.configure(background="#E6F4EA", foreground="#065F46")
-            else:
-                card.configure(background="#FDECEA", foreground="#9F1A1A")
+            card.configure(background=bg)
+            title_lbl.configure(background=bg, foreground=title_fg)
+            value_lbl.configure(background=bg, foreground=value_fg)
+            sub_lbl.configure(background=bg, foreground=sub_fg)
         except Exception:
             pass
 
