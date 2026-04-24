@@ -115,7 +115,11 @@ class RevisjonshandlingerPage(ttk.Frame):
         self.var_filter_origin = tk.StringVar(value="Alle")
         self.var_filter_phase = tk.StringVar(value="Alle")  # sidebar
         self.var_search = tk.StringVar()
-        self.var_show_rl_gaps = tk.BooleanVar(value=False)
+        # Alle scoped regnskapslinjer vises som utgangspunkt; handlinger
+        # "kobles på" der de finnes. RL uten handling vises alltid — det
+        # er selve poenget med Handlinger-fanen nå som regnskapslinjer
+        # (og ikke CRM-handlinger) er sannheten.
+        self.var_show_rl_gaps = tk.BooleanVar(value=True)
         self._phase_sidebar_labels: dict[str, ttk.Label] = {}
         self._phase_sidebar_counts: dict[str, tk.StringVar] = {}
 
@@ -178,12 +182,8 @@ class RevisjonshandlingerPage(ttk.Frame):
         ent_search.pack(side="left", padx=(2, 0))
         ent_search.bind("<KeyRelease>", lambda _: self._apply_filter())
 
-        ttk.Checkbutton(
-            filt,
-            text="Vis RL uten handling",
-            variable=self.var_show_rl_gaps,
-            command=self._apply_filter,
-        ).pack(side="left", padx=(12, 0))
+        # "Vis RL uten handling"-togglen er fjernet — alle scoped RL
+        # vises nå som default (var_show_rl_gaps=True hardkodet).
 
         # ── Body: sidebar med faser + tree ──
         body = ttk.Frame(self)
