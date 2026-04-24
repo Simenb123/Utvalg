@@ -20,6 +20,58 @@ from page_analyse_columns_widths import configure_tx_tree_columns
 # ColumnSpec-bygger for ManagedTreeview-drevet TX-tree
 # =====================================================================
 
+def build_pivot_column_specs(
+    *,
+    page: Any,
+    year: Optional[int] = None,
+):
+    """Returner ColumnSpec-liste for pivot-treet i Analyse-fanen.
+
+    Brukes når pivot_tree wrappes med ManagedTreeview. Alle PIVOT_COLS
+    inkluderes, men ``visible_by_default`` styres av gjeldende
+    aggregeringsmodus (Regnskapslinje/SB-konto/HB-konto).
+    """
+    from ui_managed_treeview import ColumnSpec
+    import analyse_treewidths
+
+    try:
+        from page_analyse_columns import pivot_default_for_mode
+        default_visible = set(pivot_default_for_mode(page=page))
+    except Exception:
+        default_visible = set(getattr(page, "PIVOT_COLS_DEFAULT_VISIBLE", ()))
+
+    pivot_cols = getattr(page, "PIVOT_COLS", ())
+    pinned_set = set(getattr(page, "PIVOT_COLS_PINNED", ("Konto", "Kontonavn")))
+
+    # Heading-tekster hentes via analysis_heading — år-avhengige labels
+    # som "UB 2025", "Δ UB 25/24" kommer fra felles vokabular.
+    try:
+        from page_analyse_columns import analysis_heading
+    except Exception:
+        analysis_heading = lambda c, year=None: c  # type: ignore[assignment]
+
+    specs = []
+    for col in pivot_cols:
+        try:
+            heading = analysis_heading(col, year=year)
+        except Exception:
+            heading = col
+        specs.append(
+            ColumnSpec(
+                id=col,
+                heading=heading or col,
+                width=analyse_treewidths.default_column_width(col),
+                minwidth=analyse_treewidths.column_minwidth(col),
+                anchor=analyse_treewidths.column_anchor(col),
+                stretch=(col == "Kontonavn"),
+                visible_by_default=col in default_visible,
+                pinned=col in pinned_set,
+                sortable=True,
+            )
+        )
+    return specs
+
+
 def build_sb_column_specs(
     *,
     year: Optional[int] = None,

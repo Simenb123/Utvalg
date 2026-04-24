@@ -234,15 +234,47 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     pv_hscroll.grid(row=3, column=0, sticky="ew")
     pivot_tree.configure(yscrollcommand=pv_scroll.set, xscrollcommand=pv_hscroll.set)
 
-    # Høyreklikkmeny for pivot-kolonner (vis/skjul)
+    # Wrap pivot-treet med ManagedTreeview — gir drag-n-drop, kolonnevelger
+    # på høyreklikk i header, og persisterte kolonnebredder. Cell-rettet
+    # høyreklikk-meny (statistikk/kommentar/koble handling) håndteres
+    # fortsatt av _show_pivot_column_menu via add="+".
+    page._pivot_managed = None
+    try:
+        from ui_managed_treeview import ManagedTreeview
+        from page_analyse_columns_presets import build_pivot_column_specs
+
+        year = None
+        try:
+            from page_analyse_columns import _active_year
+            year = _active_year()
+        except Exception:
+            pass
+
+        page._pivot_managed = ManagedTreeview(
+            pivot_tree,
+            view_id="analyse_pivot",
+            column_specs=build_pivot_column_specs(page=page, year=year),
+            pref_prefix="ui",
+            legacy_pref_keys={
+                "visible_cols":  "analyse.pivot_cols.visible",
+                "column_widths": "analyse.pivot.widths",
+            },
+        )
+    except Exception:
+        page._pivot_managed = None
+
+    # Cell-kontekstmeny: ManagedTreeview's <Button-3>-handler returnerer
+    # "break" på header (viser kolonnevelger-menyen), så denne fires kun
+    # over celler.
     _pivot_col_menu_fn = getattr(page, "_show_pivot_column_menu", None)
     if callable(_pivot_col_menu_fn):
-        pivot_tree.bind("<Button-3>", _pivot_col_menu_fn)
+        pivot_tree.bind("<Button-3>", _pivot_col_menu_fn, add="+")
     _pivot_resize_fn = getattr(page, "_schedule_balance_pivot_tree", None)
     if callable(_pivot_resize_fn):
         pivot_tree.bind("<Configure>", lambda _e=None: _pivot_resize_fn(), add="+")
 
-    # Appliser lagret kolonne-synlighet
+    # Appliser lagret kolonne-synlighet. Setter tree["displaycolumns"]
+    # direkte, uavhengig av ManagedTreeview-ens interne tilstand.
     _apply_pivot_vis = getattr(page, "_apply_pivot_visible_columns", None)
     if callable(_apply_pivot_vis):
         _apply_pivot_vis()
@@ -746,15 +778,10 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         pivot_tree.bind("<Return>", _open_pivot_drill)
         pivot_tree.bind("<KP_Enter>", _open_pivot_drill)
 
-    _pivot_press_fn   = getattr(page, "_on_pivot_tree_mouse_press",   None)
-    _pivot_drag_fn    = getattr(page, "_on_pivot_tree_mouse_drag",    None)
-    _pivot_release_fn = getattr(page, "_on_pivot_tree_mouse_release", None)
-    if callable(_pivot_press_fn):
-        pivot_tree.bind("<ButtonPress-1>",  lambda e: _pivot_press_fn(e))
-    if callable(_pivot_drag_fn):
-        pivot_tree.bind("<B1-Motion>",      lambda e: _pivot_drag_fn(e))
-    if callable(_pivot_release_fn):
-        pivot_tree.bind("<ButtonRelease-1>", lambda e: _pivot_release_fn(e))
+    # Kolonne-drag (omorganisering) for pivot håndteres nå av
+    # ManagedTreeview via page._pivot_managed. De gamle
+    # _on_pivot_tree_mouse_press/drag/release-metodene beholdes for
+    # API-kompatibilitet men wires ikke opp.
 
     _tx_select_fn = getattr(page, "_on_tx_select", None)
     if callable(_tx_select_fn):
