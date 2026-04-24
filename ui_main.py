@@ -298,9 +298,7 @@ class App(tk.Tk):
         self.nb.add(self.page_dataset, text="Dataset")
         self.nb.add(self.page_analyse, text="Analyse")
         self.nb.add(self.page_saldobalanse, text="Saldobalanse")
-        self.nb.add(self.page_admin, text="Admin")
         self.nb.add(self.page_reskontro, text="Reskontro")
-        self.nb.add(self.page_regnskap, text="Regnskap")
         if self.page_driftsmidler is not None:
             self.nb.add(self.page_driftsmidler, text="Driftsmidler")
         self.nb.add(self.page_materiality, text="Vesentlighet")
@@ -321,6 +319,9 @@ class App(tk.Tk):
             self.nb.add(self.page_fagchat, text="Fagchat")
         if self.page_documents is not None:
             self.nb.add(self.page_documents, text="Dokumenter")
+        # Regnskap og Admin plasseres helt til høyre (avslutning + systeminnstillinger).
+        self.nb.add(self.page_regnskap, text="Regnskap")
+        self.nb.add(self.page_admin, text="Admin")
         # Statistikk lives in a Toplevel-popup — ikke i tab-strippen.
         try:
             self.nb.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
