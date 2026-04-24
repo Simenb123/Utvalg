@@ -202,3 +202,73 @@ def build_scoping(
         scoped_out_total=scoped_out_total,
         aggregation_ok=aggregation_ok,
     )
+
+
+# =====================================================================
+# Auto-scope-out — greedy algoritme per PL/BS, cap ved PM
+# =====================================================================
+
+
+def compute_auto_scope_out(
+    lines: list[ScopingLine],
+    pm: float,
+) -> dict[str, str]:
+    """Beregn automatisk scope-ut-forslag per regnskapslinje.
+
+    Algoritme (se POPUP_STANDARD / scoping-diskusjon):
+      - Behandle PL og BS hver for seg
+      - Filtrer til kandidater: is_summary=False og |amount| < pm
+      - Sortér kandidatene stigende på absoluttverdi (minste først)
+      - Greedy-akkumuler: mark som "ut" så lenge akkumulert sum pluss
+        neste linje ≤ pm. Så snart neste linje ville pushe over,
+        stopp — den linjen og alle større blir *ikke* scoped ut.
+      - Linjer med |amount| ≥ pm er aldri kandidater (alltid i scope).
+
+    Returnerer en dict ``{regnr: "ut" | ""}`` for alle ikke-sumlinjer,
+    slik at calleren kan merge resultatet inn i en større scoping-
+    tilstand. Linjer som ikke er i returnert dict skal behandles som
+    "inn" (default).
+
+    Ved pm ≤ 0 returneres en tom dict (ingen auto-scoping).
+    """
+    if pm <= 0:
+        return {}
+
+    result: dict[str, str] = {}
+
+    for group in ("PL", "BS"):
+        # Filtrer til kandidater og sortér stigende på |amount|.
+        candidates = [
+            ln for ln in lines
+            if not ln.is_summary
+            and (ln.line_type or "").upper() == group
+            and abs(ln.amount) < pm
+        ]
+        candidates.sort(key=lambda ln: abs(ln.amount))
+
+        cumulative = 0.0
+        for ln in candidates:
+            size = abs(ln.amount)
+            if cumulative + size > pm:
+                # Denne linjen og alle større forblir IN scope.
+                break
+            result[ln.regnr] = "ut"
+            cumulative += size
+
+    return result
+
+
+def scoped_out_totals_by_group(lines: list[ScopingLine]) -> dict[str, float]:
+    """Summér |amount| per gruppe (PL, BS) for linjer markert scoping='ut'.
+
+    Brukes av UI-en til å vise hvor mye som er scoped ut per gruppe og
+    varsle hvis aggregatet overstiger PM. Sumposter ekskluderes.
+    """
+    totals: dict[str, float] = {"PL": 0.0, "BS": 0.0}
+    for ln in lines:
+        if ln.is_summary or ln.scoping != "ut":
+            continue
+        group = (ln.line_type or "").upper()
+        if group in totals:
+            totals[group] += abs(ln.amount)
+    return totals
