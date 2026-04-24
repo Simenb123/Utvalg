@@ -886,6 +886,15 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
             self._payroll_context_key = None
         except Exception:
             pass
+        # Tøm modul-level cacher i saldobalanse_payload — disse holder
+        # gruppe-mapping, mapping-issues, og owned-company-name-oppslag
+        # som må re-leses når klassifiseringen endres.
+        try:
+            saldobalanse_payload._invalidate_group_mapping_cache()
+            saldobalanse_payload._invalidate_mapping_issues_cache()
+            saldobalanse_payload._invalidate_owned_company_cache()
+        except Exception:
+            pass
 
     def _hard_refresh(self) -> None:
         """Invalidate cache and refresh — used by Oppfrisk and programmatic reloads."""

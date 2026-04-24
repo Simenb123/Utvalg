@@ -420,25 +420,68 @@ def _build_hb_counts(hb_df: Any) -> pd.DataFrame:
     return frame.groupby("Konto", as_index=False).agg(Antall=("Antall", "sum"))
 
 
+_MAPPING_ISSUES_CACHE: dict[tuple, list[UnmappedAccountIssue]] = {}
+_GROUP_MAPPING_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _invalidate_mapping_issues_cache() -> None:
+    """Tøm mapping-issues-cache. Kalles ved endring i klient/år eller RL-config."""
+    _MAPPING_ISSUES_CACHE.clear()
+
+
+def _invalidate_group_mapping_cache(client: str | None = None) -> None:
+    """Tøm gruppe-mapping-cache (helt, eller kun for én klient)."""
+    if client is None:
+        _GROUP_MAPPING_CACHE.clear()
+        return
+    _GROUP_MAPPING_CACHE.pop(str(client), None)
+
+
 def _load_mapping_issues(analyse_page: Any) -> list[UnmappedAccountIssue]:
+    # Cache-nøkkel basert på (klient, år, id av sb-df).
+    # id() på DataFrame er stabil så lenge samme objekt lever. Ved rebuild
+    # av SB lages ny DataFrame → ny id → ny cache-nøkkel.
+    try:
+        client = str(getattr(session, "client", "") or "")
+        year = _session_year()
+        sb_df = getattr(analyse_page, "_rl_sb_df", None)
+        df_id = id(sb_df) if sb_df is not None else 0
+        cache_key = (client, year, df_id)
+    except Exception:
+        cache_key = None
+
+    if cache_key is not None:
+        cached = _MAPPING_ISSUES_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
     try:
         import analyse_mapping_service
 
-        return analyse_mapping_service.build_page_mapping_issues(analyse_page, use_filtered_hb=False)
+        result = analyse_mapping_service.build_page_mapping_issues(analyse_page, use_filtered_hb=False)
     except Exception as exc:
         log.debug("Kunne ikke bygge mapping-issues for Saldobalanse: %s", exc)
-        return []
+        result = []
+
+    if cache_key is not None:
+        _MAPPING_ISSUES_CACHE[cache_key] = result
+    return result
 
 
 def _load_group_mapping(client: str) -> dict[str, str]:
     if not client:
         return {}
+    cached = _GROUP_MAPPING_CACHE.get(str(client))
+    if cached is not None:
+        return cached
     try:
         import konto_klassifisering
 
-        return konto_klassifisering.load(client)
+        result = konto_klassifisering.load(client) or {}
     except Exception:
-        return {}
+        result = {}
+    _GROUP_MAPPING_CACHE[str(client)] = result
+    return result
 
 
 def _group_label(group_id: str) -> str:
