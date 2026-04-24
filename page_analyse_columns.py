@@ -308,6 +308,17 @@ def adapt_pivot_columns_for_mode(*, page: Any) -> None:
     apply_pivot_visible_columns(page=page)
     persist_pivot_visible_columns(page=page)
 
+    # Etter mode-bytte: oppdater også ManagedTreeview's interne
+    # `_default_visible` slik at "Standard"-knappen i kolonnevelger-
+    # dialogen resetter til riktig mode-default. Uten dette ville den
+    # falle tilbake til defaulten fra init-tidspunktets modus.
+    managed = getattr(page, "_pivot_managed", None)
+    if managed is not None:
+        try:
+            managed.column_manager._default_visible = list(defaults)
+        except Exception:
+            pass
+
 
 def update_pivot_columns_for_prev_year(*, page: Any) -> None:
     """Kall etter at fjorårsdata er lastet.

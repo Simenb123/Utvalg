@@ -40,6 +40,12 @@ class TreeviewColumnManager:
         self._pref_prefix = pref_prefix
         self._pref_key = f"{pref_prefix}.{view_id}.visible_cols"
         self._order_key = f"{pref_prefix}.{view_id}.column_order"
+        # Personlig brukerdefinert standard — brukeren kan lagre sin
+        # foretrukne konfigurasjon som sin egen default via "Lagre som
+        # min standard" i kolonnevelger-dialogen. Skilles fra kode-
+        # defaulten (global standard) via egne preferansenøkler.
+        self._user_default_visible_key = f"{pref_prefix}.{view_id}.user_default_visible_cols"
+        self._user_default_order_key = f"{pref_prefix}.{view_id}.user_default_column_order"
 
         # Load saved visibility + order or use defaults
         self._visible: list[str] = list(self._default_visible)
@@ -202,12 +208,104 @@ class TreeviewColumnManager:
         self.save_to_preferences()
 
     def reset_to_default(self) -> None:
-        """Tilbakestill til standard synlige kolonner og rekkefoelje."""
+        """Tilbakestill til global standard (kode-default).
+
+        Vi holder fortsatt metodenavnet for bakoverkompatibilitet; den
+        resetter til ``self._default_visible`` + full kolonne-rekkefølge
+        fra ``_all_cols``. For brukerens personlige default, se
+        ``reset_to_user_default``.
+        """
         self._visible = list(self._default_visible)
         self._order = list(self._all_cols)
         self._normalize_order()
         self.apply_visible()
         self.save_to_preferences()
+
+    # ------------------------------------------------------------------
+    # Personlig (brukerdefinert) standard
+    # ------------------------------------------------------------------
+
+    def load_user_default(self) -> tuple[list[str], list[str]] | None:
+        """Last brukerens personlige standard fra preferences.
+
+        Returnerer ``(order, visible)`` hvis satt, ellers ``None``.
+        """
+        try:
+            import preferences
+            visible = preferences.get(self._user_default_visible_key, None)
+            order = preferences.get(self._user_default_order_key, None)
+        except Exception:
+            return None
+        if not isinstance(visible, list) or not visible:
+            return None
+        # Filtrer mot aktuelle kolonner slik at en personlig default fra
+        # tidligere versjon (med nå fjernede kolonner) ikke ødelegger
+        # listen.
+        valid_visible = [c for c in visible if c in self._all_cols]
+        if not valid_visible:
+            return None
+        valid_order: list[str]
+        if isinstance(order, list) and order:
+            valid_order = [c for c in order if c in self._all_cols]
+            for c in self._all_cols:
+                if c not in valid_order:
+                    valid_order.append(c)
+        else:
+            valid_order = list(self._all_cols)
+        return (valid_order, valid_visible)
+
+    def has_user_default(self) -> bool:
+        """True hvis brukeren har lagret en personlig standard."""
+        return self.load_user_default() is not None
+
+    def save_as_user_default(
+        self,
+        visible: Sequence[str] | None = None,
+        order: Sequence[str] | None = None,
+    ) -> None:
+        """Lagre en konfigurasjon som brukerens personlige standard.
+
+        Med ingen argumenter lagres dagens tilstand (``_visible`` og
+        ``_order``) som personlig standard. Ellers brukes de gitte
+        listene.
+        """
+        vis = list(visible) if visible is not None else list(self._visible)
+        ord_ = list(order) if order is not None else list(self._order)
+        try:
+            import preferences
+            preferences.set(self._user_default_visible_key, vis)
+            preferences.set(self._user_default_order_key, ord_)
+        except Exception:
+            pass
+
+    def clear_user_default(self) -> None:
+        """Slett brukerens personlige standard (tilbakestill til global)."""
+        try:
+            import preferences
+            # preferences.set(key, None) fjerner nøkkelen i de fleste
+            # implementasjoner; hvis ikke, overstyrer den med tom verdi.
+            preferences.set(self._user_default_visible_key, None)
+            preferences.set(self._user_default_order_key, None)
+        except Exception:
+            pass
+
+    def reset_to_user_default(self) -> bool:
+        """Sett nåværende visning fra personlig standard.
+
+        Returnerer True hvis en personlig standard ble brukt, False
+        hvis ingen var lagret (i så fall skjer ingen endring — kaller
+        bør falle tilbake til ``reset_to_default`` ved behov).
+        """
+        loaded = self.load_user_default()
+        if loaded is None:
+            return False
+        order, visible = loaded
+        self._order = order
+        self._visible = visible
+        self._normalize_order()
+        self.apply_visible()
+        self.save_to_preferences()
+        return True
 
     # ------------------------------------------------------------------
     # Dynamic columns (for trees that rebuild their columns)
@@ -324,6 +422,27 @@ class TreeviewColumnManager:
             if text:
                 headings[col] = str(text).strip()
 
+        # Sjekk om brukeren har lagret en personlig standard — da
+        # aktiveres "Bruk min standard" og "Fjern min standard" i
+        # Standard-menyen.
+        user_default = self.load_user_default()
+        if user_default is not None:
+            u_order, u_visible = user_default
+        else:
+            u_order, u_visible = None, None
+
+        def _save_as_user_default(order: list[str], visible: list[str]) -> None:
+            # Bevar pinned-invariantet: pinned-kolonner skal alltid være
+            # synlige og først i rekkefølgen i den lagrede defaulten.
+            normalized_visible = list(visible)
+            for p in self._pinned:
+                if p in self._all_cols and p not in normalized_visible:
+                    normalized_visible.insert(0, p)
+            self.save_as_user_default(
+                visible=normalized_visible,
+                order=list(order),
+            )
+
         result = open_column_chooser(
             self._tree,
             all_cols=self._all_cols,
@@ -333,6 +452,10 @@ class TreeviewColumnManager:
             default_order=list(self._all_cols),
             headings=headings,
             pinned=list(self._pinned),
+            user_default_visible_cols=u_visible,
+            user_default_order=u_order,
+            on_save_as_user_default=_save_as_user_default,
+            on_clear_user_default=self.clear_user_default,
         )
         if result is not None:
             order, visible = result

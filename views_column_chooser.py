@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
-from typing import List, Mapping, Sequence, Tuple
+from typing import Callable, List, Mapping, Sequence, Tuple
 
 
 def _clean_columns(items: Sequence[str] | None) -> List[str]:
@@ -28,10 +28,24 @@ def open_column_chooser(
     default_order: Sequence[str] | None = None,
     headings: Mapping[str, str] | None = None,
     pinned: Sequence[str] | None = None,
+    user_default_visible_cols: Sequence[str] | None = None,
+    user_default_order: Sequence[str] | None = None,
+    on_save_as_user_default: Callable[[List[str], List[str]], None] | None = None,
+    on_clear_user_default: Callable[[], None] | None = None,
 ) -> Tuple[List[str], List[str]] | None:
     """Dialog for valg av synlighet og rekkefølge.
 
     Returnerer ``(order, visible)`` eller ``None`` om brukeren avbryter.
+
+    Støtter tre nivåer av «standard»:
+    - **Global standard** — kode-defaulten fra ``default_visible_cols`` /
+      ``default_order``. Felles for alle brukere.
+    - **Personlig standard** — brukerens egen default fra
+      ``user_default_visible_cols`` / ``user_default_order`` (hvis satt).
+      Lagres via ``on_save_as_user_default``-callbacken, fjernes via
+      ``on_clear_user_default``.
+    - **Nåværende visning** — det brukeren konfigurerer i dialogen og
+      lagrer via "Lagre"-knappen.
     """
 
     from ui_dialog import make_dialog
@@ -77,6 +91,24 @@ def open_column_chooser(
         c for c in _clean_columns(default_visible_cols or visible_cols)
         if c in default_cols
     ]
+
+    # Personlig (brukerdefinert) standard — samme normaliserings­logikk
+    # som global default. Starter som None; blir populert hvis caller
+    # har gitt lister.
+    user_default_cols: list[str] | None = None
+    user_default_vis: list[str] | None = None
+    if user_default_visible_cols is not None:
+        u_order_raw = _clean_columns(user_default_order)
+        u_vis_raw = _clean_columns(user_default_visible_cols)
+        if u_vis_raw:
+            u_cols = [c for c in u_order_raw if c in cols]
+            for c in cols:
+                if c not in u_cols:
+                    u_cols.append(c)
+            u_vis = [c for c in u_vis_raw if c in u_cols]
+            if u_vis:
+                user_default_cols = u_cols
+                user_default_vis = u_vis
 
     heading_map: dict[str, str] = {str(k): str(v) for k, v in (headings or {}).items()}
     pinned_set = {str(p) for p in (pinned or ())}
@@ -274,13 +306,84 @@ def open_column_chooser(
     footer = ttk.Frame(dialog)
     footer.pack(fill="x", padx=12, pady=(4, 12))
 
-    def set_standard() -> None:
+    # --- "Standard ▼"-meny ---
+    # Tre nivåer av default er tilgjengelig: personlig standard (hvis
+    # brukeren har lagret en) og global standard (kode-default). Menyen
+    # lar brukeren bytte mellom dem og lagre/fjerne sin egen.
+    def apply_global_default() -> None:
         nonlocal cols, visible
         cols = list(default_cols)
         visible = list(default_visible)
         refresh_tree()
 
-    ttk.Button(footer, text="Standard", command=set_standard).pack(side="left")
+    def apply_user_default() -> None:
+        nonlocal cols, visible
+        if user_default_cols is None or user_default_vis is None:
+            return
+        cols = list(user_default_cols)
+        visible = list(user_default_vis)
+        refresh_tree()
+
+    def save_current_as_user_default() -> None:
+        nonlocal user_default_cols, user_default_vis
+        if on_save_as_user_default is not None:
+            try:
+                on_save_as_user_default(list(cols), list(visible))
+            except Exception:
+                pass
+        # Oppdater lokal state slik at menyen reflekterer at personlig
+        # standard nå finnes (disabled → enabled).
+        user_default_cols = list(cols)
+        user_default_vis = list(visible)
+
+    def clear_user_default_action() -> None:
+        nonlocal user_default_cols, user_default_vis
+        if on_clear_user_default is not None:
+            try:
+                on_clear_user_default()
+            except Exception:
+                pass
+        user_default_cols = None
+        user_default_vis = None
+
+    def show_standard_menu(event=None) -> None:
+        menu = tk.Menu(dialog, tearoff=0)
+        has_user = user_default_cols is not None and user_default_vis is not None
+        menu.add_command(
+            label="Bruk min standard",
+            command=apply_user_default,
+            state="normal" if has_user else "disabled",
+        )
+        menu.add_command(
+            label="Bruk global standard",
+            command=apply_global_default,
+        )
+        menu.add_separator()
+        can_save = on_save_as_user_default is not None
+        menu.add_command(
+            label="Lagre denne som min standard",
+            command=save_current_as_user_default,
+            state="normal" if can_save else "disabled",
+        )
+        menu.add_command(
+            label="Fjern min standard",
+            command=clear_user_default_action,
+            state="normal" if (has_user and on_clear_user_default is not None) else "disabled",
+        )
+        try:
+            # Plasser menyen rett under knappen hvis vi har en referanse,
+            # ellers ved markøren.
+            x = std_btn.winfo_rootx()
+            y = std_btn.winfo_rooty() + std_btn.winfo_height()
+            menu.tk_popup(x, y)
+        except Exception:
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            except Exception:
+                pass
+
+    std_btn = ttk.Button(footer, text="Standard ▼", command=show_standard_menu)
+    std_btn.pack(side="left")
 
     def ok() -> None:
         dialog.result = (cols, visible)
