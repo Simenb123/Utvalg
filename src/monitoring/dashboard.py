@@ -86,9 +86,34 @@ class MonitoringDashboardMixin:
         self._paused = False
         self._events: deque[TimingEvent] = deque(maxlen=5000)
 
+        self._apply_app_theme()
         self._build_ui()
         self._do_initial_load()
         self.after(_POLL_INTERVAL_MS, self._poll_events)
+
+    def _apply_app_theme(self) -> None:
+        """Matcher vinduets bakgrunn til hovedappens tema.
+
+        For standalone Tk-instans kaller vi hele apply_theme (ttk.Style + bg).
+        For Toplevel inne i hovedappen er ttk.Style allerede satt; vi henter
+        bare bakgrunnsfargen fra master så vinduet ikke stikker ut.
+        """
+        try:
+            import theme as _theme
+            if isinstance(self, tk.Tk):
+                _theme.apply_theme(self)
+                return
+            # Toplevel: hent bakgrunn fra vaak_tokens via theme-modulen
+            try:
+                import vaak_tokens as _vt
+                bg = _vt.BG_NEUTRAL
+                if isinstance(bg, str) and not bg.startswith("#"):
+                    bg = "#" + bg.lstrip("#")
+                self.configure(background=bg)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
     # ------------------------------------------------------------------
