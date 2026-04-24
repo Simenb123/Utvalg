@@ -130,17 +130,29 @@ def refresh_transactions_view(*, page: Any) -> None:
     amount_cols = {"Beløp", "MVA-beløp", "Valutabeløp", "MVA-belop", "Valutabelop", "Debet", "Kredit"}
     percent_cols = {"MVA-prosent"}
 
+    # Desimal-toggle: deler state med pivot og SB-visningen (_var_decimals).
+    # Når av → avrundete heltall; når på → 2 desimaler som fmt_amount default.
+    _use_decimals = True
+    try:
+        _vd = getattr(page, "_var_decimals", None)
+        if _vd is not None:
+            _use_decimals = bool(_vd.get())
+    except Exception:
+        pass
+    _amount_decimals = 2 if _use_decimals else 0
+
     def _fmt_cell(col: str, val: object) -> str:
         """Formatter én celle basert på kolonnenavn.
 
-        - Beløpskolonner: norsk tallformat (tusenskille + komma)
+        - Beløpskolonner: norsk tallformat (tusenskille + komma); desimal-
+          visning styres av ``page._var_decimals``.
         - Prosentkolonner: vis 0.25 som 25, og bruk 0 desimaler hvis heltall
         - Ellers: str(val) med None -> ""
         """
         if val is None:
             return ""
         if col in amount_cols:
-            return formatting.fmt_amount(val)
+            return formatting.fmt_amount(val, decimals=_amount_decimals)
         if col in percent_cols:
             try:
                 v = float(val)

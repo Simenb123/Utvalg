@@ -299,7 +299,11 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             )
         except Exception:
             pass
-        self._var_decimals = tk.BooleanVar(value=True)  # vis desimaler
+        # Tall vises uten desimaler som standard — brukerne ønsket
+        # rundere, mindre støyete tall ved første visning. De kan slå
+        # på via Visning ▾ → Desimaler. Gjelder både venstre pivot og
+        # høyre TX/SB/MVA-visninger.
+        self._var_decimals = tk.BooleanVar(value=False)
 
         # --- UI refs ---
         self._pivot_tree = None
