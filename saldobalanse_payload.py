@@ -1146,11 +1146,13 @@ def _build_decorated_base_payload(
             profile_document = _load_account_profile_document_only(client, year)
 
     ownership_map = _load_owned_company_name_map(client, year)
+    _t = _tick("ownership_map", _t)
     merged = _decorate_with_detail_class_and_ownership(
         merged,
         profile_document=profile_document,
         ownership_map=ownership_map,
     )
+    _t = _tick("detail_class_and_ownership", _t)
 
     return SaldobalanseBasePayload(
         df=merged,
