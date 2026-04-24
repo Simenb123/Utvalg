@@ -299,8 +299,6 @@ class App(tk.Tk):
         self.nb.add(self.page_analyse, text="Analyse")
         self.nb.add(self.page_saldobalanse, text="Saldobalanse")
         self.nb.add(self.page_reskontro, text="Reskontro")
-        if self.page_driftsmidler is not None:
-            self.nb.add(self.page_driftsmidler, text="Driftsmidler")
         self.nb.add(self.page_materiality, text="Vesentlighet")
         if ScopingPage is not None:
             self.page_scoping = ScopingPage(self.nb)
@@ -310,8 +308,9 @@ class App(tk.Tk):
         if self.page_revisjonshandlinger is not None:
             self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         self.nb.add(self.page_mva, text="MVA")
-        self.nb.add(self.page_skatt, text="Skatt")
         self.nb.add(self.page_a07, text="A07")
+        if self.page_driftsmidler is not None:
+            self.nb.add(self.page_driftsmidler, text="Driftsmidler")
         self.nb.add(self.page_ar, text="AR")
         self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
@@ -319,14 +318,34 @@ class App(tk.Tk):
             self.nb.add(self.page_fagchat, text="Fagchat")
         if self.page_documents is not None:
             self.nb.add(self.page_documents, text="Dokumenter")
-        # Regnskap og Admin plasseres helt til høyre (avslutning + systeminnstillinger).
+        # Regnskap + Skatt + Admin helt til høyre (avslutning + skattemelding + systeminnstillinger).
         self.nb.add(self.page_regnskap, text="Regnskap")
+        self.nb.add(self.page_skatt, text="Skatt")
         self.nb.add(self.page_admin, text="Admin")
         # Statistikk lives in a Toplevel-popup — ikke i tab-strippen.
         try:
             self.nb.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed, add="+")
         except Exception:
             pass
+
+        # Diskrete fargeaksenter per fanegruppe (tynne vertikale striper).
+        try:
+            self._tab_accents = theme.apply_tab_group_accents(self.nb, {
+                "nav": [self.page_oversikt, self.page_dataset],
+                "analyse": [self.page_analyse, self.page_saldobalanse, self.page_reskontro],
+                "planning": [
+                    self.page_materiality,
+                    getattr(self, "page_scoping", None),
+                    self.page_revisjonshandlinger,
+                ],
+                "kontroll": [
+                    self.page_mva,
+                    self.page_a07,
+                    self.page_driftsmidler,
+                ],
+            })
+        except Exception:
+            self._tab_accents = {}
 
         # Koble RegnskapPage og MvaPage til AnalysePage som datakilde
         if hasattr(self.page_regnskap, "set_analyse_page"):
@@ -1157,6 +1176,59 @@ class App(tk.Tk):
         except Exception:
             log.exception("Documents auto-refresh on tab change failed")
 
+    def _preload_ownership_map_async(self) -> None:
+        """Forhåndslast ar_store.get_client_ownership_overview i bakgrunnstråd.
+
+        Oppslaget tar typisk 3+ sekunder cold og brukes av Saldobalanse-fanen
+        til å dekorere konto-navn med selskapsnavn. Ved å kjøre det parallelt
+        med Analyse-refreshen er cachen varm før brukeren bytter til SB.
+
+        Idempotent — hvis allerede i gang eller cache allerede fylt, er kallet
+        en no-op (cache-treffet i _load_owned_company_name_map returnerer
+        umiddelbart).
+        """
+        client = (getattr(session, "client", None) or "").strip()
+        year_raw = getattr(session, "year", None)
+        if not client:
+            return
+
+        try:
+            year_int: int | None = int(str(year_raw).strip()) if year_raw else None
+        except (TypeError, ValueError):
+            year_int = None
+
+        import threading
+        import time as _time
+
+        def _worker() -> None:
+            try:
+                from src.monitoring.perf import record_event as _record_event
+            except Exception:
+                _record_event = None  # type: ignore[assignment]
+
+            t0 = _time.perf_counter()
+            try:
+                from saldobalanse_payload import _load_owned_company_name_map
+                _load_owned_company_name_map(client, year_int)
+            except Exception:
+                # Stille feil — hvis preload feiler laster SB den syncront som før.
+                return
+            finally:
+                if _record_event is not None:
+                    try:
+                        duration_ms = (_time.perf_counter() - t0) * 1000.0
+                        _record_event(
+                            "startup.ownership_map.preload",
+                            duration_ms,
+                            meta={"client": client, "year": str(year_int or "")},
+                        )
+                    except Exception:
+                        pass
+
+        threading.Thread(
+            target=_worker, name="ownership-map-preload", daemon=True
+        ).start()
+
     def _on_data_ready(self, df: pd.DataFrame) -> None:
         """Kalles når dataset er lastet.
 
@@ -1176,6 +1248,14 @@ class App(tk.Tk):
             self._sync_session_context_from_dataset_store()
         except Exception:
             pass
+
+        # Bakgrunns-preload av ownership_map (3+ sekunder cold). Kjøres mens
+        # Analyse-fanen bygger — når brukeren bytter til Saldobalanse er cachen
+        # allerede varm.
+        try:
+            self._preload_ownership_map_async()
+        except Exception:
+            log.exception("Ownership map preload failed to start")
 
         # Sett dataset-referanse umiddelbart (tester og andre moduler forventer dette)
         try:

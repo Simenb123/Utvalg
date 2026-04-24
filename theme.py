@@ -26,6 +26,8 @@ def apply_theme(root: tk.Tk) -> None:
     surface = _H(vt.BG_DATA)
     surface_soft = _H(vt.BG_SAND_SOFT)
     sand = _H(vt.BG_SAND)
+    select_bg = _H(vt.SELECT_BG)
+    select_fg = _H(vt.SELECT_FG)
     border = _H(vt.BORDER)
     border_soft = _H(vt.BORDER_SOFT)
     fg = _H(vt.TEXT_PRIMARY)
@@ -185,8 +187,8 @@ def apply_theme(root: tk.Tk) -> None:
     )
     style.map(
         "Treeview",
-        background=[("selected", sand)],
-        foreground=[("selected", fg)],
+        background=[("selected", select_bg)],
+        foreground=[("selected", select_fg)],
     )
 
 
@@ -237,3 +239,69 @@ def style_treeview_tags(tree: ttk.Treeview, *names: str) -> None:
 def tree_tag(name: str) -> dict:
     """Return a copy of the configured options for a standard tag."""
     return dict(_TREEVIEW_TAGS.get(name, {}))
+
+
+# ---------------------------------------------------------------------------
+# Tab group accents — tynne fargestriper til venstre for fanetekst
+#
+# ttk.Notebook støtter ikke direkte per-tab bakgrunnsfarge på en robust måte.
+# I stedet bygger vi små PhotoImage-striper og setter dem som tab-ikoner via
+# ``nb.tab(tab_id, image=..., compound="left")``. Det gir en diskret visuell
+# gruppering uten å hacke ttk-layoutet.
+
+# Semantiske grupper med fargene deres. Holdes med i palette-familien så
+# aksentene ikke klasher med tema-fargene.
+TAB_GROUP_COLORS: dict[str, str] = {
+    "nav":      "7A8FA8",   # Oversikt/Dataset — slate blå (inngang/navigasjon)
+    "analyse":  "8CBF7C",   # Analyse/Saldobalanse/Reskontro — sage (dataanalyse)
+    "planning": "C89860",   # Vesentlighet/Scoping/Handlinger — amber (planlegging)
+    "kontroll": "A86C80",   # MVA/A07/Driftsmidler — plum (områdekontroller)
+}
+
+
+def make_tab_accent(root: tk.Misc, color_hex: str,
+                    width: int = 4, height: int = 18) -> tk.PhotoImage:
+    """Lag en tynn farget PhotoImage til bruk som tab-ikon.
+
+    Kalleren må selv beholde en referanse til bildet (ellers GC-ryddes det
+    og Tk viser ingenting). Typisk: lagres som attr på App-instansen.
+    """
+    hex_code = color_hex if color_hex.startswith("#") else f"#{color_hex}"
+    img = tk.PhotoImage(master=root, width=width, height=height)
+    try:
+        img.put(hex_code, to=(0, 0, width, height))
+    except Exception:
+        pass
+    return img
+
+
+def apply_tab_group_accents(
+    nb: ttk.Notebook,
+    groups: dict[str, list],
+    *,
+    _cache: dict[str, tk.PhotoImage] | None = None,
+) -> dict[str, tk.PhotoImage]:
+    """Sett fargeaksent på angitte faner gruppert etter semantisk gruppe.
+
+    ``groups`` mapper gruppenøkkel → liste med tab-widgets (page-instanser).
+    Gruppe-nøkler må finnes i ``TAB_GROUP_COLORS``. Returnerer dict med de
+    opprettede PhotoImage-ene så kaller kan holde referansen i live.
+    """
+    if _cache is None:
+        _cache = {}
+    for group_name, pages in groups.items():
+        color = TAB_GROUP_COLORS.get(group_name)
+        if not color:
+            continue
+        img = _cache.get(group_name)
+        if img is None:
+            img = make_tab_accent(nb, color)
+            _cache[group_name] = img
+        for page in pages:
+            if page is None:
+                continue
+            try:
+                nb.tab(page, image=img, compound="left")
+            except Exception:
+                pass
+    return _cache
