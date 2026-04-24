@@ -112,6 +112,13 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # Pivot (konto-sammendrag)
     pivot_frame.rowconfigure(2, weight=1)
     pivot_frame.columnconfigure(0, weight=1)
+    # Tving identisk minimum-høyde på header- og søkerad som i høyre
+    # tx_outer (samme verdier), slik at naturlige høydeforskjeller mellom
+    # Combobox/Menubutton/Spinbox ikke gir visuell forskyvning.
+    _HEADER_ROW_MINSIZE = 30
+    _SEARCH_ROW_MINSIZE = 26
+    pivot_frame.rowconfigure(0, minsize=_HEADER_ROW_MINSIZE)
+    pivot_frame.rowconfigure(1, minsize=_SEARCH_ROW_MINSIZE)
 
     # Header med Aggregering-dropdown + sammendrag over pivottreet
     pivot_header = ttk.Frame(pivot_frame)
@@ -536,6 +543,11 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
 
     tx_outer.rowconfigure(2, weight=1)
     tx_outer.columnconfigure(0, weight=1)
+    # Matchende minsize på header- og søkerad slik at venstre pivot og
+    # høyre TX/SB-header står i vater uavhengig av widgetenes
+    # naturlige høyder.
+    tx_outer.rowconfigure(0, minsize=30)
+    tx_outer.rowconfigure(1, minsize=26)
 
     # --- TX-frame (transaksjoner) ---
     tx_frame = ttk.Frame(tx_outer)
