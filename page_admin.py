@@ -222,10 +222,16 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
         ).grid(row=0, column=0, sticky="ew")
         ttk.Button(
             bottom,
+            text="Ytelsesmonitor…",
+            style="Secondary.TButton",
+            command=self._on_open_monitoring,
+        ).grid(row=0, column=1, sticky="e", padx=(4, 4), pady=(0, 8))
+        ttk.Button(
+            bottom,
             text="Oppsett…",
             style="Secondary.TButton",
             command=self._on_open_settings,
-        ).grid(row=0, column=1, sticky="e", padx=(4, 8), pady=(0, 8))
+        ).grid(row=0, column=2, sticky="e", padx=(4, 8), pady=(0, 8))
 
     def set_analyse_page(self, page: Any) -> None:
         self._analyse_page = page
@@ -370,6 +376,32 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
                 self._status_var.set(
                     "Regelendringer lagret. Forslags-cache er nullstilt. Preview/Test oppdateres når fanen åpnes."
                 )
+
+    def _on_open_monitoring(self) -> None:
+        """Åpne ytelsesmonitor-popup (src/monitoring/dashboard.py)."""
+        try:
+            from src.monitoring.dashboard import open_as_popup
+        except Exception as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror(
+                        "Ytelsesmonitor",
+                        f"Kunne ikke åpne ytelsesmonitor: {exc}",
+                    )
+                except Exception:
+                    pass
+            return
+        try:
+            open_as_popup(self.winfo_toplevel())
+        except Exception as exc:
+            if messagebox is not None:
+                try:
+                    messagebox.showerror(
+                        "Ytelsesmonitor",
+                        f"Kunne ikke åpne ytelsesmonitor: {exc}",
+                    )
+                except Exception:
+                    pass
 
     def _on_open_settings(self) -> None:
         """Åpne globale innstillinger (datamappe, klientliste, eksportvalg)."""

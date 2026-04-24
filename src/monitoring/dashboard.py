@@ -77,25 +77,72 @@ def _format_time(ts_iso: str) -> str:
 # ---------------------------------------------------------------------------
 # Dashboard
 
-class MonitoringDashboard(tk.Tk):
-    """Standalone dashboard som tailer events.jsonl."""
+class MonitoringDashboardMixin:
+    """Felles GUI-logikk for både standalone Tk og popup Toplevel."""
+
+    def _init_dashboard(self, events_path: Optional[Path]) -> None:
+        self.events_path = Path(events_path) if events_path else _default_events_path()
+        self._file_offset = 0
+        self._paused = False
+        self._events: deque[TimingEvent] = deque(maxlen=5000)
+
+        self._build_ui()
+        self._do_initial_load()
+        self.after(_POLL_INTERVAL_MS, self._poll_events)
+
+
+class MonitoringDashboard(MonitoringDashboardMixin, tk.Tk):
+    """Standalone dashboard-vindu (python -m src.monitoring.dashboard)."""
 
     def __init__(self, events_path: Optional[Path] = None) -> None:
         super().__init__()
         self.title("Utvalg Monitor")
         self.geometry("1100x600")
         self.minsize(760, 400)
+        self._init_dashboard(events_path)
 
-        self.events_path = Path(events_path) if events_path else _default_events_path()
-        self._file_offset = 0
-        self._paused = False
 
-        # Rullende buffer av alle eventer vi har sett (begrenset størrelse)
-        self._events: deque[TimingEvent] = deque(maxlen=5000)
+class MonitoringPopup(MonitoringDashboardMixin, tk.Toplevel):
+    """Dashboard som Toplevel — f.eks. åpnet fra Admin-fanen.
 
-        self._build_ui()
-        self._do_initial_load()
-        self.after(_POLL_INTERVAL_MS, self._poll_events)
+    Samme GUI som standalone-varianten, bare wrappet i Toplevel så den
+    lever inne i hovedappens event-loop.
+    """
+
+    def __init__(self, master: tk.Misc, events_path: Optional[Path] = None) -> None:
+        super().__init__(master)
+        self.title("Utvalg Monitor")
+        self.geometry("1100x600")
+        self.minsize(760, 400)
+        self._init_dashboard(events_path)
+        try:
+            self.transient(master.winfo_toplevel())
+        except Exception:
+            pass
+
+
+def open_as_popup(master: tk.Misc, events_path: Optional[Path] = None) -> MonitoringPopup:
+    """Åpne monitoring-dashboard som popup inne i hovedappen.
+
+    Trygt å kalle flere ganger — hvis det allerede finnes en åpen popup
+    løftes den frem i stedet for å lage en ny.
+    """
+    existing = getattr(master, "_monitoring_popup", None)
+    if existing is not None:
+        try:
+            if existing.winfo_exists():
+                existing.deiconify()
+                existing.lift()
+                existing.focus_set()
+                return existing
+        except Exception:
+            pass
+    popup = MonitoringPopup(master, events_path)
+    try:
+        master._monitoring_popup = popup  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    return popup
 
     # ------------------------------------------------------------------
     # UI-oppbygging
