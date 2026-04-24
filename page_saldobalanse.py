@@ -185,6 +185,19 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         self.refresh()
 
     def refresh_from_session(self, session_obj: Any = None, **_kw: object) -> None:
+        # Sjekk om klient/år faktisk har endret seg — i så fall må også
+        # modul-level cacher (gruppe-mapping, mapping-issues, owned-company)
+        # tømmes fordi de er per klient/år.
+        try:
+            new_client, new_year = self._client_context()
+        except Exception:
+            new_client, new_year = None, None
+        prev_context = getattr(self, "_last_session_context", None)
+        current_context = (str(new_client or ""), str(new_year or ""))
+        if prev_context != current_context:
+            SaldobalansePage._invalidate_module_caches(self)
+            self._last_session_context = current_context
+
         SaldobalansePage._invalidate_payload_cache(self)
         # Oppdater tree-headings med nytt aktivt år
         self._apply_vocabulary_labels()
@@ -886,9 +899,22 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
             self._payroll_context_key = None
         except Exception:
             pass
-        # Tøm modul-level cacher i saldobalanse_payload — disse holder
-        # gruppe-mapping, mapping-issues, og owned-company-name-oppslag
-        # som må re-leses når klassifiseringen endres.
+        # NB: tidligere tømte vi også modul-level cacher her (group_mapping,
+        # mapping_issues, owned_company). Det ble fjernet fordi denne
+        # metoden kalles ved hver tab-aktivering via refresh_from_session,
+        # som eliminerte cache-effekten (3s+ per SB-åpning). Modul-cacher
+        # invalideres nå kun ved _hard_refresh (Oppfrisk) og ved
+        # klassifiserings-endring (context-meny-handlers + Avansert
+        # klassifisering). Se _invalidate_module_caches().
+
+    def _invalidate_module_caches(self) -> None:
+        """Tøm modul-level cacher i saldobalanse_payload.
+
+        Kalles ved eksplisitte endringer i underliggende data:
+        - Oppfrisk-knappen (_hard_refresh)
+        - Lagret endring i klassifisering/A07/gruppe/owned-company
+        - Klient-bytte (senere kan denne koble seg på session-change)
+        """
         try:
             saldobalanse_payload._invalidate_group_mapping_cache()
             saldobalanse_payload._invalidate_mapping_issues_cache()
@@ -899,6 +925,7 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
     def _hard_refresh(self) -> None:
         """Invalidate cache and refresh — used by Oppfrisk and programmatic reloads."""
         SaldobalansePage._invalidate_payload_cache(self)
+        SaldobalansePage._invalidate_module_caches(self)
         try:
             self._a07_options_loaded = False
         except Exception:
