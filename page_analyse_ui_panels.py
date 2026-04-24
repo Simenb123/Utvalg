@@ -487,15 +487,26 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     _var_max_rows = getattr(page, "_var_max_rows", None)
     if _var_max_rows is not None:
         ttk.Label(tx_header, text="Vis:").grid(row=0, column=5, sticky="e", padx=(12, 4))
-        _spn_max = ttk.Spinbox(
-            tx_header,
-            from_=50,
-            to=5000,
-            increment=50,
-            textvariable=_var_max_rows,
-            width=8,
-            command=page._on_max_rows_changed,
-        )
+        # Samme compact-padding som Menubutton for å matche Combobox-høyden
+        # på venstre side. Uten dette blir Spinbox-en synlig høyere enn
+        # resten av header-widgetene på Windows vista-theme.
+        try:
+            _compact_style2 = ttk.Style()
+            _compact_style2.configure("Analyse.Compact.TSpinbox", padding=(4, 1))
+            _spn_style = "Analyse.Compact.TSpinbox"
+        except Exception:
+            _spn_style = None
+        _spn_kwargs = {
+            "from_": 50,
+            "to": 5000,
+            "increment": 50,
+            "textvariable": _var_max_rows,
+            "width": 8,
+            "command": page._on_max_rows_changed,
+        }
+        if _spn_style:
+            _spn_kwargs["style"] = _spn_style
+        _spn_max = ttk.Spinbox(tx_header, **_spn_kwargs)
         _spn_max.grid(row=0, column=6, sticky="e")
         _spn_max.bind("<FocusOut>", lambda _e: page._on_max_rows_changed())
         _spn_max.bind("<Return>", lambda _e: page._on_max_rows_changed())
