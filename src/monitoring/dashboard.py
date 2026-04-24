@@ -510,16 +510,71 @@ class MonitoringPopup(MonitoringDashboardMixin, tk.Toplevel):
 
     Samme GUI som standalone-varianten, bare wrappet i Toplevel så den
     lever inne i hovedappens event-loop.
+
+    Følger [docs/POPUP_STANDARD.md](../../docs/POPUP_STANDARD.md): beholder
+    standard vinduskontroller (minimer, maksimer, lukk) ved å unngå
+    ``transient(master)`` og sette ``-toolwindow`` eksplisitt til False.
+    Admin-popups er ikke-modale (se doc/INTERACTION_GRAMMAR.md §5).
     """
+
+    _DEFAULT_WIDTH = 1100
+    _DEFAULT_HEIGHT = 600
+    _MIN_WIDTH = 760
+    _MIN_HEIGHT = 400
 
     def __init__(self, master: tk.Misc, events_path: Optional[Path] = None) -> None:
         super().__init__(master)
         self.title("Utvalg Monitor")
-        self.geometry("1100x600")
-        self.minsize(760, 400)
-        self._init_dashboard(events_path)
+
+        # Behold max/min + close-knappene. Må settes EKSPLISITT til False
+        # for å overstyre Tk sin default for Toplevels (ellers bruker Windows
+        # "tool window"-stilen som mangler maksimer-knappen).
         try:
-            self.transient(master.winfo_toplevel())
+            self.wm_attributes("-toolwindow", False)
+        except Exception:
+            pass
+
+        try:
+            self.minsize(self._MIN_WIDTH, self._MIN_HEIGHT)
+        except Exception:
+            pass
+
+        # Sentrer over forelder (fall tilbake til skjerm hvis master ikke
+        # er realisert).
+        self._center_on_parent(master)
+
+        # Escape lukker — standard for alle popups.
+        try:
+            self.bind("<Escape>", lambda _e=None: self.destroy())
+        except Exception:
+            pass
+
+        self._init_dashboard(events_path)
+
+    def _center_on_parent(self, master: tk.Misc) -> None:
+        w, h = self._DEFAULT_WIDTH, self._DEFAULT_HEIGHT
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        x, y = 100, 100
+        try:
+            pw = int(master.winfo_width() or 0)
+            ph = int(master.winfo_height() or 0)
+            if pw < 50 or ph < 50:
+                sw = self.winfo_screenwidth()
+                sh = self.winfo_screenheight()
+                x = max(0, (sw - w) // 2)
+                y = max(0, (sh - h) // 2)
+            else:
+                px = int(master.winfo_rootx() or 0)
+                py = int(master.winfo_rooty() or 0)
+                x = px + max(0, (pw - w) // 2)
+                y = py + max(0, (ph - h) // 2)
+        except Exception:
+            pass
+        try:
+            self.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
             pass
 
