@@ -20,6 +20,64 @@ from page_analyse_columns_widths import configure_tx_tree_columns
 # ColumnSpec-bygger for ManagedTreeview-drevet TX-tree
 # =====================================================================
 
+def build_sb_column_specs(
+    *,
+    year: Optional[int] = None,
+):
+    """Returner ColumnSpec-liste for SB-treet i Analyse-fanen.
+
+    Brukes av page_analyse_ui_panels når SB-treet wrappes med
+    ManagedTreeview. Overskrifter kommer fra analysis_heading (felles
+    vokabular, årsavhengig), bredder fra analyse_sb_tree._SB_COL_WIDTHS.
+    Pinned = Konto + Kontonavn, matcher tidligere SB_PINNED_COLS.
+    """
+    from ui_managed_treeview import ColumnSpec
+
+    try:
+        import page_analyse_sb as _sb
+    except Exception:
+        return []
+
+    try:
+        from page_analyse_columns import analysis_heading
+    except Exception:
+        analysis_heading = lambda c, year=None: c  # type: ignore[assignment]
+
+    default_order = list(_sb.SB_COLS)
+    default_visible = set(getattr(_sb, "SB_DEFAULT_VISIBLE", _sb.SB_COLS))
+    numeric_cols = set(_sb._SB_NUMERIC_COLS)
+    center_cols = set(_sb._SB_CENTER_COLS)
+    col_widths = _sb._SB_COL_WIDTHS
+    pinned_set = set(SB_PINNED_COLS)
+
+    specs = []
+    for col in default_order:
+        if col in numeric_cols:
+            anchor = "e"
+        elif col in center_cols:
+            anchor = "center"
+        else:
+            anchor = "w"
+        try:
+            heading = analysis_heading(col, year=year)
+        except Exception:
+            heading = col
+        specs.append(
+            ColumnSpec(
+                id=col,
+                heading=heading,
+                width=int(col_widths.get(col, 100)),
+                minwidth=40,
+                anchor=anchor,
+                stretch=(col == "Kontonavn"),
+                visible_by_default=col in default_visible,
+                pinned=col in pinned_set,
+                sortable=True,
+            )
+        )
+    return specs
+
+
 def build_tx_column_specs(
     *,
     tx_cols_default: Sequence[str],
@@ -328,13 +386,39 @@ def configure_sb_tree_columns(*, page: Any) -> None:
     if tree is None:
         return
 
+    # Lazy import for å unngå sirkularitet med page_analyse_columns-fasaden.
+    from page_analyse_columns import _active_year, analysis_heading
+
+    # ManagedTreeview-flyt — heading/width/anchor drives av ColumnSpec
+    # (inkl. årsavhengige overskrifter). Dynamisk UB_fjor-skjul legges
+    # direkte på tree["displaycolumns"] slik at brukerens lagrede
+    # synlighets-preferanse ikke overskrives når fjorårsdata er
+    # midlertidig utilgjengelig.
+    managed = getattr(page, "_sb_managed", None)
+    if managed is not None:
+        try:
+            year = _active_year()
+        except Exception:
+            year = None
+        try:
+            managed.update_columns(build_sb_column_specs(year=year))
+        except Exception:
+            pass
+        has_prev = _sb_ub_fjor_available(page)
+        if not has_prev:
+            try:
+                current_visible = list(managed.column_manager.visible_cols)
+                effective = [c for c in current_visible if c not in SB_DYNAMIC_COLS]
+                if effective != current_visible:
+                    tree["displaycolumns"] = tuple(effective)
+            except Exception:
+                pass
+        return
+
     try:
         import page_analyse_sb as _sb
     except Exception:
         return
-
-    # Lazy import for å unngå sirkularitet med page_analyse_columns-fasaden.
-    from page_analyse_columns import _active_year, analysis_heading
 
     default_order, _ = _sb_defaults(page)
     order = list(getattr(page, "_sb_cols_order", default_order))

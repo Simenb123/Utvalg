@@ -88,54 +88,24 @@ def show_kontodetaljer_dialog(**kw: Any) -> Any:
 # =====================================================================
 
 def _bind_sb_once(*, page: Any, tree: Any) -> None:
-    """Bind høyreklikk, dobbeltklikk og drag-n-drop på SB-tree — kalles kun én gang."""
+    """Bind rad-høyreklikk, dobbeltklikk og drag-n-drop på SB-tree.
+
+    Header-sortering og header-kolonnevelger håndteres nå av
+    ManagedTreeview (se page_analyse_ui_panels); dette laget binder bare
+    SB-spesifikke body-interaksjoner.
+    """
     if getattr(tree, "_sb_events_bound", False):
         return
     tree._sb_events_bound = True  # type: ignore[attr-defined]
 
     _bind_sb_rightclick(page=page, tree=tree)
-    _bind_sb_header_rightclick(page=page, tree=tree)
     _bind_sb_drag_drop(page=page, tree=tree)
-    _bind_sb_header_sort(page=page, tree=tree)
+    _bind_sb_dblclick(page=page, tree=tree)
 
 
-def _bind_sb_header_sort(*, page: Any, tree: Any) -> None:
-    """Bind venstreklikk på SB-kolonneoverskrift til sortering.
-
-    Sorteringen delegeres til felleskomponenten
-    ``ui_treeview_sort.enable_treeview_sorting`` — den auto-detekterer
-    numerisk vs. tekst vs. dato per kolonne basert på innholdet (støtter
-    norsk tallformat med mellomrom som tusen-skille og komma som desimal).
-    Samme sortering brukes nå i Saldobalanse-fanen (via ManagedTreeview)
-    og andre konsoliderte tabeller.
-    """
-    try:
-        from ui_treeview_sort import enable_treeview_sorting
-    except Exception:
-        enable_treeview_sorting = None  # type: ignore[assignment]
-
-    if enable_treeview_sorting is not None:
-        try:
-            enable_treeview_sorting(tree)
-        except Exception:
-            pass
-
-    def _on_sb_header_release(event: Any) -> None:
-        try:
-            region = str(tree.identify_region(event.x, event.y))
-        except Exception:
-            region = ""
-        if region in {"separator", "heading"}:
-            try:
-                import page_analyse_columns as _cols
-                _cols.remember_sb_column_widths(page=page)
-            except Exception:
-                pass
-
-    tree.bind("<ButtonRelease-1>", _on_sb_header_release, add=True)
-
+def _bind_sb_dblclick(*, page: Any, tree: Any) -> None:
+    """Dobbeltklikk på SB-konto → åpne Kontodetaljer."""
     def _on_sb_dblclick(event: Any) -> None:
-        """Dobbeltklikk på SB-konto → åpne Kontodetaljer."""
         iid = tree.identify_row(event.y)
         if not iid:
             return
@@ -152,88 +122,6 @@ def _bind_sb_header_sort(*, page: Any, tree: Any) -> None:
     tree.bind("<Double-1>", _on_sb_dblclick, add=True)
 
 
-def _bind_sb_header_rightclick(*, page: Any, tree: Any) -> None:
-    """Bind h\u00f8yreklikk p\u00e5 SB-header til kolonnemeny (vis/skjul)."""
-    try:
-        import tkinter as tk
-    except Exception:
-        return
-
-    def _on_header_rightclick(event: Any) -> None:
-        try:
-            region = tree.identify_region(event.x, event.y)
-        except Exception:
-            region = ""
-        if region not in ("heading", "separator"):
-            return
-        _show_sb_header_menu(page=page, tree=tree, event=event)
-
-    tree.bind("<Button-3>", _on_header_rightclick, add=True)
-
-
-def _show_sb_header_menu(*, page: Any, tree: Any, event: Any) -> None:
-    """Vis kolonnemeny p\u00e5 SB-header med checkbuttons + Tilpass/Nullstill."""
-    try:
-        import tkinter as tk
-    except Exception:
-        return
-    try:
-        import page_analyse_columns as _cols
-        import page_analyse_sb as _ps
-    except Exception:
-        return
-
-    default_order = list(_ps.SB_COLS)
-    current_order = list(getattr(page, "_sb_cols_order", default_order))
-    current_visible = list(getattr(page, "_sb_cols_visible", default_order))
-    pinned = set(_cols.SB_PINNED_COLS)
-
-    # Hent brukervennlige labels via felles vokabular slik at menyen
-    # viser "UB 2025" / "Δ UB 25/24" istedenfor interne IDs.
-    year = _cols._active_year()
-
-    menu = tk.Menu(tree, tearoff=0)
-
-    def _toggle(col: str) -> None:
-        if col in pinned:
-            return
-        new_visible = list(current_visible)
-        if col in new_visible:
-            new_visible.remove(col)
-        else:
-            new_visible.append(col)
-        _cols.apply_sb_column_config(
-            page=page, order=current_order, visible=new_visible)
-
-    for col in current_order:
-        try:
-            heading = _cols.analysis_heading(col, year=year)
-        except Exception:
-            heading = _ps._SB_COL_HEADINGS.get(col, col)
-        is_visible = col in current_visible
-        is_pinned = col in pinned
-        label = f"\u2713 {heading}" if is_visible else f"   {heading}"
-        if is_pinned:
-            menu.add_command(label=label + "  (l\u00e5st)", state="disabled")
-        else:
-            menu.add_command(label=label, command=lambda c=col: _toggle(c))
-
-    menu.add_separator()
-    menu.add_command(
-        label="Tilpass kolonner\u2026",
-        command=lambda: _cols.open_sb_column_chooser(page=page),
-    )
-    menu.add_command(
-        label="Nullstill kolonner",
-        command=lambda: _cols.reset_sb_columns_to_default(page=page),
-    )
-
-    try:
-        menu.tk_popup(event.x_root, event.y_root)
-    except Exception:
-        pass
-
-
 def _bind_sb_rightclick(*, page: Any, tree: Any) -> None:
     """Bind høyreklikkmeny for SB-kontoer (endre regnskapslinje).
 
@@ -246,7 +134,7 @@ def _bind_sb_rightclick(*, page: Any, tree: Any) -> None:
         return
 
     def _on_sb_rightclick(event: Any) -> None:
-        # Skip header/separator — håndteres av _bind_sb_header_rightclick
+        # Skip header/separator — kolonnemenyen håndteres av ManagedTreeview.
         try:
             region = tree.identify_region(event.x, event.y)
         except Exception:
@@ -353,7 +241,11 @@ def _bind_sb_rightclick(*, page: Any, tree: Any) -> None:
         except Exception:
             pass
 
-    tree.bind("<Button-3>", _on_sb_rightclick)
+    # add=True slik at vi ikke kapper ManagedTreeview sin egen <Button-3>-
+    # binding (som viser kolonnevelger-menyen på header). Ved body-klikk
+    # returnerer Managed-handleren uten "break", og denne handleren får
+    # kjøre videre i kjeden.
+    tree.bind("<Button-3>", _on_sb_rightclick, add=True)
 
 
 def remap_sb_account(*, page: Any, konto: str, kontonavn: str) -> None:

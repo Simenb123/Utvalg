@@ -579,6 +579,37 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         page._sb_frame = None
         page._sb_tree = None
 
+    # Wrap SB-treet med ManagedTreeview — gir drag-n-drop, kolonnevelger
+    # via høyreklikk og persisterte kolonne-preferanser. Dynamisk skjul av
+    # UB_fjor/Endring_fjor/Endring_pct når fjorårsdata mangler håndteres
+    # fortsatt av configure_sb_tree_columns via managed.column_manager.
+    page._sb_managed = None
+    if getattr(page, "_sb_tree", None) is not None:
+        try:
+            from ui_managed_treeview import ManagedTreeview
+            from page_analyse_columns_presets import build_sb_column_specs
+
+            year = None
+            try:
+                from page_analyse_columns import _active_year
+                year = _active_year()
+            except Exception:
+                pass
+
+            page._sb_managed = ManagedTreeview(
+                page._sb_tree,
+                view_id="analyse_sb",
+                column_specs=build_sb_column_specs(year=year),
+                pref_prefix="ui",
+                legacy_pref_keys={
+                    "visible_cols":  "analyse.sb_cols.visible",
+                    "column_order":  "analyse.sb_cols.order",
+                    "column_widths": "analyse.sb_cols.widths",
+                },
+            )
+        except Exception:
+            page._sb_managed = None
+
     # --- NK-frame (nøkkeltall) ---
     try:
         nk_frame = ttk.Frame(tx_outer)

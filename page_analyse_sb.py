@@ -44,13 +44,12 @@ from analyse_sb_refresh import (  # noqa: E402,F401
 from analyse_sb_remap import (  # noqa: E402,F401
     _DRAG_THRESHOLD_PX,
     _bind_sb_drag_drop,
-    _bind_sb_header_rightclick,
+    _bind_sb_dblclick,
     _bind_sb_once,
     _bind_sb_rightclick,
     _check_rl_has_active_kontoer,
     _execute_drag_remap,
     _remap_multiple_sb_accounts,
-    _show_sb_header_menu,
     remap_sb_account,
     show_sb_account_transactions,
 )
