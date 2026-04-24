@@ -34,11 +34,17 @@ def open_column_chooser(
     Returnerer ``(order, visible)`` eller ``None`` om brukeren avbryter.
     """
 
-    dialog = tk.Toplevel(master)
-    dialog.title("Kolonner")
-    dialog.transient(master)
-    dialog.grab_set()
-    dialog.minsize(620, 480)
+    from ui_dialog import make_dialog
+
+    dialog = make_dialog(
+        master,
+        title="Kolonner",
+        width=720,
+        height=560,
+        min_width=560,
+        min_height=420,
+        center_on="parent",
+    )
     try:
         dialog.configure(background="#FAFAF7")
     except Exception:
