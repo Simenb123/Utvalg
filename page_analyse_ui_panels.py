@@ -429,7 +429,19 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         rb_tx_tx.grid(row=0, column=2, sticky="w", padx=(0, 8))
 
         # "Annet ▾"-menubutton: Motposter, Motposter (kontonivå), Nøkkeltall.
-        adv_btn = ttk.Menubutton(tx_header, text="Annet ▾", direction="below")
+        # Compact-stil strammer inn Menubutton-padding slik at høyden matcher
+        # Combobox / Radiobutton i venstre pivot-header (som ellers er lavere
+        # enn en default-stylet Menubutton på Windows vista-theme).
+        try:
+            _compact_style = ttk.Style()
+            _compact_style.configure("Analyse.Compact.TMenubutton", padding=(6, 1))
+            _adv_btn_style = "Analyse.Compact.TMenubutton"
+        except Exception:
+            _adv_btn_style = None
+        _adv_btn_kwargs = {"text": "Annet ▾", "direction": "below"}
+        if _adv_btn_style:
+            _adv_btn_kwargs["style"] = _adv_btn_style
+        adv_btn = ttk.Menubutton(tx_header, **_adv_btn_kwargs)
         adv_btn.grid(row=0, column=3, sticky="w")
         adv_menu = tk.Menu(adv_btn, tearoff=False)
         adv_btn["menu"] = adv_menu
