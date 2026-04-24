@@ -389,30 +389,41 @@ def configure_sb_tree_columns(*, page: Any) -> None:
     # Lazy import for å unngå sirkularitet med page_analyse_columns-fasaden.
     from page_analyse_columns import _active_year, analysis_heading
 
-    # ManagedTreeview-flyt — heading/width/anchor drives av ColumnSpec
-    # (inkl. årsavhengige overskrifter). Dynamisk UB_fjor-skjul legges
-    # direkte på tree["displaycolumns"] slik at brukerens lagrede
-    # synlighets-preferanse ikke overskrives når fjorårsdata er
-    # midlertidig utilgjengelig.
+    # ManagedTreeview-flyt — SB-treet er allerede satt opp ved init.
+    # Her oppdaterer vi bare det som kan endre seg når brukeren veksler
+    # inn til SB-visningen:
+    #   (a) årsavhengige heading-tekster (analysis_heading avhenger av
+    #       aktiv sesjon-år),
+    #   (b) dynamisk UB_fjor-skjul via tree["displaycolumns"] når
+    #       fjorårsdata mangler — brukerens lagrede synlighets-
+    #       preferanse forblir urørt i column_manager.
+    # Vi rører IKKE tree["columns"] eller kolonne-bredder her, for å
+    # unngå å ødelegge data-rader som akkurat er (eller blir) satt inn
+    # via refresh_sb_view.
     managed = getattr(page, "_sb_managed", None)
     if managed is not None:
+        year = None
         try:
             year = _active_year()
         except Exception:
-            year = None
+            pass
         try:
-            managed.update_columns(build_sb_column_specs(year=year))
+            import page_analyse_sb as _sb_mod
+            for col in _sb_mod.SB_COLS:
+                try:
+                    tree.heading(col, text=analysis_heading(col, year=year))
+                except Exception:
+                    pass
         except Exception:
             pass
         has_prev = _sb_ub_fjor_available(page)
-        if not has_prev:
-            try:
-                current_visible = list(managed.column_manager.visible_cols)
-                effective = [c for c in current_visible if c not in SB_DYNAMIC_COLS]
-                if effective != current_visible:
-                    tree["displaycolumns"] = tuple(effective)
-            except Exception:
-                pass
+        try:
+            visible_order = list(managed.column_manager.visible_cols)
+            if not has_prev:
+                visible_order = [c for c in visible_order if c not in SB_DYNAMIC_COLS]
+            tree["displaycolumns"] = tuple(visible_order)
+        except Exception:
+            pass
         return
 
     try:
