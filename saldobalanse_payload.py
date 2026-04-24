@@ -688,14 +688,37 @@ def _rf1022_treatment_text(
 STALE_OWNED_COMPANY_LABEL = "utgått kobling"
 
 
+_OWNED_COMPANY_CACHE: dict[tuple[str, str], dict[str, str]] = {}
+
+
+def _invalidate_owned_company_cache(client: str | None = None) -> None:
+    """Tøm cache for eide-selskaper-oppslaget.
+
+    Kalles fra AR-importer/opprettelse slik at nye ownerships reflekteres
+    i Saldobalanse-fanen uten app-restart.
+    """
+    if client is None:
+        _OWNED_COMPANY_CACHE.clear()
+        return
+    keys_to_drop = [k for k in _OWNED_COMPANY_CACHE if k[0] == client]
+    for k in keys_to_drop:
+        _OWNED_COMPANY_CACHE.pop(k, None)
+
+
 def _load_owned_company_name_map(client: str, year: int | None) -> dict[str, str]:
     """Returner orgnr (kun siffer) -> selskapsnavn for aktiv klients eide selskaper.
 
     Returnerer tom dict hvis klient eller år mangler, eller hvis AR-oppslaget feiler.
+    Cachet per (client, year) — `ar_store.get_client_ownership_overview` er
+    en ~3-7s operasjon som ellers ville kjørt hver refresh.
     """
 
     if not client:
         return {}
+    cache_key = (str(client), str(year or ""))
+    cached = _OWNED_COMPANY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         import ar_store
     except Exception:
@@ -716,6 +739,7 @@ def _load_owned_company_name_map(client: str, year: int | None) -> dict[str, str
         name = str(row.get("company_name") or "").strip()
         if name:
             mapping[digits] = name
+    _OWNED_COMPANY_CACHE[cache_key] = mapping
     return mapping
 
 

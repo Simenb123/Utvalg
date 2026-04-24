@@ -2710,6 +2710,9 @@ def test_load_owned_company_name_map_filters_invalid_rows(monkeypatch) -> None:
     import page_saldobalanse
     import saldobalanse_payload
 
+    # Cache er modul-level og kan være forurenset fra tidligere tester.
+    saldobalanse_payload._invalidate_owned_company_cache()
+
     class _FakeAr:
         @staticmethod
         def get_client_ownership_overview(_client: str, _year: str) -> dict:
