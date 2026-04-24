@@ -313,6 +313,17 @@ class TreeviewColumnManager:
         except ImportError:
             return
 
+        # Hent brukervennlige heading-tekster fra treet slik at dialogen
+        # viser "UB 2025" og "Δ UB 25/24" istedenfor interne IDer.
+        headings: dict[str, str] = {}
+        for col in self._all_cols:
+            try:
+                text = self._tree.heading(col, "text")
+            except Exception:
+                text = ""
+            if text:
+                headings[col] = str(text).strip()
+
         result = open_column_chooser(
             self._tree,
             all_cols=self._all_cols,
@@ -320,6 +331,8 @@ class TreeviewColumnManager:
             initial_order=self._order,
             default_visible_cols=self._default_visible,
             default_order=list(self._all_cols),
+            headings=headings,
+            pinned=list(self._pinned),
         )
         if result is not None:
             order, visible = result
