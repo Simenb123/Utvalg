@@ -1116,7 +1116,25 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         SaldobalansePage._ensure_a07_options_loaded(self)
         self._render_df(df)
         _t_render_end = _time.perf_counter()
-        if log.isEnabledFor(logging.DEBUG):
+        # Permanent timing-logg for å oppdage regresjoner i SB-ytelse.
+        # Aktivér ved å sette UTVALG_PROFILE_SB=1 i miljøet.
+        import os as _os
+        if _os.environ.get("UTVALG_PROFILE_SB", "").strip().lower() in {"1", "true", "yes", "on"}:
+            try:
+                import sys as _sys
+                _sys.stderr.write(
+                    "[saldobalanse] refresh rows=%d base=%.3fs(%s) postprocess=%.3fs render=%.3fs\n" % (
+                        int(len(df.index)),
+                        _t_base_end - _t_start,
+                        "cache-hit" if _base_cache_hit else "rebuilt",
+                        _t_postprocess_end - _t_base_end,
+                        _t_render_end - _t_postprocess_end,
+                    )
+                )
+                _sys.stderr.flush()
+            except Exception:
+                pass
+        elif log.isEnabledFor(logging.DEBUG):
             try:
                 log.debug(
                     "[saldobalanse] refresh rows=%d base=%.3fs(%s) postprocess=%.3fs render=%.3fs",
@@ -1231,6 +1249,10 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         ]
         column_lists = [formatted[col] for col in ALL_COLUMNS]
 
+        # Pre-beregn alle (iid, values, tags)-tuples før Tk-loopen. Sparer
+        # per-rad generator-kall + tuple-konstruksjon inne i hot loop.
+        values_per_row = list(zip(*column_lists))
+
         insert = tree.insert
         for idx in range(row_count):
             try:
@@ -1238,7 +1260,7 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
                     "",
                     "end",
                     iid=konto_series[idx],
-                    values=tuple(col[idx] for col in column_lists),
+                    values=values_per_row[idx],
                     tags=tag_list[idx],
                 )
             except Exception:
