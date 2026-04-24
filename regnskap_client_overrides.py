@@ -4,16 +4,40 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Sequence
 
 import app_paths
 
 
-def overrides_dir() -> Path:
-    path = app_paths.data_dir() / "config" / "regnskap" / "client_overrides"
+import os as _os
+
+
+def _data_dir_key() -> str:
+    """Rask nøkkel som reflekterer data_dir-konfigurasjon.
+
+    UTVALG_DATA_DIR er det tester typisk endrer; hint-fil og frozen-detect
+    endrer seg ikke mellom kall i samme prosess. Bruker env var som proxy
+    for cache-invalidering — det dekker 99% av bruken uten å måtte kalle
+    den trege app_paths.data_dir() hver gang."""
+    return _os.getenv("UTVALG_DATA_DIR", "") or ""
+
+
+@lru_cache(maxsize=4)
+def _overrides_dir_cached(data_dir_key: str) -> Path:
+    """Cachet per (UTVALG_DATA_DIR env var). app_paths.data_dir() kostet
+    60-180ms per kall (leser hint-fil, resolver paths); cachen unngår
+    at dette kjøres 3+ ganger per klikk."""
+    base = app_paths.data_dir()  # tregt, men bare første gang per nøkkel
+    path = base / "config" / "regnskap" / "client_overrides"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def overrides_dir() -> Path:
+    """Returner klientstøtte-mappa, opprettet hvis nødvendig."""
+    return _overrides_dir_cached(_data_dir_key())
 
 
 def _client_slug(client: str) -> str:
@@ -23,6 +47,11 @@ def _client_slug(client: str) -> str:
 
 
 def overrides_path(client: str) -> Path:
+    """Returner sti til klientens overrides-fil.
+
+    overrides_dir() er cachet (en lru_cache bak kulissene), så gjentatte
+    kall koster ~0.1ms. Vi kaller den her så monkeypatching i tester
+    fortsatt virker."""
     return overrides_dir() / f"{_client_slug(client)}.json"
 
 
@@ -725,6 +754,12 @@ def save_kontoutskrift_path(client: str, path: str) -> Path:
 
 
 def _read_payload(client: str | None) -> dict:
+    """Les klient-payload fra disk. IKKE cachet — brukes av skrive-kall
+    som muterer payload før de skriver tilbake. Cache-muterende kode ville
+    forurenset mellomlageret.
+
+    Lesende kall (``load_comments``, ``load_account_review``) skal bruke
+    ``_read_payload_cached`` for å slippe disk-lesing på hvert klikk."""
     if not client:
         return {}
     path = overrides_path(client)
@@ -737,26 +772,96 @@ def _read_payload(client: str | None) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def _read_payload_cached(client: str | None) -> dict:
+    """Cachet utgave av _read_payload for KUN LESENDE kall.
+
+    VIKTIG: Kallere MÅ ikke mutere det returnerte objektet — det deles
+    mellom alle kall med samme (path, mtime). Mål alltid en ny dict fra
+    resultatet (se ``load_comments``, ``load_account_review`` for mønster).
+
+    Cache-nøkkel: (path, mtime). Når fila endres (f.eks. etter
+    save_comment) får neste kall ny mtime og re-leser automatisk.
+
+    NB: Tidligere returnerte denne ``copy.deepcopy`` for sikkerhet, men
+    deepcopy av store payloads tok 100-150 ms per kall — like tregt som
+    disk-lesingen vi prøver å unngå. Returnerer nå referansen direkte;
+    pålitelig no-mutation er kontrakten (sjekket i kode-review).
+    """
+    if not client:
+        return {}
+    path = overrides_path(client)
+    try:
+        mtime_ns = path.stat().st_mtime_ns if path.exists() else 0
+    except Exception:
+        mtime_ns = 0
+    return _read_payload_cached_raw(str(path), mtime_ns)
+
+
+@lru_cache(maxsize=32)
+def _read_payload_cached_raw(path: str, mtime_ns: int) -> dict:
+    """Disk-lesing + parsing med mtime-basert invalidering.
+
+    Resultatet skal ALDRI muteres direkte — delt mellom alle kall."""
+    if mtime_ns == 0:
+        return {}
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Kommentarer (per konto og per regnskapslinje)
 # ---------------------------------------------------------------------------
+
+# Modul-nivå cacher for lese-operasjoner som kalles ofte fra Analyse-fanen.
+# Vi bruker save-basert invalidering istedenfor mtime for å slippe en stat()
+# per klikk (kan være 30+ ms på treg disk/OneDrive/antivirus).
+_COMMENTS_CACHE: dict[str, dict[str, dict[str, str]]] = {}
+_ACCOUNT_REVIEW_CACHE: dict[tuple[str, str], dict[str, dict]] = {}
+
+
+def invalidate_client_cache(client: str | None = None) -> None:
+    """Tøm modul-cachene for en klient (eller alle hvis None).
+
+    Kalles automatisk fra save-funksjoner. Ekstern kode kan også kalle
+    denne ved behov (f.eks. etter direkte fil-endring)."""
+    if client is None:
+        _COMMENTS_CACHE.clear()
+        _ACCOUNT_REVIEW_CACHE.clear()
+        return
+    _COMMENTS_CACHE.pop(str(client), None)
+    keys = [k for k in _ACCOUNT_REVIEW_CACHE if k[0] == str(client)]
+    for k in keys:
+        _ACCOUNT_REVIEW_CACHE.pop(k, None)
+
 
 def load_comments(client: str | None) -> dict[str, dict[str, str]]:
     """Last kommentarer for klient.
 
     Returnerer {"accounts": {"1801": "Sjekket OK", ...},
                 "rl": {"550": "Følg opp", ...}}.
-    """
+
+    Modul-nivå cachet med save-basert invalidering. Kalles fra
+    Analyse-fanen på hvert klikk. VIKTIG: Kallere må ikke mutere
+    returverdien."""
     if not client:
         return {"accounts": {}, "rl": {}}
+    key = str(client)
+    cached = _COMMENTS_CACHE.get(key)
+    if cached is not None:
+        return cached
     raw = _read_payload(client)
     comments = raw.get("comments", {})
     if not isinstance(comments, dict):
         comments = {}
-    return {
+    result = {
         "accounts": {str(k): str(v) for k, v in comments.get("accounts", {}).items() if v},
         "rl": {str(k): str(v) for k, v in comments.get("rl", {}).items() if v},
     }
+    _COMMENTS_CACHE[key] = result
+    return result
 
 
 def save_comment(client: str, *, kind: str, key: str, text: str) -> None:
@@ -788,6 +893,7 @@ def save_comment(client: str, *, kind: str, key: str, text: str) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
+    invalidate_client_cache(client)
 
 
 # ---------------------------------------------------------------------------
@@ -955,6 +1061,9 @@ def _write_payload(client: str, payload: dict) -> Path:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
+    # Tøm cache etter skriving — alle mutasjoner går gjennom _write_payload,
+    # så dette dekker save_comment, account_review, ub_evidence osv.
+    invalidate_client_cache(client)
     return path
 
 
@@ -1139,18 +1248,25 @@ def load_account_review(client: str | None, year: str | None) -> dict[str, dict]
     """
     if not client or not year:
         return {}
+    key = (str(client), str(year))
+    cached = _ACCOUNT_REVIEW_CACHE.get(key)
+    if cached is not None:
+        return cached
     raw = _read_payload(client)
     by_year = raw.get("account_review_by_year", {})
     if not isinstance(by_year, dict):
+        _ACCOUNT_REVIEW_CACHE[key] = {}
         return {}
     year_map = by_year.get(str(year), {})
     if not isinstance(year_map, dict):
+        _ACCOUNT_REVIEW_CACHE[key] = {}
         return {}
     out: dict[str, dict] = {}
     for konto, entry in year_map.items():
         clean = _clean_review_entry(entry)
         if clean["ok"] or clean["attachments"] or clean.get("ub_evidence"):
             out[str(konto)] = clean
+    _ACCOUNT_REVIEW_CACHE[key] = out
     return out
 
 

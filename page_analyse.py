@@ -845,25 +845,48 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
 
         UI (page_analyse_ui) binder <<TreeviewSelect>> til denne hooken.
         """
+        # Per-fase stoppeklokker — vi logger til monitoren så vi ser hvilken
+        # del som er treg når bruker bytter mellom regnskapslinjer.
+        import time as _time
         try:
-            import page_analyse_detail_panel
+            from src.monitoring.perf import record_event as _record_event
+        except Exception:
+            _record_event = None  # type: ignore[assignment]
 
+        def _tick(label: str, fn) -> None:
+            t0 = _time.perf_counter()
+            try:
+                fn()
+            except Exception:
+                pass
+            if _record_event is not None:
+                try:
+                    _record_event(
+                        f"analyse.pivot_select.{label}",
+                        (_time.perf_counter() - t0) * 1000.0,
+                    )
+                except Exception:
+                    pass
+
+        t_total = _time.perf_counter()
+
+        def _reset_detail() -> None:
+            import page_analyse_detail_panel
             page_analyse_detail_panel.reset_detail_selection(self)
-        except Exception:
-            pass
-        try:
-            self._update_mapping_warning_banner()
-        except Exception:
-            pass
-        try:
-            self._refresh_transactions_view()
-        except Exception:
-            # Skal aldri krasje GUI på event-binding.
-            pass
-        try:
-            self._refresh_detail_panel()
-        except Exception:
-            pass
+
+        _tick("reset_detail", _reset_detail)
+        _tick("mapping_banner", self._update_mapping_warning_banner)
+        _tick("transactions_view", self._refresh_transactions_view)
+        _tick("detail_panel", self._refresh_detail_panel)
+
+        if _record_event is not None:
+            try:
+                _record_event(
+                    "analyse.pivot_select.total",
+                    (_time.perf_counter() - t_total) * 1000.0,
+                )
+            except Exception:
+                pass
 
     def _on_tx_select(self, _event=None) -> None:
         """Hook for evt. fremtidig logikk ved valg i transaksjonslisten.

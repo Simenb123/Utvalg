@@ -279,3 +279,30 @@ def _neutralize_blocking_dialogs() -> None:
 
 
 _neutralize_blocking_dialogs()
+
+
+# ---------------------------------------------------------------------------
+# Cache-invalidering mellom tester
+#
+# Modul-nivå cacher i produksjonskoden kan lekke data mellom tester som
+# bruker samme klient-navn med ulik tmp_path. Denne fixturen tømmer
+# cachene før hver test så testene ikke ser hverandres tilstand.
+# ---------------------------------------------------------------------------
+
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _reset_module_caches():
+    """Tøm modul-nivå cacher som kan lekke mellom tester."""
+    try:
+        import regnskap_client_overrides as _rco
+        _rco.invalidate_client_cache()
+        if hasattr(_rco, "_overrides_dir_cached"):
+            _rco._overrides_dir_cached.cache_clear()
+        if hasattr(_rco, "_read_payload_cached_raw"):
+            _rco._read_payload_cached_raw.cache_clear()
+    except Exception:
+        pass
+    yield

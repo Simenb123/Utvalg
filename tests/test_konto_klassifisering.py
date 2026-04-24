@@ -1,7 +1,18 @@
 """Tests for konto_klassifisering.py."""
 from __future__ import annotations
 
+import pytest
+
 import konto_klassifisering as kk
+
+
+@pytest.fixture(autouse=True)
+def _reset_load_cache():
+    """Tøm per-klient load()-cachen mellom tester så samme klientnavn kan
+    brukes i flere tester uten stale data."""
+    kk.invalidate_cache()
+    yield
+    kk.invalidate_cache()
 
 
 class _FakeApi:

@@ -44,11 +44,32 @@ def _api() -> AccountProfileLegacyApi:
 DEFAULT_GROUPS: list[str] = _api().default_groups()
 
 
+# Per-klient mellomlager for konto→gruppe-mappingen. load() kalles fra
+# Analyse-fanen på HVERT klikk på en regnskapslinje (ca 100ms per kall),
+# men resultatet endres kun når save() eller save_a07_mapping() kjøres.
+# Vi tømmer cache fra mutasjonsfunksjonene så ingen stale data kan slippe ut.
+_MAPPING_CACHE: dict[str, dict[str, str]] = {}
+
+
+def invalidate_cache(client: str | None = None) -> None:
+    """Tøm load()-cachen. client=None fjerner alt."""
+    if client is None:
+        _MAPPING_CACHE.clear()
+    else:
+        _MAPPING_CACHE.pop(str(client), None)
+
+
 def load(client: str) -> dict[str, str]:
-    return _api().load_mapping(
+    key = str(client or "")
+    cached = _MAPPING_CACHE.get(key)
+    if cached is not None:
+        return dict(cached)  # copy så kaller kan mutere fritt
+    mapping = _api().load_mapping(
         client=client,
         getter=preferences.get,
     )
+    _MAPPING_CACHE[key] = dict(mapping)
+    return mapping
 
 
 def save(client: str, mapping: dict[str, str]) -> None:
@@ -65,6 +86,7 @@ def save(client: str, mapping: dict[str, str]) -> None:
         source="manual",
         confidence=1.0,
     )
+    invalidate_cache(client)
 
 
 def load_a07_mapping(client: str, *, year: int | None = None) -> dict[str, str]:
@@ -89,6 +111,7 @@ def save_a07_mapping(client: str, mapping: dict[str, str], *, year: int | None =
         source="manual",
         confidence=1.0,
     )
+    invalidate_cache(client)
 
 
 def load_a07_code_options(rulebook_path: str | Path | None = None) -> list[tuple[str, str]]:

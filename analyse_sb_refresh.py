@@ -175,12 +175,69 @@ def _get_selected_regnr(*, page: Any) -> list[int]:
     return regnr_list
 
 
+def _resolve_all_accounts_to_rl_cached(
+    *, page: Any, sb_df: pd.DataFrame, konto_src: str
+) -> pd.DataFrame:
+    """Returner DataFrame med ['konto', 'regnr'] for ALLE kontoer i sb_df
+    (+ kontoer fra fjor-SB), cachet på page-instansen.
+
+    Denne resolvingen koster ~100-150ms per klikk uten cache fordi den
+    matcher hver konto mot intervall-mapping + overrides. Resultatet
+    avhenger kun av sb_df, sb_prev_df, intervals og regnskapslinjer —
+    alle stabile mellom klikk. Cache-nøkkel bruker id() på disse fire.
+    """
+    sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+    account_overrides = getattr(page, "_rl_account_overrides", None)
+
+    cache_key = (
+        id(sb_df),
+        id(sb_prev_df) if sb_prev_df is not None else 0,
+        id(intervals) if intervals is not None else 0,
+        id(regnskapslinjer) if regnskapslinjer is not None else 0,
+        id(account_overrides) if account_overrides is not None else 0,
+    )
+    cached_key = getattr(page, "_rl_resolve_cache_key", None)
+    cached_df = getattr(page, "_rl_resolve_cache", None)
+    if cached_key == cache_key and cached_df is not None:
+        return cached_df
+
+    import regnskapslinje_mapping_service as _rl_svc
+    context = _rl_svc.context_from_page(page)
+    if context.is_empty and not context.account_overrides:
+        resolved = pd.DataFrame(columns=["konto", "regnr"])
+    else:
+        sb_konto_str = sb_df[konto_src].astype(str).str.strip()
+        accounts = set(sb_konto_str.unique().tolist())
+        if isinstance(sb_prev_df, pd.DataFrame) and not sb_prev_df.empty:
+            prev_cols = _resolve_sb_columns(sb_prev_df)
+            prev_konto_src = prev_cols.get("konto")
+            if prev_konto_src:
+                try:
+                    prev_accounts = (
+                        sb_prev_df[prev_konto_src].astype(str).str.strip().unique().tolist()
+                    )
+                    accounts.update(prev_accounts)
+                except Exception:
+                    pass
+        resolved = _rl_svc.resolve_accounts_to_rl(list(accounts), context=context)
+
+    try:
+        page._rl_resolve_cache_key = cache_key
+        page._rl_resolve_cache = resolved
+    except Exception:
+        pass
+    return resolved
+
+
 def _resolve_target_kontoer(*, page: Any, sb_df: pd.DataFrame,
                              konto_src: str) -> set[str]:
     """Finn SB-kontoer som tilhører valgte regnskapslinjer/kontoer.
 
-    Bruker vektorisert pandas-logikk istedenfor triple-nested loops.
-    Overrides erstatter (ikke supplerer) intervall-mapping.
+    Bruker mellomlagret all-accounts-mapping (se
+    _resolve_all_accounts_to_rl_cached). Overrides erstatter (ikke
+    supplerer) intervall-mapping.
     """
     agg_mode = ""
     try:
@@ -197,31 +254,9 @@ def _resolve_target_kontoer(*, page: Any, sb_df: pd.DataFrame,
         return set()
     regnr_set = {int(r) for r in selected_regnr}
 
-    import regnskapslinje_mapping_service as _rl_svc
-
-    context = _rl_svc.context_from_page(page)
-    if context.is_empty and not context.account_overrides:
-        return set()
-
-    sb_konto_str = sb_df[konto_src].astype(str).str.strip()
-    accounts = set(sb_konto_str.unique().tolist())
-
-    # Inkluder også kontoer som kun finnes i fjor-SB, slik at RL med kun
-    # fjorårsdata kan resolveres og vises i hoyre-panelet.
-    sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
-    if isinstance(sb_prev_df, pd.DataFrame) and not sb_prev_df.empty:
-        prev_cols = _resolve_sb_columns(sb_prev_df)
-        prev_konto_src = prev_cols.get("konto")
-        if prev_konto_src:
-            try:
-                prev_accounts = (
-                    sb_prev_df[prev_konto_src].astype(str).str.strip().unique().tolist()
-                )
-                accounts.update(prev_accounts)
-            except Exception:
-                pass
-
-    resolved = _rl_svc.resolve_accounts_to_rl(list(accounts), context=context)
+    resolved = _resolve_all_accounts_to_rl_cached(
+        page=page, sb_df=sb_df, konto_src=konto_src,
+    )
     if resolved.empty:
         return set()
     return set(
@@ -229,11 +264,178 @@ def _resolve_target_kontoer(*, page: Any, sb_df: pd.DataFrame,
     )
 
 
+def _get_prev_maps_cached(
+    page: Any, resolve_cols
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Returner (prev_map, prev_name_map) med cache paa page-instansen.
+
+    prev_map: konto -> UB fjor
+    prev_name_map: konto -> kontonavn fjor
+
+    Byggingen koster typisk 130-250ms per klikk uten cache. Cachen
+    invalideres automatisk naar sb_prev_df bytter identitet (ny dataset).
+    """
+    sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+
+    # Tom / manglende fjor-data: ingen cache, returner tomt par.
+    if not isinstance(sb_prev_df, pd.DataFrame) or sb_prev_df.empty:
+        # Nullstill evt cache saa gammel data ikke henger igjen.
+        try:
+            page._rl_prev_maps_cache_key = None
+            page._rl_prev_maps_cache = ({}, {})
+        except Exception:
+            pass
+        return {}, {}
+
+    cache_key = id(sb_prev_df)
+    cached_key = getattr(page, "_rl_prev_maps_cache_key", None)
+    cached_maps = getattr(page, "_rl_prev_maps_cache", None)
+    if cached_key == cache_key and cached_maps is not None:
+        return cached_maps
+
+    # Bygg nytt og lagre.
+    prev_map: dict[str, float] = {}
+    prev_name_map: dict[str, str] = {}
+    try:
+        prev_cols = resolve_cols(sb_prev_df)
+        prev_konto = prev_cols.get("konto")
+        prev_ub = prev_cols.get("ub")
+        prev_navn = prev_cols.get("kontonavn")
+        if prev_konto and prev_ub:
+            wp = sb_prev_df[[prev_konto, prev_ub]].copy()
+            wp[prev_konto] = wp[prev_konto].astype(str)
+            wp[prev_ub] = pd.to_numeric(wp[prev_ub], errors="coerce")
+            wp = wp.dropna(subset=[prev_ub])
+            # Ved duplikater: ta siste verdi.
+            prev_map = dict(
+                zip(wp[prev_konto].tolist(), wp[prev_ub].astype(float).tolist())
+            )
+        if prev_konto and prev_navn:
+            try:
+                wn = sb_prev_df[[prev_konto, prev_navn]].copy()
+                wn[prev_konto] = wn[prev_konto].astype(str)
+                prev_name_map = dict(
+                    zip(wn[prev_konto].tolist(), wn[prev_navn].astype(str).tolist())
+                )
+            except Exception:
+                prev_name_map = {}
+    except Exception:
+        prev_map = {}
+        prev_name_map = {}
+
+    try:
+        page._rl_prev_maps_cache_key = cache_key
+        page._rl_prev_maps_cache = (prev_map, prev_name_map)
+    except Exception:
+        pass
+    return prev_map, prev_name_map
+
+
+def _get_regnr_maps_cached(
+    *, page: Any, active: pd.DataFrame, konto_idx: int, konto_src: str,
+) -> tuple[dict[str, int], dict[int, str]]:
+    """Returner (konto_to_regnr, regnr_to_navn) mapper for SB-treet.
+
+    Begge mapper er stabile mellom klikk (avhenger kun av intervals +
+    regnskapslinjer + overrides). Cachet på page-instansen. Tidligere
+    koster de ~60-90ms per klikk; etter cache kun første klikk koster.
+    """
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+    account_overrides = getattr(page, "_rl_account_overrides", None)
+
+    cache_key = (
+        id(intervals) if intervals is not None else 0,
+        id(regnskapslinjer) if regnskapslinjer is not None else 0,
+        id(account_overrides) if account_overrides is not None else 0,
+    )
+    cached_key = getattr(page, "_rl_regnr_maps_cache_key", None)
+    cached_maps = getattr(page, "_rl_regnr_maps_cache", None)
+    if cached_key == cache_key and cached_maps is not None:
+        return cached_maps
+
+    konto_to_regnr: dict[str, int] = {}
+    regnr_to_navn: dict[int, str] = {}
+
+    if intervals is not None and regnskapslinjer is not None:
+        try:
+            from page_analyse_rl_data import (
+                _load_current_client_account_overrides,
+                _resolve_regnr_for_accounts,
+            )
+            ao = None
+            try:
+                ao = _load_current_client_account_overrides()
+            except Exception:
+                ao = None
+            kontoer_iter = (
+                str(tup[konto_idx]) for tup in active.itertuples(index=False)
+                if konto_idx >= 0
+            )
+            kontoer_unique = list({k for k in kontoer_iter if k})
+            if kontoer_unique:
+                lookup = _resolve_regnr_for_accounts(
+                    kontoer_unique,
+                    intervals=intervals,
+                    regnskapslinjer=regnskapslinjer,
+                    account_overrides=ao,
+                )
+                if isinstance(lookup, pd.DataFrame) and not lookup.empty:
+                    for _, r in lookup.iterrows():
+                        try:
+                            konto_to_regnr[str(r["konto"])] = int(r["regnr"])
+                        except (KeyError, TypeError, ValueError):
+                            continue
+        except Exception:
+            pass
+        try:
+            from regnskap_mapping import normalize_regnskapslinjer
+            regn = normalize_regnskapslinjer(regnskapslinjer)
+            for _, r in regn.iterrows():
+                try:
+                    regnr_to_navn[int(r["regnr"])] = str(r["regnskapslinje"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+        except Exception:
+            pass
+
+    try:
+        page._rl_regnr_maps_cache_key = cache_key
+        page._rl_regnr_maps_cache = (konto_to_regnr, regnr_to_navn)
+    except Exception:
+        pass
+    return konto_to_regnr, regnr_to_navn
+
+
 def refresh_sb_view(*, page: Any) -> None:
     """Fyll SB-treet med saldobalansekontoer for valgt(e) regnskapslinjer.
 
     Filtrerer bort kontoer der IB, Endring og UB alle er 0.
     """
+    # Stoppeklokker per fase — denne funksjonen kalles på hvert klikk på
+    # regnskapslinje og tar typisk 500-1000ms. Vi logger per-fase for å
+    # identifisere hvor tiden faktisk går.
+    import time as _time
+    try:
+        from src.monitoring.perf import record_event as _record_event
+    except Exception:
+        _record_event = None  # type: ignore[assignment]
+
+    _phase_t = _time.perf_counter()
+
+    def _phase(label: str) -> None:
+        nonlocal _phase_t
+        t1 = _time.perf_counter()
+        if _record_event is not None:
+            try:
+                _record_event(
+                    f"analyse.sb_view.{label}",
+                    (t1 - _phase_t) * 1000.0,
+                )
+            except Exception:
+                pass
+        _phase_t = t1
+
     # Alle hjelpefunksjoner slås opp via page_analyse_sb slik at tester
     # kan monkeypatche dem der (historisk kontrakt bevart etter splittingen).
     import page_analyse_sb as _ps  # lazy for å unngå sirkulær import
@@ -284,40 +486,18 @@ def refresh_sb_view(*, page: Any) -> None:
 
     matched = sb_df[sb_df[konto_src].astype(str).isin(target_konto)].copy()
 
-    # Bygg UB-i-fjor-map per konto fra _rl_sb_prev_df (lastet idempotent)
+    # Bygg UB-i-fjor-map per konto fra _rl_sb_prev_df (lastet idempotent).
     # NB: Gjoeres foer filtrering slik at kontoer med kun fjor-data overlever.
-    prev_map: dict[str, float] = {}
-    prev_name_map: dict[str, str] = {}
+    #
+    # Mellomlager: prev_map og prev_name_map bygges kun en gang per klient/aar.
+    # Cachen lagres paa page og invalidieres automatisk naar sb_prev_df bytter
+    # identitet (ny dataset lastet => ny id).
     try:
         import page_analyse_rl as _rl_mod
         _rl_mod.ensure_sb_prev_loaded(page=page)
     except Exception:
         pass
-    try:
-        sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
-        if isinstance(sb_prev_df, pd.DataFrame) and not sb_prev_df.empty:
-            prev_cols = _resolve_cols(sb_prev_df)
-            prev_konto = prev_cols.get("konto")
-            prev_ub = prev_cols.get("ub")
-            prev_navn = prev_cols.get("kontonavn")
-            if prev_konto and prev_ub:
-                wp = sb_prev_df[[prev_konto, prev_ub]].copy()
-                wp[prev_konto] = wp[prev_konto].astype(str)
-                wp[prev_ub] = pd.to_numeric(wp[prev_ub], errors="coerce")
-                wp = wp.dropna(subset=[prev_ub])
-                # Ved duplikater: ta siste verdi
-                prev_map = dict(zip(wp[prev_konto].tolist(), wp[prev_ub].astype(float).tolist()))
-            if prev_konto and prev_navn:
-                try:
-                    wn = sb_prev_df[[prev_konto, prev_navn]].copy()
-                    wn[prev_konto] = wn[prev_konto].astype(str)
-                    prev_name_map = dict(
-                        zip(wn[prev_konto].tolist(), wn[prev_navn].astype(str).tolist())
-                    )
-                except Exception:
-                    prev_name_map = {}
-    except Exception:
-        prev_map = {}
+    prev_map, prev_name_map = _get_prev_maps_cached(page, _resolve_cols)
 
     # Legg til syntetiske rader for target-kontoer som kun finnes i sb_prev.
     present_in_matched: set[str] = set()
@@ -329,6 +509,7 @@ def refresh_sb_view(*, page: Any) -> None:
         k for k in target_konto
         if str(k).strip() in prev_map and str(k).strip() not in present_in_matched
     ]
+    _phase("load_prev_year")
     if only_prev:
         extra_rows = []
         for k in only_prev:
@@ -419,6 +600,8 @@ def refresh_sb_view(*, page: Any) -> None:
         except Exception:
             pass
 
+    _phase("filter_and_sort")
+
     # Last kommentarer
     account_comments: dict[str, str] = {}
     try:
@@ -430,6 +613,7 @@ def refresh_sb_view(*, page: Any) -> None:
             account_comments = all_comments.get("accounts", {})
     except Exception:
         pass
+    _phase("load_comments")
 
     # Last kontogjennomgang (OK + vedlegg) per år
     account_review: dict[str, dict] = {}
@@ -442,6 +626,7 @@ def refresh_sb_view(*, page: Any) -> None:
             account_review = _rco.load_account_review(_client, str(_year))
     except Exception:
         account_review = {}
+    _phase("load_account_review")
 
     # Last konto-klassifisering (gruppe per konto)
     gruppe_mapping: dict[str, str] = {}
@@ -453,6 +638,7 @@ def refresh_sb_view(*, page: Any) -> None:
             gruppe_mapping = _kk.load(_client)
     except Exception:
         pass
+    _phase("load_gruppe_mapping")
 
     # Sett opp tag for kommenterte rader
     try:
@@ -493,55 +679,13 @@ def refresh_sb_view(*, page: Any) -> None:
     # Bygg konto→regnr- og regnr→regnskapslinje-mapping for valgfrie
     # SB-kolonner ("regnr", "regnskapslinje"). Disse er ikke i default
     # visible men kan slås på via kolonnemenyen.
-    konto_to_regnr: dict[str, int] = {}
-    regnr_to_navn: dict[int, str] = {}
-    try:
-        intervals = getattr(page, "_rl_intervals", None)
-        regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
-        if intervals is not None and regnskapslinjer is not None:
-            try:
-                from page_analyse_rl_data import (
-                    _load_current_client_account_overrides,
-                    _resolve_regnr_for_accounts,
-                )
-                ao = None
-                try:
-                    ao = _load_current_client_account_overrides()
-                except Exception:
-                    ao = None
-                kontoer_iter = (
-                    str(tup[konto_idx]) for tup in active.itertuples(index=False)
-                    if konto_idx >= 0
-                )
-                kontoer_unique = list({k for k in kontoer_iter if k})
-                if kontoer_unique:
-                    lookup = _resolve_regnr_for_accounts(
-                        kontoer_unique,
-                        intervals=intervals,
-                        regnskapslinjer=regnskapslinjer,
-                        account_overrides=ao,
-                    )
-                    if isinstance(lookup, pd.DataFrame) and not lookup.empty:
-                        for _, r in lookup.iterrows():
-                            try:
-                                konto_to_regnr[str(r["konto"])] = int(r["regnr"])
-                            except (KeyError, TypeError, ValueError):
-                                continue
-            except Exception:
-                pass
-            # Bygg regnr→navn
-            try:
-                from regnskap_mapping import normalize_regnskapslinjer
-                regn = normalize_regnskapslinjer(regnskapslinjer)
-                for _, r in regn.iterrows():
-                    try:
-                        regnr_to_navn[int(r["regnr"])] = str(r["regnskapslinje"])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-            except Exception:
-                pass
-    except Exception:
-        pass
+    # Mellomlagring: begge mapper er stabile mellom klikk (samme intervals
+    # + regnskapslinjer), så vi cacher dem på page-instansen.
+    konto_to_regnr, regnr_to_navn = _get_regnr_maps_cached(
+        page=page, active=active, konto_idx=konto_idx, konto_src=konto_src,
+    )
+
+    _phase("build_regnr_map")
 
     for tup in active.itertuples(index=False):
         try:
@@ -628,6 +772,8 @@ def refresh_sb_view(*, page: Any) -> None:
         except Exception:
             continue
 
+    _phase("fill_tree")
+
     # Bind høyreklikk + drag-n-drop (én gang)
     _bind_sb_once(page=page, tree=tree)
     _restore_fn(
@@ -635,3 +781,4 @@ def refresh_sb_view(*, page: Any) -> None:
         selected_accounts=selected_accounts,
         focused_account=focused_account,
     )
+    _phase("bind_and_restore")
