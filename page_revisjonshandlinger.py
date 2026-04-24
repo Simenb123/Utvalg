@@ -158,29 +158,14 @@ class RevisjonshandlingerPage(ttk.Frame):
         filt = ttk.Frame(self)
         filt.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 0))
 
-        ttk.Label(filt, text="Opprinnelse:").pack(side="left")
-        cb_origin = ttk.Combobox(filt, textvariable=self.var_filter_origin, state="readonly",
-                                 values=["Alle", "CRM", "Lokal"], width=8)
-        cb_origin.pack(side="left", padx=(2, 12))
-        cb_origin.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
-
-        ttk.Label(filt, text="Type:").pack(side="left")
-        cb_type = ttk.Combobox(filt, textvariable=self.var_filter_type, state="readonly",
-                               values=["Alle", "substantive", "control"], width=12)
-        cb_type.pack(side="left", padx=(2, 12))
-        cb_type.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
-
-        ttk.Label(filt, text="Status:").pack(side="left")
-        self._cb_status = ttk.Combobox(filt, textvariable=self.var_filter_status, state="readonly",
-                                       values=["Alle"], width=14)
-        self._cb_status.pack(side="left", padx=(2, 12))
-        self._cb_status.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
-
-        ttk.Label(filt, text="Område:").pack(side="left")
-        self._cb_area = ttk.Combobox(filt, textvariable=self.var_filter_area, state="readonly",
-                                     values=["Alle"], width=24)
-        self._cb_area.pack(side="left", padx=(2, 12))
-        self._cb_area.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
+        # Opprinnelse, Type, Status og Område-filtrene er fjernet —
+        # handlingssettet drives nå av regnskapslinjer (scoped inn) og
+        # fase-sidebar-en. Internvariablene beholdes på "Alle" som
+        # no-op slik at render-hjelperne fortsatt slipper gjennom alt.
+        # _cb_status / _cb_area refereres i _refresh() for å fylle opp
+        # verdier; de blir satt til None her og _refresh guards mot det.
+        self._cb_status = None
+        self._cb_area = None
 
         ttk.Label(filt, text="Regnskapslinje:").pack(side="left")
         self._cb_regnr = ttk.Combobox(filt, textvariable=self.var_filter_regnr, state="readonly",
@@ -454,8 +439,10 @@ class RevisjonshandlingerPage(ttk.Frame):
             self._rl_scope = {}
             self._detail_var.set("")
             if self._local_lib:
-                self._cb_area.configure(values=["Alle"] + sorted({a.omraade for a in self._local_lib if a.omraade}))
-                self._cb_status.configure(values=["Alle"])
+                if self._cb_area is not None:
+                    self._cb_area.configure(values=["Alle"] + sorted({a.omraade for a in self._local_lib if a.omraade}))
+                if self._cb_status is not None:
+                    self._cb_status.configure(values=["Alle"])
                 self._cb_regnr.configure(values=["Alle", "Uten match"])
                 self._apply_filter()
                 self.var_status.set(f"{len(self._local_lib)} lokale handling(er). Last inn klient for CRM-handlinger.")
@@ -508,12 +495,16 @@ class RevisjonshandlingerPage(ttk.Frame):
         # Beløp per regnr (fra aktiv SB) + scoping-overstyringer
         self._reload_rl_context()
 
-        # Update filter dropdowns
-        areas = sorted({a.area_name for a in self._actions if a.area_name} |
-                       {a.omraade for a in self._local_lib if a.omraade})
-        statuses = sorted({a.status for a in self._actions if a.status})
-        self._cb_area.configure(values=["Alle"] + areas)
-        self._cb_status.configure(values=["Alle"] + statuses)
+        # Filter-dropdowns for Område og Status er fjernet; beholder
+        # None-guarden slik at tidligere kall ikke krasjer om widgetene
+        # gjeninnføres senere.
+        if self._cb_area is not None:
+            areas = sorted({a.area_name for a in self._actions if a.area_name} |
+                           {a.omraade for a in self._local_lib if a.omraade})
+            self._cb_area.configure(values=["Alle"] + areas)
+        if self._cb_status is not None:
+            statuses = sorted({a.status for a in self._actions if a.status})
+            self._cb_status.configure(values=["Alle"] + statuses)
 
         # Build regnr filter values
         regnr_labels = sorted(
