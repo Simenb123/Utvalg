@@ -20,6 +20,71 @@ from action_workpaper_store import ActionWorkpaper
 from workpaper_library import Workpaper
 
 
+# Revisjonsprosessens faser. Vises som sidebar på Handlinger-fanen
+# og gir et grunnleggende rammeverk å strukturere handlingsbiblioteket
+# rundt. Rekkefølgen brukes i sidebar-visningen.
+PHASE_ORDER: tuple[str, ...] = (
+    "Oppdragsvurdering",
+    "Planlegging",
+    "Utførelse",
+    "Avslutning",
+)
+
+# Keyword-heuristikk for å avlede fase fra handlings-tekst. Bruker
+# navn + område (og action_type for CRM-handlinger) som input. Senere
+# kan vi legge til eksplisitt ``fase``-felt på LocalAction og CRM-
+# metadata istedenfor gjetting — men for visuell prototype er dette
+# godt nok til å fylle sidebar-en med rimelige tall.
+_PHASE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "Oppdragsvurdering": (
+        "oppdragsvurdering",
+        "uavhengighet",
+        "integrity",
+        "aksept",
+        "engagement",
+    ),
+    "Planlegging": (
+        "innledende",
+        "ib ub",
+        "ib-ub",
+        "vesentlighet",
+        "klientinfo",
+        "roller",
+        "eier",
+        "nærstående",
+        "narstaende",
+        "estimat",
+        "scoping",
+        "risiko",
+        "planlegging",
+    ),
+    "Avslutning": (
+        "avslutning",
+        "completion",
+        "konklusjon",
+        "rapport",
+        "fullstendighetserklæring",
+        "fullstendighetserklaering",
+        "subsequent",
+        "disclosure",
+        "engasjementsbrev",
+    ),
+}
+
+
+def infer_phase(*, navn: str = "", omraade: str = "", action_type: str = "") -> str:
+    """Avled fase fra handlingens tekst-felter.
+
+    Returnerer én av ``PHASE_ORDER``-verdiene. Default er "Utførelse"
+    (substansive/kontroll-handlinger er hoved-arbeidet).
+    """
+    haystack = f"{navn} {omraade} {action_type}".lower()
+    for phase, keywords in _PHASE_KEYWORDS.items():
+        if any(kw in haystack for kw in keywords):
+            return phase
+    return "Utførelse"
+
+
 class RevisjonshandlingerPage(ttk.Frame):
     def __init__(self, parent: ttk.Notebook) -> None:
         super().__init__(parent, padding=0)
@@ -48,8 +113,11 @@ class RevisjonshandlingerPage(ttk.Frame):
         self.var_filter_area = tk.StringVar(value="Alle")
         self.var_filter_regnr = tk.StringVar(value="Alle")
         self.var_filter_origin = tk.StringVar(value="Alle")
+        self.var_filter_phase = tk.StringVar(value="Alle")  # sidebar
         self.var_search = tk.StringVar()
         self.var_show_rl_gaps = tk.BooleanVar(value=False)
+        self._phase_sidebar_labels: dict[str, ttk.Label] = {}
+        self._phase_sidebar_counts: dict[str, tk.StringVar] = {}
 
         self._build_ui()
 
@@ -132,9 +200,18 @@ class RevisjonshandlingerPage(ttk.Frame):
             command=self._apply_filter,
         ).pack(side="left", padx=(12, 0))
 
-        # ── Treeview ──
-        tree_frame = ttk.Frame(self)
-        tree_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(4, 0))
+        # ── Body: sidebar med faser + tree ──
+        body = ttk.Frame(self)
+        body.grid(row=2, column=0, sticky="nsew", padx=8, pady=(4, 0))
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        # Venstre sidebar — revisjonsprosessens faser som navigasjons-
+        # knapper. Klikk setter var_filter_phase og re-filtrerer treet.
+        self._build_phase_sidebar(body)
+
+        tree_frame = ttk.Frame(body)
+        tree_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
@@ -218,6 +295,111 @@ class RevisjonshandlingerPage(ttk.Frame):
             self._detail_text.configure(state="disabled")
 
         self._detail_var.trace_add("write", _sync_detail)
+
+    # ------------------------------------------------------------------
+    # Fase-sidebar
+    # ------------------------------------------------------------------
+
+    def _build_phase_sidebar(self, parent: ttk.Frame) -> None:
+        """Bygg venstre sidebar med revisjonsfaser.
+
+        Består av et "Alle"-punkt øverst, en skillelinje, og deretter
+        de fire revisjonsfasene. Hver rad er en Label med tall-badge
+        til høyre; klikk setter var_filter_phase og kjører filteret.
+        """
+        sidebar = ttk.Frame(parent, padding=(0, 0, 0, 0))
+        sidebar.grid(row=0, column=0, sticky="nsw")
+        sidebar.configure(width=200)
+
+        # Toppheading
+        ttk.Label(
+            sidebar,
+            text="Revisjonsprosess",
+            font=("Segoe UI", 10, "bold"),
+            foreground="#344054",
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 6))
+
+        # "Alle"-oppføring + faser
+        entries: list[tuple[str, str]] = [("Alle", "Alle faser")]
+        entries.extend((p, p) for p in PHASE_ORDER)
+
+        for idx, (key, label) in enumerate(entries, start=1):
+            row = ttk.Frame(sidebar, padding=(6, 4))
+            row.grid(row=idx, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+            row.columnconfigure(0, weight=1)
+
+            name_lbl = ttk.Label(row, text=label, anchor="w")
+            name_lbl.grid(row=0, column=0, sticky="ew")
+
+            count_var = tk.StringVar(value="")
+            count_lbl = ttk.Label(
+                row, textvariable=count_var, anchor="e",
+                foreground="#667085",
+            )
+            count_lbl.grid(row=0, column=1, sticky="e", padx=(6, 0))
+
+            # Holdt referanser slik at vi kan oppdatere highlight/tall
+            # senere. Bruker key som identifikator.
+            self._phase_sidebar_labels[key] = name_lbl
+            self._phase_sidebar_counts[key] = count_var
+
+            # Klikk-region: både raden, navn og badge er klikkbar.
+            def _make_handler(k: str):
+                return lambda _e=None: self._on_phase_selected(k)
+
+            for w in (row, name_lbl, count_lbl):
+                w.bind("<Button-1>", _make_handler(key))
+
+            # Skillelinje etter "Alle"-raden
+            if key == "Alle":
+                sep = ttk.Separator(sidebar, orient="horizontal")
+                sep.grid(row=idx * 10, column=0, columnspan=2, sticky="ew", pady=(2, 4))
+
+        # Initial highlight
+        self._update_phase_highlight()
+
+    def _on_phase_selected(self, phase_key: str) -> None:
+        self.var_filter_phase.set(phase_key)
+        self._update_phase_highlight()
+        self._apply_filter()
+
+    def _update_phase_highlight(self) -> None:
+        """Marker aktiv fase i sidebar-en ved å fete teksten."""
+        active = self.var_filter_phase.get() or "Alle"
+        for key, lbl in self._phase_sidebar_labels.items():
+            try:
+                if key == active:
+                    lbl.configure(font=("Segoe UI", 10, "bold"), foreground="#1F6FEB")
+                else:
+                    lbl.configure(font=("Segoe UI", 10, "normal"), foreground="#1F2937")
+            except Exception:
+                pass
+
+    def _update_phase_counts(self) -> None:
+        """Oppdater tall-badgene i sidebar-en basert på tilgjengelige handlinger."""
+        counts: dict[str, int] = {p: 0 for p in ("Alle", *PHASE_ORDER)}
+        for a in self._actions:
+            p = infer_phase(
+                navn=getattr(a, "procedure_name", "") or "",
+                omraade=getattr(a, "area_name", "") or "",
+                action_type=getattr(a, "action_type", "") or "",
+            )
+            counts[p] = counts.get(p, 0) + 1
+            counts["Alle"] += 1
+        for item in self._local_lib:
+            p = infer_phase(
+                navn=getattr(item, "navn", "") or "",
+                omraade=getattr(item, "omraade", "") or "",
+                action_type=getattr(item, "type", "") or "",
+            )
+            counts[p] = counts.get(p, 0) + 1
+            counts["Alle"] += 1
+        for key, var in self._phase_sidebar_counts.items():
+            try:
+                n = counts.get(key, 0)
+                var.set(str(n) if n else "")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Data loading
@@ -462,12 +644,18 @@ class RevisjonshandlingerPage(ttk.Frame):
     def _apply_filter(self) -> None:
         self._tree.delete(*self._tree.get_children())
 
+        # Oppdater tall-badgene i fase-sidebar-en så de speiler det
+        # aktuelle datasettet (hendelsene telles før selve filtreringen).
+        self._update_phase_counts()
+
         type_filter = self.var_filter_type.get()
         status_filter = self.var_filter_status.get()
         area_filter = self.var_filter_area.get()
         regnr_filter = self.var_filter_regnr.get()
         origin_filter = self.var_filter_origin.get()
+        phase_filter = self.var_filter_phase.get() or "Alle"
         search = self.var_search.get().strip().lower()
+        self._current_phase_filter = phase_filter  # leses av render-hjelperne
 
         shown = 0
         covered_regnr: set[str] = set()
@@ -503,6 +691,7 @@ class RevisjonshandlingerPage(ttk.Frame):
     def _render_crm_rows(self, type_filter, status_filter, area_filter, regnr_filter, search,
                          *, covered: set[str] | None = None) -> int:
         shown = 0
+        phase_filter = getattr(self, "_current_phase_filter", "Alle")
         for a in self._actions:
             if type_filter != "Alle" and a.action_type != type_filter:
                 continue
@@ -510,6 +699,14 @@ class RevisjonshandlingerPage(ttk.Frame):
                 continue
             if area_filter != "Alle" and a.area_name != area_filter:
                 continue
+            if phase_filter != "Alle":
+                p = infer_phase(
+                    navn=getattr(a, "procedure_name", "") or "",
+                    omraade=getattr(a, "area_name", "") or "",
+                    action_type=getattr(a, "action_type", "") or "",
+                )
+                if p != phase_filter:
+                    continue
 
             # Regnskapslinje (bekreftet > auto)
             match = self._match_by_action_id.get(a.action_id)
@@ -565,6 +762,7 @@ class RevisjonshandlingerPage(ttk.Frame):
     def _render_local_rows(self, type_filter, status_filter, area_filter, regnr_filter, search,
                            *, covered: set[str] | None = None) -> int:
         shown = 0
+        phase_filter = getattr(self, "_current_phase_filter", "Alle")
         for item in self._local_lib:
             if type_filter != "Alle" and item.type != type_filter:
                 continue
@@ -572,6 +770,14 @@ class RevisjonshandlingerPage(ttk.Frame):
                 continue  # lokale har ingen CRM-status
             if area_filter != "Alle" and item.omraade != area_filter:
                 continue
+            if phase_filter != "Alle":
+                p = infer_phase(
+                    navn=getattr(item, "navn", "") or "",
+                    omraade=getattr(item, "omraade", "") or "",
+                    action_type=getattr(item, "type", "") or "",
+                )
+                if p != phase_filter:
+                    continue
             if regnr_filter == "Uten match" and item.default_regnr:
                 continue
             if regnr_filter not in ("Alle", "Uten match"):
