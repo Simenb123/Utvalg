@@ -1164,7 +1164,19 @@ def _build_decorated_base_payload(
     client = str(getattr(session, "client", "") or "")
     year = _session_year()
     groups = _load_group_mapping(client)
-    merged["Gruppe"] = merged["Konto"].map(lambda konto: _group_label(groups.get(str(konto).strip(), "")))
+    # Pre-load group_id → label én gang (var tidligere én disk-read per konto).
+    try:
+        label_map = konto_klassifisering.group_label_map() or {}
+    except Exception:
+        label_map = {}
+
+    def _lookup_gruppe(konto_val) -> str:
+        group_id = groups.get(str(konto_val).strip(), "")
+        if not group_id:
+            return ""
+        return label_map.get(group_id, group_id)
+
+    merged["Gruppe"] = merged["Konto"].map(_lookup_gruppe)
     _t = _tick("group_mapping", _t)
 
     # Cheap filters first — narrows payroll decoration to the visible subset.

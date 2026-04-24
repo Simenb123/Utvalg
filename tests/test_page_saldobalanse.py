@@ -108,7 +108,9 @@ def test_build_saldobalanse_df_merges_ao_and_mapping(monkeypatch) -> None:
         ],
     )
     monkeypatch.setattr(saldobalanse_payload, "_load_group_mapping", lambda _client: {"1000": "bank"})
-    monkeypatch.setattr(saldobalanse_payload, "_group_label", lambda group_id: "Bankgruppe" if group_id == "bank" else group_id)
+    # Hot-path bruker konto_klassifisering.group_label_map() for batch-lookup.
+    import konto_klassifisering as _kk
+    monkeypatch.setattr(_kk, "group_label_map", lambda scope=None: {"bank": "Bankgruppe"})
     monkeypatch.setattr(page_saldobalanse.session, "client", "Testklient", raising=False)
 
     df = page_saldobalanse.build_saldobalanse_df(analyse_page=analyse_page)
