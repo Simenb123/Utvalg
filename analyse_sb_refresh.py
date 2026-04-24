@@ -275,14 +275,12 @@ def refresh_sb_view(*, page: Any) -> None:
     # Oppdater summary-label (inkl. valgt RL-navn)
     lbl = getattr(page, "_lbl_tx_summary", None)
 
-    if not target_konto:
-        if lbl is not None:
-            try:
-                lbl.configure(text="Velg en regnskapslinje for å se saldobalanse")
-            except Exception:
-                pass
-        _bind_sb_once(page=page, tree=tree)
-        return
+    # Ingen regnskapslinje / konto er markert → vis hele saldobalansen
+    # slik at brukeren har en populær visning ved førstegangsåpning av
+    # Analyse-fanen. Klikk på en RL i venstre pivot vil filtrere ned.
+    no_selection = not target_konto
+    if no_selection:
+        target_konto = set(sb_df[konto_src].astype(str).str.strip().unique())
 
     matched = sb_df[sb_df[konto_src].astype(str).isin(target_konto)].copy()
 
@@ -404,7 +402,12 @@ def refresh_sb_view(*, page: Any) -> None:
                 total_ub = active[ub_src].sum()
             # Hent valgt RL-navn
             rl_name = _get_rl_name(page=page)
-            prefix = f"{rl_name}: " if rl_name else ""
+            if rl_name:
+                prefix = f"{rl_name}: "
+            elif no_selection:
+                prefix = "Alle kontoer — "
+            else:
+                prefix = ""
             text = (
                 f"{prefix}{len(active)} kontoer | "
                 f"Sum UB: {formatting.fmt_amount(total_ub)}"
