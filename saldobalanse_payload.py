@@ -990,11 +990,28 @@ def _build_decorated_base_payload(
     ``catalog``, ``usage_features``) let the page-level caches bypass re-loading
     inside this function. If not given, the existing disk/session loaders are used.
     """
+    import os as _os
+    import time as _time
+    import sys as _sys
+    _prof = _os.environ.get("UTVALG_PROFILE_SB", "").strip().lower() in {"1", "true", "yes", "on"}
+    def _tick(label: str, t0: float) -> float:
+        t1 = _time.perf_counter()
+        if _prof:
+            try:
+                _sys.stderr.write("  [base] %s = %.3fs\n" % (label, t1 - t0))
+                _sys.stderr.flush()
+            except Exception:
+                pass
+        return t1
+
+    _t = _time.perf_counter()
     base_sb_df, adjusted_sb_df, effective_sb_df = _resolve_sb_views(analyse_page)
+    _t = _tick("resolve_sb_views", _t)
 
     effective = _normalize_sb_frame(effective_sb_df, suffix="effective")
     base = _normalize_sb_frame(base_sb_df, suffix="base")
     adjusted = _normalize_sb_frame(adjusted_sb_df, suffix="adjusted")
+    _t = _tick("normalize_sb_frames", _t)
 
     if effective.empty and base.empty and adjusted.empty:
         empty_df = pd.DataFrame(columns=ALL_COLUMNS)
@@ -1045,9 +1062,12 @@ def _build_decorated_base_payload(
     merged["UB etter ÅO"] = pd.to_numeric(merged.get("UB_adjusted"), errors="coerce").fillna(merged["UB"])
     merged["Tilleggspostering"] = merged["UB etter ÅO"] - merged["UB før ÅO"]
 
+    _t = _tick("merge_and_normalize", _t)
+
     hb_counts = _build_hb_counts(getattr(analyse_page, "dataset", None))
     merged = merged.merge(hb_counts, how="left", on="Konto")
     merged["Antall"] = pd.to_numeric(merged.get("Antall"), errors="coerce").fillna(0).astype(int)
+    _t = _tick("hb_counts", _t)
 
     issues = _load_mapping_issues(analyse_page)
     if issues:
@@ -1072,10 +1092,13 @@ def _build_decorated_base_payload(
         merged["Kilde"] = ""
         merged["_mapping_status_code"] = ""
 
+    _t = _tick("mapping_issues", _t)
+
     client = str(getattr(session, "client", "") or "")
     year = _session_year()
     groups = _load_group_mapping(client)
     merged["Gruppe"] = merged["Konto"].map(lambda konto: _group_label(groups.get(str(konto).strip(), "")))
+    _t = _tick("group_mapping", _t)
 
     # Cheap filters first — narrows payroll decoration to the visible subset.
     if not include_zero:
@@ -1096,10 +1119,13 @@ def _build_decorated_base_payload(
     if only_with_ao:
         merged = merged.loc[pd.to_numeric(merged["Tilleggspostering"], errors="coerce").fillna(0.0).abs() > 0.005].copy()
 
+    _t = _tick("filters", _t)
+
     if include_payroll:
         effective_usage = usage_features
         if effective_usage is None:
             effective_usage = _resolve_payroll_usage_features(analyse_page)
+        _t = _tick("resolve_payroll_usage", _t)
         preloaded_ctx: tuple[Any, Any, Any] | None
         if profile_document is not None:
             preloaded_ctx = (profile_document, history_document, catalog)
@@ -1112,8 +1138,10 @@ def _build_decorated_base_payload(
             usage_features=effective_usage,
             preloaded_context=preloaded_ctx,
         )
+        _t = _tick("decorate_payroll", _t)
     else:
         merged, _, history_document, catalog, suggestions, classification_items = _apply_blank_payroll_columns(merged)
+        _t = _tick("blank_payroll", _t)
         if profile_document is None:
             profile_document = _load_account_profile_document_only(client, year)
 
