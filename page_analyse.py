@@ -1080,46 +1080,35 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     # -----------------------------------------------------------------
 
     def _refresh_pivot(self) -> None:
-        # Profile-flagget bryter ned _refresh_pivot pr underkalle slik at
+        # Profile-blokken bryter ned _refresh_pivot pr underkalle slik at
         # vi vet om treghet ligger i mapping-issues, refresh_pivot, AO-label
-        # eller mapping-warning. Aktiveres med UTVALG_PROFILE_REFRESH=1.
-        try:
-            from page_analyse_refresh import _PROFILE_REFRESH
-        except Exception:
-            _PROFILE_REFRESH = False
-
+        # eller mapping-warning.
+        #
+        # Timing-events sendes til src.monitoring.perf. Sett UTVALG_PROFILE=analyse
+        # (eller bakoverkompat UTVALG_PROFILE_REFRESH=1) for å se dem på stderr.
         import time as _time
-        _stages: dict[str, float] = {}
+        try:
+            from src.monitoring.perf import record_event as _record_event
+        except Exception:
+            _record_event = None  # type: ignore[assignment]
 
         def _step(label: str, fn) -> None:
-            t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
+            t0 = _time.perf_counter()
             try:
                 fn()
             except Exception:
                 pass
-            if _PROFILE_REFRESH:
-                _stages[label] = (_time.perf_counter() - t0) * 1000
+            duration_ms = (_time.perf_counter() - t0) * 1000.0
+            if _record_event is not None:
+                try:
+                    _record_event(f"analyse.refresh.{label}", duration_ms)
+                except Exception:
+                    pass
 
-        _step("_refresh_mapping_issues", self._refresh_mapping_issues)
-        _step("refresh_pivot (dispatch)", lambda: page_analyse_pivot.refresh_pivot(page=self))
-        _step("_update_ao_count_label", self._update_ao_count_label)
-        _step("_update_mapping_warning_banner", self._update_mapping_warning_banner)
-
-        if _PROFILE_REFRESH:
-            import logging
-            import sys
-            parts = ["[REFRESH PROFILE: _refresh_pivot]"]
-            for k, v in _stages.items():
-                parts.append(f"{k}={v:.0f}ms")
-            msg = " | ".join(parts)
-            try:
-                logging.getLogger("app").warning(msg)
-            except Exception:
-                pass
-            try:
-                print(msg, file=sys.stderr, flush=True)
-            except Exception:
-                pass
+        _step("refresh_mapping_issues", self._refresh_mapping_issues)
+        _step("refresh_pivot_dispatch", lambda: page_analyse_pivot.refresh_pivot(page=self))
+        _step("update_ao_count_label", self._update_ao_count_label)
+        _step("update_mapping_warning_banner", self._update_mapping_warning_banner)
 
     def _refresh_mapping_issues(self) -> None:
         analyse_mapping_ui.refresh_mapping_issues(page=self)

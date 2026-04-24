@@ -328,23 +328,28 @@ def update_pivot_headings(*, page: Any, mode: str) -> None:
 
 def refresh_rl_pivot(*, page: Any) -> None:
     """Fyll pivot_tree med regnskapslinjer (IB, UB, Antall)."""
-    # Per-stage timing samles og logges på slutten når UTVALG_PROFILE_REFRESH=1.
-    # Importert lazy for å unngå sirkulær import.
-    try:
-        from page_analyse_refresh import _PROFILE_REFRESH
-    except Exception:
-        _PROFILE_REFRESH = False
-
+    # Per-stage timing sendes til src.monitoring.perf. Sett UTVALG_PROFILE=analyse
+    # (eller bakoverkompat UTVALG_PROFILE_REFRESH=1) for stderr-print.
     import time as _time
-    _stage_t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
+    _stage_t0 = _time.perf_counter()
     _stages: dict[str, float] = {}
 
+    try:
+        from src.monitoring.perf import record_event as _record_event
+    except Exception:
+        _record_event = None  # type: ignore[assignment]
+
     def _mark(label: str) -> None:
-        if _PROFILE_REFRESH:
-            nonlocal _stage_t0
-            now = _time.perf_counter()
-            _stages[label] = (now - _stage_t0) * 1000
-            _stage_t0 = now
+        nonlocal _stage_t0
+        now = _time.perf_counter()
+        duration_ms = (now - _stage_t0) * 1000.0
+        _stages[label] = duration_ms
+        if _record_event is not None:
+            try:
+                _record_event(f"analyse.rl_pivot.{label}", duration_ms)
+            except Exception:
+                pass
+        _stage_t0 = now
 
     tree = getattr(page, "_pivot_tree", None)
     if tree is None:
@@ -705,11 +710,8 @@ def refresh_rl_pivot(*, page: Any) -> None:
             pass
     _mark("post: column-fit + selection")
 
-    if _PROFILE_REFRESH and _stages:
-        parts = ["[REFRESH PROFILE: refresh_rl_pivot]"]
-        for label, ms in _stages.items():
-            parts.append(f"{label}={ms:.0f}ms")
-        log.warning(" | ".join(parts))
+    # Stages allerede sendt som events per fase via _mark().
+    # Stderr-print håndteres av src.monitoring.perf når UTVALG_PROFILE er satt.
 
 
 def _show_rl_not_configured(tree: Any) -> None:

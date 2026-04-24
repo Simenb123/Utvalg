@@ -19,22 +19,29 @@ def _issue_for_account(page: Any, konto: str):
 
 
 def refresh_mapping_issues(page: Any) -> None:
-    try:
-        from page_analyse_refresh import _PROFILE_REFRESH
-    except Exception:
-        _PROFILE_REFRESH = False
-
+    # Timing-events sendes til src.monitoring.perf. Sett UTVALG_PROFILE=analyse
+    # (eller bakoverkompat UTVALG_PROFILE_REFRESH=1) for stderr-print.
     import time as _time
     _stages: dict[str, float] = {}
 
+    try:
+        from src.monitoring.perf import record_event as _record_event
+    except Exception:
+        _record_event = None  # type: ignore[assignment]
+
     def _t(label: str, fn):
-        t0 = _time.perf_counter() if _PROFILE_REFRESH else 0.0
+        t0 = _time.perf_counter()
         try:
             res = fn()
         except Exception:
             res = None
-        if _PROFILE_REFRESH:
-            _stages[label] = (_time.perf_counter() - t0) * 1000
+        duration_ms = (_time.perf_counter() - t0) * 1000.0
+        _stages[label] = duration_ms
+        if _record_event is not None:
+            try:
+                _record_event(f"analyse.mapping_issues.{label}", duration_ms)
+            except Exception:
+                pass
         return res
 
     try:
@@ -76,21 +83,8 @@ def refresh_mapping_issues(page: Any) -> None:
             pass
     update_mapping_warning_banner(page, problem_count=len(problems) if problems else 0)
 
-    if _PROFILE_REFRESH and _stages:
-        import logging
-        import sys
-        parts = ["[REFRESH PROFILE: refresh_mapping_issues]"]
-        for k, v in _stages.items():
-            parts.append(f"{k}={v:.0f}ms")
-        msg = " | ".join(parts)
-        try:
-            logging.getLogger("app").warning(msg)
-        except Exception:
-            pass
-        try:
-            print(msg, file=sys.stderr, flush=True)
-        except Exception:
-            pass
+    # Stages allerede sendt som events per fase via _t().
+    # Stderr-print håndteres av src.monitoring.perf når UTVALG_PROFILE er satt.
 
 
 # Modul-nivå cache for mapping-drift. Profil viste 350-600ms pr kall —

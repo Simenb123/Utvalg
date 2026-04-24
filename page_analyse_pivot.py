@@ -260,15 +260,8 @@ def refresh_pivot(*, page: Any) -> None:
     """Bygg pivot og fyll treeview – dispatcher på aggregering-modus."""
     agg_mode = _resolve_agg_mode(page)
 
-    # Profile-flagget logger hvilken pivot-modus som dispatchers og hvor
-    # lang tid den underliggende funksjonen tar. Aktiveres med
-    # UTVALG_PROFILE_REFRESH=1. Bruker try/finally så loggen kommer ut
-    # også om underfunksjonen kaster.
-    try:
-        from page_analyse_refresh import _PROFILE_REFRESH
-    except Exception:
-        _PROFILE_REFRESH = False
-
+    # Timing-event sendes til src.monitoring.perf. Sett UTVALG_PROFILE=analyse
+    # (eller bakoverkompat UTVALG_PROFILE_REFRESH=1) for stderr-print i tillegg.
     import time as _time
     import logging
     _log = logging.getLogger("app")
@@ -298,20 +291,15 @@ def refresh_pivot(*, page: Any) -> None:
         # Default + legacy: HB-konto
         refresh_hb_konto_pivot(page=page)
     finally:
-        if _PROFILE_REFRESH:
-            ms = (_time.perf_counter() - _t0) * 1000
-            # Log via standard print til stderr som ekstra sikring — Python-
-            # logging kan være konfigurert til å filtrere "app"-loggeren.
-            msg = f"[REFRESH PROFILE: refresh_pivot dispatch] mode={agg_mode} | total={ms:.0f}ms"
-            try:
-                _log.warning(msg)
-            except Exception:
-                pass
-            try:
-                import sys
-                print(msg, file=sys.stderr, flush=True)
-            except Exception:
-                pass
+        try:
+            from src.monitoring.perf import record_event as _record_event
+            _record_event(
+                "analyse.pivot.dispatch",
+                (_time.perf_counter() - _t0) * 1000.0,
+                meta={"mode": agg_mode},
+            )
+        except Exception:
+            pass
 
 
 def refresh_sb_konto_pivot(*, page: Any) -> None:

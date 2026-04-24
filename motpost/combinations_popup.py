@@ -633,13 +633,23 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
 
         payload = (combo_rows, per_rows)
         self._display_rows_cache[mode] = payload
+        _duration = perf_counter() - started
         logger.debug(
             "Motpost kombinasjoner: bygget display-cache mode=%s rows=%s/%s på %.3fs",
             mode,
             len(combo_rows),
             len(per_rows),
-            perf_counter() - started,
+            _duration,
         )
+        try:
+            from src.monitoring.perf import record_event as _record_event
+            _record_event(
+                "motpost.combinations.display_cache",
+                _duration * 1000.0,
+                meta={"mode": mode, "combo_rows": len(combo_rows), "per_rows": len(per_rows)},
+            )
+        except Exception:
+            pass
         return payload
 
     def _get_drilldown_payload(self, combo_key: str) -> dict[str, object]:
@@ -687,13 +697,23 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             "bilag_rows": build_bilag_rows(df_combo, df_sel, df_mot),
         }
         self._drilldown_cache[cache_key] = payload
+        _duration = perf_counter() - started
         logger.debug(
             "Motpost kombinasjoner: bygget drilldown-cache combo=%s mode=%s bilag=%s på %.3fs",
             combo_key,
             mode,
             len(bilag_list),
-            perf_counter() - started,
+            _duration,
         )
+        try:
+            from src.monitoring.perf import record_event as _record_event
+            _record_event(
+                "motpost.combinations.drilldown_cache",
+                _duration * 1000.0,
+                meta={"combo": str(combo_key), "mode": mode, "bilag": len(bilag_list)},
+            )
+        except Exception:
+            pass
         return payload
 
     def _refresh_display_mode(self) -> None:
