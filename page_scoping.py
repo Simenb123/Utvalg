@@ -72,12 +72,12 @@ class ScopingPage(ttk.Frame):
         agg.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
         agg.columnconfigure(2, weight=1)
 
-        self._card_pl_var = tk.StringVar(value="Resultat (PL)\n—")
-        self._card_bs_var = tk.StringVar(value="Balanse (BS)\n—")
+        self._card_pl_var = tk.StringVar(value="Resultat (PL) — ingen data")
+        self._card_bs_var = tk.StringVar(value="Balanse (BS) — ingen data")
         self._card_pl = ttk.Label(
             agg, textvariable=self._card_pl_var,
-            font=("Segoe UI", 9),
-            padding=(10, 6),
+            font=("Segoe UI", 11, "bold"),
+            padding=(14, 10),
             relief="solid", borderwidth=1,
             background="#F5F7FA", foreground="#1F2937",
             justify="left",
@@ -85,13 +85,13 @@ class ScopingPage(ttk.Frame):
         self._card_pl.grid(row=0, column=0, sticky="w")
         self._card_bs = ttk.Label(
             agg, textvariable=self._card_bs_var,
-            font=("Segoe UI", 9),
-            padding=(10, 6),
+            font=("Segoe UI", 11, "bold"),
+            padding=(14, 10),
             relief="solid", borderwidth=1,
             background="#F5F7FA", foreground="#1F2937",
             justify="left",
         )
-        self._card_bs.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self._card_bs.grid(row=0, column=1, sticky="w", padx=(10, 0))
 
         self._var_scoping_locked = tk.BooleanVar(value=False)
         self._chk_lock = ttk.Checkbutton(
@@ -113,15 +113,16 @@ class ScopingPage(ttk.Frame):
         filt = ttk.Frame(self)
         filt.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 4))
 
-        ttk.Label(filt, text="Klassifisering:").pack(side="left")
+        ttk.Label(filt, text="Klassifisering:").pack(side="left", padx=(0, 4))
         cb_class = ttk.Combobox(
             filt, textvariable=self.var_filter_class, state="readonly",
             values=["Alle", "Vesentlig", "Moderat", "Ikke vesentlig", "Manuell"], width=14,
         )
-        cb_class.pack(side="left", padx=(2, 12))
+        cb_class.pack(side="left", padx=(4, 0))
         cb_class.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
+        ttk.Frame(filt, width=16).pack(side="left")
 
-        ttk.Label(filt, text="Type:").pack(side="left")
+        ttk.Label(filt, text="Type:").pack(side="left", padx=(0, 4))
         # Radio-bokser (ikke kombiboks) for Type — tre valg: Alle /
         # Resultat (PL) / Balanse (BS). "Resultat" og "Balanse" er
         # internt BS/PL, men vises med tydelige norske labels.
@@ -130,17 +131,18 @@ class ScopingPage(ttk.Frame):
                 filt, text=label,
                 variable=self.var_filter_type, value=value,
                 command=self._apply_filter,
-            ).pack(side="left", padx=(2, 4))
-        ttk.Frame(filt, width=8).pack(side="left")  # liten spacer
+            ).pack(side="left", padx=(4, 10))
+        # Seksjonsskille mellom filter-gruppene
+        ttk.Frame(filt, width=16).pack(side="left")
 
-        ttk.Label(filt, text="Scoping:").pack(side="left")
+        ttk.Label(filt, text="Scoping:").pack(side="left", padx=(0, 4))
         for label in ("Alle", "I scope", "Ut av scope"):
             ttk.Radiobutton(
                 filt, text=label,
                 variable=self.var_filter_scoping, value=label,
                 command=self._apply_filter,
-            ).pack(side="left", padx=(2, 4))
-        ttk.Frame(filt, width=8).pack(side="left")
+            ).pack(side="left", padx=(4, 10))
+        ttk.Frame(filt, width=16).pack(side="left")
 
         ttk.Checkbutton(
             filt, text="Skjul sumposter", variable=self.var_hide_summary,
@@ -948,8 +950,8 @@ class ScopingPage(ttk.Frame):
             pass
 
         if not self._result:
-            self._card_pl_var.set("Resultat (PL)\n—")
-            self._card_bs_var.set("Balanse (BS)\n—")
+            self._card_pl_var.set("Resultat (PL) — ingen data")
+            self._card_bs_var.set("Balanse (BS) — ingen data")
             self._set_card_status(self._card_pl, None)
             self._set_card_status(self._card_bs, None)
             return
@@ -962,30 +964,27 @@ class ScopingPage(ttk.Frame):
         n_ut = sum(1 for l in non_sum if l.scoping == "ut")
         n_in = len(non_sum) - n_ut
 
+        def _card_text(title: str, scoped_out: float, n_ut: int) -> str:
+            if pm <= 0:
+                return f"{title}   ·   {n_label(n_ut)} ut\nScopet ut: {_fmt(scoped_out)}   (PM ikke satt)"
+            pct = round(scoped_out / pm * 100, 1)
+            return (
+                f"{title}   ·   {n_label(n_ut)} ut\n"
+                f"Scopet ut: {_fmt(scoped_out)}  av PM {_fmt(pm)}   ({pct}%)"
+            )
+
         # PL-kort
         pl_out = totals.get("PL", 0.0)
-        pl_pct = round(pl_out / pm * 100, 1) if pm > 0 else 0
         pl_ok = pm <= 0 or pl_out <= pm
         pl_n = sum(1 for l in non_sum if (l.line_type or "").upper() == "PL" and l.scoping == "ut")
-        pl_text = (
-            f"Resultat (PL)          {n_label(pl_n)}\n"
-            f"Scopet ut: {_fmt(pl_out)}  av PM {_fmt(pm) if pm > 0 else '—'}"
-            + (f"  ({pl_pct}%)" if pm > 0 else "")
-        )
-        self._card_pl_var.set(pl_text)
+        self._card_pl_var.set(_card_text("Resultat (PL)", pl_out, pl_n))
         self._set_card_status(self._card_pl, pl_ok if pm > 0 else None)
 
         # BS-kort
         bs_out = totals.get("BS", 0.0)
-        bs_pct = round(bs_out / pm * 100, 1) if pm > 0 else 0
         bs_ok = pm <= 0 or bs_out <= pm
         bs_n = sum(1 for l in non_sum if (l.line_type or "").upper() == "BS" and l.scoping == "ut")
-        bs_text = (
-            f"Balanse (BS)           {n_label(bs_n)}\n"
-            f"Scopet ut: {_fmt(bs_out)}  av PM {_fmt(pm) if pm > 0 else '—'}"
-            + (f"  ({bs_pct}%)" if pm > 0 else "")
-        )
-        self._card_bs_var.set(bs_text)
+        self._card_bs_var.set(_card_text("Balanse (BS)", bs_out, bs_n))
         self._set_card_status(self._card_bs, bs_ok if pm > 0 else None)
 
         # Bakoverkompat: behold _agg_var for evt. lesere
