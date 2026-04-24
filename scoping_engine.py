@@ -35,6 +35,7 @@ class ScopingLine:
     action_count: int = 0             # Antall CRM-handlinger matchet
     has_ib_ub_avvik: bool = False
     is_summary: bool = False          # Sumpost - ikke del av scoping-beregning
+    manual: bool = False              # True hvis scoping er manuelt satt (ikke auto)
 
 
 @dataclass
@@ -93,6 +94,7 @@ def build_scoping(
     ib_ub_avvik: set[str] | None = None,
     overrides: dict[str, dict] | None = None,
     summary_regnr: set[str] | None = None,
+    auto_suggestions: dict[str, str] | None = None,
 ) -> ScopingResult:
     """Bygg scoping-resultat fra regnskapslinje-pivot og vesentlighetsdata.
 
@@ -109,6 +111,10 @@ def build_scoping(
         Sett med regnr (str) som har IB/UB-avvik.
     overrides : dict, optional
         regnr (str) -> {scoping, rationale, classification} for manuelle overstyringer.
+    auto_suggestions : dict, optional
+        regnr (str) -> "ut" — automatisk foreslått scope-ut fra
+        ``compute_auto_scope_out``. Brukes kun for linjer som ikke har
+        manuell overstyring; manuell vinner alltid.
     """
     om = 0.0
     pm = 0.0
@@ -122,6 +128,7 @@ def build_scoping(
     action_counts = action_counts or {}
     ib_ub_avvik = ib_ub_avvik or set()
     overrides = overrides or {}
+    auto_suggestions = auto_suggestions or {}
 
     lines: list[ScopingLine] = []
 
@@ -165,7 +172,18 @@ def build_scoping(
 
         ovr = overrides.get(regnr, {})
         classification = "" if is_sum else (ovr.get("classification", "") or auto_class)
-        scoping = "" if is_sum else ovr.get("scoping", "")
+        # Manuell overstyring vinner over auto-forslag. Sumposter får
+        # aldri scoping. Hvis override ikke har 'scoping'-nøkkel,
+        # prøver vi auto_suggestions.
+        manual_scoping = ovr.get("scoping", "")
+        manual_flag = False
+        if is_sum:
+            scoping = ""
+        elif manual_scoping:
+            scoping = manual_scoping
+            manual_flag = True
+        else:
+            scoping = auto_suggestions.get(regnr, "")
         rationale = "" if is_sum else ovr.get("rationale", "")
         audit_action = "" if is_sum else ovr.get("audit_action", "")
 
@@ -186,6 +204,7 @@ def build_scoping(
             action_count=action_counts.get(regnr, 0),
             has_ib_ub_avvik=regnr in ib_ub_avvik,
             is_summary=is_sum,
+            manual=manual_flag,
         )
         lines.append(line)
 

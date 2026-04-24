@@ -213,18 +213,48 @@ class ScopingPage(ttk.Frame):
         self._ent_audit_action.bind("<FocusOut>", self._on_audit_action_changed)
         self._ent_audit_action.bind("<Return>", self._on_audit_action_changed)
 
-        # ── Aggregation bar ──
+        # ── Aggregation bar: to metric-kort (PL og BS) + lås-knapp ──
         agg = ttk.Frame(self)
         agg.grid(row=4, column=0, sticky="ew", padx=8, pady=(2, 8))
-        agg.columnconfigure(0, weight=1)
+        agg.columnconfigure(2, weight=1)  # spacer mellom kort og lås/eksport
 
-        self._agg_var = tk.StringVar(value="")
-        self._agg_label = ttk.Label(agg, textvariable=self._agg_var, font=("", 9, "bold"))
-        self._agg_label.grid(row=0, column=0, sticky="w")
+        self._card_pl_var = tk.StringVar(value="Resultat (PL)\n—")
+        self._card_bs_var = tk.StringVar(value="Balanse (BS)\n—")
+        self._card_pl = ttk.Label(
+            agg, textvariable=self._card_pl_var,
+            font=("Segoe UI", 9),
+            padding=(10, 6),
+            relief="solid", borderwidth=1,
+            background="#F5F7FA", foreground="#1F2937",
+            justify="left",
+        )
+        self._card_pl.grid(row=0, column=0, sticky="w")
+        self._card_bs = ttk.Label(
+            agg, textvariable=self._card_bs_var,
+            font=("Segoe UI", 9),
+            padding=(10, 6),
+            relief="solid", borderwidth=1,
+            background="#F5F7FA", foreground="#1F2937",
+            justify="left",
+        )
+        self._card_bs.grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+        self._var_scoping_locked = tk.BooleanVar(value=False)
+        self._chk_lock = ttk.Checkbutton(
+            agg, text="Lås scoping",
+            variable=self._var_scoping_locked,
+            command=self._on_lock_toggled,
+        )
+        self._chk_lock.grid(row=0, column=3, sticky="e", padx=(8, 0))
 
         ttk.Button(agg, text="Eksporter Excel", command=self._export_excel).grid(
-            row=0, column=1, sticky="e", padx=(8, 0),
+            row=0, column=4, sticky="e", padx=(8, 0),
         )
+
+        # Beholder bakoverkompat-attributter for eventuelle andre lesere;
+        # selve oppdateringen gjøres mot kortene nå.
+        self._agg_var = tk.StringVar(value="")
+        self._agg_label = self._card_pl  # alias for test-kompat
 
     # ------------------------------------------------------------------
     # Data loading
@@ -329,12 +359,57 @@ class ScopingPage(ttk.Frame):
         import scoping_store
         overrides = scoping_store.load_overrides(self._client, self._year)
 
+        # Beregn auto-scope-ut-forslag fra scoping-motoren. Brukes for
+        # linjer uten manuell override. Hoppes over hvis scoping er
+        # låst — da holdes forrige resultat uendret.
+        auto_suggestions: dict[str, str] = {}
+        if not self._is_scoping_locked():
+            # Bygg foreløpig ScopingLine-liste for auto-algoritmen.
+            # Vi kaller build_scoping én gang uten auto_suggestions for
+            # å få ordentlig line_type (PL/BS) + is_summary-klassifisering,
+            # deretter beregner vi auto og kjører build_scoping en gang
+            # til med auto. Det er to kall men de er billige på ren logikk.
+            from scoping_engine import compute_auto_scope_out
+
+            preliminary = build_scoping(
+                rl_pivot, materiality,
+                action_counts=action_counts,
+                ib_ub_avvik=ib_ub_avvik,
+                overrides=overrides,
+            )
+            auto_suggestions = compute_auto_scope_out(
+                preliminary.lines,
+                pm=preliminary.pm,
+            )
+
         return build_scoping(
             rl_pivot, materiality,
             action_counts=action_counts,
             ib_ub_avvik=ib_ub_avvik,
             overrides=overrides,
+            auto_suggestions=auto_suggestions,
         )
+
+    def _is_scoping_locked(self) -> bool:
+        """Returnerer True hvis bruker har låst scoping for aktuell klient/år."""
+        if not self._client or not self._year:
+            return False
+        try:
+            import preferences
+            key = f"scoping.locked.{self._client}.{self._year}"
+            return bool(preferences.get(key, False))
+        except Exception:
+            return False
+
+    def _set_scoping_locked(self, locked: bool) -> None:
+        if not self._client or not self._year:
+            return
+        try:
+            import preferences
+            key = f"scoping.locked.{self._client}.{self._year}"
+            preferences.set(key, bool(locked))
+        except Exception:
+            pass
 
     def _resolve_year_int(self) -> int | None:
         try:
@@ -856,32 +931,83 @@ class ScopingPage(ttk.Frame):
             pass
 
     def _update_aggregation(self) -> None:
+        # Synk lås-sjekkboks med lagret tilstand (gjøres her så det skjer
+        # ved hver refresh, uten at sjekkboks-klikket trigger loop).
+        try:
+            self._var_scoping_locked.set(self._is_scoping_locked())
+        except Exception:
+            pass
+
         if not self._result:
-            self._agg_var.set("")
+            self._card_pl_var.set("Resultat (PL)\n—")
+            self._card_bs_var.set("Balanse (BS)\n—")
+            self._set_card_status(self._card_pl, None)
+            self._set_card_status(self._card_bs, None)
             return
 
-        non_sum = [l for l in self._result.lines if not l.is_summary]
-        scoped_out = sum(abs(l.amount) for l in non_sum if l.scoping == "ut")
-        total_saldo = sum(abs(l.amount) for l in non_sum)
-        om = self._result.om
+        from scoping_engine import scoped_out_totals_by_group
+        totals = scoped_out_totals_by_group(self._result.lines)
+        pm = self._result.pm
 
+        non_sum = [l for l in self._result.lines if not l.is_summary]
         n_ut = sum(1 for l in non_sum if l.scoping == "ut")
         n_in = len(non_sum) - n_ut
 
-        if om > 0:
-            ok = scoped_out < om
-            pct_om = round(scoped_out / om * 100, 1) if om else 0
-            pct_total = round(scoped_out / total_saldo * 100, 1) if total_saldo > 0 else 0
-            status = "OK" if ok else "ADVARSEL — overskrider OM!"
-            self._agg_var.set(
-                f"AGGREGERING: Scopet ut: {_fmt(scoped_out)} ({pct_om}% av OM, "
-                f"{pct_total}% av total)  |  I scope: {n_in}  Ut: {n_ut}  "
-                f"|  OM: {_fmt(om)}  —  {status}"
-            )
-            self._agg_label.configure(foreground="#065f46" if ok else "#dc2626")
-        else:
-            self._agg_var.set("AGGREGERING: Vesentlighetsgrense (OM) er ikke satt.")
-            self._agg_label.configure(foreground="#92400e")
+        # PL-kort
+        pl_out = totals.get("PL", 0.0)
+        pl_pct = round(pl_out / pm * 100, 1) if pm > 0 else 0
+        pl_ok = pm <= 0 or pl_out <= pm
+        pl_n = sum(1 for l in non_sum if (l.line_type or "").upper() == "PL" and l.scoping == "ut")
+        pl_text = (
+            f"Resultat (PL)          {n_label(pl_n)}\n"
+            f"Scopet ut: {_fmt(pl_out)}  av PM {_fmt(pm) if pm > 0 else '—'}"
+            + (f"  ({pl_pct}%)" if pm > 0 else "")
+        )
+        self._card_pl_var.set(pl_text)
+        self._set_card_status(self._card_pl, pl_ok if pm > 0 else None)
+
+        # BS-kort
+        bs_out = totals.get("BS", 0.0)
+        bs_pct = round(bs_out / pm * 100, 1) if pm > 0 else 0
+        bs_ok = pm <= 0 or bs_out <= pm
+        bs_n = sum(1 for l in non_sum if (l.line_type or "").upper() == "BS" and l.scoping == "ut")
+        bs_text = (
+            f"Balanse (BS)           {n_label(bs_n)}\n"
+            f"Scopet ut: {_fmt(bs_out)}  av PM {_fmt(pm) if pm > 0 else '—'}"
+            + (f"  ({bs_pct}%)" if pm > 0 else "")
+        )
+        self._card_bs_var.set(bs_text)
+        self._set_card_status(self._card_bs, bs_ok if pm > 0 else None)
+
+        # Bakoverkompat: behold _agg_var for evt. lesere
+        total_out = pl_out + bs_out
+        self._agg_var.set(
+            f"PL: {_fmt(pl_out)} / PM {_fmt(pm)}  |  "
+            f"BS: {_fmt(bs_out)} / PM {_fmt(pm)}  |  "
+            f"I scope: {n_in}  Ut: {n_ut}  Total ut: {_fmt(total_out)}"
+        )
+
+    def _set_card_status(self, card: ttk.Label, ok: bool | None) -> None:
+        """Fargelegg metric-kortet basert på om det er OK, advarsel eller nøytralt."""
+        try:
+            if ok is None:
+                card.configure(background="#F5F7FA", foreground="#1F2937")
+            elif ok:
+                card.configure(background="#E6F4EA", foreground="#065F46")
+            else:
+                card.configure(background="#FDECEA", foreground="#9F1A1A")
+        except Exception:
+            pass
+
+    def _on_lock_toggled(self) -> None:
+        locked = bool(self._var_scoping_locked.get())
+        self._set_scoping_locked(locked)
+        self._refresh()
+
+
+def n_label(n: int) -> str:
+    """Formater antall som 'n linje(r)' for metric-kortene."""
+    return f"{n} linje{'r' if n != 1 else ''}"
 
 
 def _fmt(value: float) -> str:
