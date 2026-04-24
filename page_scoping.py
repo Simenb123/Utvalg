@@ -72,15 +72,16 @@ class ScopingPage(ttk.Frame):
         agg.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
         agg.columnconfigure(2, weight=1)
 
-        # Metric-kort: tk.Frame med tittel + stort tall + sub-info som
-        # diskrete felt. ttk.Frame støtter ikke background direkte i
-        # vista-themet, så vi bruker tk.Frame for containerne.
-        self._card_pl, self._card_pl_title, self._card_pl_value, self._card_pl_sub = \
-            self._build_metric_card(agg, "Resultat (PL)")
+        # Metric-kort: tk.Frame med strukturerte felt (tittel, stort
+        # scopet-ut-tall, PM-tall, progress bar, prosent, linje-teller).
+        # _build_metric_card returnerer et dict med widget-referanser;
+        # _populate_card oppdaterer dem senere.
+        self._card_pl_refs = self._build_metric_card(agg, "Resultat (PL)")
+        self._card_pl = self._card_pl_refs["frame"]
         self._card_pl.grid(row=0, column=0, sticky="w")
 
-        self._card_bs, self._card_bs_title, self._card_bs_value, self._card_bs_sub = \
-            self._build_metric_card(agg, "Balanse (BS)")
+        self._card_bs_refs = self._build_metric_card(agg, "Balanse (BS)")
+        self._card_bs = self._card_bs_refs["frame"]
         self._card_bs.grid(row=0, column=1, sticky="w", padx=(12, 0))
 
         # Bakoverkompat-StringVars — brukes ikke lenger direkte men
@@ -964,83 +965,186 @@ class ScopingPage(ttk.Frame):
         )
 
     def _build_metric_card(self, parent, title: str):
-        """Bygg et metric-kort med tittel + stort tall + sub-info.
+        """Bygg et metric-kort som kommuniserer scoping-status tydelig.
 
-        Returnerer (frame, title_lbl, value_lbl, sub_lbl) slik at
-        _populate_card kan oppdatere tekstene senere.
+        Layout (rader i en tk.Frame):
+          Rad 0: tittel  "Resultat (PL)"                             (liten, dempet)
+          Rad 1: to kolonner — "Scopet ut" + "av PM"                  (labels)
+          Rad 2: to kolonner — [STORT TALL]  +  [mindre PM-tall]
+          Rad 3: progressbar (34% fylt)
+          Rad 4: linje-teller  "7 av 25 linjer ut av scope"           (liten, dempet)
+
+        Returnerer dict med widget-referanser som _populate_card oppdaterer.
         """
-        bg = "#F5F7FA"
+        bg = "#FFFFFF"
         card = tk.Frame(parent, relief="solid", borderwidth=1, background=bg)
+        card.columnconfigure(0, weight=1)
+        card.columnconfigure(1, weight=0)
+
         title_lbl = ttk.Label(
             card, text=title,
-            font=("Segoe UI", 9), foreground="#667085", background=bg,
+            font=("Segoe UI", 10, "bold"),
+            foreground="#344054", background=bg,
         )
-        title_lbl.pack(anchor="w", padx=14, pady=(8, 0))
+        title_lbl.grid(row=0, column=0, columnspan=2, sticky="w",
+                       padx=14, pady=(10, 2))
+
+        # Rad 1: feltetiketter
+        ttk.Label(
+            card, text="Scopet ut",
+            font=("Segoe UI", 8),
+            foreground="#667085", background=bg,
+        ).grid(row=1, column=0, sticky="w", padx=(14, 4))
+        ttk.Label(
+            card, text="av PM",
+            font=("Segoe UI", 8),
+            foreground="#667085", background=bg,
+        ).grid(row=1, column=1, sticky="e", padx=(4, 14))
+
+        # Rad 2: selve tallene
         value_lbl = ttk.Label(
             card, text="—",
-            font=("Segoe UI", 18, "bold"), foreground="#1F2937", background=bg,
+            font=("Segoe UI", 18, "bold"),
+            foreground="#1F2937", background=bg,
         )
-        value_lbl.pack(anchor="w", padx=14, pady=(0, 0))
-        sub_lbl = ttk.Label(
+        value_lbl.grid(row=2, column=0, sticky="w", padx=(14, 4))
+        pm_lbl = ttk.Label(
+            card, text="—",
+            font=("Segoe UI", 12),
+            foreground="#475569", background=bg,
+        )
+        pm_lbl.grid(row=2, column=1, sticky="e", padx=(4, 14))
+
+        # Rad 3: progress bar med prosent-tekst
+        # Egen style per kort så vi kan farge den uavhengig
+        style_name = f"ScopingMetric{title.replace(' ', '').replace('(', '').replace(')', '')}.Horizontal.TProgressbar"
+        style = ttk.Style()
+        try:
+            style.configure(style_name, troughcolor="#EEF2F7", background="#3B82F6",
+                            thickness=10)
+        except Exception:
+            pass
+        bar = ttk.Progressbar(
+            card, orient="horizontal", mode="determinate",
+            style=style_name, length=200, maximum=100, value=0,
+        )
+        bar.grid(row=3, column=0, columnspan=2, sticky="ew",
+                 padx=14, pady=(8, 4))
+        pct_lbl = ttk.Label(
             card, text="",
-            font=("Segoe UI", 9), foreground="#4B5563", background=bg,
+            font=("Segoe UI", 8),
+            foreground="#667085", background=bg,
         )
-        sub_lbl.pack(anchor="w", padx=14, pady=(2, 10))
-        return card, title_lbl, value_lbl, sub_lbl
+        pct_lbl.grid(row=4, column=0, sticky="w", padx=(14, 4), pady=(0, 2))
+
+        # Rad 5: linje-teller
+        count_lbl = ttk.Label(
+            card, text="",
+            font=("Segoe UI", 9),
+            foreground="#4B5563", background=bg,
+        )
+        count_lbl.grid(row=5, column=0, columnspan=2, sticky="w",
+                       padx=14, pady=(2, 10))
+
+        return {
+            "frame": card,
+            "bg": bg,
+            "title": title_lbl,
+            "value": value_lbl,
+            "pm": pm_lbl,
+            "bar": bar,
+            "bar_style": style_name,
+            "pct": pct_lbl,
+            "count": count_lbl,
+        }
 
     def _populate_card(self, *, which: str, scoped_out: float | None, pm: float, n_ut: int) -> None:
         """Oppdater innholdet i et metric-kort."""
-        if which == "PL":
-            card = self._card_pl
-            title_lbl = self._card_pl_title
-            value_lbl = self._card_pl_value
-            sub_lbl = self._card_pl_sub
-        else:
-            card = self._card_bs
-            title_lbl = self._card_bs_title
-            value_lbl = self._card_bs_value
-            sub_lbl = self._card_bs_sub
+        refs = self._card_pl_refs if which == "PL" else self._card_bs_refs
 
         if scoped_out is None:
-            # Ingen data
-            value_lbl.configure(text="—")
-            sub_lbl.configure(text="ingen data")
-            self._set_card_status(card, title_lbl, value_lbl, sub_lbl, ok=None)
+            refs["value"].configure(text="—")
+            refs["pm"].configure(text="—")
+            refs["bar"].configure(value=0)
+            refs["pct"].configure(text="")
+            refs["count"].configure(text="ingen data")
+            self._set_card_status(refs, ok=None)
             return
 
-        value_lbl.configure(text=_fmt(scoped_out))
+        refs["value"].configure(text=_fmt(scoped_out))
         if pm > 0:
             pct = round(scoped_out / pm * 100, 1)
-            sub_lbl.configure(text=f"av PM {_fmt(pm)}   ·   {pct}%   ·   {n_label(n_ut)} ut")
+            refs["pm"].configure(text=_fmt(pm))
+            refs["bar"].configure(value=min(pct, 100))
+            refs["pct"].configure(text=f"{pct}% brukt")
             ok = scoped_out <= pm
         else:
-            sub_lbl.configure(text=f"{n_label(n_ut)} ut   ·   PM ikke satt")
+            refs["pm"].configure(text="—")
+            refs["bar"].configure(value=0)
+            refs["pct"].configure(text="PM ikke satt")
             ok = None
 
-        self._set_card_status(card, title_lbl, value_lbl, sub_lbl, ok=ok)
-
-    def _set_card_status(self, card, title_lbl, value_lbl, sub_lbl, *, ok: bool | None) -> None:
-        """Fargelegg hele metric-kortet basert på OK/advarsel/nøytral."""
-        if ok is None:
-            bg = "#F5F7FA"
-            title_fg = "#667085"
-            value_fg = "#1F2937"
-            sub_fg = "#4B5563"
-        elif ok:
-            bg = "#E6F4EA"
-            title_fg = "#0B6A38"
-            value_fg = "#065F46"
-            sub_fg = "#2A7A52"
+        # Linje-teller: X ut av total
+        total_lines = 0
+        if self._result:
+            group = "PL" if which == "PL" else "BS"
+            total_lines = sum(
+                1 for l in self._result.lines
+                if not l.is_summary and (l.line_type or "").upper() == group
+            )
+        if total_lines > 0:
+            refs["count"].configure(text=f"{n_ut} av {total_lines} linjer ut av scope")
         else:
-            bg = "#FDECEA"
-            title_fg = "#9F1A1A"
-            value_fg = "#7F1D1D"
-            sub_fg = "#A93232"
+            refs["count"].configure(text=f"{n_label(n_ut)} ut av scope")
+
+        self._set_card_status(refs, ok=ok)
+
+    def _set_card_status(self, refs: dict, *, ok: bool | None) -> None:
+        """Fargelegg hele metric-kortet basert på OK / advarsel / nøytral."""
+        if ok is None:
+            bg = "#FFFFFF"
+            title_fg = "#344054"
+            value_fg = "#1F2937"
+            pm_fg = "#475569"
+            muted_fg = "#667085"
+            count_fg = "#4B5563"
+            bar_color = "#9CA3AF"
+        elif ok:
+            bg = "#F0FDF4"
+            title_fg = "#14532D"
+            value_fg = "#166534"
+            pm_fg = "#166534"
+            muted_fg = "#3F8558"
+            count_fg = "#2F6B46"
+            bar_color = "#22C55E"
+        else:
+            bg = "#FEF2F2"
+            title_fg = "#7F1D1D"
+            value_fg = "#991B1B"
+            pm_fg = "#991B1B"
+            muted_fg = "#B54141"
+            count_fg = "#A93232"
+            bar_color = "#EF4444"
         try:
-            card.configure(background=bg)
-            title_lbl.configure(background=bg, foreground=title_fg)
-            value_lbl.configure(background=bg, foreground=value_fg)
-            sub_lbl.configure(background=bg, foreground=sub_fg)
+            refs["frame"].configure(background=bg)
+            refs["title"].configure(background=bg, foreground=title_fg)
+            refs["value"].configure(background=bg, foreground=value_fg)
+            refs["pm"].configure(background=bg, foreground=pm_fg)
+            refs["pct"].configure(background=bg, foreground=muted_fg)
+            refs["count"].configure(background=bg, foreground=count_fg)
+            # Oppdater bar-stilen
+            style = ttk.Style()
+            style.configure(refs["bar_style"], troughcolor=bg, background=bar_color,
+                            thickness=10)
+            # Fellesetikettene for "Scopet ut" / "av PM" (rad 1) — de er
+            # ikke lagret i refs siden de ikke endrer innhold, men de må
+            # oppdateres for å matche bakgrunnen. Vi traverserer frame
+            # sine barn og fargelegger alle ttk.Label-er med dempet farge.
+            for w in refs["frame"].winfo_children():
+                if isinstance(w, ttk.Label) and w not in (
+                    refs["title"], refs["value"], refs["pm"], refs["pct"], refs["count"]
+                ):
+                    w.configure(background=bg, foreground=muted_fg)
         except Exception:
             pass
 
