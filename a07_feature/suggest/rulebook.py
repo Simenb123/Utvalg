@@ -282,6 +282,12 @@ def _load_rulebook_cached(path: str, mtime_ns: int) -> Rulebook:
 
 def clear_rulebook_cache() -> None:
     _load_rulebook_cached.cache_clear()
+    # Tøm også avledede caches som leser fra rulebook.
+    try:
+        from a07_feature.control.rf1022_bridge import _clear_group_caches
+        _clear_group_caches()
+    except Exception:
+        pass
 
 
 def load_rulebook(rulebook_path: Optional[str]) -> Rulebook:

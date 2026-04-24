@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+
 from ..groups import a07_code_aliases
 
 RF1022_UNKNOWN_GROUP = "uavklart_rf1022"
@@ -59,7 +61,32 @@ def rf1022_group_label(group_id: object) -> str:
     return RF1022_GROUP_LABELS.get(group_s, group_s)
 
 
+def _rulebook_mtime_ns(rulebook_path: str | None) -> int:
+    """Hent mtime for rulebook-fila. Del av cache-nøkkel så filendringer
+    invaliderer cache automatisk (samme mønster som load_rulebook)."""
+    try:
+        from pathlib import Path
+
+        from a07_feature.suggest.rulebook import _find_rulebook_path
+
+        path = _find_rulebook_path(rulebook_path)
+        if not path:
+            return 0
+        return Path(path).stat().st_mtime_ns
+    except Exception:
+        return 0
+
+
 def _a07_group_pairs(rulebook_path: str | None = None) -> tuple[tuple[str, str], ...]:
+    # Cachet fordi kalles 250+ ganger per SB-refresh (en gang per konto-klassifisering).
+    # mtime er del av cache-nøkkelen så filendringer invaliderer automatisk.
+    return _a07_group_pairs_cached(rulebook_path, _rulebook_mtime_ns(rulebook_path))
+
+
+@lru_cache(maxsize=8)
+def _a07_group_pairs_cached(
+    rulebook_path: str | None, mtime_ns: int
+) -> tuple[tuple[str, str], ...]:
     pairs: dict[str, tuple[str, str]] = {
         str(alias).strip().casefold(): (str(alias).strip(), group_id)
         for group_id, codes in RF1022_A07_BRIDGE.items()
@@ -87,6 +114,32 @@ def _a07_group_pairs(rulebook_path: str | None = None) -> tuple[tuple[str, str],
     return tuple(pairs.values())
 
 
+def _a07_group_lookup(rulebook_path: str | None = None) -> dict[str, str]:
+    """Returner pre-bygd lookup casefold(code) -> group_id.
+
+    Brukes av resolve_a07_rf1022_group så den slipper å bygge dicten selv
+    hver gang. Cache invalideres via mtime + clear_rulebook_cache().
+    """
+    return _a07_group_lookup_cached(rulebook_path, _rulebook_mtime_ns(rulebook_path))
+
+
+@lru_cache(maxsize=8)
+def _a07_group_lookup_cached(
+    rulebook_path: str | None, mtime_ns: int
+) -> dict[str, str]:
+    return {
+        str(member_code).strip().casefold(): str(group_id).strip()
+        for member_code, group_id in _a07_group_pairs_cached(rulebook_path, mtime_ns)
+        if str(member_code).strip() and str(group_id).strip()
+    }
+
+
+def _clear_group_caches() -> None:
+    """Tøm rf1022-bridge-caches. Kalles fra clear_rulebook_cache()."""
+    _a07_group_pairs_cached.cache_clear()
+    _a07_group_lookup_cached.cache_clear()
+
+
 def rf1022_group_a07_codes(group_id: object, *, rulebook_path: str | None = None) -> tuple[str, ...]:
     group_s = str(group_id or "").strip()
     if not group_s:
@@ -111,11 +164,7 @@ def resolve_a07_rf1022_group(code: object, *, rulebook_path: str | None = None) 
     code_s = str(code or "").strip()
     if not code_s:
         return ""
-    lookup = {
-        str(member_code).strip().casefold(): str(group_id).strip()
-        for member_code, group_id in _a07_group_pairs(rulebook_path)
-        if str(member_code).strip() and str(group_id).strip()
-    }
+    lookup = _a07_group_lookup(rulebook_path)
 
     members = a07_group_member_codes(code_s)
     if members:

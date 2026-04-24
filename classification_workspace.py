@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time as _time
+from contextlib import contextmanager
 from dataclasses import dataclass
 import re
 from typing import Any, Iterable, Mapping, Sequence
@@ -13,6 +15,28 @@ from account_profile import (
     AccountProfileDocument,
     AccountProfileSuggestion,
 )
+
+
+# Akkumulerte stoppeklokker for build_workspace_item.
+#
+# build_workspace_item kalles 126+ ganger per Saldobalanse-refresh. Per-kall
+# timing ville druknet monitoren i støy; vi summerer derfor tiden for hver
+# arbeidsoppgave og sender ETT event per fase når build_workspace_items er
+# ferdig. Se doc/architecture/monitoring.md for mønsteret.
+_phase_totals: dict[str, float] | None = None
+
+
+@contextmanager
+def _phase(name: str):
+    """Akkumuler tid brukt i denne blokken til _phase_totals[name]."""
+    if _phase_totals is None:
+        yield
+        return
+    t0 = _time.perf_counter()
+    try:
+        yield
+    finally:
+        _phase_totals[name] = _phase_totals.get(name, 0.0) + (_time.perf_counter() - t0)
 
 
 QUEUE_ALL = "Alle"
@@ -517,73 +541,78 @@ def build_workspace_item(
     movement_f = _to_number(movement)
     ub_f = _to_number(ub)
 
-    result = payroll_classification.classify_payroll_account(
-        account_no=account_no_s,
-        account_name=account_name_s,
-        movement=movement_f,
-        current_profile=current_profile,
-        history_profile=history_profile,
-        catalog=catalog,
-        usage=usage,
-        rulebook_path=rulebook_path,
-    )
+    with _phase("classify"):
+        result = payroll_classification.classify_payroll_account(
+            account_no=account_no_s,
+            account_name=account_name_s,
+            movement=movement_f,
+            current_profile=current_profile,
+            history_profile=history_profile,
+            catalog=catalog,
+            usage=usage,
+            rulebook_path=rulebook_path,
+        )
     suggestions = dict(result.suggestions) if result is not None else {}
 
     actual_a07 = _clean_text(getattr(current_profile, "a07_code", None))
     actual_group_id = _clean_text(getattr(current_profile, "control_group", None))
     actual_tags = tuple(getattr(current_profile, "control_tags", ()) or ())
 
-    current = ClassificationCurrentState(
-        a07_code=_current_field_state(actual_a07, actual_a07, current_profile),
-        control_group=_current_field_state(
-            actual_group_id,
-            payroll_classification.format_control_group(actual_group_id, catalog),
-            current_profile,
-        ),
-        control_tags=_current_field_state(
-            actual_tags,
-            payroll_classification.format_control_tags(actual_tags, catalog),
-            current_profile,
-        ),
-        source=_source_label(getattr(current_profile, "source", None)),
-        confidence=getattr(current_profile, "confidence", None),
-        locked=bool(getattr(current_profile, "locked", False)),
-    )
-    previous = _history_snapshot(history_profile, catalog)
+    with _phase("current_state"):
+        current = ClassificationCurrentState(
+            a07_code=_current_field_state(actual_a07, actual_a07, current_profile),
+            control_group=_current_field_state(
+                actual_group_id,
+                payroll_classification.format_control_group(actual_group_id, catalog),
+                current_profile,
+            ),
+            control_tags=_current_field_state(
+                actual_tags,
+                payroll_classification.format_control_tags(actual_tags, catalog),
+                current_profile,
+            ),
+            source=_source_label(getattr(current_profile, "source", None)),
+            confidence=getattr(current_profile, "confidence", None),
+            locked=bool(getattr(current_profile, "locked", False)),
+        )
+    with _phase("history_snapshot"):
+        previous = _history_snapshot(history_profile, catalog)
 
     effective_code = actual_a07
     a07_suggestion = suggestions.get("a07_code")
     if not effective_code and a07_suggestion is not None:
         effective_code = _clean_text(a07_suggestion.value)
 
-    suggested = ClassificationSuggestedState(
-        a07_code=_suggested_field_state(
-            field_name="a07_code",
-            suggestion=a07_suggestion,
-            catalog=catalog,
-            effective_code=effective_code,
-        ),
-        control_group=_suggested_field_state(
-            field_name="control_group",
-            suggestion=suggestions.get("control_group"),
-            catalog=catalog,
-            effective_code=effective_code,
-        ),
-        control_tags=_suggested_field_state(
-            field_name="control_tags",
-            suggestion=suggestions.get("control_tags"),
-            catalog=catalog,
-            effective_code=effective_code,
-        ),
-    )
-
-    issue_text = _clean_text(
-        payroll_classification.suspicious_saved_payroll_profile_issue(
-            account_no=account_no_s,
-            account_name=account_name_s,
-            current_profile=current_profile,
+    with _phase("suggested_state"):
+        suggested = ClassificationSuggestedState(
+            a07_code=_suggested_field_state(
+                field_name="a07_code",
+                suggestion=a07_suggestion,
+                catalog=catalog,
+                effective_code=effective_code,
+            ),
+            control_group=_suggested_field_state(
+                field_name="control_group",
+                suggestion=suggestions.get("control_group"),
+                catalog=catalog,
+                effective_code=effective_code,
+            ),
+            control_tags=_suggested_field_state(
+                field_name="control_tags",
+                suggestion=suggestions.get("control_tags"),
+                catalog=catalog,
+                effective_code=effective_code,
+            ),
         )
-    )
+
+    with _phase("issue_check"):
+        issue_text = _clean_text(
+            payroll_classification.suspicious_saved_payroll_profile_issue(
+                account_no=account_no_s,
+                account_name=account_name_s,
+                current_profile=current_profile,
+            )
+        )
 
     has_current_state = payroll_classification._has_payroll_profile_state(current_profile)
     has_history_state = payroll_classification._has_payroll_profile_state(history_profile)
@@ -678,14 +707,15 @@ def build_workspace_item(
     elif getattr(current_profile, "confidence", None) is not None:
         top_confidence = getattr(current_profile, "confidence", None)
 
-    rf1022_exclude_blocks = tuple(
-        payroll_classification.detect_rf1022_exclude_blocks(
-            account_no=account_no_s,
-            account_name=account_name_s,
-            catalog=catalog,
-            usage=usage,
+    with _phase("exclude_blocks"):
+        rf1022_exclude_blocks = tuple(
+            payroll_classification.detect_rf1022_exclude_blocks(
+                account_no=account_no_s,
+                account_name=account_name_s,
+                catalog=catalog,
+                usage=usage,
+            )
         )
-    )
 
     return ClassificationWorkspaceItem(
         account_no=account_no_s,
@@ -750,23 +780,40 @@ def build_workspace_items(
     usage_features: Mapping[str, Any] | None = None,
     rulebook_path: str | None = None,
 ) -> dict[str, ClassificationWorkspaceItem]:
-    items: dict[str, ClassificationWorkspaceItem] = {}
-    for row in _iter_account_rows(accounts_df):
-        account_no = _clean_text(row.get("Konto"))
-        if not account_no:
-            continue
-        items[account_no] = build_workspace_item(
-            account_no=account_no,
-            account_name=_clean_text(row.get("Kontonavn")),
-            ib=row.get("IB"),
-            movement=row.get("Endring"),
-            ub=row.get("UB"),
-            current_profile=document.get(account_no),
-            history_profile=history_document.get(account_no) if history_document is not None else None,
-            catalog=catalog,
-            usage=(usage_features or {}).get(account_no),
-            rulebook_path=rulebook_path,
-        )
+    # Aktiver akkumulerende stoppeklokker for build_workspace_item. Vi får
+    # ett event per fase istedenfor 126x per-kall-støy.
+    global _phase_totals
+    _phase_totals = {}
+    try:
+        items: dict[str, ClassificationWorkspaceItem] = {}
+        for row in _iter_account_rows(accounts_df):
+            account_no = _clean_text(row.get("Konto"))
+            if not account_no:
+                continue
+            items[account_no] = build_workspace_item(
+                account_no=account_no,
+                account_name=_clean_text(row.get("Kontonavn")),
+                ib=row.get("IB"),
+                movement=row.get("Endring"),
+                ub=row.get("UB"),
+                current_profile=document.get(account_no),
+                history_profile=history_document.get(account_no) if history_document is not None else None,
+                catalog=catalog,
+                usage=(usage_features or {}).get(account_no),
+                rulebook_path=rulebook_path,
+            )
+    finally:
+        # Send akkumulerte tall til ytelsesmonitoren, og nullstill akkumulatoren.
+        try:
+            from src.monitoring.perf import record_event as _record_event
+            for name, duration in _phase_totals.items():
+                _record_event(
+                    f"sb.payroll.build_items.{name}",
+                    duration * 1000.0,
+                )
+        except Exception:
+            pass
+        _phase_totals = None
     return items
 
 

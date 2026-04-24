@@ -885,10 +885,29 @@ def _decorate_with_payroll_columns(
     dict[str, payroll_classification.PayrollSuggestionResult],
     dict[str, classification_workspace.ClassificationWorkspaceItem],
 ]:
+    # Fin-granulær timing så vi kan se hvor de 300-600ms faktisk går:
+    # load_context, build_items, row_loop.
+    import time as _time
+    try:
+        from src.monitoring.perf import record_event as _record_event
+    except Exception:
+        _record_event = None  # type: ignore[assignment]
+
+    def _phase(label: str, t0: float) -> float:
+        t1 = _time.perf_counter()
+        if _record_event is not None:
+            try:
+                _record_event(f"sb.payroll.{label}", (t1 - t0) * 1000.0)
+            except Exception:
+                pass
+        return t1
+
+    _t = _time.perf_counter()
     if preloaded_context is not None:
         document, history_document, catalog = preloaded_context
     else:
         document, history_document, catalog = _load_payroll_context(client, year)
+    _t = _phase("load_context", _t)
     suggestions: dict[str, payroll_classification.PayrollSuggestionResult] = {}
     items: dict[str, classification_workspace.ClassificationWorkspaceItem] = {}
     if merged.empty:
@@ -909,6 +928,7 @@ def _decorate_with_payroll_columns(
             for account_no, item in items.items()
             if item.result is not None
         }
+    _t = _phase("build_items", _t)
 
     work = merged.copy()
     current_summary_values: list[str] = []
@@ -1034,6 +1054,7 @@ def _decorate_with_payroll_columns(
     work["_payroll_unmapped"] = payroll_unmapped_values
     work["_payroll_unclear"] = payroll_unclear_values
     work["_payroll_suspicious_saved"] = payroll_suspicious_values
+    _phase("row_loop", _t)
     return work, document, history_document, catalog, suggestions, items
 
 
