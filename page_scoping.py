@@ -229,6 +229,22 @@ class ScopingPage(ttk.Frame):
         self._tree.tag_configure("summary", foreground="#9ca3af")
         self._tree.tag_configure("stripe", background="#f8f9fa")
 
+        # Registrer i global selection-summary (footer-teksten nederst
+        # til venstre). Gjør at brukeren ser sumtall for valgt rad(er) i
+        # samme UI-element som på Analyse/Saldobalanse/TX.
+        try:
+            import ui_selection_summary as _uiss
+            _uiss.register_treeview_selection_summary(
+                self._tree,
+                columns=("ub", "ub_fjor", "endring"),
+                priority_columns=("ub", "ub_fjor", "endring"),
+                row_noun="regnskapslinjer",
+                max_items=3,
+                hide_zero=True,
+            )
+        except Exception:
+            pass
+
         # Input-raden (Ut av scope + Begrunnelse + Revisjonshandling) er
         # fjernet — manuell overstyring gjøres nå via høyreklikk-meny på
         # raden i tabellen (eller via tastatursnarveier som fortsatt er
