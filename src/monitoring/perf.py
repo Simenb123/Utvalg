@@ -51,14 +51,25 @@ def _parse_profile_env() -> Optional[set[str]]:
     - Tom/uset → None (ingen stderr-print)
     - "all" eller "*" → set med "*"
     - "sb,analyse" → {"sb", "analyse"}
+
+    Bakoverkompat: ``UTVALG_PROFILE_SB=1`` → legger til "sb".
+    ``UTVALG_PROFILE_REFRESH=1`` → legger til "analyse".
     """
+    areas: set[str] = set()
+
     raw = os.environ.get("UTVALG_PROFILE", "").strip().lower()
-    if not raw:
-        return None
-    if raw in {"all", "*", "1", "true", "yes", "on"}:
-        return {"*"}
-    parts = {p.strip() for p in raw.split(",") if p.strip()}
-    return parts or None
+    if raw:
+        if raw in {"all", "*", "1", "true", "yes", "on"}:
+            return {"*"}
+        areas.update(p.strip() for p in raw.split(",") if p.strip())
+
+    # Bakoverkompat med gamle flagg
+    if os.environ.get("UTVALG_PROFILE_SB", "").strip().lower() in {"1", "true", "yes", "on"}:
+        areas.add("sb")
+    if os.environ.get("UTVALG_PROFILE_REFRESH", "").strip().lower() in {"1", "true", "yes", "on"}:
+        areas.add("analyse")
+
+    return areas or None
 
 
 def init_monitoring(
@@ -142,6 +153,31 @@ def _print_event(op: str, duration_ms: float, meta: Optional[dict]) -> None:
         sys.stderr.flush()
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Direkte event-recording (for imperative timing-kode)
+
+def record_event(
+    op: str,
+    duration_ms: float,
+    *,
+    meta: Optional[dict] = None,
+) -> None:
+    """Direkte record uten timer-context.
+
+    Brukes når kode allerede måler tiden selv (f.eks. via
+    ``_tick``-mønster i saldobalanse_payload). For nye implementasjoner,
+    foretrekk ``timer()`` context-manager eller ``profile()``-dekorator.
+    """
+    area = op.split(".", 1)[0] if "." in op else op
+    if _STORE is not None:
+        try:
+            _STORE.record(make_event(op, duration_ms, meta=meta))
+        except Exception:
+            pass
+    if _should_print(area):
+        _print_event(op, duration_ms, meta)
 
 
 # ---------------------------------------------------------------------------

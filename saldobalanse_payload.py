@@ -1057,16 +1057,20 @@ def _build_decorated_base_payload(
     ``catalog``, ``usage_features``) let the page-level caches bypass re-loading
     inside this function. If not given, the existing disk/session loaders are used.
     """
-    import os as _os
     import time as _time
-    import sys as _sys
-    _prof = _os.environ.get("UTVALG_PROFILE_SB", "").strip().lower() in {"1", "true", "yes", "on"}
+    # Hver fase måles og sendes til monitoring-subsystemet (src/monitoring).
+    # UTVALG_PROFILE_SB=1 gir i tillegg stderr-print via bakoverkompat i perf._parse_profile_env.
+    try:
+        from src.monitoring.perf import record_event as _record_event
+    except Exception:
+        _record_event = None  # type: ignore[assignment]
+
     def _tick(label: str, t0: float) -> float:
         t1 = _time.perf_counter()
-        if _prof:
+        duration_ms = (t1 - t0) * 1000.0
+        if _record_event is not None:
             try:
-                _sys.stderr.write("  [base] %s = %.3fs\n" % (label, t1 - t0))
-                _sys.stderr.flush()
+                _record_event(f"sb.base.{label}", duration_ms)
             except Exception:
                 pass
         return t1

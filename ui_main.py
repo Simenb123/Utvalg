@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
 from types import SimpleNamespace
 from typing import List, Optional
 
@@ -14,12 +14,19 @@ import pandas as pd
 import session
 import theme
 
+
+class _HashableNamespace(SimpleNamespace):
+    __hash__ = object.__hash__
+
+_ADMIN_PASSWORD = "123"
+_ADMIN_PASSWORD_TITLE = "Admin"
+
 # Pages / views
 from page_dataset import DatasetPage
 from page_analyse import AnalysePage
 from page_saldobalanse import SaldobalansePage
 from page_admin import AdminPage
-from page_a07 import A07Page
+from src.pages.a07 import A07Page
 from page_utvalg_strata import UtvalgStrataPage
 
 # UtvalgPage brukes tidligere som "Resultat"-fane, men den er fjernet.
@@ -34,7 +41,6 @@ from page_ar import ARPage
 from page_regnskap import RegnskapPage
 from page_materiality import MaterialityPage
 from page_mva import MvaPage
-from page_lonn import LonnPage
 from page_skatt import SkattPage
 from page_reskontro import ReskontroPage
 
@@ -187,6 +193,16 @@ class App(tk.Tk):
         # for sider som ikke er Analyse — de refreshes først når brukeren
         # aktiverer fanen (lazy refresh, jf. _on_notebook_tab_changed).
         self._post_load_dirty_refreshers: dict = {}
+        self._admin_unlocked: bool = False
+        self._last_allowed_tab_widget: object | None = None
+
+        # Ytelsesovervåking — se src/monitoring/README.md.
+        # EventStore flusher i bakgrunnstråd, så dette tar ~ingen tid.
+        try:
+            from src.monitoring.perf import init_monitoring
+            init_monitoring()
+        except Exception:
+            pass
 
         try:
             super().__init__()
@@ -255,7 +271,6 @@ class App(tk.Tk):
         self.page_regnskap = _build("regnskap", lambda: RegnskapPage(self.nb))
         self.page_materiality = _build("materiality", lambda: MaterialityPage(self.nb))
         self.page_mva = _build("mva", lambda: MvaPage(self.nb))
-        self.page_lonn = _build("lonn", lambda: LonnPage(self.nb))
         self.page_skatt = _build("skatt", lambda: SkattPage(self.nb))
         self.page_reskontro = _build("reskontro", lambda: ReskontroPage(self.nb))
         self.page_fagchat = _build("fagchat", lambda: FagchatPage(self.nb)) if FagchatPage is not None else None
@@ -297,7 +312,6 @@ class App(tk.Tk):
         if self.page_revisjonshandlinger is not None:
             self.nb.add(self.page_revisjonshandlinger, text="Handlinger")
         self.nb.add(self.page_mva, text="MVA")
-        self.nb.add(self.page_lonn, text="Lønn")
         self.nb.add(self.page_skatt, text="Skatt")
         self.nb.add(self.page_a07, text="A07")
         self.nb.add(self.page_ar, text="AR")
@@ -322,8 +336,6 @@ class App(tk.Tk):
             self.page_admin.set_analyse_page(self.page_analyse)
         if hasattr(self.page_mva, "set_analyse_page"):
             self.page_mva.set_analyse_page(self.page_analyse)
-        if hasattr(self.page_lonn, "set_analyse_page"):
-            self.page_lonn.set_analyse_page(self.page_analyse)
         if hasattr(self.page_skatt, "set_analyse_page"):
             self.page_skatt.set_analyse_page(self.page_analyse)
         if self.page_statistikk is not None and hasattr(self.page_statistikk, "set_analyse_page"):
@@ -618,7 +630,7 @@ class App(tk.Tk):
     def _init_headless(self) -> None:
         """Initialiserer en minimal app når Tk ikke kan brukes."""
         # Minimal notebook-stub
-        self.nb = SimpleNamespace(  # type: ignore[assignment]
+        self.nb = _HashableNamespace(  # type: ignore[assignment]
             select=lambda *_args, **_kwargs: None,
             add=lambda *_args, **_kwargs: None,
         )
@@ -629,29 +641,28 @@ class App(tk.Tk):
         self._footer_status_label = None
 
         # Minimal pages/stubs som testene forventer
-        self.page_analyse = SimpleNamespace(dataset=None)  # type: ignore[assignment]
-        self.page_saldobalanse = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_admin = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_analyse = _HashableNamespace(dataset=None)  # type: ignore[assignment]
+        self.page_saldobalanse = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_admin = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
 
         # DatasetPage må eksponere .dp, og DatasetPane må ha ._on_ready
-        dp_stub = SimpleNamespace(_on_ready=None)
-        self.page_dataset = SimpleNamespace(dp=dp_stub)  # type: ignore[assignment]
+        dp_stub = _HashableNamespace(_on_ready=None)
+        self.page_dataset = _HashableNamespace(dp=dp_stub)  # type: ignore[assignment]
 
         # Resten brukes ikke av testene, men vi setter dem for robusthet
-        self.page_a07 = SimpleNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
-        self.page_ar = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_utvalg = SimpleNamespace()  # type: ignore[assignment]
-        self.page_logg = SimpleNamespace()  # type: ignore[assignment]
-        self.page_consolidation = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_regnskap = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_materiality = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_mva = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_lonn = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_skatt = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_reskontro = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
-        self.page_driftsmidler = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_a07 = _HashableNamespace(refresh_from_session=lambda *_args, **_kwargs: None)  # type: ignore[assignment]
+        self.page_ar = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_utvalg = _HashableNamespace()  # type: ignore[assignment]
+        self.page_logg = _HashableNamespace()  # type: ignore[assignment]
+        self.page_consolidation = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_regnskap = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_materiality = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_mva = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_skatt = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_reskontro = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_driftsmidler = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
         self.page_revisjonshandlinger = None
-        self.page_oversikt = SimpleNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
+        self.page_oversikt = _HashableNamespace(refresh_from_session=lambda *_a, **_kw: None)  # type: ignore[assignment]
 
         # Installer hook slik at testene kan finne dp._on_ready og kalle callback
         self._maybe_install_dataset_ready_hook()
@@ -762,6 +773,65 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _fallback_tab_after_admin_denied(self) -> object | None:
+        admin_page = self.__dict__.get("page_admin")
+        fallback = self.__dict__.get("_last_allowed_tab_widget")
+        if fallback is not None and fallback is not admin_page:
+            return fallback
+
+        for attr_name in ("page_oversikt", "page_dataset"):
+            candidate = self.__dict__.get(attr_name)
+            if candidate is not None and candidate is not admin_page:
+                return candidate
+
+        try:
+            for tab_id in self.nb.tabs():
+                try:
+                    widget = self.nametowidget(tab_id)
+                except Exception:
+                    widget = tab_id
+                if widget is not admin_page:
+                    return widget
+        except Exception:
+            pass
+        return None
+
+    def _ensure_admin_access(self, selected_widget: object) -> bool:
+        admin_page = self.__dict__.get("page_admin")
+        if selected_widget is not admin_page:
+            return True
+        if self.__dict__.get("_admin_unlocked", False):
+            return True
+
+        password = None
+        try:
+            password = simpledialog.askstring(
+                _ADMIN_PASSWORD_TITLE,
+                "Skriv inn admin-passord:",
+                parent=self,
+                show="*",
+            )
+        except Exception:
+            password = None
+
+        if password == _ADMIN_PASSWORD:
+            self._admin_unlocked = True
+            return True
+
+        if password not in (None, ""):
+            try:
+                messagebox.showerror(_ADMIN_PASSWORD_TITLE, "Feil passord.", parent=self)
+            except Exception:
+                pass
+
+        fallback = self._fallback_tab_after_admin_denied()
+        if fallback is not None:
+            try:
+                self.nb.select(fallback)
+            except Exception:
+                pass
+        return False
+
     def _save_current_tab(self) -> None:
         """Lagre aktiv fane i preferences."""
         try:
@@ -774,20 +844,24 @@ class App(tk.Tk):
             pass
 
     def _on_notebook_tab_changed(self, _event=None) -> None:
-        self._save_current_tab()
-
-        # Nullstill selection-summary når man bytter fane, slik at en markering
-        # på Analyse ikke blir stående igjen nederst på en annen side.
-        try:
-            self.clear_selection_summary()
-        except Exception:
-            pass
-
         try:
             selected_id = self.nb.select()
             selected_widget = self.nametowidget(selected_id)
         except Exception:
             return
+
+        if not self._ensure_admin_access(selected_widget):
+            return
+
+        self._save_current_tab()
+        self._last_allowed_tab_widget = selected_widget
+
+        # Nullstill selection-summary nar man bytter fane, slik at en markering
+        # pa Analyse ikke blir staende igjen nederst pa en annen side.
+        try:
+            self.clear_selection_summary()
+        except Exception:
+            pass
 
         self._sync_session_context_from_dataset_store()
 
@@ -1145,13 +1219,6 @@ class App(tk.Tk):
             except Exception:
                 log.exception("MVA refresh after dataset load failed")
 
-        def _refresh_lonn() -> None:
-            try:
-                if hasattr(self.page_lonn, "refresh_from_session") and callable(getattr(self.page_lonn, "refresh_from_session")):
-                    self.page_lonn.refresh_from_session(session)  # type: ignore[attr-defined]
-            except Exception:
-                log.exception("Lonn refresh after dataset load failed")
-
         def _refresh_skatt() -> None:
             try:
                 if hasattr(self.page_skatt, "refresh_from_session") and callable(getattr(self.page_skatt, "refresh_from_session")):
@@ -1272,7 +1339,6 @@ class App(tk.Tk):
             (getattr(self, "page_regnskap", None),     _refresh_regnskap),
             (getattr(self, "page_materiality", None),  _refresh_materiality),
             (getattr(self, "page_mva", None),          _refresh_mva),
-            (getattr(self, "page_lonn", None),         _refresh_lonn),
             (getattr(self, "page_skatt", None),        _refresh_skatt),
             (getattr(self, "page_reskontro", None),    _refresh_reskontro),
             (getattr(self, "page_documents", None),    _refresh_documents),
@@ -1419,3 +1485,6 @@ if __name__ == "__main__":
     app = create_app()
     install_runtime_ui_behaviors(app)
     app.mainloop()
+
+
+

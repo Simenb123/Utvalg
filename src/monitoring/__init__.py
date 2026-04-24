@@ -23,6 +23,7 @@ from src.monitoring.perf import (
     init_monitoring,
     is_enabled,
     profile,
+    record_event,
     timer,
 )
 
@@ -30,5 +31,6 @@ __all__ = [
     "init_monitoring",
     "is_enabled",
     "profile",
+    "record_event",
     "timer",
 ]

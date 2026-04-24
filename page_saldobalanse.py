@@ -1152,36 +1152,21 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         SaldobalansePage._ensure_a07_options_loaded(self)
         self._render_df(df)
         _t_render_end = _time.perf_counter()
-        # Permanent timing-logg for å oppdage regresjoner i SB-ytelse.
-        # Aktivér ved å sette UTVALG_PROFILE_SB=1 i miljøet.
-        import os as _os
-        if _os.environ.get("UTVALG_PROFILE_SB", "").strip().lower() in {"1", "true", "yes", "on"}:
-            try:
-                import sys as _sys
-                _sys.stderr.write(
-                    "[saldobalanse] refresh rows=%d base=%.3fs(%s) postprocess=%.3fs render=%.3fs\n" % (
-                        int(len(df.index)),
-                        _t_base_end - _t_start,
-                        "cache-hit" if _base_cache_hit else "rebuilt",
-                        _t_postprocess_end - _t_base_end,
-                        _t_render_end - _t_postprocess_end,
-                    )
-                )
-                _sys.stderr.flush()
-            except Exception:
-                pass
-        elif log.isEnabledFor(logging.DEBUG):
-            try:
-                log.debug(
-                    "[saldobalanse] refresh rows=%d base=%.3fs(%s) postprocess=%.3fs render=%.3fs",
-                    int(len(df.index)),
-                    _t_base_end - _t_start,
-                    "cache-hit" if _base_cache_hit else "rebuilt",
-                    _t_postprocess_end - _t_base_end,
-                    _t_render_end - _t_postprocess_end,
-                )
-            except Exception:
-                pass
+        # Send timing-events til monitoring-subsystemet (src/monitoring).
+        # Tre events per refresh: base, postprocess, render. Sett
+        # UTVALG_PROFILE_SB=1 (eller UTVALG_PROFILE=sb) for å se dem på
+        # stderr i tillegg til persistent event-logg.
+        try:
+            from src.monitoring.perf import record_event as _record_event
+            _meta_base = {"rows": int(len(df.index)), "cache": "hit" if _base_cache_hit else "rebuilt"}
+            _record_event("sb.refresh.base", (_t_base_end - _t_start) * 1000.0, meta=_meta_base)
+            _record_event("sb.refresh.postprocess", (_t_postprocess_end - _t_base_end) * 1000.0)
+            _record_event("sb.refresh.render", (_t_render_end - _t_postprocess_end) * 1000.0,
+                          meta={"rows": int(len(df.index))})
+            _record_event("sb.refresh", (_t_render_end - _t_start) * 1000.0,
+                          meta={"rows": int(len(df.index)), "cache": "hit" if _base_cache_hit else "rebuilt"})
+        except Exception:
+            pass
         self._restore_tree_selection(preserved_selection, focused_account=preserved_focus)
         if df.empty:
             self._set_status("Ingen kontoer matcher dette utvalget.")
