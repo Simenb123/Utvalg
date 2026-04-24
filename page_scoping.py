@@ -21,7 +21,13 @@ class ScopingPage(ttk.Frame):
     def __init__(self, parent: ttk.Notebook) -> None:
         super().__init__(parent, padding=0)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        # Ny layout:
+        #   rad 0: OM/PM/SUM + status + Oppdater
+        #   rad 1: metric-kort (PL/BS) + Lås + Eksporter
+        #   rad 2: filtrene
+        #   rad 3: tree  ← vokser
+        #   rad 4: input-rad (Ut av scope + Begrunnelse + Revisjonshandling)
+        self.rowconfigure(3, weight=1)
 
         self._client: str | None = None
         self._year: str | None = None
@@ -59,9 +65,53 @@ class ScopingPage(ttk.Frame):
             row=0, column=11, sticky="e", padx=(6, 0)
         )
 
+        # ── Metric-kort: Resultat (PL) + Balanse (BS) + Lås + Eksport ──
+        # Flyttet hit fra bunnen — gir brukeren umiddelbar oversikt over
+        # scopet-ut totalt per gruppe, med fargekodet OK/ADVARSEL.
+        agg = ttk.Frame(self)
+        agg.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
+        agg.columnconfigure(2, weight=1)
+
+        self._card_pl_var = tk.StringVar(value="Resultat (PL)\n—")
+        self._card_bs_var = tk.StringVar(value="Balanse (BS)\n—")
+        self._card_pl = ttk.Label(
+            agg, textvariable=self._card_pl_var,
+            font=("Segoe UI", 9),
+            padding=(10, 6),
+            relief="solid", borderwidth=1,
+            background="#F5F7FA", foreground="#1F2937",
+            justify="left",
+        )
+        self._card_pl.grid(row=0, column=0, sticky="w")
+        self._card_bs = ttk.Label(
+            agg, textvariable=self._card_bs_var,
+            font=("Segoe UI", 9),
+            padding=(10, 6),
+            relief="solid", borderwidth=1,
+            background="#F5F7FA", foreground="#1F2937",
+            justify="left",
+        )
+        self._card_bs.grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+        self._var_scoping_locked = tk.BooleanVar(value=False)
+        self._chk_lock = ttk.Checkbutton(
+            agg, text="Lås scoping",
+            variable=self._var_scoping_locked,
+            command=self._on_lock_toggled,
+        )
+        self._chk_lock.grid(row=0, column=3, sticky="e", padx=(8, 0))
+
+        ttk.Button(agg, text="Eksporter Excel", command=self._export_excel).grid(
+            row=0, column=4, sticky="e", padx=(8, 0),
+        )
+
+        # Bakoverkompat-alias brukt av eldre kode/tester
+        self._agg_var = tk.StringVar(value="")
+        self._agg_label = self._card_pl
+
         # ── Filters ──
         filt = ttk.Frame(self)
-        filt.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
+        filt.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 4))
 
         ttk.Label(filt, text="Klassifisering:").pack(side="left")
         cb_class = ttk.Combobox(
@@ -72,20 +122,25 @@ class ScopingPage(ttk.Frame):
         cb_class.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
 
         ttk.Label(filt, text="Type:").pack(side="left")
-        cb_type = ttk.Combobox(
-            filt, textvariable=self.var_filter_type, state="readonly",
-            values=["Alle", "BS", "PL"], width=6,
-        )
-        cb_type.pack(side="left", padx=(2, 12))
-        cb_type.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
+        # Radio-bokser (ikke kombiboks) for Type — tre valg: Alle /
+        # Resultat (PL) / Balanse (BS). "Resultat" og "Balanse" er
+        # internt BS/PL, men vises med tydelige norske labels.
+        for label, value in (("Alle", "Alle"), ("Resultat", "PL"), ("Balanse", "BS")):
+            ttk.Radiobutton(
+                filt, text=label,
+                variable=self.var_filter_type, value=value,
+                command=self._apply_filter,
+            ).pack(side="left", padx=(2, 4))
+        ttk.Frame(filt, width=8).pack(side="left")  # liten spacer
 
         ttk.Label(filt, text="Scoping:").pack(side="left")
-        cb_scoping = ttk.Combobox(
-            filt, textvariable=self.var_filter_scoping, state="readonly",
-            values=["Alle", "I scope", "Ut av scope"], width=14,
-        )
-        cb_scoping.pack(side="left", padx=(2, 12))
-        cb_scoping.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
+        for label in ("Alle", "I scope", "Ut av scope"):
+            ttk.Radiobutton(
+                filt, text=label,
+                variable=self.var_filter_scoping, value=label,
+                command=self._apply_filter,
+            ).pack(side="left", padx=(2, 4))
+        ttk.Frame(filt, width=8).pack(side="left")
 
         ttk.Checkbutton(
             filt, text="Skjul sumposter", variable=self.var_hide_summary,
@@ -94,7 +149,7 @@ class ScopingPage(ttk.Frame):
 
         # ── Treeview ──
         tree_frame = ttk.Frame(self)
-        tree_frame.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 0))
+        tree_frame.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 0))
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
@@ -176,21 +231,18 @@ class ScopingPage(ttk.Frame):
         self._tree.tag_configure("summary", foreground="#9ca3af")
         self._tree.tag_configure("stripe", background="#f8f9fa")
 
-        # ── Detail panel ──
-        detail = ttk.LabelFrame(self, text="Detaljer", padding=6)
-        detail.grid(row=3, column=0, sticky="ew", padx=8, pady=(4, 2))
-        detail.columnconfigure(1, weight=1)
+        # ── Input-rad for valgt linje: Ut av scope + Begrunnelse + Revisjonshandling ──
+        # Den tidligere "Detaljer"-LabelFramen med duplikat tekst-info
+        # er fjernet — radgrid-visningen over inneholder alt brukeren
+        # trenger. Kun inputfeltene for manuell overstyring beholdes i
+        # en flat rad under treet.
+        scope_frame = ttk.Frame(self, padding=(8, 4))
+        scope_frame.grid(row=4, column=0, sticky="ew", padx=8, pady=(2, 2))
 
+        # Stringvar-alias for bakoverkompat (tester/oppdaterings­funksjoner
+        # som tidligere skrev til _detail_var).
         self._detail_var = tk.StringVar(value="")
-        self._detail_label = ttk.Label(
-            detail, textvariable=self._detail_var, wraplength=900,
-            anchor="w", justify="left",
-        )
-        self._detail_label.grid(row=0, column=0, columnspan=4, sticky="w")
-
-        # Scoping-endring
-        scope_frame = ttk.Frame(detail)
-        scope_frame.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        self._detail_label = None  # fjernet; beholder attributt for kompat
 
         self._scope_var = tk.BooleanVar(value=False)
         self._chk_scope_ut = ttk.Checkbutton(
@@ -212,49 +264,6 @@ class ScopingPage(ttk.Frame):
         self._ent_audit_action.pack(side="left", padx=(2, 6))
         self._ent_audit_action.bind("<FocusOut>", self._on_audit_action_changed)
         self._ent_audit_action.bind("<Return>", self._on_audit_action_changed)
-
-        # ── Aggregation bar: to metric-kort (PL og BS) + lås-knapp ──
-        agg = ttk.Frame(self)
-        agg.grid(row=4, column=0, sticky="ew", padx=8, pady=(2, 8))
-        agg.columnconfigure(2, weight=1)  # spacer mellom kort og lås/eksport
-
-        self._card_pl_var = tk.StringVar(value="Resultat (PL)\n—")
-        self._card_bs_var = tk.StringVar(value="Balanse (BS)\n—")
-        self._card_pl = ttk.Label(
-            agg, textvariable=self._card_pl_var,
-            font=("Segoe UI", 9),
-            padding=(10, 6),
-            relief="solid", borderwidth=1,
-            background="#F5F7FA", foreground="#1F2937",
-            justify="left",
-        )
-        self._card_pl.grid(row=0, column=0, sticky="w")
-        self._card_bs = ttk.Label(
-            agg, textvariable=self._card_bs_var,
-            font=("Segoe UI", 9),
-            padding=(10, 6),
-            relief="solid", borderwidth=1,
-            background="#F5F7FA", foreground="#1F2937",
-            justify="left",
-        )
-        self._card_bs.grid(row=0, column=1, sticky="w", padx=(8, 0))
-
-        self._var_scoping_locked = tk.BooleanVar(value=False)
-        self._chk_lock = ttk.Checkbutton(
-            agg, text="Lås scoping",
-            variable=self._var_scoping_locked,
-            command=self._on_lock_toggled,
-        )
-        self._chk_lock.grid(row=0, column=3, sticky="e", padx=(8, 0))
-
-        ttk.Button(agg, text="Eksporter Excel", command=self._export_excel).grid(
-            row=0, column=4, sticky="e", padx=(8, 0),
-        )
-
-        # Beholder bakoverkompat-attributter for eventuelle andre lesere;
-        # selve oppdateringen gjøres mot kortene nå.
-        self._agg_var = tk.StringVar(value="")
-        self._agg_label = self._card_pl  # alias for test-kompat
 
     # ------------------------------------------------------------------
     # Data loading
