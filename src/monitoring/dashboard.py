@@ -91,59 +91,6 @@ class MonitoringDashboardMixin:
         self.after(_POLL_INTERVAL_MS, self._poll_events)
 
 
-class MonitoringDashboard(MonitoringDashboardMixin, tk.Tk):
-    """Standalone dashboard-vindu (python -m src.monitoring.dashboard)."""
-
-    def __init__(self, events_path: Optional[Path] = None) -> None:
-        super().__init__()
-        self.title("Utvalg Monitor")
-        self.geometry("1100x600")
-        self.minsize(760, 400)
-        self._init_dashboard(events_path)
-
-
-class MonitoringPopup(MonitoringDashboardMixin, tk.Toplevel):
-    """Dashboard som Toplevel — f.eks. åpnet fra Admin-fanen.
-
-    Samme GUI som standalone-varianten, bare wrappet i Toplevel så den
-    lever inne i hovedappens event-loop.
-    """
-
-    def __init__(self, master: tk.Misc, events_path: Optional[Path] = None) -> None:
-        super().__init__(master)
-        self.title("Utvalg Monitor")
-        self.geometry("1100x600")
-        self.minsize(760, 400)
-        self._init_dashboard(events_path)
-        try:
-            self.transient(master.winfo_toplevel())
-        except Exception:
-            pass
-
-
-def open_as_popup(master: tk.Misc, events_path: Optional[Path] = None) -> MonitoringPopup:
-    """Åpne monitoring-dashboard som popup inne i hovedappen.
-
-    Trygt å kalle flere ganger — hvis det allerede finnes en åpen popup
-    løftes den frem i stedet for å lage en ny.
-    """
-    existing = getattr(master, "_monitoring_popup", None)
-    if existing is not None:
-        try:
-            if existing.winfo_exists():
-                existing.deiconify()
-                existing.lift()
-                existing.focus_set()
-                return existing
-        except Exception:
-            pass
-    popup = MonitoringPopup(master, events_path)
-    try:
-        master._monitoring_popup = popup  # type: ignore[attr-defined]
-    except Exception:
-        pass
-    return popup
-
     # ------------------------------------------------------------------
     # UI-oppbygging
 
@@ -520,3 +467,57 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+class MonitoringDashboard(MonitoringDashboardMixin, tk.Tk):
+    """Standalone dashboard-vindu (python -m src.monitoring.dashboard)."""
+
+    def __init__(self, events_path: Optional[Path] = None) -> None:
+        super().__init__()
+        self.title("Utvalg Monitor")
+        self.geometry("1100x600")
+        self.minsize(760, 400)
+        self._init_dashboard(events_path)
+
+
+class MonitoringPopup(MonitoringDashboardMixin, tk.Toplevel):
+    """Dashboard som Toplevel — f.eks. åpnet fra Admin-fanen.
+
+    Samme GUI som standalone-varianten, bare wrappet i Toplevel så den
+    lever inne i hovedappens event-loop.
+    """
+
+    def __init__(self, master: tk.Misc, events_path: Optional[Path] = None) -> None:
+        super().__init__(master)
+        self.title("Utvalg Monitor")
+        self.geometry("1100x600")
+        self.minsize(760, 400)
+        self._init_dashboard(events_path)
+        try:
+            self.transient(master.winfo_toplevel())
+        except Exception:
+            pass
+
+
+def open_as_popup(master: tk.Misc, events_path: Optional[Path] = None) -> MonitoringPopup:
+    """Åpne monitoring-dashboard som popup inne i hovedappen.
+
+    Trygt å kalle flere ganger — hvis det allerede finnes en åpen popup
+    løftes den frem i stedet for å lage en ny.
+    """
+    existing = getattr(master, "_monitoring_popup", None)
+    if existing is not None:
+        try:
+            if existing.winfo_exists():
+                existing.deiconify()
+                existing.lift()
+                existing.focus_set()
+                return existing
+        except Exception:
+            pass
+    popup = MonitoringPopup(master, events_path)
+    try:
+        master._monitoring_popup = popup  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    return popup
