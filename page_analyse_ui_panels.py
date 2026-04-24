@@ -162,45 +162,25 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     pivot_header.columnconfigure(5, weight=1)
     lbl_tx_summary.grid(in_=pivot_header, row=0, column=6, sticky="e", padx=(8, 0))
 
-    # Søkefelt over pivot-treet (Ctrl+F fokuserer hit)
+    # Søkefelt over pivot-treet (Ctrl+F fokuserer hit). "Søk:"-label +
+    # entry i egen rad matcher oppsettet i høyre listbox for visuell
+    # symmetri på tvers av delvinduer.
     _pivot_search_var = tk.StringVar()
-    pivot_search_entry = ttk.Entry(pivot_frame, textvariable=_pivot_search_var)
-    pivot_search_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 2))
-    pivot_search_entry.insert(0, "Sok konto...")
-    pivot_search_entry.configure(foreground="gray")
+    pivot_search_row = ttk.Frame(pivot_frame)
+    pivot_search_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+    pivot_search_row.columnconfigure(1, weight=1)
+    ttk.Label(pivot_search_row, text="Søk:").grid(row=0, column=0, sticky="w", padx=(0, 4))
+    pivot_search_entry = ttk.Entry(pivot_search_row, textvariable=_pivot_search_var)
+    pivot_search_entry.grid(row=0, column=1, sticky="ew")
     page._pivot_search_var = _pivot_search_var  # type: ignore[attr-defined]
     page._pivot_search_entry = pivot_search_entry  # type: ignore[attr-defined]
 
-    _pivot_search_placeholder = [True]
-
-    def _pivot_search_focus_in(_e=None):
-        if _pivot_search_placeholder[0]:
-            pivot_search_entry.delete(0, "end")
-            pivot_search_entry.configure(foreground="")
-            _pivot_search_placeholder[0] = False
-
-    def _pivot_search_focus_out(_e=None):
-        if not _pivot_search_var.get().strip():
-            pivot_search_entry.insert(0, "Sok konto...")
-            pivot_search_entry.configure(foreground="gray")
-            _pivot_search_placeholder[0] = True
-
     def _pivot_search_changed(*_args):
-        if _pivot_search_placeholder[0]:
-            return
         query = _pivot_search_var.get().strip().lower()
-        if not query:
-            # Fjern filter — vis alle (kall page._apply_pivot_filter hvis finnes)
-            _fn = getattr(page, "_on_pivot_search", None)
-            if callable(_fn):
-                _fn("")
-            return
         _fn = getattr(page, "_on_pivot_search", None)
         if callable(_fn):
             _fn(query)
 
-    pivot_search_entry.bind("<FocusIn>", _pivot_search_focus_in)
-    pivot_search_entry.bind("<FocusOut>", _pivot_search_focus_out)
     _pivot_search_var.trace_add("write", _pivot_search_changed)
 
     pivot_tree = ttk.Treeview(
