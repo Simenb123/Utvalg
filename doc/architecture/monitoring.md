@@ -9,6 +9,7 @@
 
 **Sist oppdatert:** 2026-04-24
 **Forutgående:** [ytelse_status_og_plan.md](ytelse_status_og_plan.md) (tiltak 1-5, status frem til 2026-04-23)
+**Hvordan jobbe med ytelse:** [ytelse_metodikk.md](ytelse_metodikk.md) — fremgangsmåte, fiks-mønstre, kjente flaskehalser og status
 
 ## Formål
 

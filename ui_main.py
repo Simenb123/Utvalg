@@ -1280,17 +1280,39 @@ class App(tk.Tk):
         if df is None or df.empty:
             return
 
+        # Per-fase timing — _on_data_ready kalles synkront fra
+        # dataset.apply.on_ready_callback og blokkerer brukeren i 1+ sek.
+        # Vi måler hver del for å finne hva som dominerer tiden.
+        import time as _t_dr
+        try:
+            from src.monitoring.perf import record_event as _rec_dr
+        except Exception:
+            _rec_dr = None  # type: ignore[assignment]
+        _tdr = _t_dr.perf_counter()
+
+        def _dr_phase(label: str) -> None:
+            nonlocal _tdr
+            t1 = _t_dr.perf_counter()
+            if _rec_dr is not None:
+                try:
+                    _rec_dr(f"dataset.on_data_ready.{label}", (t1 - _tdr) * 1000.0)
+                except Exception:
+                    pass
+            _tdr = t1
+
         try:
             session.dataset = df
             session.version_type = "hb"
         except Exception:
             pass
+        _dr_phase("session_set")
 
         # Oppdater session.client / session.year fra DatasetPane sin store-seksjon
         try:
             self._sync_session_context_from_dataset_store()
         except Exception:
             pass
+        _dr_phase("sync_session_context")
 
         # Bakgrunns-preload av ownership_map (3+ sekunder cold). Kjøres mens
         # Analyse-fanen bygger — når brukeren bytter til Saldobalanse er cachen
@@ -1299,12 +1321,14 @@ class App(tk.Tk):
             self._preload_ownership_map_async()
         except Exception:
             log.exception("Ownership map preload failed to start")
+        _dr_phase("preload_ownership_map_thread_start")
 
         # Sett dataset-referanse umiddelbart (tester og andre moduler forventer dette)
         try:
             setattr(self.page_analyse, "dataset", df)
         except Exception:
             pass
+        _dr_phase("set_analyse_dataset")
 
         # Defer tung refresh (pivot, filtre, SB) til etter at GUI har malt seg.
         # Spre oppdateringene litt utover for å redusere opplevd heng.
@@ -1389,6 +1413,8 @@ class App(tk.Tk):
             except Exception:
                 log.exception("Oversikt refresh after dataset load failed")
 
+        _dr_phase("define_callbacks")
+
         # Vis app-nivå loading-overlay til Analyse-fanen er faktisk ferdig
         # bygget (ikke bare når dataset er lastet). Dette dekker tidsvinduet
         # mellom dataset-bygging og Analyse-refresh — som tar 2-6 sekunder
@@ -1399,6 +1425,7 @@ class App(tk.Tk):
                 overlay.show("Bygger Analyse-fanen...")
             except Exception:
                 overlay = None
+        _dr_phase("show_overlay")
 
         # Registrer skjul-overlay som callback når Analyse-refresh er ferdig.
         # Knytt også overlay til page slik at hver stage kan oppdatere
@@ -1445,6 +1472,8 @@ class App(tk.Tk):
                 except Exception:
                     pass
 
+        _dr_phase("setup_overlay_callbacks")
+
         # Eager: kun Analyse (mål-fanen brukeren bytter til umiddelbart).
         # Lazy: alle andre faner får en "dirty"-markering og refreshes
         # først når brukeren aktiverer dem. Tidligere ble alle 13 faner
@@ -1455,6 +1484,7 @@ class App(tk.Tk):
             self.after_idle(_refresh_analyse)
         except Exception:
             _refresh_analyse()
+        _dr_phase("schedule_analyse_refresh")
 
         # Bygg mapping: side-widget → refresh-callable. Filtreres for
         # None (sider som ikke er konstruert i denne build-en).
@@ -1474,12 +1504,15 @@ class App(tk.Tk):
             widget: fn for widget, fn in candidate_refreshers if widget is not None
         }
 
+        _dr_phase("build_dirty_refreshers")
+
         # Vis Analyse som neste steg
         try:
             if hasattr(self, "nb") and hasattr(self.nb, "select"):
                 self.nb.select(self.page_analyse)
         except Exception:
             pass
+        _dr_phase("nb_select_analyse")
 
     def _on_tb_ready(self) -> None:
         """Kalles naar en SB-versjon er valgt og session.tb_df er satt.

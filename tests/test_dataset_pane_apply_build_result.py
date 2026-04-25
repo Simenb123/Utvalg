@@ -93,7 +93,9 @@ def test_apply_build_result_defers_saft_auto_sb(monkeypatch):
 
     scheduled: dict[str, object] = {}
     pane._schedule_auto_create_sb_from_saft = lambda: scheduled.setdefault("ran", True)
-    pane.after_idle = lambda fn: scheduled.setdefault("fn", fn)
+    pane._invalidate_sb_for_current_year = lambda: scheduled.setdefault("invalidated", True)
+    captured_fns: list = []
+    pane.after_idle = lambda fn: captured_fns.append(fn)
 
     df = pd.DataFrame({"Konto": ["1000"], "Bilag": ["1"], "Beløp": [1.0]})
     cols = Columns(konto="Konto", bilag="Bilag", belop="Beløp")
@@ -101,5 +103,10 @@ def test_apply_build_result_defers_saft_auto_sb(monkeypatch):
 
     dataset_pane.DatasetPane._apply_build_result(pane, res, show_message=False, update_ml=False)
 
-    assert scheduled.get("fn") is pane._schedule_auto_create_sb_from_saft
+    # Funksjonen skal være planlagt via after_idle (ikke kjørt direkte).
     assert "ran" not in scheduled
+    # Når den planlagte funksjonen senere kjøres, skal den trigge auto-create.
+    assert captured_fns, "after_idle skulle vært kalt med en funksjon"
+    for fn in captured_fns:
+        fn()
+    assert scheduled.get("ran") is True

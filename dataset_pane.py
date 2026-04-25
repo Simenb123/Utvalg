@@ -871,29 +871,53 @@ class DatasetPane(ttk.Frame):
                     regnskap_client_overrides.save_column_mapping(client, mapping)
             except Exception:
                 logger.debug("Kunne ikke lagre kolonne-mapping per klient", exc_info=True)
+        _apply_phase("update_ml_and_save_mapping")
 
         # Hvis filen ble lagret som versjon: oppdater dropdown (men ikke overskriv filfeltet).
+        # Flyttet til after_idle: refresh() leser versjonsliste fra disk (~344 ms)
+        # og blokkerer ellers brukeren mens hen venter på Analyse-fanen.
+        # hb_var.set er rask og må gjøres synkront så _store_section.refresh()
+        # plukker riktig valgt versjon.
         if self._store_section is not None and res.stored_version_id:
             try:
                 self._store_section.hb_var.set(res.stored_version_id)
-                self._store_section.refresh()
             except Exception:
-                logger.exception("Kunne ikke oppdatere store UI etter auto-store")
+                logger.exception("Kunne ikke sette store UI hb_var")
+
+            def _deferred_store_refresh(section=self._store_section):
+                try:
+                    section.refresh()
+                except Exception:
+                    logger.exception("Kunne ikke oppdatere store UI etter auto-store")
+            try:
+                self.after_idle(_deferred_store_refresh)
+            except Exception:
+                _deferred_store_refresh()
+        _apply_phase("store_section_refresh")
 
         # Auto-opprett SB fra SAF-T hvis det er en SAF-T-fil og ingen aktiv SB finnes.
-        # Den tunge jobben må gå i bakgrunnstråd, ellers ser appen ut til å henge.
-        # Ved ny HB-versjon (ikke duplikat): invalider eksisterende SB så den
-        # regenereres fra den nye kildefilen.
+        # Hele blokken er flyttet til after_idle: _invalidate_sb_for_current_year
+        # leser disk (~344 ms) og _schedule_auto_create_sb_from_saft sin
+        # planlegging burde uansett ikke blokkere brukeren.
         if self._store_section is not None and is_saft_path(self.path_var.get()):
-            if res.stored_version_id and not res.stored_was_duplicate:
+            stored_vid = res.stored_version_id
+            stored_dup = res.stored_was_duplicate
+
+            def _deferred_saft_actions(vid=stored_vid, dup=stored_dup):
+                if vid and not dup:
+                    try:
+                        self._invalidate_sb_for_current_year()
+                    except Exception:
+                        logger.debug("Kunne ikke invalidere SB etter ny HB-versjon", exc_info=True)
                 try:
-                    self._invalidate_sb_for_current_year()
+                    self._schedule_auto_create_sb_from_saft()
                 except Exception:
-                    logger.debug("Kunne ikke invalidere SB etter ny HB-versjon", exc_info=True)
+                    logger.exception("Kunne ikke planlegge SAF-T auto-create")
             try:
-                self.after_idle(self._schedule_auto_create_sb_from_saft)
+                self.after_idle(_deferred_saft_actions)
             except Exception:
-                self._schedule_auto_create_sb_from_saft()
+                _deferred_saft_actions()
+        _apply_phase("saft_auto_create_check")
 
         try:
             r, c = res.df.shape
@@ -906,6 +930,7 @@ class DatasetPane(ttk.Frame):
                 self._set_status(f"Datasett bygd: rader={r:,} kolonner={c}".replace(",", " "), level="ready")
         except Exception:
             self._set_status("Datasett klart.", level="ready")
+        _apply_phase("set_status")
 
         if show_message:
             messagebox.showinfo("Datasett", "Datasett er bygget og klart til analyse.")

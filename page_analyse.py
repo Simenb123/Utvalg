@@ -1144,10 +1144,43 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                 except Exception:
                     pass
 
-        _step("refresh_mapping_issues", self._refresh_mapping_issues)
+        # Vis pivot FØRST så bruker ser data raskt. mapping_issues og banner
+        # bruker ~1 sekund å bygge og er ikke nødvendig for pivot — defererres
+        # til etter at pivoten er på skjermen.
         _step("refresh_pivot_dispatch", lambda: page_analyse_pivot.refresh_pivot(page=self))
         _step("update_ao_count_label", self._update_ao_count_label)
-        _step("update_mapping_warning_banner", self._update_mapping_warning_banner)
+
+        # Deferert kjøring av mapping_issues + banner.
+        # Bruker after(100, ...) i stedet for after_idle for å unngå at
+        # update_idletasks() i andre kallere trigger jobben synkront.
+        # Brukeren ser pivoten umiddelbart; banner/varsler dukker opp ~1 sek
+        # senere når mapping-issues er ferdig.
+        def _deferred_mapping_work() -> None:
+            t0 = _time.perf_counter()
+            try:
+                self._refresh_mapping_issues()
+            except Exception:
+                pass
+            try:
+                self._update_mapping_warning_banner()
+            except Exception:
+                pass
+            if _record_event is not None:
+                try:
+                    _record_event(
+                        "analyse.refresh.mapping_issues_deferred",
+                        (_time.perf_counter() - t0) * 1000.0,
+                    )
+                except Exception:
+                    pass
+
+        try:
+            if hasattr(self, "after") and callable(getattr(self, "after", None)):
+                self.after(50, _deferred_mapping_work)
+            else:
+                _deferred_mapping_work()
+        except Exception:
+            _deferred_mapping_work()
 
     def _refresh_mapping_issues(self) -> None:
         analyse_mapping_ui.refresh_mapping_issues(page=self)
