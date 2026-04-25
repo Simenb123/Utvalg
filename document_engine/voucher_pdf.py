@@ -35,14 +35,24 @@ from typing import Any
 
 @dataclass
 class VoucherEntry:
-    """One bilag block within a multi-bilag PDF."""
+    """One bilag block — kan komme fra to kilder:
+
+    - Tripletex: én stor PDF der hver bilag dekker et side-spenn
+      (``source_pdf`` + ``start_page``/``end_page``).
+    - PowerOffice GO: ZIP-arkiv der hver bilag er en separat PDF inne i
+      arkivet (``source_pdf`` peker til ZIP-en, ``pdf_in_zip`` er den
+      relative stien til PDF-en inne i arkivet, og side-feltene er 0).
+
+    ``pdf_in_zip`` er tomt for Tripletex-entries, og fylt for PowerOffice.
+    """
     bilag_nr: str           # e.g. "67" or "223754"
     year: str               # e.g. "2025"
-    start_page: int         # 0-indexed, inclusive
-    end_page: int           # 0-indexed, inclusive
+    start_page: int         # 0-indexed, inclusive (Tripletex)
+    end_page: int           # 0-indexed, inclusive (Tripletex)
     date: str = ""          # "YYYY-MM-DD" if found on cover page
     description: str = ""   # first meaningful text from cover page
-    source_pdf: str = ""    # absolute path to source PDF
+    source_pdf: str = ""    # absolute path to source PDF or ZIP
+    pdf_in_zip: str = ""    # relativ sti i ZIP — kun satt for PowerOffice
 
     @property
     def bilag_key(self) -> str:
@@ -53,8 +63,13 @@ class VoucherEntry:
     def page_count(self) -> int:
         return self.end_page - self.start_page + 1
 
+    @property
+    def is_zip(self) -> bool:
+        """True hvis denne kommer fra en ZIP (PowerOffice GO)."""
+        return bool(self.pdf_in_zip)
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "bilag_nr": self.bilag_nr,
             "year": self.year,
             "start_page": self.start_page,
@@ -63,6 +78,9 @@ class VoucherEntry:
             "description": self.description,
             "source_pdf": self.source_pdf,
         }
+        if self.pdf_in_zip:
+            d["pdf_in_zip"] = self.pdf_in_zip
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "VoucherEntry":
@@ -74,6 +92,7 @@ class VoucherEntry:
             date=str(d.get("date", "")),
             description=str(d.get("description", "")),
             source_pdf=str(d.get("source_pdf", "")),
+            pdf_in_zip=str(d.get("pdf_in_zip", "")),
         )
 
 

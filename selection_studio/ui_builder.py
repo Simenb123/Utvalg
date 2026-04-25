@@ -190,16 +190,20 @@ def build_ui(studio: Any) -> None:
     frm_top = ttk.Frame(tab_utvalg)
     frm_top.grid(row=0, column=0, sticky="ew", pady=(4, 0))
     frm_top.columnconfigure(0, weight=1)
-    ttk.Button(frm_top, text="Vis kontorer", command=studio._show_accounts).grid(row=0, column=1, padx=(6, 0))
-    ttk.Button(frm_top, text="Drilldown", command=studio._open_drilldown).grid(row=0, column=2, padx=(6, 0))
-    ttk.Button(frm_top, text="Dokumentkontroll", command=studio._open_document_control).grid(
-        row=0, column=3, padx=(6, 0)
-    )
+    # "Last opp bilag" plasseres først og styles som Primary fordi det er
+    # forutsetningen for de andre handlingene (Dokumentkontroll og Massekjøring
+    # trenger at bilag er lastet opp først).
     ttk.Button(
         frm_top,
-        text="Bilagseksport...",
+        text="Last opp bilag...",
+        style="Primary.TButton",
         command=studio._open_voucher_setup,
-    ).grid(row=0, column=4, padx=(6, 0))
+    ).grid(row=0, column=1, padx=(6, 0))
+    ttk.Button(frm_top, text="Vis kontorer", command=studio._show_accounts).grid(row=0, column=2, padx=(6, 0))
+    ttk.Button(frm_top, text="Drilldown", command=studio._open_drilldown).grid(row=0, column=3, padx=(6, 0))
+    ttk.Button(frm_top, text="Dokumentkontroll", command=studio._open_document_control).grid(
+        row=0, column=4, padx=(6, 0)
+    )
     ttk.Button(
         frm_top,
         text="Massekjøring...",

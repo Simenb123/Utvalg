@@ -1,25 +1,28 @@
 """document_control_voucher_index
 
-Client-level management of Tripletex voucher bundle PDFs.
+Client-level management of voucher bundle files (Tripletex PDF + PowerOffice GO ZIP).
 
 Workflow
 --------
-1. User places one or more Tripletex voucher PDFs in the client's vouchers/ folder
-   (or any other folder and then imports them via the dialog).
-2. The index is built on first use and cached as JSON next to the store.
-3. When document control opens for bilag X, we look up X in the index,
-   extract the relevant pages to a per-bilag PDF and return the path.
+1. User places ett eller flere bilag-arkiver i klientens vouchers/-mappe:
+   - Tripletex: én stor PDF (f.eks. ``voucher 1-500.pdf``)
+   - PowerOffice GO: ZIP-arkiv med én PDF per bilag (f.eks.
+     ``Bilagseksport-Bilag KlientNavn ÅO 2025.zip``)
+2. Indeksen bygges ved første bruk og caches som JSON.
+3. Når dokumentkontroll åpner bilag X, slår vi opp X i indeksen, henter
+   ut bilag-PDF-en (utpakking fra ZIP eller side-uttrekk fra stor-PDF)
+   og returnerer stien.
 
 Folder conventions
 ------------------
-Voucher PDFs are searched in:
-  <client_years_dir>/vouchers/        ← primary drop folder
-  <client_years_dir>/                 ← fallback (PDFs in the year root)
+Bilag-arkiver søkes i:
+  <client_years_dir>/vouchers/        ← primær slipp-mappe
+  <client_years_dir>/                 ← fallback (filer i års-roten)
 
-Extracted single-bilag PDFs are saved to:
+Utpakkede enkelt-bilag-PDF-er lagres til:
   <client_years_dir>/vouchers/extracted/<bilag_nr>.pdf
 
-The index cache file is:
+Indeks-cache-fila er:
   <app_data>/document_control/voucher_index_<client_slug>_<year>.json
 """
 from __future__ import annotations
@@ -33,7 +36,16 @@ from pathlib import Path
 from typing import Any
 
 import app_paths
-from document_engine.voucher_pdf import VoucherEntry, extract_entry, scan_voucher_pdf
+from document_engine.voucher_pdf import (
+    VoucherEntry,
+    extract_entry as _extract_entry_pdf,
+    scan_voucher_pdf,
+)
+from document_engine.voucher_zip import (
+    extract_entry as _extract_entry_zip,
+    is_powereoffice_zip,
+    scan_voucher_zip,
+)
 
 try:
     import client_store as _cs
@@ -70,23 +82,29 @@ def scan_voucher_dirs(
 ) -> list[VoucherEntry]:
     """Scan all known voucher directories and return a flat list of VoucherEntries.
 
-    Results from multiple PDFs are merged.  Entries from extra_paths are
-    included alongside the standard directories.
+    Results from multiple files are merged. Both Tripletex-PDF og PowerOffice-ZIP
+    plukkes opp automatisk basert på filendelse.
     """
     search_dirs = get_voucher_search_dirs(client, year)
-    pdf_paths: list[Path] = _collect_pdf_paths(search_dirs)
+    file_paths: list[Path] = _collect_voucher_paths(search_dirs)
 
     for extra in extra_paths or []:
         p = Path(extra).expanduser()
-        if p.is_file() and p.suffix.lower() == ".pdf":
-            if p not in pdf_paths:
-                pdf_paths.append(p)
+        if p.is_file() and p.suffix.lower() in (".pdf", ".zip"):
+            if p not in file_paths:
+                file_paths.append(p)
         elif p.is_dir():
-            _collect_from_dir(p, pdf_paths)
+            _collect_from_dir(p, file_paths)
 
     entries: list[VoucherEntry] = []
-    for pdf in pdf_paths:
-        entries.extend(scan_voucher_pdf(pdf))
+    year_str = str(year or "")
+    for path in file_paths:
+        if path.suffix.lower() == ".zip":
+            # Bare PowerOffice-stilte ZIP-er — ignorerer andre ZIP-er stille.
+            if is_powereoffice_zip(path):
+                entries.extend(scan_voucher_zip(path, year=year_str))
+        else:
+            entries.extend(scan_voucher_pdf(path))
     return entries
 
 
@@ -150,7 +168,10 @@ def extract_bilag_pdf(
     if skip_if_exists and output_path.exists() and output_path.stat().st_size > 0:
         return output_path
 
-    return extract_entry(entry, output_path)
+    # Velg riktig ekstraksjons-funksjon basert på kilde-type.
+    if entry.is_zip:
+        return _extract_entry_zip(entry, output_path)
+    return _extract_entry_pdf(entry, output_path)
 
 
 def find_and_extract_bilag(
@@ -211,13 +232,22 @@ def import_voucher_pdf(
     year: str | None,
     copy_to_vouchers: bool = True,
 ) -> list[VoucherEntry]:
-    """Import a voucher PDF: scan it, copy to vouchers/ dir, update cache.
+    """Importer en bilag-fil — Tripletex-PDF eller PowerOffice-ZIP.
 
-    Returns the list of VoucherEntries found in the PDF.
+    Funksjonen heter fortsatt ``import_voucher_pdf`` av bakoverkompat-
+    grunner, men aksepterer både ``.pdf`` og ``.zip``.
+
+    Returnerer listen med VoucherEntries fra fila.
     """
     pdf_path = Path(pdf_path).expanduser().resolve()
     if not pdf_path.exists():
         raise FileNotFoundError(f"Fant ikke filen: {pdf_path}")
+
+    suffix = pdf_path.suffix.lower()
+    if suffix not in (".pdf", ".zip"):
+        raise ValueError(
+            f"Ukjent filtype: {suffix}. Forventet .pdf (Tripletex) eller .zip (PowerOffice GO)."
+        )
 
     dest_path = pdf_path
     if copy_to_vouchers and _HAS_CLIENT_STORE and client and year:
@@ -231,9 +261,16 @@ def import_voucher_pdf(
         except Exception:
             dest_path = pdf_path
 
-    entries = scan_voucher_pdf(dest_path)
+    if suffix == ".zip":
+        if not is_powereoffice_zip(dest_path):
+            raise ValueError(
+                f"ZIP-fila gjenkjennes ikke som PowerOffice GO bilag-eksport: {dest_path.name}"
+            )
+        entries = scan_voucher_zip(dest_path, year=str(year or ""))
+    else:
+        entries = scan_voucher_pdf(dest_path)
 
-    # Merge into existing cache
+    # Slå sammen med eksisterende cache
     existing_raw = _load_index_cache(client, year) or {}
     for e in entries:
         existing_raw[e.bilag_key] = e.to_dict()
@@ -318,18 +355,25 @@ def _add_dir(dirs: list[Path], path: Path) -> None:
     dirs.append(path)
 
 
-def _collect_pdf_paths(dirs: list[Path]) -> list[Path]:
+def _collect_voucher_paths(dirs: list[Path]) -> list[Path]:
+    """Samle alle bilag-arkiver (PDF og ZIP) i de gitte mappene."""
     paths: list[Path] = []
     for d in dirs:
         _collect_from_dir(d, paths)
     return paths
 
 
+# Bakoverkompat-alias — eldre kode kalte denne ``_collect_pdf_paths``.
+_collect_pdf_paths = _collect_voucher_paths
+
+
 def _collect_from_dir(d: Path, paths: list[Path]) -> None:
     if not d.is_dir():
         return
     for f in sorted(d.iterdir()):
-        if f.is_file() and f.suffix.lower() == ".pdf" and f not in paths:
+        if not f.is_file() or f in paths:
+            continue
+        if f.suffix.lower() in (".pdf", ".zip"):
             paths.append(f)
 
 

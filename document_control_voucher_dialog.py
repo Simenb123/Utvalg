@@ -36,7 +36,7 @@ class VoucherSetupDialog(tk.Toplevel):
         year: str | None,
     ) -> None:
         super().__init__(master)
-        self.title("Bilagseksport — oppsett")
+        self.title("Last opp bilag — oppsett")
         self.geometry("760x520")
         self.minsize(600, 380)
         self.resizable(True, True)
@@ -66,7 +66,7 @@ class VoucherSetupDialog(tk.Toplevel):
 
         client_label = f"{self._client or 'ukjent klient'}  /  {self._year or 'ukjent år'}"
         ttk.Label(
-            hdr, text="Bilagseksport fra Tripletex", font=("Segoe UI", 11, "bold")
+            hdr, text="Last opp bilag", font=("Segoe UI", 11, "bold")
         ).grid(row=0, column=0, sticky="w")
         ttk.Label(hdr, text=client_label, foreground="#555").grid(
             row=1, column=0, sticky="w", pady=(2, 0)
@@ -74,8 +74,10 @@ class VoucherSetupDialog(tk.Toplevel):
         ttk.Label(
             hdr,
             text=(
-                "Legg til PDF-filer eksportert fra Tripletex ('Bilagsjournal' eller 'Vedlegg').\n"
-                "Systemet indekserer dem og finner automatisk riktige sider når du åpner et bilag."
+                "Legg til bilag fra regnskapssystemet:\n"
+                "  • Tripletex: PDF-eksport ('Bilagsjournal' eller 'Vedlegg')\n"
+                "  • PowerOffice GO: ZIP-arkiv ('Bilagseksport-Bilag …')\n"
+                "Systemet indekserer dem og finner riktig bilag når du åpner et."
             ),
             wraplength=700,
             foreground="#444",
@@ -84,7 +86,7 @@ class VoucherSetupDialog(tk.Toplevel):
         # Toolbar
         toolbar = ttk.Frame(self, padding=(12, 0, 12, 4))
         toolbar.grid(row=0, column=0, sticky="se")
-        ttk.Button(toolbar, text="Legg til PDF-filer...", command=self._add_pdfs).pack(
+        ttk.Button(toolbar, text="Legg til bilag-fil(er)...", command=self._add_pdfs).pack(
             side=tk.LEFT, padx=(0, 6)
         )
         ttk.Button(toolbar, text="Skann på nytt", command=self._rescan).pack(
@@ -184,8 +186,13 @@ class VoucherSetupDialog(tk.Toplevel):
     def _add_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(
             parent=self,
-            title="Velg Tripletex bilagseksport-PDF-er",
-            filetypes=[("PDF-filer", "*.pdf"), ("Alle filer", "*.*")],
+            title="Velg bilag-fil(er) — PDF (Tripletex) eller ZIP (PowerOffice GO)",
+            filetypes=[
+                ("Bilag-filer (PDF + ZIP)", "*.pdf;*.zip"),
+                ("PDF-filer (Tripletex)", "*.pdf"),
+                ("ZIP-filer (PowerOffice GO)", "*.zip"),
+                ("Alle filer", "*.*"),
+            ],
         )
         if not paths:
             return
@@ -204,7 +211,7 @@ class VoucherSetupDialog(tk.Toplevel):
             messagebox.showinfo(
                 "Ingen mapper",
                 "Ingen bilagsmapper funnet for denne klienten.\n"
-                "Legg til PDF-filer med 'Legg til PDF-filer...'.",
+                "Legg til bilag med 'Legg til bilag-fil(er)...'.",
                 parent=self,
             )
             return

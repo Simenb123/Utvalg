@@ -343,12 +343,23 @@ class ScopingPage(ttk.Frame):
         account_overrides = {}
         prior_year_overrides = None
         try:
-            account_overrides = _rco.load_account_overrides(self._client, self._year)
+            # year er keyword-only i load_account_overrides — tidligere ble
+            # det sendt positionalt og kallet feilet med TypeError som ble
+            # svelget av except-blokken. Da fikk Scoping et tomt overrides-
+            # dict og brukte derfor en annen mapping enn Analyse-fanen.
+            account_overrides = _rco.load_account_overrides(
+                self._client, year=str(self._year) if self._year else None
+            )
         except Exception:
+            log.warning("load_account_overrides feilet", exc_info=True)
             account_overrides = {}
         try:
-            prior_year_overrides = _rco.load_prior_year_overrides(self._client, self._year)
+            prior_year_overrides = _rco.load_prior_year_overrides(
+                self._client,
+                str(self._year) if self._year else None,
+            )
         except Exception:
+            log.warning("load_prior_year_overrides feilet", exc_info=True)
             prior_year_overrides = None
 
         # Bygg RL-pivot
