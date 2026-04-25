@@ -151,7 +151,7 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
 
     def _schedule_control_gl_refresh(
         self,
-        delay_ms: int = 75,
+        delay_ms: int = 125,
         *,
         on_complete: Callable[[], None] | None = None,
     ) -> None:
@@ -168,7 +168,7 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
 
     def _schedule_a07_refresh(
         self,
-        delay_ms: int = 75,
+        delay_ms: int = 125,
         *,
         on_complete: Callable[[], None] | None = None,
     ) -> None:
@@ -202,7 +202,11 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
                 if active_tab == "history" and not bool(getattr(self, "_history_compare_ready", False)):
                     self._schedule_support_refresh()
                 elif self._support_views_ready:
-                    self._refresh_control_support_trees()
+                    schedule_render = getattr(self, "_schedule_active_support_render", None)
+                    if callable(schedule_render):
+                        schedule_render(force=False)
+                    else:
+                        self._refresh_control_support_trees()
                 else:
                     self._schedule_support_refresh()
             self._update_control_transfer_buttons()
@@ -221,10 +225,26 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
             pass
         self._support_refresh_job = None
 
+    def _schedule_active_support_render(self, delay_ms: int = 45, *, force: bool = False) -> None:
+        if not bool(getattr(self, "_control_details_visible", False)):
+            self._cancel_scheduled_job("_support_render_job")
+            return
+        self._cancel_scheduled_job("_support_render_job")
+
+        def _run() -> None:
+            self._support_render_job = None
+            self._render_active_support_tab(force=force)
+
+        try:
+            self._support_render_job = self.after(delay_ms, _run)
+        except Exception:
+            _run()
+
     def _schedule_support_refresh(self) -> None:
         details_visible = bool(getattr(self, "_control_details_visible", False))
         if not details_visible:
             self._pending_support_refresh = False
+            self._cancel_scheduled_job("_support_render_job")
             return
         self._support_requested = True
         if self._refresh_in_progress:
@@ -235,7 +255,11 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
             or bool(getattr(self, "_history_compare_ready", False))
         ):
             if self._support_views_ready and not self._support_views_dirty:
-                self._render_active_support_tab(force=True)
+                schedule_render = getattr(self, "_schedule_active_support_render", None)
+                if callable(schedule_render):
+                    schedule_render(force=False)
+                else:
+                    self._render_active_support_tab(force=False)
             return
         self._cancel_support_refresh()
 
@@ -254,6 +278,7 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
             "_control_gl_refresh_job",
             "_a07_refresh_job",
             "_control_selection_followup_job",
+            "_support_render_job",
         ):
             self._cancel_scheduled_job(attr_name)
 
@@ -418,7 +443,11 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
                 self._start_support_refresh()
                 return
             if not callable(active_tab_getter) or active_tab in loaded_tabs:
-                self._render_active_support_tab()
+                schedule_render = getattr(self, "_schedule_active_support_render", None)
+                if callable(schedule_render):
+                    schedule_render(force=False)
+                else:
+                    self._render_active_support_tab()
             return
         if self._refresh_in_progress:
             self._pending_support_refresh = True

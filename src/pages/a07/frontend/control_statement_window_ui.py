@@ -19,10 +19,17 @@ from a07_feature.page_a07_frames import _empty_control_statement_df
 from a07_feature.page_a07_runtime_helpers import _account_profile_api_for_a07
 from a07_feature.control import status as a07_control_status
 from a07_feature.control.data import (
+    append_rf1022_total_row,
     build_control_statement_accounts_df,
     build_rf1022_accounts_df,
     build_rf1022_statement_df,
     build_rf1022_statement_summary,
+    build_rf1022_summary_cards,
+    rf1022_overview_tree_tag,
+)
+from .control_statement_summary_ui import (
+    build_control_statement_summary_card_strip,
+    update_control_statement_summary_cards,
 )
 
 
@@ -197,16 +204,19 @@ class A07PageControlStatementWindowMixin:
         mode_key = self._selected_control_statement_window_mode()
         basis_col = getattr(getattr(self, "workspace", None), "basis_col", "Endring")
         if mode_key == _STATEMENT_MODE_RF1022:
-            overview_df = build_rf1022_statement_df(
+            raw_overview_df = build_rf1022_statement_df(
                 source_df,
                 basis_col=basis_col,
                 a07_overview_df=getattr(self, "a07_overview_df", None),
+                control_df=getattr(self, "control_df", None),
                 control_gl_df=getattr(self, "control_gl_df", None),
                 profile_document=self._control_statement_profile_document(),
             )
+            overview_df = append_rf1022_total_row(raw_overview_df)
             overview_columns = _RF1022_OVERVIEW_COLUMNS
             overview_iid_column = "GroupId"
-            summary_text = build_rf1022_statement_summary(overview_df)
+            summary_text = build_rf1022_statement_summary(raw_overview_df)
+            summary_cards = build_rf1022_summary_cards(raw_overview_df)
         else:
             overview_df = source_df
             overview_columns = _CONTROL_STATEMENT_COLUMNS
@@ -216,6 +226,7 @@ class A07PageControlStatementWindowMixin:
                 basis_col=basis_col,
                 amount_formatter=_format_picker_amount,
             )
+            summary_cards = None
         state["overview_df"] = overview_df
 
         overview_tree = state.get("overview_tree")
@@ -228,7 +239,11 @@ class A07PageControlStatementWindowMixin:
                 overview_df,
                 overview_columns,
                 iid_column=overview_iid_column,
-                row_tag_fn=lambda row: a07_control_status.control_tree_tag(row.get("Status")),
+                row_tag_fn=(
+                    rf1022_overview_tree_tag
+                    if mode_key == _STATEMENT_MODE_RF1022
+                    else lambda row: a07_control_status.control_tree_tag(row.get("Status"))
+                ),
             )
             try:
                 children = overview_tree.get_children()
@@ -244,6 +259,7 @@ class A07PageControlStatementWindowMixin:
 
         if summary_var is not None:
             summary_var.set(summary_text)
+        update_control_statement_summary_cards(state.get("summary_card_vars"), summary_cards)
 
         self._refresh_control_statement_window_accounts()
 
@@ -315,6 +331,8 @@ class A07PageControlStatementWindowMixin:
         )
         mode_widget.pack(side="right")
         mode_widget.set(_STATEMENT_MODE_LABELS[_STATEMENT_MODE_RF1022])
+        summary_strip, summary_card_vars = build_control_statement_summary_card_strip(win)
+        summary_strip.pack(fill="x")
 
         body = ttk.Panedwindow(win, orient="vertical")
         body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -324,6 +342,18 @@ class A07PageControlStatementWindowMixin:
         body.add(lower, weight=2)
 
         overview_tree = self._build_tree_tab(upper, _RF1022_OVERVIEW_COLUMNS)
+        configure_tags = getattr(self, "_configure_tree_tags", None)
+        if callable(configure_tags):
+            tag_tokens = {
+                "family_warning": ("NEG_SOFT", "NEG_TEXT"),
+                "suggestion_review": ("WARN_SOFT", "WARN_TEXT"),
+                "suggestion_ok": ("POS_SOFT", "POS_TEXT"),
+                "summary_total": ("FOREST", "TEXT_ON_FOREST"),
+            }
+            configure_tags(overview_tree, tag_tokens)
+        configure_total_tag = getattr(self, "_configure_summary_total_tag", None)
+        if callable(configure_total_tag):
+            configure_total_tag(overview_tree)
         accounts_top = ttk.Frame(lower, padding=(0, 0, 0, 6))
         accounts_top.pack(fill="x")
         accounts_var = tk.StringVar(value="Velg RF-1022-post for aa se kontoene bak raden.")
@@ -353,6 +383,7 @@ class A07PageControlStatementWindowMixin:
             "overview_tree": overview_tree,
             "accounts_tree": accounts_tree,
             "summary_var": summary_var,
+            "summary_card_vars": summary_card_vars,
             "accounts_var": accounts_var,
             "view_var": view_var,
             "view_label_var": view_label_var,

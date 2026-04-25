@@ -1,69 +1,90 @@
 # A07 Lonn Module Map
 
-Denne filen er beslutningsgrunnlaget for senere flytting. Fase 1 flytter ingen
-runtime-filer, men laster plasseringen for neste faser.
+Denne filen beskriver dagens faktiske modulgrenser etter refaktorrundene. Den
+er ikke lenger et rent fase-1-notat; den skal brukes som oppslagsverk for hvor
+kanonisk logikk bor, og hvilke wrappers som kun er compat.
 
 ## Regler
 
-- `page_a07.py` forblir offentlig fasade
-- `page_saldobalanse.py` forblir forbruker av lonnssporlogikken
-- nye malmapper innfores, men uten runtime-importer i fase 1
+- `src/pages/a07/page_a07.py` er kanonisk page shell.
+- `page_a07.py` i repo-roten er kun offentlig compat-shim.
+- `a07_feature/` er fortsatt intern A07-motor/runtime.
+- Flere gamle `page_a07_*`- og `control_*`-moduler lever videre som tynne
+  compat-fasader.
 
-## Fasade / compat
+## Offentlig Shell Og Compat
 
-| Naa | Framtidig ansvar | Malmappe | Kommentar |
-| --- | --- | --- | --- |
-| `page_a07.py` | Offentlig fasade og monkeypatch-grense | beholdes | Offentlig entrypoint beholdes, men peker na direkte til kanoniske flyttede moduler |
-| `a07_feature/page_a07_shared.py` | Compat/re-export-lag for eldre helperflate | beholdes som compat | Skal ikke brukes av aktive A07-moduler; henter na kontrollfunksjoner fra kanoniske control-moduler |
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `src/pages/a07/page_a07.py` | Kanonisk A07-shell og shared-ref-sync | Offentlig runtime-entrypoint i appen |
+| `page_a07.py` | Root compat-shim | Re-eksporterer `A07Page` og helperflate |
+| `a07_feature/page_a07_shared.py` | Compat/re-export-lag | Skal ikke brukes av aktive A07-moduler |
 
-## Lonn / RF-1022
+## Payroll / RF-1022
 
-| Naa | Framtidig ansvar | Malmappe | Kommentar |
-| --- | --- | --- | --- |
-| `payroll_classification.py` | Lonnsklassifisering, relevans, RF-1022-forslag, flagg | `a07_feature/payroll/classification.py` | Flyttet i fase 2. Rotsti beholdt som compat-shim |
-| `payroll_feedback.py` | Tilbakemelding og hjelpefunksjoner for lonnsspor | `a07_feature/payroll/feedback.py` | Flyttet i fase 2. Rotsti beholdt som compat-shim |
-| `saldobalanse_payroll_mode.py` | Bridge mellom saldobalanse og lonnsspor | `a07_feature/payroll/saldobalanse_bridge.py` | Flyttet i fase 2. Rotsti beholdt som compat-shim |
-| `a07_feature/page_a07_rf1022.py` | RF-1022-visning og RF-1022-vindu | `a07_feature/payroll/rf1022.py` | Flyttet i fase 2. Gammel A07-sti beholdt som compat-shim |
-| payroll-relevante deler av `a07_feature/page_a07_runtime_helpers.py` | Runtime-hjelpere for lonnsprofil-/kontrollstate | `a07_feature/payroll/profile_state.py` | Flyttet i fase 2. Resten av A07-runtime blir liggende i gammel modul forelopig |
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `a07_feature/payroll/classification.py` | Kanonisk payroll-fasade | Wrapper over `classification_shared`, `classification_guardrails`, `classification_catalog`, `classification_a07_engine`, `classification_engine`, `classification_audit` |
+| `payroll_classification.py` | Root compat-shim | Peker til payroll-pakken |
+| `a07_feature/payroll/feedback.py` | Payroll feedback-hjelpere | Gammel rotsti beholdt som compat |
+| `a07_feature/payroll/saldobalanse_bridge.py` | Handoff mellom A07 og saldobalanse | `saldobalanse_payroll_mode.py` beholdes som compat |
+| `a07_feature/payroll/rf1022.py` | RF-1022-runtime | `a07_feature/page_a07_rf1022.py` beholdes som compat |
+| `a07_feature/payroll/profile_state.py` | Payroll profilstate | Hentet ut av runtime-hjelpere |
 
-## Kontrollko / presentasjon
+## Suggest / Solver
 
-| Naa | Framtidig ansvar | Malmappe | Kommentar |
-| --- | --- | --- | --- |
-| `a07_feature/page_control_data.py` | Kontrollko, kontrolldata, RF-1022-dataformatering | `a07_feature/control/data.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/control_matching.py` | Presentasjon av forslag, historikk og smart fallback | `a07_feature/control/matching.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/control_presenter.py` | Tekstbygging for kontrollpanel | `a07_feature/control/presenter.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/control_status.py` | Statusetiketter, next action, bucket summary | `a07_feature/control/status.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/control_statement_model.py` | Modeller og view-definisjoner for kontrolloppstilling | `a07_feature/control/statement_model.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/control_statement_source.py` | Datakilde for kontrolloppstilling | `a07_feature/control/statement_source.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_control_statement.py` | UI-bindinger og handlinger for kontrolloppstilling | `a07_feature/control/statement_ui.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `a07_feature/suggest/__init__.py` | Kanonisk suggest-fasade | Re-eksporterer forslag, rulebook og residual-solver-symboler |
+| `a07_feature/suggest/engine.py` | Kandidatbygging og scoremotor | Brukes for vanlige A07-forslag |
+| `a07_feature/suggest/solver.py`, `solver_prepare.py`, `solver_code.py` | Eksisterende kode-/gruppe-solvere | Brukes for smarte A07-grupper og belopskandidater |
+| `a07_feature/suggest/residual_solver.py` | Residual-solver v1 for `Tryllestav: finn 0-diff` | Ren motorlogikk uten GUI; jobber deterministisk i oere/int |
+| `a07_feature/suggest/residual_models.py` | Datamodeller og belopshjelpere for residual-solver | Inneholder statuskonstanter, dataclasses og cents/display-konvertering |
+| `a07_feature/suggest/residual_display.py` | Adapter fra residual-analyse til kompakte forslag-/review-rader | Holder GUI-tekst kort og lar eksisterende forslagstabell brukes |
+| `a07_feature/suggest/explain.py`, `rule_lookup.py`, `special_add.py` | Forklaring, regeloppslag og spesialtillegg | Brukes av forslag/control-flyter |
 
-## A07 UI
+## Kontrollmotor
 
-| Naa | Framtidig ansvar | Malmappe | Kommentar |
-| --- | --- | --- | --- |
-| `a07_feature/page_a07_ui.py` | UI-entry og UI-byggerkobling | `a07_feature/ui/page.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_ui_canonical.py` | Kanonisk A07-layout | `a07_feature/ui/canonical_layout.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_support_render.py` | Rendering av stottefaner og sammendrag | `a07_feature/ui/support_render.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_selection.py` | UI-seleksjon og fanerouting | `a07_feature/ui/selection.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_render.py` | Tree- og panel-rendering | `a07_feature/ui/render.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_ui_helpers.py` | UI-hjelpere og defaultvalg | `a07_feature/ui/helpers.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_tree_render.py` | Tree-spesifikk rendering | `a07_feature/ui/tree_render.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
-| `a07_feature/page_a07_tree_ui.py` | Legacy tree-compat / tree-UI | `a07_feature/ui/tree_ui.py` | Flyttet i fase 2. Gammel sti beholdt som compat-shim |
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `a07_feature/control/data.py` | Kanonisk kontrollfasade | Re-eksporterer kontrollmotoren utad |
+| `a07_feature/control/overview_data.py`, `history_data.py`, `control_queue_data.py`, `control_gl_data.py`, `control_filters.py`, `queue_shared.py`, `control_suggestion_selection.py` | Kontrollko, oversikt, historikk og GL-grunnlag | Tidligere `queue_data`-monolitt |
+| `a07_feature/control/matching.py` | Compat-fasade for matching | Split i `matching_shared`, `matching_guardrails`, `matching_history`, `matching_display` |
+| `a07_feature/control/mapping_audit.py` | Compat-fasade for mapping-audit | Split i `mapping_audit_rules`, `mapping_audit_status`, `mapping_review`, `mapping_audit_projection` |
+| `a07_feature/control/statement_data.py` | Kontrolloppstilling-data | Kanonisk dataflate for statement/RF-1022 |
+| `a07_feature/control/statement_ui.py` | Compat-fasade for statement-UI | Split i `statement_view_state`, `statement_window_ui`, `statement_panel_ui` |
+| `a07_feature/page_control_data.py`, `a07_feature/control_matching.py`, `a07_feature/control_presenter.py`, `a07_feature/control_status.py`, `a07_feature/page_a07_control_statement.py` | Compat-stier | Beholdt for eldre importer |
 
-## Saldobalanse-bridge
+## Page-Runtime Og Actions
 
-| Naa | Framtidig ansvar | Malmappe | Kommentar |
-| --- | --- | --- | --- |
-| `page_saldobalanse.py` | Forbruker av payroll bridge | beholdes | Flyttes ikke i fase 1 |
-| `saldobalanse_payroll_mode.py` | Payroll bridge og mode-switching | `a07_feature/payroll/` | Selve bridge-laget flyttes senere, men kallestedet beholdes |
-| `a07_feature/page_a07_runtime_helpers.py` | Laster profile/state som begge spor bruker | delt | Ma sannsynligvis splittes mellom payroll og generell A07-runtime |
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `a07_feature/page_a07_mapping_actions.py` | Compat-fasade for mappinghandlinger | Split i `page_a07_mapping_assign`, `page_a07_mapping_batch`, `page_a07_mapping_candidates`, `page_a07_mapping_control_actions`, `page_a07_mapping_learning_*`, `page_a07_mapping_candidate_apply`, `page_a07_mapping_shared` |
+| `a07_feature/page_a07_mapping_residual.py` | Page-flyt for residual-tryllestav | Kaller ren solver, viser kort review-feedback og auto-appliserer bare `safe_exact` |
+| `a07_feature/page_a07_context.py` | Tynn kontekstfasade | Context-/navigasjonsansvar er trukket ut til egne moduler |
+| `a07_feature/page_a07_context_menu.py` | Compat-fasade for hoyreklikk | Split i `page_a07_context_menu_base`, `page_a07_context_menu_control`, `page_a07_context_menu_codes` |
+| `a07_feature/page_a07_dialogs.py` | Compat-fasade for picker/dialog-hjelpere | Split i `page_a07_dialogs_shared`, `page_a07_dialogs_editors`, `page_a07_manual_mapping_dialog` |
+| `a07_feature/page_a07_project_actions.py` | Compat-fasade for prosjekt-/verktoyhandlinger | Split i `page_a07_project_io`, `page_a07_group_actions`, `page_a07_project_tools` |
+| `a07_feature/page_windows.py` | Compat-fasade for hjelpevinduer | Split i `page_windows_source`, `page_windows_mapping`, `page_windows_matcher_admin` |
+| `a07_feature/page_paths.py` | Compat-fasade for path/runtime-context | Split i `path_context`, `path_rulebook`, `path_snapshots`, `path_trial_balance`, `path_history`, `path_shared` |
+| `a07_feature/page_a07_refresh*.py` | Refresh-klynge | Fortsatt et av de tydeligste gjenvaarende hotspot-omraadene |
 
-## Bevisste unntak i fase 1
+## UI-Lag
 
-Disse flyttes ikke na:
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `a07_feature/ui/page.py` | Kanonisk UI-entry | `a07_feature/page_a07_ui.py` beholdes som compat |
+| `a07_feature/ui/canonical_layout.py` | Tynn layout-shell | Split i `control_layout`, `support_layout`, `groups_popup` |
+| `a07_feature/ui/helpers.py` | Compat-fasade for UI-hjelpere | Split i `tree_builders`, `tree_sorting`, `tree_selection_helpers`, `manual_mapping_defaults`, `focus_helpers`, `drag_drop_helpers` |
+| `a07_feature/ui/support_render.py` | Compat-fasade for support-render | Split i `support_filters`, `support_guidance`, `support_panel`, `support_suggestions`, `support_trees`, `support_render_shared` |
+| `a07_feature/ui/selection.py` | Compat-fasade for selection | Split i `selection_context`, `selection_controls`, `selection_details`, `selection_events`, `selection_scope`, `selection_tree`, `selection_shared` |
+| `a07_feature/ui/render.py`, `a07_feature/ui/tree_render.py` | Kanonisk rendering | Fortsatt aktive hovedmoduler i UI-laget |
+| `a07_feature/page_a07_ui_canonical.py`, `page_a07_support_render.py`, `page_a07_selection.py`, `page_a07_render.py`, `page_a07_ui_helpers.py`, `page_a07_tree_render.py`, `page_a07_tree_ui.py` | Compat-stier | Beholdt for eldre importer og tester |
 
-- `page_a07.py`
-- `page_saldobalanse.py`
-- eksisterende testimporter
-- eksisterende `a07_feature/__init__.py`
+## Saldobalanse-Bridge
+
+| Naa | Ansvar | Kommentar |
+| --- | --- | --- |
+| `page_saldobalanse.py` | Forbruker av payroll bridge | Flyttes ikke i denne runden |
+| `saldobalanse_payroll_mode.py` | Compat for payroll bridge | Peker til `a07_feature/payroll/saldobalanse_bridge.py` |
+| `a07_feature/page_a07_runtime_helpers.py` | Felles runtime-hjelpere | Noe profilstate er flyttet ut, men modulen lever videre |

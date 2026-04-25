@@ -145,7 +145,7 @@ class A07PageRefreshStateMixin:
         *,
         client: str | None = None,
         year: str | int | None = None,
-        prefer_profiles: bool = True,
+        prefer_profiles: bool = False,
     ) -> dict[str, str]:
         if path is None:
             return {}
@@ -263,7 +263,7 @@ class A07PageRefreshStateMixin:
             project_path=self.project_path,
         )
 
-    def _restore_context_state(self, client: str | None, year: str | None) -> None:
+    def reset_context_runtime_state(self, client: str | None, year: str | None) -> None:
         def _fill_optional_tree(
             attr_name: str,
             df: pd.DataFrame,
@@ -365,6 +365,10 @@ class A07PageRefreshStateMixin:
             pass
         self.a07_filter_var.set("alle")
         self.a07_filter_label_var.set(_CONTROL_VIEW_LABELS["alle"])
+        try:
+            self.a07_match_filter_var.set("alle")
+        except Exception:
+            pass
         self.basis_var.set(_BASIS_LABELS["Endring"])
         self.workspace.basis_col = "Endring"
         self.control_work_level_var.set("a07")
@@ -404,7 +408,6 @@ class A07PageRefreshStateMixin:
         if callable(sync_groups_panel_visibility):
             sync_groups_panel_visibility()
         _fill_optional_tree("tree_control_suggestions", _empty_suggestions_df(), _CONTROL_SUGGESTION_COLUMNS)
-        _fill_optional_tree("tree_suggestions", _empty_suggestions_df(), _SUGGESTION_COLUMNS)
         _fill_optional_tree(
             "tree_control_accounts",
             pd.DataFrame(columns=[c[0] for c in _CONTROL_SELECTED_ACCOUNT_COLUMNS]),
@@ -417,29 +420,20 @@ class A07PageRefreshStateMixin:
             _CONTROL_SELECTED_ACCOUNT_COLUMNS,
             iid_column="Konto",
         )
-        _fill_optional_tree("tree_mapping", _empty_mapping_df(), _MAPPING_COLUMNS, iid_column="Konto")
         _fill_optional_tree("tree_history", _empty_history_df(), _HISTORY_COLUMNS, iid_column="Kode")
         _fill_optional_tree("tree_unmapped", _empty_unmapped_df(), _UNMAPPED_COLUMNS, iid_column="Konto")
-        _fill_optional_tree(
-            "tree_control_statement",
-            _empty_control_statement_df(),
-            _CONTROL_STATEMENT_COLUMNS,
-            iid_column="Gruppe",
-        )
         self._update_selected_suggestion_details()
         self._update_control_panel()
         self._update_control_transfer_buttons()
         self._update_summary()
-        refresh_rf1022_window = getattr(self, "_refresh_rf1022_window", None)
-        if callable(refresh_rf1022_window):
-            refresh_rf1022_window()
         refresh_control_statement_window = getattr(self, "_refresh_control_statement_window", None)
         if callable(refresh_control_statement_window):
             refresh_control_statement_window()
 
+    def _restore_context_state(self, client: str | None, year: str | None) -> None:
+        self.reset_context_runtime_state(client, year)
         self._context_snapshot = self._current_context_snapshot(client, year)
         self._start_context_restore(client, year)
-
     def _sync_active_tb_clicked(self) -> None:
         ok = self._sync_active_trial_balance(refresh=True)
         if ok and self.tb_path is not None:

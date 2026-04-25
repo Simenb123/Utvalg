@@ -20,6 +20,7 @@ konkrete konto-/kodefeil for de blir gjort til regelendringer.
 | Oppdater | Aktiv saldobalanse brukes |  |  |
 | RF-1022-visning | Postene 100/111/112 viser GL, A07 og diff |  |  |
 | A07-visning | A07-koder er hovedlisten og ferdige koder er gronne ved diff 0 |  |  |
+| Fire arbeidsflater | GL, A07-koder, Forslag og Koblinger vises samtidig uten nederste fanestoy |  |  |
 | AGA-plikt | AGA-kolonne/visning viser `Ja`, `Nei` eller ukjent fra kilde/regler |  |  |
 | Global auto | `Kjor automatisk matching` kobler bare trygge kandidater |  |  |
 | Auto ved oppdatering | Klare 100-prosent-treff kobles uten at hver A07-kode maa klikkes |  |  |
@@ -31,6 +32,7 @@ konkrete konto-/kodefeil for de blir gjort til regelendringer.
 | 5800 | `Refusjon av sykepenger` kan bli trygg ved NAV/sykepenger-stotte |  |  |
 | Generisk `annet` | Bodleie/kantine/driftskostnader blir ikke trygge uten tydelig evidens |  |  |
 | A07-grupper | Vanlige lonnsgrupper summeres uten duplikater eller heng i GUI |  |  |
+| Gruppe-popup | A07-grupper aapnes i popup og tar ikke fast plass i hovedflaten |  |  |
 | Mistenkelig kobling | Eksisterende darlige koblinger flagges tydelig |  |  |
 | Hoyreklikk GL | Tildel/fjern/avansert mapping virker |  |  |
 | Hoyreklikk GL laering | `Laer av konto` skriver til A07-regelbok og refreshes raskt |  |  |

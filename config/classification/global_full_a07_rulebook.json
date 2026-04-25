@@ -58,7 +58,8 @@
         "påløpt feriepenger",
         "avsatt feriepenger",
         "skyldige feriepenger",
-        "Feriepenger over 60 år"
+        "Feriepenger over 60 år",
+        "Motkonto for gruppe 52"
       ],
       "exclude_keywords": [
         "aga",
@@ -83,14 +84,12 @@
         "revisjon",
         "revisjonshonorar",
         "uferiepenger",
-        "uten feriepenger"
+        "uten feriepenger",
+        "Andre obligasjoner"
       ],
       "allowed_ranges": [
-        "5002",
-        "5020",
-        "5092",
-        "5096",
-        "2940"
+        "5000-5999",
+        "2000-2999"
       ],
       "boost_accounts": [
         5002,
@@ -363,47 +362,6 @@
       ],
       "basis": "UB"
     },
-    "yrkebilTjenstligbehovListepris": {
-      "label": "Yrkebil tjenstlig behov listepris",
-      "rf1022_group": "111_naturalytelser",
-      "aga_pliktig": true,
-      "keywords": [
-        "yrkebil",
-        "listepris",
-        "fri bil",
-        "firmabil",
-        "yrkesbil",
-        "yrkebil listepris",
-        "yrkebil tjenstlig behov"
-      ],
-      "exclude_keywords": [
-        "aga",
-        "arbeidsgiveravgift",
-        "forskuddstrekk",
-        "Forsikring - Ansvar og rettshjelp",
-        "Annen leiekostnad",
-        "Lys, varme",
-        "Leie datasystemer",
-        "Honorar for juridisk bistand, fradragsberettiget",
-        "revisjon",
-        "revisjonshonorar",
-        "advokat",
-        "drivstoff",
-        "bom",
-        "parkering",
-        "leasing",
-        "verksted",
-        "telefon",
-        "forsikring"
-      ],
-      "allowed_ranges": [
-        "5200-5209"
-      ],
-      "boost_accounts": [
-        5200
-      ],
-      "basis": "UB"
-    },
     "annet": {
       "label": "annet",
       "rf1022_group": "100_loenn_ol",
@@ -426,7 +384,15 @@
         "leie maskiner",
         "advokathonorar",
         "rettshjelp",
-        "Kantine m.v. ansatte"
+        "Kantine m.v. ansatte",
+        "Kantinekostnad",
+        "Bodleie",
+        "Honorar revisjon",
+        "Salgskostnad",
+        "Andre forskuddsbetalte kostnader"
+      ],
+      "allowed_ranges": [
+        "5000-5999"
       ],
       "basis": "UB"
     },
@@ -462,7 +428,8 @@
         "Honorar for juridisk bistand, fradragsberettiget",
         "OTP",
         "Obligatorisk Tjeneste Pensjon",
-        "Obligatorisk Tjenestepensjon"
+        "Obligatorisk Tjenestepensjon",
+        "Forsikring ansvar rettshjelp"
       ],
       "allowed_ranges": [
         "5000-5200"
@@ -501,7 +468,7 @@
     },
     "kilometergodtgjoerelsePassasjertillegg": {
       "label": "kilometergodtgjoerelsePassasjertillegg",
-      "rf1022_group": "uavklart_rf1022",
+      "rf1022_group": "111_naturalytelser",
       "aga_pliktig": false,
       "exclude_keywords": [
         "OTP"
@@ -513,7 +480,7 @@
     },
     "kilometergodtgjoerelseBil": {
       "label": "kilometergodtgjoerelseBil",
-      "rf1022_group": "uavklart_rf1022",
+      "rf1022_group": "111_naturalytelser",
       "aga_pliktig": false,
       "exclude_keywords": [
         "Leie kontormaskiner/utstyr",
@@ -524,17 +491,55 @@
       ],
       "basis": "UB"
     },
-    "yrkebilTjenestligbehovListepris": {
-      "label": "yrkebilTjenestligbehovListepris",
-      "exclude_keywords": [
-        "Annen fremmed tjeneste"
-      ]
-    },
     "A07_GROUP:bil+yrkebilTjenestligbehovListepris": {
       "label": "A07_GROUP:bil+yrkebilTjenestligbehovListepris",
+      "rf1022_group": "uavklart_rf1022",
       "exclude_keywords": [
         "Revisjonshonorar"
-      ]
+      ],
+      "basis": "UB"
+    },
+    "yrkebilTjenesteligbehovListepris": {
+      "label": "Yrkebil tjenstlig behov listepris",
+      "rf1022_group": "111_naturalytelser",
+      "aga_pliktig": true,
+      "keywords": [
+        "yrkebil",
+        "listepris",
+        "fri bil",
+        "firmabil",
+        "yrkesbil",
+        "yrkebil listepris",
+        "yrkebil tjenstlig behov"
+      ],
+      "exclude_keywords": [
+        "aga",
+        "arbeidsgiveravgift",
+        "forskuddstrekk",
+        "Forsikring - Ansvar og rettshjelp",
+        "Annen leiekostnad",
+        "Lys, varme",
+        "Leie datasystemer",
+        "Honorar for juridisk bistand, fradragsberettiget",
+        "revisjon",
+        "revisjonshonorar",
+        "advokat",
+        "drivstoff",
+        "bom",
+        "parkering",
+        "leasing",
+        "verksted",
+        "telefon",
+        "forsikring",
+        "Annen fremmed tjeneste"
+      ],
+      "allowed_ranges": [
+        "5200-5209"
+      ],
+      "boost_accounts": [
+        5200
+      ],
+      "basis": "UB"
     }
   }
 }

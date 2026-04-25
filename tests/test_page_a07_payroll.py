@@ -309,6 +309,7 @@ def test_a07_page_init_sets_control_statement_view_vars_without_nameerror(monkey
     monkeypatch.setattr(page_a07.ttk.Frame, "__init__", lambda self, parent: None)
     monkeypatch.setattr(page_a07.tk, "StringVar", _Var)
     monkeypatch.setattr(page_a07.tk, "BooleanVar", _Var)
+    monkeypatch.setattr(page_a07.tk, "IntVar", _Var)
     monkeypatch.setattr(page_a07.A07Page, "_build_ui", lambda self: None)
     monkeypatch.setattr(page_a07.A07Page, "_schedule_session_refresh", lambda self: None)
     monkeypatch.setattr(page_a07.A07Page, "_diag", lambda self, *_args, **_kwargs: None)

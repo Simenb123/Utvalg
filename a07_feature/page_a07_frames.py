@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from .control.rf1022_contract import RF1022_OVERVIEW_COLUMNS as _RF1022_OVERVIEW_DATA_COLUMNS
 from .page_a07_constants import (
     _CONTROL_COLUMNS,
     _CONTROL_EXTRA_COLUMNS,
@@ -73,7 +74,7 @@ def _empty_control_statement_df() -> pd.DataFrame:
 
 
 def _empty_rf1022_overview_df() -> pd.DataFrame:
-    return pd.DataFrame(columns=[c[0] for c in _RF1022_OVERVIEW_COLUMNS])
+    return pd.DataFrame(columns=list(_RF1022_OVERVIEW_DATA_COLUMNS))
 
 
 def _empty_rf1022_accounts_df() -> pd.DataFrame:

@@ -11,6 +11,10 @@ from .control.data import (
     CONTROL_STATEMENT_VIEW_UNCLASSIFIED,
     control_statement_view_requires_unclassified,
 )
+from .control.rf1022_contract import (
+    RF1022_ACCOUNT_COLUMNS as _RF1022_ACCOUNT_DATA_COLUMNS,
+    RF1022_OVERVIEW_COLUMNS as _RF1022_OVERVIEW_DATA_COLUMNS,
+)
 from .control.rf1022_bridge import RF1022_A07_BRIDGE as _RF1022_A07_BRIDGE
 
 
@@ -35,6 +39,7 @@ _CONTROL_COLUMNS = (
 
 _CONTROL_A07_TOTAL_IID = "__a07_total__"
 _SUMMARY_TOTAL_TAG = "summary_total"
+_A07_MATCHED_TAG = "a07_matched"
 
 _CONTROL_RF1022_COLUMNS = (
     ("Post", "Post", 70, "w"),
@@ -71,6 +76,9 @@ _CONTROL_GL_DATA_COLUMNS = (
     "WorkFamily",
     "MappingAuditStatus",
     "MappingAuditReason",
+    "MappingAuditRawStatus",
+    "MappingAuditRawReason",
+    "A07CodeDiff",
 )
 
 _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
@@ -150,6 +158,12 @@ _CONTROL_GL_SERIES_LABELS = {
     "9": "9xxx",
 }
 
+_A07_MATCH_FILTER_LABELS = {
+    "alle": "Alle",
+    "avstemt": "Avstemt",
+    "ikke_avstemt": "Ikke avstemt",
+}
+
 _MAPPING_FILTER_LABELS = {
     "alle": "Alle",
     "kritiske": "Kritiske",
@@ -198,7 +212,10 @@ _CONTROL_EXTRA_COLUMNS = (
 
 _GROUP_COLUMNS = (
     ("Navn", "Gruppe", 260, "w"),
-    ("Members", "A07-koder", 420, "w"),
+    ("Members", "A07-koder", 360, "w"),
+    ("A07_Belop", "A07", 110, "e"),
+    ("GL_Belop", "GL", 110, "e"),
+    ("Diff", "Diff", 110, "e"),
     ("Locked", "Låst", 60, "center"),
 )
 
@@ -266,11 +283,15 @@ _CONTROL_STATEMENT_COLUMNS = (
 
 _RF1022_OVERVIEW_COLUMNS = (
     ("Post", "Post", 70, "w"),
-    ("Omraade", "Omrade", 190, "w"),
+    ("Omraade", "Område", 190, "w"),
     ("Kontrollgruppe", "Kontrollgruppe", 220, "w"),
-    ("GL_Belop", "GL", 120, "e"),
-    ("A07", "A07", 120, "e"),
-    ("Diff", "Diff", 120, "e"),
+    ("GL_Belop", "GL", 110, "e"),
+    ("SamledeYtelser", "GL opplys.", 120, "e"),
+    ("A07", "A07 opplys.", 120, "e"),
+    ("Diff", "Diff opplys.", 120, "e"),
+    ("AgaGrunnlag", "GL AGA", 110, "e"),
+    ("A07Aga", "A07 AGA", 110, "e"),
+    ("AgaDiff", "Diff AGA", 110, "e"),
     ("Status", "Status", 100, "w"),
     ("AntallKontoer", "Antall", 80, "e"),
 )
@@ -284,25 +305,30 @@ _RF1022_ACCOUNT_COLUMNS = (
     ("Post", "Post", 150, "w"),
     ("Konto", "Kontonr", 90, "w"),
     ("Navn", "Kontobetegnelse", 240, "w"),
-    ("KostnadsfortYtelse", "Kostnadsfort", 120, "e"),
-    ("TilleggTidligereAar", "Tillegg tidl. ar", 120, "e"),
-    ("FradragPaalopt", "Fradrag palopt", 120, "e"),
+    ("KostnadsfortYtelse", "Kostnadsført", 120, "e"),
+    ("TilleggTidligereAar", "Tillegg tidl. år", 120, "e"),
+    ("FradragPaalopt", "Fradrag påløpt", 120, "e"),
     ("SamledeYtelser", "Samlede ytelser", 120, "e"),
     ("AgaPliktig", "AGA-pliktig", 95, "center"),
     ("AgaGrunnlag", "AGA-grunnlag", 120, "e"),
     ("Feriepengegrunnlag", "Feriep.grl.", 95, "center"),
 )
 
+assert tuple(column_id for column_id, *_rest in _RF1022_OVERVIEW_COLUMNS) == tuple(
+    column_id for column_id in _RF1022_OVERVIEW_DATA_COLUMNS if column_id != "GroupId"
+)
+assert tuple(column_id for column_id, *_rest in _RF1022_ACCOUNT_COLUMNS) == _RF1022_ACCOUNT_DATA_COLUMNS
+
 _RF1022_POST_RULES = (
-    (100, "LÃ¸nn o.l.", {"100_loenn_ol"}),
+    (100, "Lønn o.l.", {"100_loenn_ol"}),
     (100, "Refusjon", {"100_refusjon"}),
     (111, "Naturalytelser", {"111_naturalytelser"}),
     (112, "Pensjon", {"112_pensjon"}),
     (999, "Uavklart RF-1022", {"uavklart_rf1022"}),
     (
         100,
-        "Lonn og trekk",
-        {"Lonnskostnad", "Skyldig lonn", "Feriepenger", "Skyldig feriepenger", "Skattetrekk"},
+        "Lønn og trekk",
+        {"Lønnskostnad", "Skyldig lønn", "Feriepenger", "Skyldig feriepenger", "Skattetrekk"},
     ),
     (
         110,
@@ -402,6 +428,8 @@ __all__ = [
     "_A07_DIAGNOSTICS_ENABLED",
     "_A07_DIAGNOSTICS_LOG",
     "_A07_FILTER_LABELS",
+    "_A07_MATCH_FILTER_LABELS",
+    "_A07_MATCHED_TAG",
     "_BASIS_LABELS",
     "_CONTROL_ALTERNATIVE_MODE_LABELS",
     "_CONTROL_A07_TOTAL_IID",

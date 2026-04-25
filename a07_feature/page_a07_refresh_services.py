@@ -295,6 +295,7 @@ def build_core_refresh_payload(
             basis_col=basis_col,
         ).reset_index(drop=True)
     code_profile_state = load_code_profile_state(client, year, effective_mapping, gl_df=gl_df)
+    a07_overview_df = build_a07_overview_df(grouped_a07_df, reconcile_df)
 
     mapping_audit_df = build_mapping_audit_df(
         gl_df,
@@ -321,9 +322,9 @@ def build_core_refresh_payload(
             rulebook=effective_rulebook,
         ),
         mapping_audit_df,
+        a07_overview_df=a07_overview_df,
     ).reset_index(drop=True)
     mapping_review_df = build_mapping_review_df(mapping_audit_df, control_gl_df).reset_index(drop=True)
-    a07_overview_df = build_a07_overview_df(grouped_a07_df, reconcile_df)
     control_df = build_control_queue_df(
         a07_overview_df,
         suggestions,
@@ -333,8 +334,9 @@ def build_core_refresh_payload(
         code_profile_state=code_profile_state,
         locked_codes=locks,
         mapping_audit_df=mapping_audit_df,
+        rulebook=effective_rulebook,
     ).reset_index(drop=True)
-    groups_df = build_groups_df(groups, locked_codes=locks).reset_index(drop=True)
+    groups_df = build_groups_df(groups, locked_codes=locks, control_df=control_df).reset_index(drop=True)
     control_statement_base_df = build_control_statement_export_df(
         client=client,
         year=year,

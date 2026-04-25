@@ -2,9 +2,10 @@
 
 Denne mappen samler dokumentasjon for A07-lonnsporet i Utvalg.
 
-Hvis du er ny i repoet, start med `STATUS_AND_GOAL.md`. Det dokumentet fungerer
-som overtakelsesnotat: hvorfor A07-sporet finnes, hva som nettopp er gjort,
-dagens tekniske status, og hvilken plan som bor folges videre.
+Hvis du er ny i repoet, start med `CURRENT_STATUS.md`. Det er den korte,
+operative statusen: hva som er gjort, hva som fortsatt ikke er godt nok, og
+hva vi jobber etter videre. Bruk `STATUS_AND_GOAL.md` som lengre
+overtakelsesnotat og historikk.
 
 ## Hva dette sporet dekker
 
@@ -19,104 +20,49 @@ A07-lonnsporet dekker fire tett koblede omrader:
 
 Disse er fortsatt gjeldende runtime-entrypoints:
 
+- `src/pages/a07/page_a07.py`
 - `page_a07.py`
 - `payroll_classification.py`
 - `saldobalanse_payroll_mode.py`
-- eksisterende `a07_feature/page_a07_*`-filer
-- eksisterende `a07_feature/control_*`- og `a07_feature/page_control_data.py`
-
-Fra og med fase 2 er disse tre payroll-modulene flyttet til `a07_feature/payroll/`,
-men de gamle rotstiene beholdes som compat-shims:
-
-- `a07_feature/payroll/classification.py`
-- `a07_feature/payroll/feedback.py`
-- `a07_feature/payroll/saldobalanse_bridge.py`
-
-Fra og med fase 2, runde 2 er disse A07-lonnsmodulene ogsa flyttet inn i payroll-pakken:
-
-- `a07_feature/payroll/rf1022.py`
-- `a07_feature/payroll/profile_state.py`
-
-Gamle A07-stier beholdes fortsatt for kompatibilitet:
-
-- `a07_feature/page_a07_rf1022.py`
-- `a07_feature/page_a07_runtime_helpers.py`
-
-Fra og med fase 2, runde 3 er disse kontrollmodulene flyttet inn i `a07_feature/control/`:
-
-- `a07_feature/control/data.py`
-- `a07_feature/control/matching.py`
-- `a07_feature/control/status.py`
-- `a07_feature/control/presenter.py`
-- `a07_feature/control/statement_model.py`
-- `a07_feature/control/statement_source.py`
-
-De gamle modulstiene under `a07_feature/` beholdes som compat-shims.
-
-Fra og med fase 2, runde 4 er kontrolloppstillings-UI-et ogsa flyttet inn i
-kontrollpakken:
-
-- `a07_feature/control/statement_ui.py`
-
-Den gamle A07-stien beholdes fortsatt som compat-shim:
-
-- `a07_feature/page_a07_control_statement.py`
-
-Fra og med fase 2, runde 5 er den kanoniske A07-UI-slicen flyttet inn i
-`a07_feature/ui/`:
-
-- `a07_feature/ui/page.py`
-- `a07_feature/ui/canonical_layout.py`
-- `a07_feature/ui/helpers.py`
-- `a07_feature/ui/tree_render.py`
-- `a07_feature/ui/support_render.py`
-- `a07_feature/ui/render.py`
-
-De gamle `page_a07_*`-stiene for disse modulene beholdes som compat-shims.
-
-Fra og med fase 2, runde 6 er ogsa seleksjonslaget og legacy tree-UI flyttet
-inn i `a07_feature/ui/`:
-
-- `a07_feature/ui/selection.py`
-- `a07_feature/ui/tree_ui.py`
-
-De gamle `page_a07_selection.py`- og `page_a07_tree_ui.py`-stiene beholdes som
-compat-shims.
-
-Fra og med fase 2, runde 7 peker `page_a07.py`-fasaden direkte mot de
-kanoniske flyttede `payroll`-, `control`- og `ui`-modulene, og
-`a07_feature/page_a07_shared.py` er strammet inn som tydelig compat/re-export
-lag med kanoniske kontrollimporter.
-
-## Nye malmapper i fase 1
-
-Fase 1 oppretter disse malmappene for senere migrering:
-
 - `a07_feature/payroll/`
 - `a07_feature/control/`
 - `a07_feature/ui/`
 
-`a07_feature/payroll/` er ikke lenger bare en malmappe. Den inneholder na den
-kanoniske plasseringen for den flyttede payroll-kjernen.
+Navaerende tommelfingerregel:
+
+- `src/pages/a07/page_a07.py` er kanonisk page shell.
+- `page_a07.py` i repo-roten er offentlig compat-shim.
+- `a07_feature/` er intern motor/runtime.
+- eldre `page_a07_*`, `control_*` og `page_control_data.py` lever videre der de
+  trengs som compat-stier.
+
+De viktigste kanoniske modulomraadene naa er:
+
+- `a07_feature/payroll/` for payroll- og RF-1022-kjernen
+- `a07_feature/control/` for kontrollmotor, audit og statement-logikk
+- `a07_feature/ui/` for kanonisk UI-lag
+- tynne wrappers som `page_a07_dialogs.py`, `page_a07_context_menu.py`,
+  `page_a07_project_actions.py`, `page_windows.py` og `page_paths.py` for
+  bakoverkompatibilitet
 
 ## Hva du finner i denne dokumentasjonen
 
-- `STATUS_AND_GOAL.md`: samlet status, formal, arbeidsprinsipper og neste mal
+- `CURRENT_STATUS.md`: kort gjeldende status, siste opprydding og videre plan
+- `STATUS_AND_GOAL.md`: samlet historikk, formal, arbeidsprinsipper og neste mal
 - `WORKFLOW.md`: hvordan A07-lonn faktisk flyter i dag
 - `LIVE_VERIFICATION_CHECKLIST.md`: sjekkliste for test mot faktisk klientdata
-- `MODULE_MAP.md`: dagens filer og framtidig plassering
+- `MODULE_MAP.md`: dagens kanoniske filer, wrappers og compat-lag
 - `TESTING.md`: hvilke tester som beskytter dette sporet
 
-## Status etter fase 2, runde 7
+## Status naa
 
-Struktur og dokumentasjon er pa plass, payroll-kjernen er flyttet inn i
-`a07_feature/payroll/`, og A07-loennsspesifikk RF-1022/profilstate er flyttet
-dit uten at gamle importstier er brutt. Kontroll-laget har na ogsa en
-kanonisk plassering under `a07_feature/control/`, inkludert UI-bindingene for
-kontrolloppstilling. Den sentrale UI-slicen lever na ogsa under
-`a07_feature/ui/`, inkludert seleksjonslaget og legacy tree-UI. Fasaden peker
-na direkte til de flyttede kanoniske modulene, mens `page_a07_shared.py`
-bevisst er beholdt som compat-lag.
+Struktur, testing og dokumentasjon er na i mye bedre samsvar:
+
+- `src/pages/a07/page_a07.py` er etablert som offentlig shell
+- store A07-monolitter er splittet ned i mindre kanoniske moduler
+- testmonolitten er splittet til `tests/a07/`
+- modulbudsjetter og storrelsesrapport beskytter videre struktur
+- gamle importstier lever videre som compat der det fortsatt trengs
 
 ## Aktiv Produktretning
 
