@@ -38,7 +38,7 @@ except Exception:
 from src.pages.logg import LoggPage
 from src.pages.consolidation.frontend.page import ConsolidationPage
 from src.pages.ar.frontend.page import ARPage
-from page_regnskap import RegnskapPage
+from src.pages.regnskap.frontend.page import RegnskapPage
 from src.pages.materiality.frontend.page import MaterialityPage
 from page_mva import MvaPage
 from page_skatt import SkattPage
@@ -1462,7 +1462,7 @@ class App(tk.Tk):
         # None (sider som ikke er konstruert i denne build-en).
         candidate_refreshers: list[tuple[object | None, callable]] = [
             (getattr(self, "page_saldobalanse", None), _refresh_saldobalanse),
-            (getattr(self, "page_regnskap", None),     _refresh_regnskap),
+            (getattr(self, "src.pages.regnskap.frontend.page", None),     _refresh_regnskap),
             (getattr(self, "src.pages.materiality.frontend.page", None),  _refresh_materiality),
             (getattr(self, "page_mva", None),          _refresh_mva),
             (getattr(self, "page_skatt", None),        _refresh_skatt),

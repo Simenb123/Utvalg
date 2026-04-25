@@ -58,7 +58,7 @@ def main() -> None:
         "page_saldobalanse",
         "page_admin",
         "page_reskontro",
-        "page_regnskap",
+        "src.pages.regnskap.frontend.page",
         "src.pages.driftsmidler",
         "src.pages.materiality.frontend.page",
         "page_scoping",
