@@ -8,7 +8,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Border, Font, PatternFill, Side
 
-from consolidation.models import CompanyTB, CurrencyDetail, EliminationJournal, RunResult
+from .models import CompanyTB, CurrencyDetail, EliminationJournal, RunResult
 
 _HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")
 _SUM_FILL = PatternFill("solid", fgColor="F3F6F9")

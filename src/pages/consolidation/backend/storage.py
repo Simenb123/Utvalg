@@ -18,7 +18,7 @@ from typing import Optional
 import pandas as pd
 
 import client_store
-from consolidation.models import (
+from .models import (
     ConsolidationProject,
     project_from_dict,
     project_to_dict,

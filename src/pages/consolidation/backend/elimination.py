@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from consolidation.models import EliminationJournal
+from .models import EliminationJournal
 
 _COLS = ["journal_id", "journal_name", "regnr", "company_id", "amount", "description"]
 

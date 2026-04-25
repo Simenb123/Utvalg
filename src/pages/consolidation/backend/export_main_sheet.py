@@ -8,8 +8,8 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-from consolidation.control_rows import append_control_rows
-from consolidation.models import CompanyTB, EliminationJournal
+from .control_rows import append_control_rows
+from .models import CompanyTB, EliminationJournal
 
 _TITLE_FILL = PatternFill("solid", fgColor="DDEBF7")
 _HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")

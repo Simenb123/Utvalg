@@ -12,7 +12,7 @@ from typing import Optional
 
 import pandas as pd
 
-from consolidation.models import CompanyTB
+from .models import CompanyTB
 
 logger = logging.getLogger(__name__)
 

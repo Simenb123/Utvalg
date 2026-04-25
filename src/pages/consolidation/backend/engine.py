@@ -12,10 +12,10 @@ import logging
 
 import pandas as pd
 
-from consolidation.elimination import aggregate_eliminations_by_konto, aggregate_eliminations_by_regnr
-from consolidation.line_basis_import import validate_company_line_basis
-from consolidation.mapping import load_shared_config, map_company_tb
-from consolidation.models import ConsolidationProject, CurrencyDetail, RunResult
+from .elimination import aggregate_eliminations_by_konto, aggregate_eliminations_by_regnr
+from .line_basis_import import validate_company_line_basis
+from .mapping import load_shared_config, map_company_tb
+from .models import ConsolidationProject, CurrencyDetail, RunResult
 
 logger = logging.getLogger(__name__)
 

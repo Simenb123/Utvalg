@@ -8,21 +8,21 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import Workbook
 
-from consolidation.export_company_sheets import (
+from .export_company_sheets import (
     build_associate_sheets as _build_associate_sheets_impl,
     build_company_sheets as _build_company_sheets_impl,
     build_elimineringer as _build_elimineringer_impl,
 )
-from consolidation.export_control_sheets import (
+from .export_control_sheets import (
     build_kontrollark as _build_kontrollark_impl,
     build_saldobalanse_alle as _build_saldobalanse_alle_impl,
     build_valutakontroll as _build_valutakontroll_impl,
 )
-from consolidation.export_main_sheet import (
+from .export_main_sheet import (
     build_konsolidert_sb as _build_konsolidert_sb_impl,
     build_konsernoppstilling as _build_konsernoppstilling_impl,
 )
-from consolidation.models import AssociateCase, CompanyTB, EliminationJournal, RunResult
+from .models import AssociateCase, CompanyTB, EliminationJournal, RunResult
 
 logger = logging.getLogger(__name__)
 

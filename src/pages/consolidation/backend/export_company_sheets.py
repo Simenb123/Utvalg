@@ -6,7 +6,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Border, Font, PatternFill, Side
 
-from consolidation.models import AssociateCase, CompanyTB, EliminationJournal
+from .models import AssociateCase, CompanyTB, EliminationJournal
 
 _HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")
 _THIN_SIDE = Side(style="thin", color="D9D9D9")

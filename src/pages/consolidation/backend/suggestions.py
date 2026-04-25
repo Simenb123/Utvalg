@@ -20,7 +20,7 @@ from typing import Optional
 
 import pandas as pd
 
-from consolidation.models import (
+from .models import (
     CompanyTB,
     ConsolidationProject,
     EliminationLine,
