@@ -30,7 +30,7 @@ def _fake_page(
 
 def test_compute_kontoer_inkluderer_sb_kontoer_uten_bevegelse() -> None:
     """Regresjonstest: konti i SB innenfor RL-range skal vises selv uten tx."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
 
     sb_df = pd.DataFrame(
         [
@@ -66,7 +66,7 @@ def test_compute_kontoer_bruker_sb_prev_som_ib(monkeypatch) -> None:
     import session as _session
     monkeypatch.setattr(_session, "year", "2025", raising=False)
 
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
 
     sb_df = pd.DataFrame([{"konto": "3000", "kontonavn": "Salg", "ib": 0.0, "ub": -100.0}])
     sb_prev = pd.DataFrame([{"konto": "3000", "kontonavn": "Salg", "ib": 0.0, "ub": -50.0}])
@@ -87,7 +87,7 @@ def test_compute_kontoer_bruker_sb_prev_som_ib(monkeypatch) -> None:
 )
 def test_build_motpost_rl_df_aggregerer_paa_regnr(monkeypatch) -> None:
     """_build_motpost_rl_df skal aggregere kontoer til regnr via RL-context."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
     import regnskapslinje_mapping_service as rl_svc
 
     grp = pd.DataFrame(
@@ -146,7 +146,7 @@ def test_build_motpost_rl_df_aggregerer_paa_regnr(monkeypatch) -> None:
 )
 def test_compute_kombinasjoner_bygger_kombinasjoner() -> None:
     """Smoke-test at _compute_kombinasjoner returnerer forventede rader + bilag-map."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
 
     df_all = pd.DataFrame(
         [
@@ -181,7 +181,7 @@ def test_compute_kombinasjoner_bygger_kombinasjoner() -> None:
 
 def test_compute_kombinasjoner_tomt_input_returnerer_tomt() -> None:
     """Robusthet: ingen RL-kontoer → tom DataFrame og tom bilag-map."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
 
     page = page_statistikk.StatistikkPage(None)
     combos, bilag_map = page._compute_kombinasjoner(pd.DataFrame(), set())
@@ -191,7 +191,7 @@ def test_compute_kombinasjoner_tomt_input_returnerer_tomt() -> None:
 
 def test_get_konto_set_respekterer_override(monkeypatch) -> None:
     """_get_konto_set_for_regnr må droppe konti som override flytter ut av regnr."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
     import regnskapslinje_mapping_service as rl_svc
 
     intervals = pd.DataFrame([{"regnr": 15, "fra": 3600, "til": 3999}])
@@ -243,7 +243,7 @@ def test_get_konto_set_respekterer_override(monkeypatch) -> None:
 
 def test_compute_kombinasjoner_export_wrapper() -> None:
     """Eksport-wrapperen _compute_kombinasjoner_export skal bygge samme tabell."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
 
     df_all = pd.DataFrame(
         [
@@ -262,7 +262,7 @@ def test_compute_kombinasjoner_export_wrapper() -> None:
 
 def test_write_workbook_har_sum_rader_og_nye_ark(tmp_path, monkeypatch) -> None:
     """Excel-eksporten skal inneholde summeringslinjer og begge nye seksjoner."""
-    from src.pages.statistikk import page_statistikk
+    from src.audit_actions.statistikk import page_statistikk
     import regnskapslinje_mapping_service as rl_svc
     from openpyxl import load_workbook
 

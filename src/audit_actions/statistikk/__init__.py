@@ -1,7 +1,9 @@
-"""Statistikk-fanen.
+"""Statistikk — revisjonshandling som åpnes som popup fra Analyse.
 
-Følger ``frontend/backend``-mappestrukturen (pilot 2 i mønsteret som
-ble etablert med driftsmidler 2026-04-25).
+Lå tidligere i ``src/pages/statistikk/`` (pilot 2-3), men hører
+egentlig hjemme i ``src/audit_actions/`` siden Statistikk ikke er
+en fane i hovednotebook — den åpnes via ``_open_statistikk_popup()``
+fra Analyse (høyreklikk → "Vis statistikk for ...").
 
 Skillet:
 - ``backend/`` — beregningskjerne + Excel-eksport (ren Python, ingen Tk)
@@ -14,7 +16,7 @@ pakken — re-eksporten under skjuler at klassen nå bor i ``frontend/page.py``.
 from .frontend import StatistikkPage
 
 # Bakoverkompat-aliaser: eldre kode (særlig tester) importerer som
-# ``from src.pages.statistikk import page_statistikk`` osv. Vi peker
+# ``from src.audit_actions.statistikk import page_statistikk`` osv. Vi peker
 # disse navnene til de nye lokasjonene så ingen eksterne kall trenger
 # oppdatering. Aliasene kan fjernes når alle importer er migrert.
 from .frontend import page as page_statistikk  # noqa: F401

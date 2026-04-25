@@ -65,7 +65,7 @@ except Exception:
     DocumentsPage = None  # type: ignore
 
 try:
-    from src.pages.statistikk import StatistikkPage
+    from src.audit_actions.statistikk import StatistikkPage
 except Exception:
     StatistikkPage = None  # type: ignore
 
@@ -860,40 +860,12 @@ class App(tk.Tk):
         return None
 
     def _ensure_admin_access(self, selected_widget: object) -> bool:
-        admin_page = self.__dict__.get("page_admin")
-        if selected_widget is not admin_page:
-            return True
-        if self.__dict__.get("_admin_unlocked", False):
-            return True
-
-        password = None
-        try:
-            password = simpledialog.askstring(
-                _ADMIN_PASSWORD_TITLE,
-                "Skriv inn admin-passord:",
-                parent=self,
-                show="*",
-            )
-        except Exception:
-            password = None
-
-        if password == _ADMIN_PASSWORD:
-            self._admin_unlocked = True
-            return True
-
-        if password not in (None, ""):
-            try:
-                messagebox.showerror(_ADMIN_PASSWORD_TITLE, "Feil passord.", parent=self)
-            except Exception:
-                pass
-
-        fallback = self._fallback_tab_after_admin_denied()
-        if fallback is not None:
-            try:
-                self.nb.select(fallback)
-            except Exception:
-                pass
-        return False
+        # Tilgang til Admin-fanen styres nå av landing-siden i AdminPage —
+        # ikke av et passord-prompt på fanebytte. Brukeren ser en
+        # ufarlig landing med "Ytelsesmonitor…" og "Oppsett…", og
+        # "Oppsett…" er det som faktisk ber om passord.
+        # Vi returnerer alltid True her så fane-bytte ikke blokkeres.
+        return True
 
     def _save_current_tab(self) -> None:
         """Lagre aktiv fane i preferences."""

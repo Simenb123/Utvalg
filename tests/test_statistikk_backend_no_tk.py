@@ -20,7 +20,7 @@ import pytest
 
 _BACKEND_DIR = (
     Path(__file__).resolve().parent.parent
-    / "src" / "pages" / "statistikk" / "backend"
+    / "src" / "audit_actions" / "statistikk" / "backend"
 )
 
 _FORBIDDEN_PATTERNS = [
@@ -53,8 +53,8 @@ def test_backend_file_does_not_import_tkinter(py_file: Path) -> None:
 
 def test_backend_can_be_imported_headless() -> None:
     """Backend-pakken skal kunne importeres uten at tkinter er tilgjengelig."""
-    from src.pages.statistikk.backend import compute, excel  # noqa: F401
-    from src.pages.statistikk import backend  # noqa: F401
+    from src.audit_actions.statistikk.backend import compute, excel  # noqa: F401
+    from src.audit_actions.statistikk import backend  # noqa: F401
 
     # Public API skal være på plass
     assert hasattr(compute, "get_konto_ranges")
