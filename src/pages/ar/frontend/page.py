@@ -692,7 +692,7 @@ class ARPage(ttk.Frame):
         app = getattr(session, "APP", None)
         if app is None:
             return None, None
-        page = getattr(app, "page_consolidation", None)
+        page = getattr(app, "src.pages.consolidation.frontend.page", None)
         notebook = getattr(app, "nb", None)
         return page, notebook
 

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pandas as pd
 from unittest.mock import patch
 
-import consolidation_readiness as readiness
+import src.pages.consolidation.backend.readiness as readiness
 from consolidation.models import AssociateCase, CompanyTB, ConsolidationProject, EliminationJournal, EliminationLine
 
 

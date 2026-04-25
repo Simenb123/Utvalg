@@ -67,7 +67,7 @@ def _regnr_to_name() -> dict[int, str]:
 
 def _make_tab(callback=None):
     """Create a MappingTab instance without tkinter by using __new__."""
-    from consolidation_mapping_tab import MappingTab
+    from src.pages.consolidation.frontend.mapping_tab import MappingTab
 
     tab = MappingTab.__new__(MappingTab)
     tab._on_overrides_changed = callback
@@ -327,7 +327,7 @@ class TestMappingStatus:
 
 class TestOverridesChangedCallback:
     def test_callback_updates_project_and_remaps(self):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -349,7 +349,7 @@ class TestOverridesChangedCallback:
 
         mapped_result = _sample_mapped_tb()
         with patch("consolidation.mapping.map_company_tb", return_value=(mapped_result, [])), \
-             patch("page_consolidation.storage") as mock_storage:
+             patch("src.pages.consolidation.frontend.page.storage") as mock_storage:
             page._on_mapping_overrides_changed("c1", {"3000": 300})
 
         assert page._project.mapping_config.company_overrides["c1"] == {"3000": 300}
@@ -401,7 +401,7 @@ class TestOverridesChangedCallback:
         assert inserted.count("3000") == 1
 
     def test_empty_overrides_removes_key(self):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -416,7 +416,7 @@ class TestOverridesChangedCallback:
         page._intervals = None
         page._regnskapslinjer = None
 
-        with patch("page_consolidation.storage"):
+        with patch("src.pages.consolidation.frontend.page.storage"):
             page._on_mapping_overrides_changed("c1", {})
 
         assert "c1" not in page._project.mapping_config.company_overrides

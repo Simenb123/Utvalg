@@ -223,7 +223,7 @@ class TestPreviewCancel:
     def test_import_with_none_result_does_nothing(self, monkeypatch, tmp_path):
         """_on_import_company with cancelled preview should not create company."""
         import client_store
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         monkeypatch.setattr(
             client_store, "years_dir",
@@ -240,7 +240,7 @@ class TestPreviewCancel:
 
         # Simulate: file dialog returns path, preview returns None (cancel)
         monkeypatch.setattr(
-            "page_consolidation.filedialog",
+            "src.pages.consolidation.frontend.page.filedialog",
             MagicMock(askopenfilename=MagicMock(
                 return_value=str(tmp_path / "fake.xlsx"),
             )),
@@ -266,7 +266,7 @@ class TestFinalizeImport:
     def test_finalize_creates_company_and_persists(self, monkeypatch, tmp_path):
         """_finalize_import should create CompanyTB, save, and update tree."""
         import client_store
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
         from consolidation import storage
 
         monkeypatch.setattr(
@@ -290,7 +290,7 @@ class TestFinalizeImport:
 
         # Mock messagebox for potential warnings
         monkeypatch.setattr(
-            "page_consolidation.messagebox",
+            "src.pages.consolidation.frontend.page.messagebox",
             MagicMock(),
         )
 
@@ -321,7 +321,7 @@ class TestFinalizeImport:
     def test_finalize_shows_validation_warnings(self, monkeypatch, tmp_path):
         """_finalize_import should show warnings from validate_tb."""
         import client_store
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         monkeypatch.setattr(
             client_store, "years_dir",
@@ -341,7 +341,7 @@ class TestFinalizeImport:
         page._select_and_show_company = MagicMock()
 
         mock_msgbox = MagicMock()
-        monkeypatch.setattr("page_consolidation.messagebox", mock_msgbox)
+        monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", mock_msgbox)
 
         # DataFrame with no IB → should trigger warning
         df = pd.DataFrame({
@@ -366,7 +366,7 @@ class TestFinalizeImport:
 class TestSelectAndShowCompany:
     def test_select_and_show_calls_tree_methods(self):
         """_select_and_show_company should set selection and show detail."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -400,7 +400,7 @@ class TestSelectAndShowCompany:
 class TestShowCompanyDetailDfFix:
     def test_no_value_error_with_empty_mapped_tb(self):
         """_show_company_detail should not raise ValueError with empty mapped_tbs."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -441,7 +441,7 @@ class TestShowCompanyDetailDfFix:
 
     def test_uses_mapped_tb_when_available(self):
         """_show_company_detail should prefer mapped_tbs when non-empty."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False

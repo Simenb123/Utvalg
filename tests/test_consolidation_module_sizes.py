@@ -19,8 +19,8 @@ def _targets(repo_root: Path) -> list[Path]:
     )
     for pattern in patterns:
         files.update(repo_root.glob(pattern))
-    files.add(repo_root / "consolidation_mapping_tab.py")
-    files.add(repo_root / "consolidation_pdf_review_dialog.py")
+    files.add(repo_root / "src.pages.consolidation.frontend.mapping_tab.py")
+    files.add(repo_root / "src.pages.consolidation.frontend.pdf_review_dialog.py")
     return sorted(path for path in files if path.is_file())
 
 

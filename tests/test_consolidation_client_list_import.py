@@ -19,7 +19,7 @@ def _sample_tb() -> pd.DataFrame:
 
 
 def _make_page(project):
-    from page_consolidation import ConsolidationPage
+    from src.pages.consolidation.frontend.page import ConsolidationPage
 
     page = ConsolidationPage.__new__(ConsolidationPage)
     page._tk_ok = False
@@ -61,8 +61,8 @@ def test_import_company_from_client_list_creates_company(monkeypatch, tmp_path) 
     )
     monkeypatch.setattr("client_picker_dialog.open_client_picker", lambda *a, **kw: "Air Cargo Logistics AS")
     monkeypatch.setattr("trial_balance_reader.read_trial_balance", lambda _path: _sample_tb())
-    monkeypatch.setattr("page_consolidation.simpledialog.askstring", lambda *a, **kw: "Air Cargo Logistics AS")
-    monkeypatch.setattr("page_consolidation.messagebox", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.simpledialog.askstring", lambda *a, **kw: "Air Cargo Logistics AS")
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", MagicMock())
 
     page = _make_page(ConsolidationProject(client="Air Management AS", year="2024"))
 
@@ -104,8 +104,8 @@ def test_import_company_from_client_list_updates_existing_company_and_preserves_
     )
     monkeypatch.setattr("client_picker_dialog.open_client_picker", lambda *a, **kw: "Air Cargo Logistics AS")
     monkeypatch.setattr("trial_balance_reader.read_trial_balance", lambda _path: _sample_tb())
-    monkeypatch.setattr("page_consolidation.simpledialog.askstring", lambda *a, **kw: "Air Cargo Logistics AS")
-    monkeypatch.setattr("page_consolidation.messagebox", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.simpledialog.askstring", lambda *a, **kw: "Air Cargo Logistics AS")
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", MagicMock())
 
     existing = CompanyTB(company_id="dat1", name="Air Cargo Logistics AS", source_type="excel", source_file="old.xlsx")
     project = ConsolidationProject(client="Air Management AS", year="2024", companies=[existing])
@@ -135,7 +135,7 @@ def test_import_company_from_client_list_shows_info_when_no_active_sb(monkeypatc
     monkeypatch.setattr("client_picker_dialog.open_client_picker", lambda *a, **kw: "Air Cargo Logistics AS")
 
     mock_messagebox = MagicMock()
-    monkeypatch.setattr("page_consolidation.messagebox", mock_messagebox)
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", mock_messagebox)
 
     page = _make_page(ConsolidationProject(client="Air Management AS", year="2024"))
 

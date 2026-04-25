@@ -273,7 +273,7 @@ class TestUiMainVersionType:
 class TestConsolidationSessionTb:
     def test_update_session_tb_button_shows_when_tb_available(self):
         """Button should be visible when _resolve_active_client_tb returns data."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -293,7 +293,7 @@ class TestConsolidationSessionTb:
 
     def test_update_session_tb_button_hides_when_no_tb(self):
         """Button should be hidden when _resolve_active_client_tb returns None."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -310,7 +310,7 @@ class TestConsolidationSessionTb:
 
     def test_update_session_tb_button_hides_when_already_imported(self):
         """Button should be hidden when parent is already a session company."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
         from consolidation.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
@@ -337,7 +337,7 @@ class TestConsolidationSessionTb:
         """_on_use_session_tb should create a CompanyTB with source_type='session'."""
         import session as _session
         import client_store
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
         from consolidation.models import ConsolidationProject
         from consolidation import storage
 
@@ -371,12 +371,12 @@ class TestConsolidationSessionTb:
 
         # Mock simpledialog to return a name
         monkeypatch.setattr(
-            "page_consolidation.simpledialog.askstring",
+            "src.pages.consolidation.frontend.page.simpledialog.askstring",
             lambda *a, **kw: "Morselskap AS",
         )
         # Mock messagebox to avoid Tk requirement
         monkeypatch.setattr(
-            "page_consolidation.messagebox", MagicMock(),
+            "src.pages.consolidation.frontend.page.messagebox", MagicMock(),
         )
 
         page._on_use_session_tb()
@@ -407,7 +407,7 @@ class TestConsolidationSessionTb:
     def test_on_use_session_tb_no_tb_does_not_crash(self, monkeypatch):
         """_on_use_session_tb with no session.tb_df should show info, not crash."""
         import session as _session
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         _session.tb_df = None
         _session.client = "Test"
@@ -419,7 +419,7 @@ class TestConsolidationSessionTb:
         # Mock messagebox
         shown = []
         monkeypatch.setattr(
-            "page_consolidation.messagebox.showinfo",
+            "src.pages.consolidation.frontend.page.messagebox.showinfo",
             lambda *a, **kw: shown.append(a),
         )
 

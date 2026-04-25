@@ -19,7 +19,7 @@ def _sample_tb() -> pd.DataFrame:
 
 
 def _make_page(project):
-    from page_consolidation import ConsolidationPage
+    from src.pages.consolidation.frontend.page import ConsolidationPage
 
     page = ConsolidationPage.__new__(ConsolidationPage)
     page._tk_ok = False
@@ -61,7 +61,7 @@ def test_import_company_from_client_name_returns_company(monkeypatch, tmp_path) 
         ),
     )
     monkeypatch.setattr("trial_balance_reader.read_trial_balance", lambda _path: _sample_tb())
-    monkeypatch.setattr("page_consolidation.messagebox", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", MagicMock())
 
     page = _make_page(ConsolidationProject(client="Air Management AS", year="2024"))
 
@@ -80,7 +80,7 @@ def test_import_company_from_client_name_returns_company(monkeypatch, tmp_path) 
 def test_create_or_update_associate_case_from_ar_relation_upserts_case(monkeypatch) -> None:
     from consolidation.models import CompanyTB, ConsolidationProject
 
-    monkeypatch.setattr("page_consolidation.storage.save_project", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.storage.save_project", MagicMock())
 
     project = ConsolidationProject(
         client="Air Management AS",
@@ -142,7 +142,7 @@ def test_batch_import_daughters_multiple(monkeypatch, tmp_path) -> None:
         ),
     )
     monkeypatch.setattr("trial_balance_reader.read_trial_balance", lambda _path: _sample_tb())
-    monkeypatch.setattr("page_consolidation.messagebox", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", MagicMock())
 
     page = _make_page(ConsolidationProject(client="Mor AS", year="2024"))
 
@@ -174,7 +174,7 @@ def test_batch_import_skips_missing_sb(monkeypatch, tmp_path) -> None:
         ),
     )
     monkeypatch.setattr("trial_balance_reader.read_trial_balance", lambda _path: _sample_tb())
-    monkeypatch.setattr("page_consolidation.messagebox", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", MagicMock())
 
     page = _make_page(ConsolidationProject(client="Mor AS", year="2024"))
 
@@ -196,7 +196,7 @@ def test_batch_import_associates_multiple(monkeypatch) -> None:
     """Batch-create 2 associate cases from AR rows."""
     from consolidation.models import CompanyTB, ConsolidationProject
 
-    monkeypatch.setattr("page_consolidation.storage.save_project", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.storage.save_project", MagicMock())
 
     project = ConsolidationProject(
         client="Mor AS",
@@ -237,7 +237,7 @@ def test_batch_import_associates_multiple(monkeypatch) -> None:
 
 def test_associate_next_step_text_warns_about_duplicate_company() -> None:
     from consolidation.models import AssociateCase, CompanyTB, ConsolidationProject
-    from page_consolidation import ConsolidationPage
+    from src.pages.consolidation.frontend.page import ConsolidationPage
 
     project = ConsolidationProject(
         client="Air Management AS",

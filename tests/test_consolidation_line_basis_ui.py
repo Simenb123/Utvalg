@@ -19,14 +19,14 @@ def test_finalize_line_basis_import_creates_company_and_persists(monkeypatch, tm
     import client_store
     from consolidation import storage
     from consolidation.models import ConsolidationProject
-    from page_consolidation import ConsolidationPage
+    from src.pages.consolidation.frontend.page import ConsolidationPage
 
     monkeypatch.setattr(
         client_store,
         "years_dir",
         lambda client, year: tmp_path / client / "years" / year,
     )
-    monkeypatch.setattr("page_consolidation.messagebox", MagicMock())
+    monkeypatch.setattr("src.pages.consolidation.frontend.page.messagebox", MagicMock())
 
     page = ConsolidationPage.__new__(ConsolidationPage)
     page._tk_ok = False

@@ -36,7 +36,7 @@ try:
 except Exception:
     UtvalgPage = None  # type: ignore
 from src.pages.logg import LoggPage
-from page_consolidation import ConsolidationPage
+from src.pages.consolidation.frontend.page import ConsolidationPage
 from page_ar import ARPage
 from page_regnskap import RegnskapPage
 from page_materiality import MaterialityPage
@@ -909,7 +909,7 @@ class App(tk.Tk):
         except Exception:
             pass
 
-        if selected_widget is getattr(self, "page_consolidation", None):
+        if selected_widget is getattr(self, "src.pages.consolidation.frontend.page", None):
             try:
                 self.after_idle(self._refresh_consolidation_from_session)
             except Exception:

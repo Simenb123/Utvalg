@@ -210,7 +210,7 @@ class TestV1MorHasValues:
 class TestV2ModeSwitching:
     def test_both_dataframes_cached(self, _mock_config):
         """After company select + run, both result DFs should be available."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -268,7 +268,7 @@ class TestV2ModeSwitching:
         assert "UB" in set_cols2
 
     def test_empty_consolidated_shows_nothing(self):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tree_result = MagicMock()
@@ -295,7 +295,7 @@ class TestV2ModeSwitching:
 class TestV3HideZeroFilter:
     def test_sumlines_always_shown(self, _mock_config):
         """Sum lines should appear even if their value is 0."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tree_result = MagicMock()
@@ -350,7 +350,7 @@ class TestV3HideZeroFilter:
         assert any_nonzero, "Elim line should have non-zero values"
 
     def test_hide_zero_off_shows_everything(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tree_result = MagicMock()

@@ -688,7 +688,7 @@ class TestExportHideZero:
 
 class TestFmtNo:
     def test_basic_formatting(self):
-        from page_consolidation import _fmt_no
+        from src.pages.consolidation.frontend.page import _fmt_no
 
         assert _fmt_no(0) == "0"
         assert _fmt_no(1234) == "1 234"
@@ -700,7 +700,7 @@ class TestFmtNo:
         assert _fmt_no(0, 2) == "0,00"
 
     def test_rounding(self):
-        from page_consolidation import _fmt_no
+        from src.pages.consolidation.frontend.page import _fmt_no
 
         assert _fmt_no(99.999) == "100"
         assert _fmt_no(99.999, 2) == "100,00"
@@ -716,7 +716,7 @@ class TestParentMappingFromAnalyse:
 
     def _make_page(self, *, analyse_overrides=None, local_overrides=None):
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -781,14 +781,14 @@ class TestParentMappingFromAnalyse:
 
 class TestUiLabelHelpers:
     def test_source_display_skips_netto_hint_for_line_basis_sources(self):
-        from page_consolidation import _source_display
+        from src.pages.consolidation.frontend.page import _source_display
 
         assert _source_display("rl_excel", False) == "Regnskapslinjer"
         assert _source_display("pdf_regnskap", False) == "PDF-regnskap"
         assert _source_display("excel", False) == "TB-fil (kun netto)"
 
     def test_build_detail_meta_text_for_line_basis_pdf_includes_review_summary(self):
-        from page_consolidation import _build_detail_meta_text
+        from src.pages.consolidation.frontend.page import _build_detail_meta_text
 
         company = CompanyTB(
             company_id="c1",
@@ -1190,7 +1190,7 @@ class TestAOConsistency:
 
     def _make_page(self, *, ao_on=True, ao_entries=None):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -1317,7 +1317,7 @@ class TestEnsureConsolidatedResult:
     def _make_page(self, *, has_project=True, has_companies=True, has_tbs=True,
                    has_cached_result=False):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -1460,7 +1460,7 @@ class TestPerSelskapView:
     def test_get_per_company_columns_order(self, _mock_config):
         """_get_per_company_columns should return Mor first, then daughters, then elim+kons."""
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = _sample_project(with_elimination=False)
         proj.parent_company_id = "a"
@@ -1610,7 +1610,7 @@ class TestFxColumnsBuildCompanyResult:
     def _make_fx_page(self, _mock_config):
         """Build a page-like object with FX companies and a run result."""
         from consolidation.mapping import map_company_tb, load_shared_config
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -1725,7 +1725,7 @@ class TestFxColumnsConsolidated:
 
     def _make_fx_page(self, _mock_config):
         """Build a page-like object with FX companies and a run result."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -1788,7 +1788,7 @@ class TestFxColumnsConsolidated:
 
     def test_nok_only_no_effect(self, _mock_config):
         """For NOK-only project, all FX effect columns should be zero."""
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = _sample_project(with_elimination=False)
         proj.parent_company_id = "a"
@@ -1817,7 +1817,7 @@ class TestShowResultRebuildsCompanyResult:
         """After consolidation, _company_result_df should use fresh run_result."""
         from unittest.mock import MagicMock, patch
         from consolidation.mapping import map_company_tb, load_shared_config
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -1889,7 +1889,7 @@ class TestInvalidateRunCache:
     """Verify _invalidate_run_cache clears all run state."""
 
     def test_invalidate_clears_all_cache(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -1910,7 +1910,7 @@ class TestInvalidateRunCache:
     def test_rerun_invalidates_and_runs(self, _mock_config):
         """_rerun_consolidation should invalidate cache and call _on_run."""
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -1936,7 +1936,7 @@ class TestEliminationRerunOnCreateDelete:
     def test_create_elim_invalidates_and_reruns(self, _mock_config):
         """_on_create_simple_elim should call _rerun_consolidation (not just _ensure)."""
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = _sample_project(with_elimination=False)
         tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
@@ -1967,7 +1967,7 @@ class TestEliminationRerunOnCreateDelete:
         # Mock _on_run to just set result back
         page._on_run = MagicMock()
 
-        with patch("page_consolidation.storage") as mock_storage:
+        with patch("src.pages.consolidation.frontend.page.storage") as mock_storage:
             page._on_create_simple_elim()
 
         # Should have created the journal
@@ -1986,7 +1986,7 @@ class TestRunRefreshesMappingState:
 
     def test_on_run_recomputes_mapping_status_before_preflight(self, _mock_config):
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         proj = ConsolidationProject(
@@ -2014,10 +2014,10 @@ class TestRunRefreshesMappingState:
         page._show_result = MagicMock()
         page._update_status = MagicMock()
 
-        with patch("page_consolidation.messagebox") as mock_mb:
+        with patch("src.pages.consolidation.frontend.page.messagebox") as mock_mb:
             mock_mb.askyesno.return_value = True
             with patch(
-                "consolidation_readiness.build_readiness_report",
+                "src.pages.consolidation.backend.readiness.build_readiness_report",
                 return_value=SimpleNamespace(issues=[]),
             ):
                 with patch("consolidation.engine.run_consolidation") as mock_run:
@@ -2025,7 +2025,7 @@ class TestRunRefreshesMappingState:
                         pd.DataFrame({"regnr": [10], "konsolidert": [100.0]}),
                         SimpleNamespace(warnings=[], input_digest=""),
                     )
-                    with patch("page_consolidation.storage") as mock_storage:
+                    with patch("src.pages.consolidation.frontend.page.storage") as mock_storage:
                         page._on_run()
 
         page._compute_mapping_status.assert_called_once()
@@ -2038,7 +2038,7 @@ class TestShowElimDetail:
 
     def test_show_lines_for_selected_journal(self, _mock_config):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = _sample_project(with_elimination=True)
         journal = proj.eliminations[0]
@@ -2069,7 +2069,7 @@ class TestGrunnlagContextFiltering:
 
     def _make_page_with_run(self, _mock_config):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -2124,7 +2124,7 @@ class TestRefreshFromSessionClearsCache:
 
     def test_session_reload_invalidates_cache(self, _mock_config):
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = True
@@ -2148,7 +2148,7 @@ class TestRefreshFromSessionClearsCache:
         sess.client = ""
         sess.year = ""
 
-        with patch("page_consolidation.storage"):
+        with patch("src.pages.consolidation.frontend.page.storage"):
             page.refresh_from_session(sess)
 
         assert page._result_df is None
@@ -2167,7 +2167,7 @@ class TestOnShowUnmapped:
 
     def test_show_unmapped_calls_detail_and_switches_tab(self, _mock_config):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2185,7 +2185,7 @@ class TestOnShowUnmapped:
 
     def test_show_unmapped_no_selection_does_nothing(self, _mock_config):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2210,7 +2210,7 @@ class TestBuildUnmappedWarnings:
 
     def test_warns_about_unmapped_kontos_with_amounts(self, _mock_config):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
         from consolidation.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
@@ -2238,7 +2238,7 @@ class TestBuildUnmappedWarnings:
 
     def test_no_warnings_when_all_mapped(self, _mock_config):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
         from consolidation.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
@@ -2254,7 +2254,7 @@ class TestBuildUnmappedWarnings:
         assert warnings == []
 
     def test_no_warnings_when_no_project(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2273,7 +2273,7 @@ class TestExportStaleGuard:
 
     def test_export_warns_when_consolidated_result_is_none(self, _mock_config):
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2283,7 +2283,7 @@ class TestExportStaleGuard:
         page._project.year = "2025"
         page._consolidated_result_df = None  # stale!
 
-        with patch("page_consolidation.messagebox") as mock_mb:
+        with patch("src.pages.consolidation.frontend.page.messagebox") as mock_mb:
             mock_mb.askyesno.return_value = True
             page._rerun_consolidation = MagicMock()
             # After rerun, result_df becomes None (no TBs) — should bail
@@ -2298,7 +2298,7 @@ class TestExportStaleGuard:
 
     def test_export_proceeds_when_user_declines_rerun(self, _mock_config):
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2309,8 +2309,8 @@ class TestExportStaleGuard:
         page._project.runs = []
         page._consolidated_result_df = None  # stale
 
-        with patch("page_consolidation.messagebox") as mock_mb, \
-             patch("page_consolidation.filedialog") as mock_fd:
+        with patch("src.pages.consolidation.frontend.page.messagebox") as mock_mb, \
+             patch("src.pages.consolidation.frontend.page.filedialog") as mock_fd:
             mock_mb.askyesno.return_value = False  # user says no
             # No runs → run_result is None → early return
             page._on_export()
@@ -2320,7 +2320,7 @@ class TestExportStaleGuard:
 
     def test_export_skips_guard_when_not_stale(self, _mock_config):
         from unittest.mock import MagicMock, patch
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2335,8 +2335,8 @@ class TestExportStaleGuard:
         page._hide_zero_var = MagicMock()
         page._hide_zero_var.get.return_value = False
 
-        with patch("page_consolidation.messagebox") as mock_mb, \
-             patch("page_consolidation.filedialog") as mock_fd:
+        with patch("src.pages.consolidation.frontend.page.messagebox") as mock_mb, \
+             patch("src.pages.consolidation.frontend.page.filedialog") as mock_fd:
             mock_fd.asksaveasfilename.return_value = ""  # user cancels
             page._on_export()
 
@@ -2352,15 +2352,15 @@ class TestSortingWiring:
     """Verify enable_treeview_sorting is called on tree builds."""
 
     def test_page_imports_sorting(self, _mock_config):
-        import page_consolidation
+        import src.pages.consolidation.frontend.page as page_consolidation
         assert hasattr(page_consolidation, "enable_treeview_sorting")
 
     def test_mapping_tab_imports_sorting(self, _mock_config):
-        import consolidation_mapping_tab
+        import src.pages.consolidation.frontend.mapping_tab as consolidation_mapping_tab
         assert hasattr(consolidation_mapping_tab, "enable_treeview_sorting")
 
     def test_reset_sort_state_clears_state(self, _mock_config):
-        from page_consolidation import _reset_sort_state
+        from src.pages.consolidation.frontend.page import _reset_sort_state
         from types import SimpleNamespace
 
         tree = MagicMock()
@@ -2370,13 +2370,13 @@ class TestSortingWiring:
         assert tree._sort_state.descending is False
 
     def test_reset_sort_state_no_state_is_harmless(self, _mock_config):
-        from page_consolidation import _reset_sort_state
+        from src.pages.consolidation.frontend.page import _reset_sort_state
 
         tree = MagicMock(spec=[])  # no _sort_state
         _reset_sort_state(tree)  # should not raise
 
     def test_mapping_tab_reset_sort_state(self, _mock_config):
-        from consolidation_mapping_tab import _reset_sort_state
+        from src.pages.consolidation.frontend.mapping_tab import _reset_sort_state
         from types import SimpleNamespace
 
         tree = MagicMock()
@@ -2395,7 +2395,7 @@ class TestSumpostDrilldown:
 
     def _make_page(self):
         from unittest.mock import MagicMock
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2482,7 +2482,7 @@ class TestSumpostDrilldown:
         assert "underliggende" not in label_text
 
     def test_on_result_line_select_detects_sumpost_tag(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2501,7 +2501,7 @@ class TestSumpostDrilldown:
         page._left_nb.select.assert_called_once_with(2)
 
     def test_on_result_line_select_leaf_line(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2519,7 +2519,7 @@ class TestSumpostDrilldown:
         page._populate_grunnlag.assert_called_once_with(10, is_sumpost=False)
 
     def test_on_result_line_select_no_selection(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2540,7 +2540,7 @@ class TestRightClickRouting:
     """Verify header right-clicks route to column manager, data clicks to context menu."""
 
     def test_company_right_click_heading_shows_col_menu(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2556,7 +2556,7 @@ class TestRightClickRouting:
         page._company_menu.post.assert_not_called()
 
     def test_company_right_click_cell_shows_context_menu(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2573,7 +2573,7 @@ class TestRightClickRouting:
         page._company_menu.post.assert_called_once()
 
     def test_detail_right_click_heading_shows_col_menu(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2589,7 +2589,7 @@ class TestRightClickRouting:
         page._detail_menu.post.assert_not_called()
 
     def test_detail_right_click_cell_replaces_selection(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2606,7 +2606,7 @@ class TestRightClickRouting:
         page._detail_menu.post.assert_called_once()
 
     def test_result_right_click_delegates_to_col_mgr(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2629,7 +2629,7 @@ class TestResultColumnProfiles:
     """Verify each result mode uses its own column manager."""
 
     def test_three_separate_managers_created(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2655,7 +2655,7 @@ class TestResultColumnProfiles:
         assert page._result_col_mgr is mgr_c
 
     def test_mode_keys_mapping(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         assert ConsolidationPage._RESULT_MODE_KEYS == {
             "Valgt selskap": "company",
@@ -2680,7 +2680,7 @@ class TestResultColumnProfiles:
         assert mgr_co._order_key != mgr_con._order_key
 
     def test_update_columns_only_affects_active_mode(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2751,7 +2751,7 @@ class _StrictResultTree:
 
 class TestResultTreeColumnReset:
     def test_populate_result_tree_resets_stale_displaycolumns_before_columns(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2775,7 +2775,7 @@ class TestResultTreeColumnReset:
             "UB": [784896.95],
         })
 
-        with patch("page_consolidation.enable_treeview_sorting", None):
+        with patch("src.pages.consolidation.frontend.page.enable_treeview_sorting", None):
             page._populate_result_tree(df, ["UB"])
 
         assert page._tree_result.displaycolumns == "#all"
@@ -2879,7 +2879,7 @@ class _SettableVar:
 
 class TestDetailTreeAggregation:
     def test_populate_detail_tree_aggregates_duplicate_accounts(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2915,7 +2915,7 @@ class TestDetailTreeAggregation:
         assert page._detail_count_var.value == "1 konto"
 
     def test_populate_line_basis_detail_tree_formats_pdf_rows(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2952,7 +2952,7 @@ class TestDetailTreeAggregation:
         assert page._detail_count_var.value == "1 linje"
 
     def test_change_mapping_deduplicates_selected_accounts(self, _mock_config):
-        from page_consolidation import ConsolidationPage
+        from src.pages.consolidation.frontend.page import ConsolidationPage
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2987,12 +2987,12 @@ class TestDetailTreeAggregation:
             widget.pack = MagicMock()
             return widget
 
-        with patch("page_consolidation.tk.Toplevel", return_value=fake_dialog), \
-             patch("page_consolidation.ttk.Label", side_effect=_fake_label), \
-             patch("page_consolidation.ttk.Combobox", side_effect=_fake_widget), \
-             patch("page_consolidation.ttk.Frame", side_effect=_fake_widget), \
-             patch("page_consolidation.ttk.Button", side_effect=_fake_widget), \
-             patch("page_consolidation.tk.StringVar", return_value=MagicMock()):
+        with patch("src.pages.consolidation.frontend.page.tk.Toplevel", return_value=fake_dialog), \
+             patch("src.pages.consolidation.frontend.page.ttk.Label", side_effect=_fake_label), \
+             patch("src.pages.consolidation.frontend.page.ttk.Combobox", side_effect=_fake_widget), \
+             patch("src.pages.consolidation.frontend.page.ttk.Frame", side_effect=_fake_widget), \
+             patch("src.pages.consolidation.frontend.page.ttk.Button", side_effect=_fake_widget), \
+             patch("src.pages.consolidation.frontend.page.tk.StringVar", return_value=MagicMock()):
             page._on_change_mapping()
 
         first_label = next(call for call in label_calls if call.get("font") == ("", 10, "bold"))
