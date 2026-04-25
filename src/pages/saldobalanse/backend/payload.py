@@ -763,7 +763,7 @@ def _load_owned_company_name_map(client: str, year: int | None) -> dict[str, str
     if cached is not None:
         return cached
     try:
-        import ar_store
+        from src.pages.ar.backend import store as ar_store
     except Exception:
         return {}
     try:

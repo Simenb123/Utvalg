@@ -19,7 +19,7 @@ def _write_registry_csv(path) -> None:
 
 
 def _configure_client_matching(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
     import client_meta_index
 
     client_meta = {
@@ -57,8 +57,8 @@ def _configure_client_matching(monkeypatch, tmp_path) -> None:
 
 
 def test_import_registry_csv_and_get_client_ownership_overview(monkeypatch, tmp_path) -> None:
-    import ar_store
-    from ar_store import ManualOwnedChange
+    import src.pages.ar.backend.store as ar_store
+    from src.pages.ar.backend.store import ManualOwnedChange
 
     _configure_client_matching(monkeypatch, tmp_path)
     csv_path = tmp_path / "aksjeeiebok__2024_07052025.csv"
@@ -111,7 +111,7 @@ def test_import_registry_csv_and_get_client_ownership_overview(monkeypatch, tmp_
 
 
 def test_classify_relation_type_boundaries() -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     assert ar_store.classify_relation_type(60.0) == "datter"
     assert ar_store.classify_relation_type(50.0) == "vurder"
@@ -119,8 +119,34 @@ def test_classify_relation_type_boundaries() -> None:
     assert ar_store.classify_relation_type(19.99) == "investering"
 
 
+def test_list_company_owners_with_fallback_uses_latest_company_year(monkeypatch, tmp_path) -> None:
+    import src.pages.ar.backend.store as ar_store
+
+    monkeypatch.setattr(ar_store, "list_imported_years", lambda: ["2023", "2024", "2025"])
+
+    def fake_list_company_owners(company_orgnr, year):
+        if company_orgnr == "834108682" and year == "2024":
+            return [
+                {"shareholder_orgnr": "914601819", "shareholder_name": "JOZANI HOLDING AS"},
+                {"shareholder_orgnr": "922294941", "shareholder_name": "RISTO AS"},
+                {"shareholder_orgnr": "914601827", "shareholder_name": "THE PURCHASING GROUP AS"},
+            ]
+        return []
+
+    monkeypatch.setattr(ar_store, "list_company_owners", fake_list_company_owners)
+
+    used_year, rows = ar_store.list_company_owners_with_fallback("834108682", "2025")
+
+    assert used_year == "2024"
+    assert {r["shareholder_orgnr"] for r in rows} == {
+        "914601819",
+        "922294941",
+        "914601827",
+    }
+
+
 def test_carry_forward_and_accept_register_changes(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -168,7 +194,7 @@ def test_carry_forward_and_accept_register_changes(monkeypatch, tmp_path) -> Non
 
 
 def test_self_owned_shares_are_shown_separately(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -196,7 +222,7 @@ def test_self_owned_shares_are_shown_separately(monkeypatch, tmp_path) -> None:
 
 
 def test_get_client_orgnr_falls_back_to_saved_regnskap_preferences(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -215,7 +241,7 @@ def test_get_client_orgnr_falls_back_to_saved_regnskap_preferences(monkeypatch, 
 
 
 def test_find_client_by_orgnr_uses_local_index_without_client_scan(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -229,7 +255,7 @@ def test_find_client_by_orgnr_uses_local_index_without_client_scan(monkeypatch, 
 
 
 def test_detect_circular_ownership_finds_cycle(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -255,7 +281,7 @@ def test_detect_circular_ownership_finds_cycle(monkeypatch, tmp_path) -> None:
 
 
 def test_detect_circular_ownership_no_cycle(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -287,7 +313,7 @@ def _make_rf1086_parse_result(
     Each shareholder tuple: (id, name, kind, shares_start, shares_end, transactions)
     transaction tuple: (direction, type, shares, date, amount)
     """
-    from ar_registry_pdf_parser import (
+    from src.pages.ar.backend.pdf_parser import (
         CompanyHeader, ParseResult, ShareholderRecord, Transaction,
     )
 
@@ -314,7 +340,7 @@ def _make_rf1086_parse_result(
 
 
 def test_rf1086_import_writes_history_and_compare(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 
@@ -388,7 +414,7 @@ def test_rf1086_import_writes_history_and_compare(monkeypatch, tmp_path) -> None
 
 
 def test_rf1086_import_reimport_is_idempotent(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure_client_matching(monkeypatch, tmp_path)
 

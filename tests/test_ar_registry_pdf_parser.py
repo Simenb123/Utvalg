@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ar_registry_pdf_parser import (
+from src.pages.ar.backend.pdf_parser import (
     CompanyHeader,
     ShareholderRecord,
     Transaction,

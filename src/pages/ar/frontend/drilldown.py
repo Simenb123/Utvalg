@@ -213,7 +213,7 @@ class _OwnerDrilldownDialog(tk.Toplevel):
 
     def _load_owner_rows(self, orgnr: str) -> tuple[str, list[dict]]:
         try:
-            import ar_store
+            from ..backend import store as ar_store
         except Exception:
             log.warning("ar_store ikke tilgjengelig", exc_info=True)
             return "", []

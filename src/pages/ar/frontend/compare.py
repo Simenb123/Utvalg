@@ -401,7 +401,7 @@ def on_compare_selected(page, _event=None) -> None:
 
     trace: dict[str, Any] = {}
     try:
-        from ar_store import get_shareholder_trace_detail
+        from ..backend.store import get_shareholder_trace_detail
         trace = get_shareholder_trace_detail(page._client, page._year, key) or {}
     except Exception:
         trace = {}
@@ -514,7 +514,7 @@ def on_compare_show_import_detail(page) -> None:
 
 def show_persisted_import_detail(page, import_id: str) -> None:
     try:
-        from ar_store import _load_import_detail
+        from ..backend.store import _load_import_detail
     except Exception as exc:
         messagebox.showerror("AR", f"Kunne ikke laste importdetaljer:\n{exc}")
         return
@@ -522,7 +522,7 @@ def show_persisted_import_detail(page, import_id: str) -> None:
     if not detail:
         messagebox.showinfo("AR", "Fant ingen lagrede importdetaljer.")
         return
-    from page_ar_import_detail_dialog import _ImportDetailDialog
+    from .import_detail_dialog import _ImportDetailDialog
     _ImportDetailDialog(page, detail=detail).show()
 
 

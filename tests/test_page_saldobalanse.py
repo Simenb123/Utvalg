@@ -2727,7 +2727,8 @@ def test_load_owned_company_name_map_filters_invalid_rows(monkeypatch) -> None:
                 ]
             }
 
-    monkeypatch.setitem(__import__("sys").modules, "ar_store", _FakeAr)
+    import src.pages.ar.backend as _ar_backend
+    monkeypatch.setattr(_ar_backend, "store", _FakeAr)
     mapping = page_saldobalanse._load_owned_company_name_map("Testklient", 2025)
     assert mapping == {"987654321": "Datter AS"}
 

@@ -37,7 +37,7 @@ def export_klientinfo_workpaper(page) -> None:
     if filedialog is None:
         return
 
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
     import brreg_client
     import workpaper_klientinfo
 
@@ -112,6 +112,38 @@ def export_klientinfo_workpaper(page) -> None:
             )
         return rows
 
+    def _indirect_owners_with_fallback(orgnr: str) -> list[dict]:
+        try:
+            rows = list(ar_store.list_company_owners(orgnr, lookup_year) or [])
+        except Exception:
+            log.warning(
+                "list_company_owners feilet for %s/%s",
+                orgnr, lookup_year, exc_info=True,
+            )
+            rows = []
+        if rows:
+            return rows
+
+        fallback = getattr(ar_store, "list_company_owners_with_fallback", None)
+        if fallback is None:
+            return []
+        try:
+            used_year, fallback_rows = fallback(orgnr, lookup_year)
+            rows = list(fallback_rows or [])
+        except Exception:
+            log.warning(
+                "list_company_owners_with_fallback feilet for %s/%s",
+                orgnr, lookup_year, exc_info=True,
+            )
+            return []
+        if rows:
+            log.info(
+                "Indirekte eierskap: bruker AR-året %s for orgnr=%s "
+                "(siste tilgjengelige <= %s).",
+                used_year, orgnr, lookup_year,
+            )
+        return rows
+
     wb = workpaper_klientinfo.build_klientinfo_workpaper(
         client=client,
         year=year,
@@ -121,7 +153,7 @@ def export_klientinfo_workpaper(page) -> None:
         owners=owners,
         owned_companies=owned_companies,
         owners_year_used=owners_year_used,
-        indirect_owners_fn=_indirect_owners,
+        indirect_owners_fn=_indirect_owners_with_fallback,
     )
 
     base_name = _safe_base_name("Klientinfo", client, year)

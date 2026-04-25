@@ -613,8 +613,8 @@ def _build_indirect_entries(
         return entries, breaks, ""
 
     try:
-        import ar_store
-        from ar_ownership_chain import walk_indirect_chain
+        from ..backend import store as ar_store
+        from ..backend.ownership_chain import walk_indirect_chain
     except Exception:
         logger.debug("Indirekte eierkjede: ar_store/ar_ownership_chain ikke tilgjengelig", exc_info=True)
         return entries, breaks, lookup_year

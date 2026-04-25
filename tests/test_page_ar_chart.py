@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 
 def test_build_owned_help_text_describes_row() -> None:
-    from page_ar import _build_owned_help_text
+    from src.pages.ar.frontend.page import _build_owned_help_text
 
     text = _build_owned_help_text(
         {
@@ -26,7 +26,7 @@ def test_build_owned_help_text_describes_row() -> None:
 
 
 def _make_page():
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._nb = MagicMock()
@@ -156,14 +156,14 @@ def test_chart_reset_view_refreshes_chart() -> None:
     page = _make_page()
     page._refresh_org_chart = MagicMock()
 
-    with patch("page_ar.ARPage._chart_positions_path", return_value=None):
+    with patch("src.pages.ar.frontend.page.ARPage._chart_positions_path", return_value=None):
         page._chart_reset_view()
 
     page._refresh_org_chart.assert_called_once()
 
 
 def test_refresh_current_overview_starts_background_load() -> None:
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._client = "Spor Arkitekter AS"
@@ -172,7 +172,7 @@ def test_refresh_current_overview_starts_background_load() -> None:
     page._overview_loading = False
     page.var_status = MagicMock()
 
-    with patch("page_ar.threading.Thread") as mock_thread:
+    with patch("src.pages.ar.frontend.page.threading.Thread") as mock_thread:
         page._refresh_current_overview()
 
     assert page._overview_loading is True
@@ -208,7 +208,7 @@ def test_tab_changed_refreshes_dirty_chart() -> None:
 
 def test_load_chart_positions_accepts_valid_json(tmp_path) -> None:
     import json as _json
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     payload = {"root:123": [10.5, 20.25], "child:ACME": [100.0, 200.0]}
@@ -222,7 +222,7 @@ def test_load_chart_positions_accepts_valid_json(tmp_path) -> None:
 
 
 def test_load_chart_positions_returns_empty_on_invalid_json(tmp_path) -> None:
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     positions_file = tmp_path / "chart_positions.json"
@@ -236,7 +236,7 @@ def test_load_chart_positions_returns_empty_on_invalid_json(tmp_path) -> None:
 
 def test_load_chart_positions_discards_malformed_entries(tmp_path) -> None:
     import json as _json
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     payload = {
@@ -256,7 +256,7 @@ def test_load_chart_positions_discards_malformed_entries(tmp_path) -> None:
 
 def test_save_chart_positions_is_atomic(tmp_path) -> None:
     import json as _json
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     positions_file = tmp_path / "chart_positions.json"
@@ -277,7 +277,7 @@ def test_save_chart_positions_is_atomic(tmp_path) -> None:
 def test_chart_fit_view_does_not_recurse_into_refresh() -> None:
     """chart_fit_view skal ikke kalle _refresh_org_chart — den re-rendrer
     fra logisk modell direkte. Dette hindrer auto-fit-loopen."""
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     canvas = MagicMock()
@@ -296,7 +296,7 @@ def test_chart_fit_view_does_not_recurse_into_refresh() -> None:
 
 
 def test_scheduled_fit_view_ignores_stale_render_id() -> None:
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._chart_render_id = 7
@@ -311,7 +311,7 @@ def test_scheduled_fit_view_ignores_stale_render_id() -> None:
 
 
 def test_refresh_org_chart_defers_when_user_is_dragging() -> None:
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._chart_dragging = True
@@ -327,7 +327,7 @@ def test_refresh_org_chart_defers_when_user_is_dragging() -> None:
 
 def test_zoom_does_not_mutate_logical_positions() -> None:
     """Endret zoom skal ikke endre lagrede logiske koordinater."""
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     canvas = MagicMock()
@@ -352,14 +352,14 @@ def test_load_overview_worker_does_not_block_on_circular_detection() -> None:
     """Kritisk regresjonsvakt: _load_overview_worker skal ALDRI kalle
     detect_circular_ownership. Hvis den gjør det, kan AR-tabellene bli
     blanke fordi tung SQLite-analyse forsinker _apply_loaded_overview."""
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._overview_request_id = 1
     page.after = lambda _delay, callback, *a, **kw: None
 
-    with patch("page_ar.get_client_ownership_overview", return_value={"owners": []}) as m_ov, \
-         patch("page_ar.detect_circular_ownership") as m_circ:
+    with patch("src.pages.ar.frontend.page.get_client_ownership_overview", return_value={"owners": []}) as m_ov, \
+         patch("src.pages.ar.frontend.page.detect_circular_ownership") as m_circ:
         page._load_overview_worker(1, "Test AS", "2025")
 
     m_ov.assert_called_once_with("Test AS", "2025")
@@ -369,7 +369,7 @@ def test_load_overview_worker_does_not_block_on_circular_detection() -> None:
 def test_apply_loaded_overview_fills_tables_without_circular_result() -> None:
     """_apply_loaded_overview skal fylle tabellene selv om circular
     ownership ikke er beregnet. Kartet viser evt. varsel senere."""
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = _make_page()
     page._overview_request_id = 1
@@ -395,7 +395,7 @@ def test_apply_loaded_overview_fills_tables_without_circular_result() -> None:
 
 
 def test_start_circular_worker_runs_in_background_with_request_id() -> None:
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._client = "Test AS"
@@ -404,7 +404,7 @@ def test_start_circular_worker_runs_in_background_with_request_id() -> None:
     page._circular_request_id = 4
     page._circular_in_flight = False
 
-    with patch("page_ar.threading.Thread") as mock_thread:
+    with patch("src.pages.ar.frontend.page.threading.Thread") as mock_thread:
         page._start_circular_worker()
 
     assert page._circular_in_flight is True
@@ -414,7 +414,7 @@ def test_start_circular_worker_runs_in_background_with_request_id() -> None:
 
 
 def test_start_circular_worker_is_noop_when_cycles_already_present() -> None:
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._client = "Test AS"
@@ -423,7 +423,7 @@ def test_start_circular_worker_is_noop_when_cycles_already_present() -> None:
     page._circular_request_id = 3
     page._circular_in_flight = False
 
-    with patch("page_ar.threading.Thread") as mock_thread:
+    with patch("src.pages.ar.frontend.page.threading.Thread") as mock_thread:
         page._start_circular_worker()
 
     mock_thread.assert_not_called()
@@ -432,7 +432,7 @@ def test_start_circular_worker_is_noop_when_cycles_already_present() -> None:
 
 
 def test_apply_circular_result_ignores_stale_request() -> None:
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._client = "Test AS"
@@ -452,7 +452,7 @@ def test_apply_circular_result_ignores_stale_request() -> None:
 
 
 def test_apply_circular_result_injects_and_rerenders_when_fresh() -> None:
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._client = "Test AS"
@@ -472,7 +472,7 @@ def test_apply_circular_result_injects_and_rerenders_when_fresh() -> None:
 
 
 def test_apply_circular_result_ignores_different_client_year() -> None:
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._client = "Other AS"
@@ -491,7 +491,7 @@ def test_apply_circular_result_ignores_different_client_year() -> None:
 
 
 def test_chart_render_without_cycles_triggers_circular_worker_once() -> None:
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._org_canvas = MagicMock()
@@ -516,7 +516,7 @@ def test_chart_render_without_cycles_triggers_circular_worker_once() -> None:
 
 
 def test_chart_render_skips_circular_worker_when_cycles_ready() -> None:
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._org_canvas = MagicMock()
@@ -543,7 +543,7 @@ def test_chart_render_skips_circular_worker_when_cycles_ready() -> None:
 def test_chart_renders_when_circular_cycles_missing() -> None:
     """Kartet skal kunne tegnes selv når circular_ownership_cycles ikke
     finnes i overview — varselet bare utelates."""
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     canvas = MagicMock()
@@ -570,7 +570,7 @@ def test_chart_renders_when_circular_cycles_missing() -> None:
 def test_chart_render_reads_cycles_from_overview_not_sqlite() -> None:
     """refresh_org_chart skal ikke selv kalle detect_circular_ownership —
     den skal lese ferdig beregnede sykler fra overview."""
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._org_canvas = MagicMock()
@@ -588,7 +588,7 @@ def test_chart_render_reads_cycles_from_overview_not_sqlite() -> None:
     page.after = lambda _delay, callback, *_a, **_kw: None
 
     with patch.object(page, "_load_chart_positions", return_value={}), \
-         patch("ar_store.detect_circular_ownership") as mock_detect:
+         patch("src.pages.ar.backend.store.detect_circular_ownership") as mock_detect:
         chart.refresh_org_chart(page)
 
     mock_detect.assert_not_called()
@@ -598,7 +598,7 @@ def test_chart_render_reads_cycles_from_overview_not_sqlite() -> None:
 
 def _make_brreg_page():
     """En tynnere ARPage uten fullt GUI, for BRREG-lazy-load-tester."""
-    from page_ar import ARPage
+    from src.pages.ar.frontend.page import ARPage
 
     page = ARPage.__new__(ARPage)
     page._brreg_data = {}
@@ -646,7 +646,7 @@ def test_brreg_header_empty_state_when_no_selection() -> None:
 
 def test_load_brreg_for_row_without_orgnr_shows_empty_state_and_skips_fetch() -> None:
     page = _make_brreg_page()
-    with patch("page_ar_brreg.threading.Thread") as mock_thread, \
+    with patch("src.pages.ar.frontend.brreg.threading.Thread") as mock_thread, \
          patch("reskontro_brreg_panel.update_brreg_panel") as mock_update:
         page._load_brreg_for_selected_row({"company_orgnr": "", "company_name": "Ukjent AS"})
 
@@ -659,7 +659,7 @@ def test_load_brreg_for_row_without_orgnr_shows_empty_state_and_skips_fetch() ->
 
 def test_load_brreg_starts_lazy_fetch_on_first_selection() -> None:
     page = _make_brreg_page()
-    with patch("page_ar_brreg.threading.Thread") as mock_thread:
+    with patch("src.pages.ar.frontend.brreg.threading.Thread") as mock_thread:
         page._load_brreg_for_selected_row({
             "company_orgnr": "914305195", "company_name": "Air Cargo Logistics AS",
         })
@@ -674,7 +674,7 @@ def test_load_brreg_starts_lazy_fetch_on_first_selection() -> None:
 def test_load_brreg_uses_cache_when_already_fetched_and_no_force() -> None:
     page = _make_brreg_page()
     page._brreg_data["914305195"] = {"enhet": {"orgnr": "914305195"}, "regnskap": {}}
-    with patch("page_ar_brreg.threading.Thread") as mock_thread, \
+    with patch("src.pages.ar.frontend.brreg.threading.Thread") as mock_thread, \
          patch("reskontro_brreg_panel.update_brreg_panel") as mock_update:
         page._load_brreg_for_selected_row({
             "company_orgnr": "914305195", "company_name": "Air Cargo Logistics AS",
@@ -719,7 +719,7 @@ def test_brreg_refresh_button_forces_new_fetch_bypassing_cache() -> None:
     page._selected_owned_row = MagicMock(return_value={
         "company_orgnr": "914305195", "company_name": "Air Cargo Logistics AS",
     })
-    with patch("page_ar_brreg.threading.Thread") as mock_thread:
+    with patch("src.pages.ar.frontend.brreg.threading.Thread") as mock_thread:
         page._on_brreg_refresh_clicked()
 
     assert "914305195" not in page._brreg_data  # cachen ble tømt
@@ -751,7 +751,7 @@ def test_build_model_includes_indirect_nodes() -> None:
     via list_company_owners og legge dem til som indirekte noder + kanter
     i kart-modellen.
     """
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._org_canvas = MagicMock()
@@ -797,7 +797,7 @@ def test_build_model_includes_indirect_nodes() -> None:
             ]
         return []
 
-    with patch("ar_store.list_company_owners", side_effect=fake_list_company_owners):
+    with patch("src.pages.ar.backend.store.list_company_owners", side_effect=fake_list_company_owners):
         chart._build_model(page, saved={})
 
     meta = page._chart_model_meta
@@ -840,7 +840,7 @@ def test_build_model_records_chain_break_when_owners_empty() -> None:
     """Hvis list_company_owners returnerer tom liste, registreres en
     placeholder i indirect_entries og orgnr loggføres i indirect_breaks.
     """
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     page._org_canvas = MagicMock()
@@ -859,7 +859,10 @@ def test_build_model_records_chain_break_when_owners_empty() -> None:
         "owners_year_used": "2024",
     }
 
-    with patch("ar_store.list_company_owners", return_value=[]):
+    with (
+        patch("src.pages.ar.backend.store.list_company_owners", return_value=[]),
+        patch("src.pages.ar.backend.store.list_company_owners_with_fallback", return_value=("", [])),
+    ):
         chart._build_model(page, saved={})
 
     meta = page._chart_model_meta
@@ -872,9 +875,68 @@ def test_build_model_records_chain_break_when_owners_empty() -> None:
     assert any(e["pos_key"] == "chain_break:777666555" for e in placeholders)
 
 
+def test_build_model_uses_latest_available_year_per_holding() -> None:
+    """2025-visning skal kunne bruke 2024-import for holdings i eierkjeden."""
+    import src.pages.ar.frontend.chart as chart
+
+    page = _make_page()
+    page._org_canvas = MagicMock()
+    page._org_canvas.winfo_width.return_value = 800
+    page._overview = {
+        "client_orgnr": "915321445",
+        "owners": [
+            {
+                "shareholder_orgnr": "834108682",
+                "shareholder_name": "Ataris Holding AS",
+                "shareholder_kind": "company",
+                "ownership_pct": 100.0,
+            },
+        ],
+        "owned_companies": [],
+        "owners_year_used": "2025",
+    }
+
+    def fake_fallback(orgnr, year):
+        assert year == "2025"
+        if orgnr == "834108682":
+            return "2024", [
+                {
+                    "shareholder_orgnr": "914601819",
+                    "shareholder_name": "Jozani Holding AS",
+                    "shareholder_kind": "company",
+                    "ownership_pct": 33.33,
+                },
+            ]
+        if orgnr == "914601819":
+            return "2024", [
+                {
+                    "shareholder_orgnr": "",
+                    "shareholder_name": "Sorush Ghiasvand Jozani",
+                    "shareholder_kind": "person",
+                    "ownership_pct": 100.0,
+                },
+            ]
+        return "", []
+
+    with (
+        patch("src.pages.ar.backend.store.list_company_owners", return_value=[]),
+        patch("src.pages.ar.backend.store.list_company_owners_with_fallback", side_effect=fake_fallback),
+    ):
+        chart._build_model(page, saved={})
+
+    meta = page._chart_model_meta
+    names = {
+        (entry.get("row") or {}).get("shareholder_name")
+        for entry in (meta.get("indirect_entries") or [])
+    }
+    assert "Jozani Holding AS" in names
+    assert "Sorush Ghiasvand Jozani" in names
+    assert "914601819" not in (meta.get("indirect_breaks") or [])
+
+
 def test_chart_double_click_on_indirect_owner_opens_drilldown() -> None:
     """Dobbeltklikk på en indirekte boks skal åpne eierkjede-drilldown."""
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     canvas = MagicMock()
@@ -900,7 +962,7 @@ def test_chart_double_click_on_indirect_owner_opens_drilldown() -> None:
 
 
 def test_chart_double_click_on_unknown_node_is_noop() -> None:
-    import page_ar_chart as chart
+    import src.pages.ar.frontend.chart as chart
 
     page = _make_page()
     canvas = MagicMock()

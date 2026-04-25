@@ -1564,7 +1564,7 @@ class ARPage(ttk.Frame):
         if not lookup_year:
             overview = self._overview if isinstance(self._overview, dict) else {}
             lookup_year = str(overview.get("owners_year_used") or self._year or "")
-        import page_ar_drilldown
+        from . import drilldown as page_ar_drilldown
         dlg = page_ar_drilldown._OwnerDrilldownDialog(
             self, orgnr=orgnr, name=name, lookup_year=lookup_year,
         )
@@ -1628,8 +1628,8 @@ class ARPage(ttk.Frame):
         self._import_registry_pdf(Path(path))
 
     def _import_registry_pdf(self, path: Path) -> None:
-        from ar_registry_pdf_parser import parse_rf1086_pdf
-        from ar_registry_pdf_review_dialog import ArRegistryPdfReviewDialog
+        from ..backend.pdf_parser import parse_rf1086_pdf
+        from .pdf_review_dialog import ArRegistryPdfReviewDialog
 
         self.var_status.set("Leser PDF ...")
         self.update_idletasks()

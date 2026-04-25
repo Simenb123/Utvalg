@@ -65,7 +65,7 @@ def main() -> None:
         "page_mva",
         "page_skatt",
         "src.pages.a07.page_a07",
-        "page_ar",
+        "src.pages.ar.frontend.page",
         "src.pages.consolidation.frontend.page",
         "page_utvalg",
         "page_utvalg_strata",

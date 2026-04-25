@@ -37,7 +37,7 @@ except Exception:
     UtvalgPage = None  # type: ignore
 from src.pages.logg import LoggPage
 from src.pages.consolidation.frontend.page import ConsolidationPage
-from page_ar import ARPage
+from src.pages.ar.frontend.page import ARPage
 from page_regnskap import RegnskapPage
 from page_materiality import MaterialityPage
 from page_mva import MvaPage
@@ -937,7 +937,7 @@ class App(tk.Tk):
                 self._refresh_admin_from_session()
             return
 
-        if selected_widget is getattr(self, "page_ar", None):
+        if selected_widget is getattr(self, "src.pages.ar.frontend.page", None):
             try:
                 self.after_idle(self._refresh_ar_from_session)
             except Exception:

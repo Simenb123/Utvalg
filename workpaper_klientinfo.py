@@ -24,7 +24,7 @@ from typing import Any, Callable, Iterable, Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-from ar_ownership_chain import walk_indirect_chain
+from src.pages.ar.backend.ownership_chain import walk_indirect_chain
 from workpaper_forside import build_forside_sheet
 
 

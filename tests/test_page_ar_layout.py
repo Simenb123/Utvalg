@@ -16,7 +16,7 @@ def _make_ar_page():
     nb = ttk.Notebook(root)
     nb.pack(fill="both", expand=True)
 
-    import page_ar
+    import src.pages.ar.frontend.page as page_ar
     page = page_ar.ARPage(nb)
     nb.add(page, text="AR")
     root.update_idletasks()

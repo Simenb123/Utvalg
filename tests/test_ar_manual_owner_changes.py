@@ -30,7 +30,7 @@ def _write_registry_csv_updated(path) -> None:
 
 
 def _configure(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
     import client_meta_index
 
     client_meta = {
@@ -61,7 +61,7 @@ def _configure(monkeypatch, tmp_path) -> None:
 
 
 def test_manual_owner_change_roundtrip(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     change = ar_store.ManualOwnerChange(
@@ -87,7 +87,7 @@ def test_manual_owner_change_roundtrip(monkeypatch, tmp_path) -> None:
 
 
 def test_merge_owners_upsert_wins(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     register_rows = [
         {
@@ -115,7 +115,7 @@ def test_merge_owners_upsert_wins(monkeypatch, tmp_path) -> None:
 
 
 def test_merge_owners_remove_filters_register(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     register_rows = [
         {
@@ -142,7 +142,7 @@ def test_merge_owners_remove_filters_register(monkeypatch, tmp_path) -> None:
 
 
 def test_merge_owners_new_manual_without_register(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     change = ar_store.ManualOwnerChange(
         shareholder_name="Nytt Selskap AS",
@@ -159,7 +159,7 @@ def test_merge_owners_new_manual_without_register(monkeypatch, tmp_path) -> None
 
 
 def test_build_pending_owner_changes_overwrite_and_restore() -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     upsert = ar_store.ManualOwnerChange(
         shareholder_name="OLA NORDMANN",
@@ -196,7 +196,7 @@ def test_build_pending_owner_changes_overwrite_and_restore() -> None:
 
 
 def test_build_pending_owner_changes_skips_when_match() -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     change = ar_store.ManualOwnerChange(
         shareholder_name="OLA NORDMANN",
@@ -218,7 +218,7 @@ def test_build_pending_owner_changes_skips_when_match() -> None:
 
 
 def test_accept_pending_owner_changes_deletes_manual(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     c1 = ar_store.ManualOwnerChange(shareholder_name="A")
@@ -233,7 +233,7 @@ def test_accept_pending_owner_changes_deletes_manual(monkeypatch, tmp_path) -> N
 
 
 def test_accept_all_owner_changes(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     c1 = ar_store.ManualOwnerChange(shareholder_name="A")
@@ -244,7 +244,7 @@ def test_accept_all_owner_changes(monkeypatch, tmp_path) -> None:
 
 
 def test_overview_reports_manual_owner_override(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     csv_path = tmp_path / "aksjeeiebok__2024_07052025.csv"
@@ -281,7 +281,7 @@ def test_overview_reports_manual_owner_override(monkeypatch, tmp_path) -> None:
 
 
 def test_overview_surfaces_pending_on_register_conflict(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     csv_2024 = tmp_path / "aksjeeiebok__2024_07052025.csv"
@@ -319,7 +319,7 @@ def test_overview_surfaces_pending_on_register_conflict(monkeypatch, tmp_path) -
 
 
 def test_hidden_owner_surfaces_in_compare(monkeypatch, tmp_path) -> None:
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     csv_path = tmp_path / "aksjeeiebok__2024_07052025.csv"
@@ -348,7 +348,7 @@ def test_manual_owner_replaces_fallback_register(monkeypatch, tmp_path) -> None:
     """Når target_year mangler eget register og brukeren har lagt inn manuelle
     eiere, skal disse representere hele eierbildet for target_year. Fallback-
     registeret fra et tidligere år skal ikke lekke inn som 'nå-tall'."""
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     # Seed 2024-register med tre eiere (AIR MANAGEMENT HOLDING + OLA NORDMANN)
@@ -390,7 +390,7 @@ def test_manual_owner_replaces_fallback_register(monkeypatch, tmp_path) -> None:
 def test_manual_owner_merges_with_target_year_register(monkeypatch, tmp_path) -> None:
     """Når target_year faktisk har eget register, skal manuelle oppføringer
     fortsatt merges inn som overstyringer (ikke erstatte hele registeret)."""
-    import ar_store
+    import src.pages.ar.backend.store as ar_store
 
     _configure(monkeypatch, tmp_path)
     csv_path = tmp_path / "aksjeeiebok__2024_07052025.csv"

@@ -479,7 +479,7 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         return _import_ctx.import_companies_from_ar_batch(self, rows, storage_module=storage, tb_import_module=tb_import, messagebox_module=messagebox)
 
     def create_associate_cases_from_ar_batch(self, rows: list[dict[str, Any]], *, year: str | None = None) -> list[AssociateCase | None]:
-        from ar_store import classify_relation_type
+        from src.pages.ar.backend.store import classify_relation_type
         results: list[AssociateCase | None] = []
         for row in rows:
             try:
