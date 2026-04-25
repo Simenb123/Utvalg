@@ -33,6 +33,106 @@ from page_analyse_rl_pivot import (
 
 log = logging.getLogger("app")
 
+
+# Mellomlager for build_rl_pivot-resultater. refresh_rl_pivot kaller
+# funksjonen tre ganger per bytte til Regnskapslinje-modus (hoved +
+# base-SB + adjusted-SB for AO-sammenligning). Alle input-objekter er
+# stabile mellom klikk så lenge bruker ikke reloader data — vi bruker
+# derfor id() på hver input som cache-nøkkel. Cachen er en enkel LRU-ring
+# så vi ikke blåser opp minnet hvis bruker bytter klient ofte.
+_RL_PIVOT_CACHE: dict[tuple, pd.DataFrame] = {}
+_RL_PIVOT_CACHE_MAX = 8
+
+
+# Mellomlager for hele det berikede pivot_df (etter fjor + brreg + AO).
+# Byggingen koster 500+ ms; på andre mode-bytte er alle inputs identiske.
+# Verdi: dict med 'pivot_df', 'has_prev', 'has_brreg', 'fjor_source'.
+_RL_ENRICHED_CACHE: dict[tuple, dict] = {}
+_RL_ENRICHED_CACHE_MAX = 4
+
+
+def _rl_enriched_cache_key(
+    *,
+    page: Any,
+    df_filtered: pd.DataFrame,
+    intervals: pd.DataFrame,
+    regnskapslinjer: pd.DataFrame,
+    sb_df: Optional[pd.DataFrame],
+    base_sb_df: Optional[pd.DataFrame],
+    adjusted_sb_df: Optional[pd.DataFrame],
+    account_overrides: Optional[dict],
+) -> tuple:
+    """Cache-nøkkel for beriket pivot_df.
+
+    Baserer seg på STABILE source-objekter, ikke på derived/computed
+    objekter (som account_overrides og adjusted_sb_df som kan ha ny id()
+    hver gang selv med samme innhold). Vi bruker:
+      - id() av rene kilde-DataFramer (df_filtered, intervals, regnskapslinjer)
+      - id() av base SB og fjor-SB (de er stabile på page-instansen)
+      - state-flagg (include_ao) i stedet for derived adjusted_sb_df
+      - klient + år (siden de styrer overrides + AO-entries)
+    """
+    base_sb_page = getattr(page, "_rl_sb_df", None)
+    sb_prev = getattr(page, "_rl_sb_prev_df", None)
+    brreg = getattr(page, "_nk_brreg_data", None)
+    try:
+        include_ao = bool(page._include_ao_enabled())
+    except Exception:
+        include_ao = False
+    try:
+        import session as _sess
+        client = str(getattr(_sess, "client", "") or "")
+        year = str(getattr(_sess, "year", "") or "")
+    except Exception:
+        client = ""
+        year = ""
+    return (
+        id(df_filtered),
+        id(intervals),
+        id(regnskapslinjer),
+        id(base_sb_page) if base_sb_page is not None else 0,
+        id(sb_prev) if sb_prev is not None else 0,
+        id(brreg) if brreg is not None else 0,
+        include_ao,
+        client,
+        year,
+    )
+
+
+def _cached_build_rl_pivot(
+    df_hb: pd.DataFrame,
+    intervals: pd.DataFrame,
+    regnskapslinjer: pd.DataFrame,
+    *,
+    sb_df: Optional[pd.DataFrame] = None,
+    account_overrides: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Cachet proxy for build_rl_pivot. Nøkkel på id() av alle inputs —
+    når bruker reloader data får alle objekter nye id-er og cachen går
+    automatisk tom."""
+    key = (
+        id(df_hb),
+        id(intervals),
+        id(regnskapslinjer),
+        id(sb_df) if sb_df is not None else 0,
+        id(account_overrides) if account_overrides is not None else 0,
+    )
+    cached = _RL_PIVOT_CACHE.get(key)
+    if cached is not None:
+        return cached.copy()  # kopier så kallere kan mutere fritt
+    result = build_rl_pivot(
+        df_hb,
+        intervals,
+        regnskapslinjer,
+        sb_df=sb_df,
+        account_overrides=account_overrides,
+    )
+    # Enkel LRU: hvis cachen er full, fjern eldste entry.
+    if len(_RL_PIVOT_CACHE) >= _RL_PIVOT_CACHE_MAX:
+        _RL_PIVOT_CACHE.pop(next(iter(_RL_PIVOT_CACHE)))
+    _RL_PIVOT_CACHE[key] = result.copy()
+    return result
+
 # Kolonnenavn brukt i treeview (vises som headings i RL-modus).
 # Interne kolonne-IDer er uendret — kun brukerrettet label endres.
 # Labels formatteres dynamisk via felles vokabular (heading()) i
@@ -389,6 +489,23 @@ def refresh_rl_pivot(*, page: Any) -> None:
     base_sb_df, adjusted_sb_df, sb_df = _resolve_analysis_sb_views(page=page)
 
     account_overrides = _load_current_client_account_overrides()
+
+    # Sjekk mellomlager for den ENDELIGE pivot_df. Hele refresh_rl_pivot
+    # bygger et beriket pivot (fjor, brreg, AO) som er stabilt mellom
+    # mode-byttene så lenge dataene ikke har endret seg. Hopper direkte
+    # til tree-fyllinga hvis vi har en gyldig cachet versjon.
+    enriched_cache_key = _rl_enriched_cache_key(
+        page=page,
+        df_filtered=df_filtered,
+        intervals=intervals,
+        regnskapslinjer=regnskapslinjer,
+        sb_df=sb_df,
+        base_sb_df=base_sb_df,
+        adjusted_sb_df=adjusted_sb_df,
+        account_overrides=account_overrides,
+    )
+    _enriched_cached = _RL_ENRICHED_CACHE.get(enriched_cache_key)
+
     try:
         from regnskap_mapping import normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
@@ -438,111 +555,144 @@ def refresh_rl_pivot(*, page: Any) -> None:
     except Exception:
         pass
 
-    try:
-        pivot_df = build_rl_pivot(
-            df_filtered,
-            intervals,
-            regnskapslinjer,
-            sb_df=sb_df,
-            account_overrides=account_overrides,
-        )
-    except Exception as exc:
-        log.warning("refresh_rl_pivot: feil ved bygging: %s", exc)
-        return
-    _mark("build_rl_pivot (hoved)")
-
-    # --- Fjorårsdata ---
-    sb_prev = ensure_sb_prev_loaded(page=page)
-    has_prev = sb_prev is not None and not sb_prev.empty
-    fjor_source: Optional[str] = None
-    if has_prev:
+    # Hvis mellomlager har en gyldig versjon: hopp over hele byggingen.
+    if _enriched_cached is not None:
+        pivot_df = _enriched_cached["pivot_df"].copy()
+        has_prev = _enriched_cached["has_prev"]
+        has_brreg = _enriched_cached["has_brreg"]
+        fjor_source = _enriched_cached["fjor_source"]
         try:
-            import previous_year_comparison
-            import regnskap_client_overrides as _rco
-            import session as _sess
-            _cl = getattr(_sess, "client", None) or ""
-            _yr = getattr(_sess, "year", None) or ""
-            prior_overrides = _rco.load_prior_year_overrides(_cl, _yr) if _cl and _yr else None
-            pivot_df = previous_year_comparison.add_previous_year_columns(
-                pivot_df, sb_prev, intervals, regnskapslinjer,
+            page._rl_fjor_source = fjor_source
+        except Exception:
+            pass
+        update_pivot_headings(page=page, mode="Regnskapslinje")
+        try:
+            page._pivot_df_last = pivot_df
+            page._pivot_df_rl = pivot_df
+        except Exception:
+            pass
+        _mark("enriched_cache_hit")
+    else:
+        try:
+            pivot_df = _cached_build_rl_pivot(
+                df_filtered,
+                intervals,
+                regnskapslinjer,
+                sb_df=sb_df,
                 account_overrides=account_overrides,
-                prior_year_overrides=prior_overrides,
             )
-            fjor_source = "sb"
         except Exception as exc:
-            log.warning("refresh_rl_pivot: fjorårskolonner feilet: %s", exc)
-            has_prev = False
+            log.warning("refresh_rl_pivot: feil ved bygging: %s", exc)
+            return
+        _mark("build_rl_pivot (hoved)")
 
-    # BRREG-fallback når egne fjorårstall mangler og BRREG dekker år N-1
-    if not has_prev:
-        active_year = _resolve_active_year()
-        brreg_data_try = getattr(page, "_nk_brreg_data", None)
-        if active_year is not None:
-            fjor_year = active_year - 1
+        # --- Fjorårsdata ---
+        sb_prev = ensure_sb_prev_loaded(page=page)
+        has_prev = sb_prev is not None and not sb_prev.empty
+        fjor_source: Optional[str] = None
+        if has_prev:
             try:
-                import brreg_fjor_fallback
-                if brreg_fjor_fallback.has_brreg_for_year(brreg_data_try, fjor_year):
-                    pivot_df = brreg_fjor_fallback.build_brreg_fjor_pivot_columns(
-                        pivot_df, regnskapslinjer, brreg_data_try, fjor_year,
-                    )
-                    has_prev = True
-                    fjor_source = "brreg"
+                import previous_year_comparison
+                import regnskap_client_overrides as _rco
+                import session as _sess
+                _cl = getattr(_sess, "client", None) or ""
+                _yr = getattr(_sess, "year", None) or ""
+                prior_overrides = _rco.load_prior_year_overrides(_cl, _yr) if _cl and _yr else None
+                pivot_df = previous_year_comparison.add_previous_year_columns(
+                    pivot_df, sb_prev, intervals, regnskapslinjer,
+                    account_overrides=account_overrides,
+                    prior_year_overrides=prior_overrides,
+                )
+                fjor_source = "sb"
             except Exception as exc:
-                log.warning("refresh_rl_pivot: BRREG-fjor-fallback feilet: %s", exc)
+                log.warning("refresh_rl_pivot: fjorårskolonner feilet: %s", exc)
+                has_prev = False
 
-    try:
-        page._rl_fjor_source = fjor_source
-    except Exception:
-        pass
-    # Oppdater headings på nytt: fjor_source og has_prev er nå kjent
-    update_pivot_headings(page=page, mode="Regnskapslinje")
-    _mark("fjor+brreg-fallback")
+        # BRREG-fallback når egne fjorårstall mangler og BRREG dekker år N-1
+        if not has_prev:
+            active_year = _resolve_active_year()
+            brreg_data_try = getattr(page, "_nk_brreg_data", None)
+            if active_year is not None:
+                fjor_year = active_year - 1
+                try:
+                    import brreg_fjor_fallback
+                    if brreg_fjor_fallback.has_brreg_for_year(brreg_data_try, fjor_year):
+                        pivot_df = brreg_fjor_fallback.build_brreg_fjor_pivot_columns(
+                            pivot_df, regnskapslinjer, brreg_data_try, fjor_year,
+                        )
+                        has_prev = True
+                        fjor_source = "brreg"
+                except Exception as exc:
+                    log.warning("refresh_rl_pivot: BRREG-fjor-fallback feilet: %s", exc)
 
-    try:
-        base_pivot_df = build_rl_pivot(
-            df_filtered,
-            intervals,
-            regnskapslinjer,
-            sb_df=base_sb_df,
-            account_overrides=account_overrides,
-        )
-        adjusted_pivot_df = build_rl_pivot(
-            df_filtered,
-            intervals,
-            regnskapslinjer,
-            sb_df=adjusted_sb_df,
-            account_overrides=account_overrides,
-        )
-        pivot_df = _add_adjustment_columns(
-            pivot_df,
-            base_pivot_df=base_pivot_df,
-            adjusted_pivot_df=adjusted_pivot_df,
-        )
-    except Exception as exc:
-        log.warning("refresh_rl_pivot: AO-sammenligning feilet: %s", exc)
-        pivot_df = _add_adjustment_columns(pivot_df)
-    _mark("AO-sammenligning (build_rl_pivot x2)")
-
-    # --- BRREG-sammenligning ---
-    brreg_data = getattr(page, "_nk_brreg_data", None)
-    has_brreg = bool(brreg_data)
-    if has_brreg:
         try:
-            import brreg_rl_comparison
-            pivot_df = brreg_rl_comparison.add_brreg_columns(
-                pivot_df, regnskapslinjer, brreg_data,
+            page._rl_fjor_source = fjor_source
+        except Exception:
+            pass
+        # Oppdater headings på nytt: fjor_source og has_prev er nå kjent
+        update_pivot_headings(page=page, mode="Regnskapslinje")
+        _mark("fjor+brreg-fallback")
+
+        try:
+            base_pivot_df = _cached_build_rl_pivot(
+                df_filtered,
+                intervals,
+                regnskapslinjer,
+                sb_df=base_sb_df,
+                account_overrides=account_overrides,
+            )
+            adjusted_pivot_df = _cached_build_rl_pivot(
+                df_filtered,
+                intervals,
+                regnskapslinjer,
+                sb_df=adjusted_sb_df,
+                account_overrides=account_overrides,
+            )
+            pivot_df = _add_adjustment_columns(
+                pivot_df,
+                base_pivot_df=base_pivot_df,
+                adjusted_pivot_df=adjusted_pivot_df,
             )
         except Exception as exc:
-            log.warning("refresh_rl_pivot: BRREG-sammenligning feilet: %s", exc)
-            has_brreg = False
+            log.warning("refresh_rl_pivot: AO-sammenligning feilet: %s", exc)
+            pivot_df = _add_adjustment_columns(pivot_df)
+        _mark("AO-sammenligning (build_rl_pivot x2)")
 
-    try:
-        snap = pivot_df.copy()
-        page._pivot_df_last = snap
-        page._pivot_df_rl = snap
-    except Exception:
-        pass
-    _mark("brreg+cache_snapshot")
+        # --- BRREG-sammenligning ---
+        brreg_data = getattr(page, "_nk_brreg_data", None)
+        has_brreg = bool(brreg_data)
+        if has_brreg:
+            try:
+                import brreg_rl_comparison
+                pivot_df = brreg_rl_comparison.add_brreg_columns(
+                    pivot_df, regnskapslinjer, brreg_data,
+                )
+            except Exception as exc:
+                log.warning("refresh_rl_pivot: BRREG-sammenligning feilet: %s", exc)
+                has_brreg = False
+
+        try:
+            snap = pivot_df.copy()
+            page._pivot_df_last = snap
+            page._pivot_df_rl = snap
+        except Exception:
+            pass
+        _mark("brreg+cache_snapshot")
+
+        # Lagre det ferdige berikede pivot_df i mellomlager for raskere
+        # neste mode-bytte. Bruk copy() så cachen ikke forurenses av
+        # senere mutasjoner.
+        try:
+            if len(_RL_ENRICHED_CACHE) >= _RL_ENRICHED_CACHE_MAX:
+                _RL_ENRICHED_CACHE.pop(next(iter(_RL_ENRICHED_CACHE)))
+            _RL_ENRICHED_CACHE[enriched_cache_key] = {
+                "pivot_df": pivot_df.copy(),
+                "has_prev": has_prev,
+                "has_brreg": has_brreg,
+                "fjor_source": fjor_source,
+            }
+        except Exception:
+            pass
 
     has_sb = sb_df is not None and not sb_df.empty
 

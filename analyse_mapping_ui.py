@@ -18,6 +18,35 @@ def _issue_for_account(page: Any, konto: str):
     return None
 
 
+def _mapping_issues_cache_key(page: Any) -> tuple:
+    """Cache-nøkkel for mapping-issues.
+
+    Bruker STABILE source-objekter + state-flagg, ikke derived
+    DataFramer (som _df_filtered kan rebygges mellom kall selv om
+    innholdet er likt). Klient/år-tuple er med så cache ikke deles
+    mellom klienter."""
+    try:
+        include_ao = bool(page._include_ao_enabled())
+    except Exception:
+        include_ao = False
+    try:
+        import session as _sess
+        client = str(getattr(_sess, "client", "") or "")
+        year = str(getattr(_sess, "year", "") or "")
+    except Exception:
+        client = ""
+        year = ""
+    return (
+        id(getattr(page, "dataset", None)),
+        id(getattr(page, "_rl_sb_df", None)),
+        id(getattr(page, "_rl_intervals", None)),
+        id(getattr(page, "_rl_regnskapslinjer", None)),
+        include_ao,
+        client,
+        year,
+    )
+
+
 def refresh_mapping_issues(page: Any) -> None:
     # Timing-events sendes til src.monitoring.perf. Sett UTVALG_PROFILE=analyse
     # (eller bakoverkompat UTVALG_PROFILE_REFRESH=1) for stderr-print.
@@ -44,17 +73,31 @@ def refresh_mapping_issues(page: Any) -> None:
                 pass
         return res
 
-    try:
-        import analyse_mapping_service
-        issues = _t("build_page_mapping_issues", lambda: analyse_mapping_service.build_page_mapping_issues(page))
-        problems = _t("problem_mapping_issues", lambda: analyse_mapping_service.problem_mapping_issues(issues))
-        summary = _t("summarize_mapping_issues", lambda: analyse_mapping_service.summarize_mapping_issues(issues))
-        accounts = _t("get_problem_accounts", lambda: analyse_mapping_service.get_problem_accounts(issues))
-    except Exception:
-        issues = []
-        problems = []
-        summary = ""
-        accounts = []
+    # Sjekk mellomlager først: build_page_mapping_issues koster 300-350ms
+    # og kjøres på hvert bytte mellom visnings-modi. Resultatet avhenger
+    # kun av stabile page-DataFramer — cache på id() invaliderer automatisk.
+    cache_key = _mapping_issues_cache_key(page)
+    cached = getattr(page, "_mapping_issues_cache", None)
+    cached_key = getattr(page, "_mapping_issues_cache_key", None)
+    if cached is not None and cached_key == cache_key:
+        issues, problems, summary, accounts = cached
+    else:
+        try:
+            import analyse_mapping_service
+            issues = _t("build_page_mapping_issues", lambda: analyse_mapping_service.build_page_mapping_issues(page))
+            problems = _t("problem_mapping_issues", lambda: analyse_mapping_service.problem_mapping_issues(issues))
+            summary = _t("summarize_mapping_issues", lambda: analyse_mapping_service.summarize_mapping_issues(issues))
+            accounts = _t("get_problem_accounts", lambda: analyse_mapping_service.get_problem_accounts(issues))
+        except Exception:
+            issues = []
+            problems = []
+            summary = ""
+            accounts = []
+        try:
+            page._mapping_issues_cache_key = cache_key
+            page._mapping_issues_cache = (issues, problems, summary, accounts)
+        except Exception:
+            pass
     page._mapping_issues = list(issues) if issues else []
     page._mapping_problem_accounts = list(accounts) if accounts else []
 

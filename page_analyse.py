@@ -366,7 +366,19 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
                     self._var_aggregering.set("Saldobalanse")
         except Exception:
             pass
-        self._apply_filters_and_refresh()
+        # Bytt KUN visning — ikke kjør hele filter-rørledningen på nytt.
+        # _apply_filters_and_refresh ville bygd _df_filtered fra scratch (nytt
+        # DataFrame-objekt), noe som invaliderte alle id()-baserte cacher i
+        # mapping_issues og rl_pivot. Mode-bytte trenger ikke ny filtrering;
+        # bare ny pivot-visning + transaksjonsoppdatering.
+        try:
+            self._refresh_pivot()
+        except Exception:
+            pass
+        try:
+            self._refresh_transactions_view()
+        except Exception:
+            pass
         # Tilpass synlige kolonner etter pivot-refresh (headings er nå oppdatert)
         self._adapt_pivot_columns_for_mode()
         # Sortering: aktiver i konto-moduser, deaktiver i RL-modus
