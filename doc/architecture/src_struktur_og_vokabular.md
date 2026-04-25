@@ -1,10 +1,14 @@
 # src/-struktur og felles vokabular
 
-**Sist oppdatert:** 2026-04-23
+**Sist oppdatert:** 2026-04-26 (etter pilot 13 — 11 sider migrert + alle shims ryddet)
 
 Beskriver organiseringen av kodebasen rundt `src/`-mappen som ble innført i
 April 2026, det felles kolonne-vokabularet i `src/shared/columns_vocabulary.py`,
 og det typede pivot-cache-systemet på `AnalysePage`.
+
+Mappestrukturen utviklet seg gjennom piloter 1-13 (april 2026):
+- Pilot 1-11: 11 sider/handlinger flyttet til `src/`
+- Pilot 12-13: 67 toppnivå-shim-filer ryddet bort etter at importerere ble migrert
 
 ## Bakgrunn og motivasjon
 
@@ -28,93 +32,198 @@ Løsningen er introdusert gradvis fane-for-fane, ikke som en stor refaktor.
 ```
 src/
 ├── __init__.py              # tom — gjør src importerbar som package
-├── pages/
+├── pages/                   # Faner i hovednotebook (ui_main.nb.add(...))
 │   ├── __init__.py          # tom
-│   ├── driftsmidler/
-│   │   ├── __init__.py      # re-eksporterer DriftsmidlerPage
-│   │   └── page_driftsmidler.py
-│   └── statistikk/
-│       ├── __init__.py      # re-eksporterer StatistikkPage
-│       ├── page_statistikk.py
-│       ├── page_statistikk_compute.py
-│       └── page_statistikk_excel.py
-└── shared/
-    ├── __init__.py          # tom
-    └── columns_vocabulary.py
+│   ├── a07/                 # frontend/ + backend/ + controller/
+│   ├── ar/                  # Aksjonærer (frontend/ + backend/)
+│   ├── consolidation/       # Konsolidering (frontend/ + backend/)
+│   ├── documents/
+│   ├── driftsmidler/        # frontend/ + backend/
+│   ├── fagchat/
+│   ├── logg/
+│   ├── materiality/         # Vesentlighet (frontend/ + backend/)
+│   ├── oversikt/
+│   ├── regnskap/            # frontend/
+│   └── saldobalanse/        # frontend/ + backend/
+├── audit_actions/           # Popups/handlinger åpnet FRA en fane
+│   ├── __init__.py
+│   ├── motpost/             # Kalles fra Statistikk og Analyse
+│   └── statistikk/          # Åpnes som popup fra Analyse
+├── shared/                  # Cross-cutting utility
+│   ├── __init__.py
+│   └── columns_vocabulary.py
+└── monitoring/              # Ytelsesovervåkning (perf, events, dashboard)
+    ├── perf.py
+    ├── events.py
+    ├── dashboard.py
+    ├── baseline.py
+    └── bench.py
 ```
 
-### Hva går i `src/pages/`
+### Hva går i `src/pages/` vs `src/audit_actions/`
 
-Én fane = én undermappe. Klyngen flyttes samlet (alle `page_X*.py` +
-`X_*.py`-filene som hører sammen). Konvensjon:
+**Avgjørende kriterium:** Er det en `nb.add(...)` for siden i [ui_main.py:340-367](../../ui_main.py#L340-L367)?
 
-- `__init__.py` re-eksporterer fanens hovedklasse: `from .page_X import XPage`
-- Intra-fane-imports er relative: `from .page_X_compute import _foo`
-- Eksterne importer henter via fanens `__init__`: `from src.pages.X import XPage`
+- **`src/pages/<navn>/`** — Faneside i hovednotebook. Brukeren navigerer
+  EXPLISITT dit. Egen UI-state, eget tab-ikon. Ved React-migrering blir
+  dette en route (f.eks. `/saldobalanse`).
+- **`src/audit_actions/<navn>/`** — Popup/dialog/handling som åpnes FRA
+  en annen fane (typisk høyreklikk-meny eller knapp). Lever i `tk.Toplevel`
+  eller midlertidig vindu. Ved React-migrering blir dette en komponent.
+
+Eksempel: `StatistikkPage` har klassebase `ttk.Frame`, MEN den åpnes via
+`_open_statistikk_popup()` i Analyse — derfor `audit_actions/`, ikke `pages/`.
+`SaldobalansePage` legges til hovednotebooken via `self.nb.add(self.page_saldobalanse, ...)`
+— derfor `pages/`.
+
+### Frontend/backend-mønsteret
+
+Innenfor en side-pakke deler vi i to undermapper:
+
+```
+src/pages/X/
+├── __init__.py          # re-eksporterer XPage fra frontend.page
+├── frontend/
+│   ├── __init__.py      # re-eksporterer XPage fra .page
+│   ├── page.py          # Tk-widgets (XPage(ttk.Frame))
+│   ├── actions.py       # Knappklikk-handlinger
+│   └── ...              # Dialoger, kolonne-helpers, osv.
+└── backend/
+    ├── __init__.py
+    ├── compute.py       # Beregningslogikk (rene DataFrames inn/ut)
+    ├── store.py         # Lagring/lasting
+    └── excel.py         # Excel-eksport
+```
+
+Konvensjoner:
+- **Backend importerer ALDRI tkinter** — verifiseres av
+  `tests/test_<X>_backend_no_tk.py` (lint-test per side)
+- **Frontend importerer fra backend** via relative import: `from ..backend.compute import ...`
+- **Backend tar pure data**, ikke `page`-objekter (gjør hodeløs kjøring +
+  REST-eksponering mulig senere)
+- **Eksterne kallere** importerer via fanens `__init__`:
+  `from src.pages.X import XPage`
 
 ### Hva går i `src/shared/`
 
-Cross-cutting kode som brukes av flere faner. Akkurat nå er
-`columns_vocabulary.py` eneste innbygger.
+Cross-cutting kode som brukes av flere faner. I dag inneholder den
+bare `columns_vocabulary.py`. Folder-strukturen under `src/shared/`
+skal kun splittes når det vokser til 10+ filer — enkelhet først.
 
-På sikt kan dette inkludere:
-- `formatting.py`, `preferences.py`, `session.py` (i dag i rot)
-- Theme-moduler (`vaak_excel_theme.py`, `vaak_tokens.py`)
-- Felles widget-helpers
+### Hva går i `src/monitoring/`
 
-Folder-strukturen under `src/shared/` skal kun splittes når det vokser
-til 10+ filer — enkelhet først.
+Ytelsesovervåknings-subsystem (etablert med plan-fila før piloter):
+- `perf.py` — `timer()`, `profile()`, `init_monitoring()`
+- `events.py` — `EventStore` med async disk-flush
+- `dashboard.py` — Tk-sidekick (`python -m src.monitoring.dashboard`)
+- `baseline.py` + `bench.py` — baseline-sammenligning
+
+Se [doc/architecture/monitoring.md](monitoring.md).
 
 ### Hva ligger fortsatt i rot
 
-Alt som ennå ikke er flyttet. Migrering skjer fane-for-fane mens vi
-jobber med dem. Det er **ikke** et mål å flytte alt på en gang —
-re-export-shimmer eller bare oppdatert importsti gjør at flytting kan
-skje uten å bryte resten.
+Alt som ennå ikke er flyttet — store og små. Migrering skjer fane-for-fane
+mens vi jobber med dem. Etter pilot 13 har roten KUN reell kode + 2
+shim-filer (`bilag_drilldialog.py` og `saldobalanse_payload.py`).
+
+Største gjenstående klynger:
+- **Analyse-fanen** — 28+ filer (`page_analyse*.py` + `analyse_*.py`),
+  brukerens eget område, holdes utenfor refaktor inntil videre
+- **Reskontro, MVA, Skatt, Utvalg, Scoping, Dataset, Admin, Revisjonshandlinger**
+  — én-fane-grupper med diverse hjelpefiler
+- **Diverse utility i rot** — formatting.py, preferences.py, session.py osv.
+  (kandidater for `src/shared/` på sikt)
 
 ### Migrering av en ny fane (playbook)
 
 1. **Kartlegg klyngen.** Liste alle filer som hører til fanen
    (`grep page_X*.py + X_*.py`), tester (`tests/test_*X*.py`), og
    eksterne importere (`grep "import page_X\|from page_X"`).
-2. **Lag mappestruktur:** `src/pages/X/__init__.py` med re-eksport
-   av hovedklassen.
-3. **Flytt filene:** `git mv` (preserves history; `git log --follow` fungerer).
-4. **Gjør intra-fane-imports relative:**
-   `from page_X_compute import …` → `from .page_X_compute import …`.
-5. **Oppdater eksterne importere:**
-   `from page_X import XPage` → `from src.pages.X import XPage`.
-6. **Oppdater tester:** `import page_X` → `from src.pages.X import page_X`.
-7. **Verifiser:**
+2. **Identifiser tk-frie vs Tk-koblede filer:**
+   `grep -l "import tkinter\|from tkinter" *X*.py` — gir kandidater
+   for backend/ vs frontend/.
+3. **Lag mappestruktur:** `src/pages/X/{frontend,backend}/__init__.py`
+   med re-eksport.
+4. **Flytt filene:** `git mv` (preserves history; `git log --follow` fungerer).
+5. **Gjør intra-pakke-imports relative:**
+   - Frontend-til-frontend: `from . import Y`
+   - Frontend-til-backend: `from ..backend.compute import ...`
+   - Backend-til-backend: `from .Y import ...`
+6. **Oppdater eksterne importere** (alle steder som bruker gamle navn):
+   `from page_X import XPage` → `from src.pages.X import XPage`
+7. **(Valgfritt) Lag sys.modules-shim** for gradvis overgang — se
+   [Skim-mønsteret](#sys-modules-shim-mønsteret-overgangsfase) under.
+8. **Lag lint-test:** `tests/test_X_backend_no_tk.py` som forbyr
+   tkinter-imports i backend/.
+9. **Verifiser:**
    - `python -c "import ui_main"` — sikrer at hele import-grafen virker
    - `pytest tests/test_X*.py` — fanens egne tester
    - Bredere suite — fanger indirekte avhengigheter
-8. **PyInstaller:** Ingen endring nødvendig så lenge entrypoint
-   (`ui_main.py`) finner modulen — speccen lister bare `ui_main` som
-   hidden import og finner resten via import-graf.
+10. **PyInstaller:** Ingen endring nødvendig så lenge entrypoint
+    (`ui_main.py`) finner modulen.
 
-### Migrert hittil
+### sys.modules-shim-mønsteret (overgangsfase)
 
-- `src/pages/driftsmidler/` (1 fil) — pilot, validerte oppskriften
-- `src/pages/statistikk/` (3 filer) — første flerfilet klynge
+Når en fane med mange eksterne importerere flyttes, kan vi unngå å
+oppdatere alle på en gang ved å lage en shim-fil på toppnivå:
 
-### Planlagt neste store klynge
+```python
+# saldobalanse_payload.py (toppnivå-shim)
+"""Bakoverkompat-shim — har flyttet til src.pages.saldobalanse.backend.payload."""
+from __future__ import annotations
+import sys as _sys
+from src.pages.saldobalanse.backend import payload as _payload
+_sys.modules[__name__] = _payload
+```
 
-- `src/pages/a07/`
+`sys.modules`-aliaseringen gjør at `import saldobalanse_payload` returnerer
+nøyaktig samme modul-objekt som `src.pages.saldobalanse.backend.payload` —
+viktig for monkeypatch-konsistens i tester.
 
-For A07 er vedtatt retning aa flytte den offentlige page-entrypointen foerst,
-ikke hele runtime-klyngen i ett steg.
+**For pakker** (motpost/, consolidation/) trengs litt mer for at
+`from pkg import X` skal returnere SAMME modul-objekt — pre-load
+submoduler OG sett dem som attributter på pakka:
 
-Det betyr:
+```python
+# motpost.py (toppnivå pakke-shim)
+import importlib as _importlib
+import pkgutil as _pkgutil
+import sys as _sys
+from src.audit_actions import motpost as _motpost
+_sys.modules[__name__] = _motpost
+for _info in _pkgutil.iter_modules(_motpost.__path__):
+    _mod = _importlib.import_module(f"src.audit_actions.motpost.{_info.name}")
+    _sys.modules[f"motpost.{_info.name}"] = _mod
+    setattr(_motpost, _info.name, _mod)
+```
 
-- `src/pages/a07/` blir kanonisk page-importflate
-- `page_a07.py` beholdes som compat-shim i en overgangsperiode
-- intern motorlogikk i `a07_feature/` splittes videre foer eventuell senere
-  fysisk flytting
+Shimmen fjernes når alle eksterne importerere er oppdatert (typisk i
+en separat opprydnings-pilot — se piloter 12-13).
+
+### Migrert hittil (etter pilot 13)
+
+**`src/pages/`** (11 sider):
+| Side | Pilot | Linjer | Notat |
+|---|---|---|---|
+| driftsmidler | 1 | 550 | Etablerte mønsteret |
+| saldobalanse | 4-5 | 4 250 | 6 filer, sys.modules-shim første gang |
+| materiality | 6 | 2 000 | 5 filer |
+| ar (aksjonærer) | 7 | 7 100 | 11 filer, største enkeltpilot |
+| regnskap | 8 | 1 025 | 1 fil — ren én-fil-pilot |
+| consolidation | 11 | 10 000 | 47 filer, delt i 3 sub-piloter |
+| a07, oversikt, fagchat, logg, documents | (annen utvikler) | — | Codex-arbeid |
+
+**`src/audit_actions/`** (2 handlinger):
+| Handling | Pilot | Notat |
+|---|---|---|
+| motpost | 9 | Etablerte audit_actions-kategorien |
+| statistikk | 10 | Korrigert fra `pages/` (åpnes som popup, ikke fane) |
+
+**Opprydding (pilot 12-13):** 67 toppnivå-shim-filer fjernet.
 
 Se:
-
 - [A07 Refaktor- Og `src/`-Plan](a07_refaktor_og_src_plan.md)
+- [Monitoring-arkitektur](monitoring.md)
 
 ## Felles kolonne-vokabular
 

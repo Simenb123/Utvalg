@@ -10,6 +10,8 @@
 ## Datakilder og struktur
 
 - [`architecture/datakilder_og_mapping_navaerende_struktur.md`](architecture/datakilder_og_mapping_navaerende_struktur.md) - gjeldende modell for delt datamappe, aktiv mapping, lokal cache og hva som ble ryddet i stabiliseringsrunden.
+- [`architecture/src_struktur_og_vokabular.md`](architecture/src_struktur_og_vokabular.md) - organisering av kodebasen rundt `src/pages/`, `src/audit_actions/`, `src/shared/` og `src/monitoring/`. Frontend/backend-mønsteret + kolonne-vokabular.
+- [`architecture/src_migrasjon_pilot_logg.md`](architecture/src_migrasjon_pilot_logg.md) - pilot-for-pilot logg over fane-flyttingen til `src/`. Erfaringer og prinsipper.
 
 ---
 
