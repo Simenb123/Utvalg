@@ -130,7 +130,7 @@ def get_effective_company_tb(page: "ConsolidationPage", company_id: str) -> pd.D
         columns = {str(col).strip() for col in tb.columns}
         if not {"konto", "kontonavn", "ib", "ub", "netto"}.issubset(columns):
             try:
-                from consolidation.tb_import import _normalize_columns
+                from ..backend.tb_import import _normalize_columns
 
                 tb = _normalize_columns(tb.copy())
             except Exception:
@@ -232,7 +232,7 @@ def compute_mapping_status(page: "ConsolidationPage") -> None:
         return
 
     try:
-        from consolidation.mapping import load_shared_config, map_company_tb
+        from ..backend.mapping import load_shared_config, map_company_tb
 
         intervals, regnskapslinjer = load_shared_config()
         page._intervals = intervals
@@ -251,7 +251,7 @@ def compute_mapping_status(page: "ConsolidationPage") -> None:
     for company in page._project.companies:
         try:
             if _is_line_basis_company(company):
-                from consolidation.line_basis_import import validate_company_line_basis
+                from ..backend.line_basis_import import validate_company_line_basis
 
                 basis = getattr(page, "_company_line_bases", {}).get(company.company_id)
                 if basis is None or basis.empty:

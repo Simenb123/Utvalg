@@ -4,8 +4,8 @@ import xml.etree.ElementTree as ET
 
 import pandas as pd
 
-from motpost.excel_sheets.common import TAB_OUTLIER_YELLOW
-from motpost.konto_core import build_motpost_data
+from src.audit_actions.motpost.excel_sheets.common import TAB_OUTLIER_YELLOW
+from src.audit_actions.motpost.konto_core import build_motpost_data
 from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 
 

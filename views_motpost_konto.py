@@ -33,7 +33,7 @@ from tkinter import ttk, messagebox, filedialog
 import session
 import regnskap_client_overrides
 
-from motpost.expected_rules import (
+from src.audit_actions.motpost.expected_rules import (
     ExpectedRuleSet,
     empty_rule_set,
     expected_motkontoer,
@@ -41,11 +41,11 @@ from motpost.expected_rules import (
     normalize_direction,
     save_rule_set,
 )
-from motpost.expected_rules_dialog import (
+from src.audit_actions.motpost.expected_rules_dialog import (
     build_mva_group_map,
     choose_expected_rules,
 )
-from motpost.view_konto_actions import (
+from src.audit_actions.motpost.view_konto_actions import (
     clear_outliers,
     drilldown,
     export_excel,
@@ -54,13 +54,13 @@ from motpost.view_konto_actions import (
     open_bilag_drilldown,
     show_combinations,
 )
-from motpost.view_konto_render import refresh_details, render_summary
-from motpost.view_konto_tree import (
+from src.audit_actions.motpost.view_konto_render import refresh_details, render_summary
+from src.audit_actions.motpost.view_konto_tree import (
     configure_bilag_details_tree,
     treeview_first_selected_value,
     treeview_value_from_iid,
 )
-from motpost.view_konto_ui import (
+from src.audit_actions.motpost.view_konto_ui import (
     bind_entry_select_all,
     build_motpost_header_metrics_text,
     build_motpost_rule_set_summary_text,

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -16,8 +16,8 @@ from consolidation.models import (
 )
 from types import SimpleNamespace
 
-from consolidation.engine import run_consolidation
-from consolidation.mapping import ConfigNotLoadedError
+from src.pages.consolidation.backend.engine import run_consolidation
+from src.pages.consolidation.backend.mapping import ConfigNotLoadedError
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +436,7 @@ class TestParentCompanySerialization:
     """Test that parent_company_id survives serialization round-trip."""
 
     def test_roundtrip(self):
-        from consolidation.models import project_to_dict, project_from_dict
+        from src.pages.consolidation.backend.models import project_to_dict, project_from_dict
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -450,7 +450,7 @@ class TestParentCompanySerialization:
         assert restored.parent_company_id == "abc-123"
 
     def test_missing_parent_in_old_data(self):
-        from consolidation.models import project_from_dict
+        from src.pages.consolidation.backend.models import project_from_dict
 
         d = {
             "project_id": "p1", "client": "Test", "year": "2025",
@@ -587,8 +587,8 @@ class TestCurrencyInEngine:
 class TestExportHideZero:
     def test_hide_zero_filters_result(self, _mock_config):
         """Export with hide_zero should exclude zero leaf lines."""
-        from consolidation.export import build_consolidation_workbook
-        from consolidation.models import RunResult
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.models import RunResult
 
         proj = _sample_project(with_elimination=False)
         tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
@@ -626,7 +626,7 @@ class TestExportHideZero:
 
     def test_hide_zero_filters_company_sheets(self, _mock_config):
         """Export with hide_zero should also filter company TB sheets."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = _sample_project(with_elimination=False)
         tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
@@ -658,7 +658,7 @@ class TestExportHideZero:
 
     def test_main_sheet_places_parent_company_first(self, _mock_config):
         """Konsernoppstilling should always place parent company first among company columns."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = _sample_project(with_elimination=False)
         proj.parent_company_id = "a"
@@ -905,7 +905,7 @@ class TestValutakontroll:
 
     def test_control_sheet_in_export(self, _mock_config):
         """Valutakontroll sheet should appear in export and use engine data."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -954,7 +954,7 @@ class TestSaldobalanseAlle:
 
     def test_sheet_exists_and_row_count(self, _mock_config):
         """Sheet should exist and have one row per account per company."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = _sample_project(with_elimination=False)
         proj.parent_company_id = "a"
@@ -975,7 +975,7 @@ class TestSaldobalanseAlle:
 
     def test_columns_are_correct(self, _mock_config):
         """Header columns should match spec."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = _sample_project(with_elimination=False)
         tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
@@ -998,7 +998,7 @@ class TestSaldobalanseAlle:
 
     def test_amounts_and_rate_are_numeric(self, _mock_config):
         """All amount/rate cells should be numeric, not text."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = _sample_project(with_elimination=False)
         tbs = {"a": _company_a_tb(), "b": _company_b_tb()}
@@ -1021,7 +1021,7 @@ class TestSaldobalanseAlle:
 
     def test_result_account_uses_snittkurs(self, _mock_config):
         """Accounts mapped to regnr < 500 should show Snittkurs."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         proj = ConsolidationProject(
             client="Test", year="2025",
@@ -1059,7 +1059,7 @@ class TestSaldobalanseAlle:
     def test_balance_account_uses_sluttkurs(self, _mock_config, monkeypatch):
         """Accounts mapped to regnr >= 500 should show Sluttkurs."""
         import regnskap_config
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         # Use intervals where konto 1000-1999 maps to regnr 500 (balance)
         monkeypatch.setattr(regnskap_config, "load_kontoplan_mapping", lambda **kw: pd.DataFrame({
@@ -1114,7 +1114,7 @@ class TestSaldobalanseAlle:
 
     def test_unmapped_accounts_included(self, _mock_config):
         """Unmapped accounts (no regnr) should appear in Saldobalanse alle."""
-        from consolidation.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         # TB with one unmapped konto (5000 is outside intervals 1000-1999 / 3000-3999)
         tb_with_unmapped = pd.DataFrame({
@@ -1609,7 +1609,7 @@ class TestFxColumnsBuildCompanyResult:
 
     def _make_fx_page(self, _mock_config):
         """Build a page-like object with FX companies and a run result."""
-        from consolidation.mapping import map_company_tb, load_shared_config
+        from src.pages.consolidation.backend.mapping import map_company_tb, load_shared_config
         from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = ConsolidationProject(
@@ -1816,7 +1816,7 @@ class TestShowResultRebuildsCompanyResult:
     def test_show_result_refreshes_company_result(self, _mock_config):
         """After consolidation, _company_result_df should use fresh run_result."""
         from unittest.mock import MagicMock, patch
-        from consolidation.mapping import map_company_tb, load_shared_config
+        from src.pages.consolidation.backend.mapping import map_company_tb, load_shared_config
         from src.pages.consolidation.frontend.page import ConsolidationPage
 
         proj = ConsolidationProject(
@@ -2211,7 +2211,7 @@ class TestBuildUnmappedWarnings:
     def test_warns_about_unmapped_kontos_with_amounts(self, _mock_config):
         from unittest.mock import MagicMock
         from src.pages.consolidation.frontend.page import ConsolidationPage
-        from consolidation.models import CompanyTB, ConsolidationProject
+        from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2239,7 +2239,7 @@ class TestBuildUnmappedWarnings:
     def test_no_warnings_when_all_mapped(self, _mock_config):
         from unittest.mock import MagicMock
         from src.pages.consolidation.frontend.page import ConsolidationPage
-        from consolidation.models import CompanyTB, ConsolidationProject
+        from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -2421,7 +2421,7 @@ class TestSumpostDrilldown:
         assert "underliggende" not in label_text
 
     def test_sumpost_true_expands_leaf_lines(self, _mock_config):
-        from consolidation.models import RunResult
+        from src.pages.consolidation.backend.models import RunResult
 
         page = self._make_page()
 
@@ -2785,7 +2785,7 @@ class TestResultTreeColumnReset:
 
 class TestConsolidationControlRows:
     def test_append_control_rows_builds_balance_and_disposition_rows(self):
-        from consolidation.control_rows import append_control_rows
+        from src.pages.consolidation.backend.control_rows import append_control_rows
 
         df = pd.DataFrame(
             {
@@ -2827,8 +2827,8 @@ class TestConsolidationControlRows:
         assert ctrl_sum["konsolidert"] == pytest.approx(15.0)
 
     def test_export_appends_control_rows_to_main_sheet(self, _mock_config):
-        from consolidation.export import build_consolidation_workbook
-        from consolidation.models import RunResult
+        from src.pages.consolidation.backend.export import build_consolidation_workbook
+        from src.pages.consolidation.backend.models import RunResult
 
         result_df = pd.DataFrame(
             {

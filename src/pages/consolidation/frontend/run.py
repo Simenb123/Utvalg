@@ -13,7 +13,7 @@ except Exception:  # pragma: no cover
     filedialog = None  # type: ignore
     messagebox = None  # type: ignore
 
-from consolidation import storage
+from ..backend import storage
 from .common import fmt_no, is_line_basis_company
 
 if TYPE_CHECKING:
@@ -60,8 +60,8 @@ def on_run(page: "ConsolidationPage") -> None:
     page._compute_mapping_status()
 
     from ..backend import readiness as consolidation_readiness
-    from consolidation.engine import run_consolidation
-    from consolidation.mapping import ConfigNotLoadedError
+    from ..backend.engine import run_consolidation
+    from ..backend.mapping import ConfigNotLoadedError
 
     try:
         preflight = consolidation_readiness.build_readiness_report(page)
@@ -191,7 +191,7 @@ def on_export(page: "ConsolidationPage") -> None:
         if page._result_df is None or stale:
             return
 
-    from consolidation.export import save_consolidation_workbook
+    from ..backend.export import save_consolidation_workbook
 
     path = filedialog.asksaveasfilename(
         title="Eksporter konsolidering",

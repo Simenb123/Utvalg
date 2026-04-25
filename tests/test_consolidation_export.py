@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     AssociateAdjustmentRow,
     AssociateCase,
     CompanyTB,
@@ -16,7 +16,7 @@ from consolidation.models import (
     EliminationLine,
     RunResult,
 )
-from consolidation.export import build_consolidation_workbook, save_consolidation_workbook
+from src.pages.consolidation.backend.export import build_consolidation_workbook, save_consolidation_workbook
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     AssociateCase,
     CompanyTB,
     ConsolidationProject,
@@ -16,7 +16,7 @@ from consolidation.models import (
     EliminationLine,
     MappingConfig,
 )
-from consolidation import storage
+from src.pages.consolidation.backend import storage
 
 
 @pytest.fixture

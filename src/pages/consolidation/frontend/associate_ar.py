@@ -14,8 +14,8 @@ except Exception:  # pragma: no cover
     filedialog = None  # type: ignore
     messagebox = None  # type: ignore
 
-from consolidation import storage
-from consolidation.models import AssociateCase
+from ..backend import storage
+from ..backend.models import AssociateCase
 from .associate_actions import on_save_associate_case
 from .associate_state import (
     _fmt_no,
@@ -77,8 +77,8 @@ def on_import_associate_line_support(page: "ConsolidationPage") -> None:
     )
     if not path:
         return
-    from consolidation.associate_equity_method import suggest_associate_fields_from_line_basis
-    from consolidation.line_basis_import import import_company_line_basis
+    from ..backend.associate_equity_method import suggest_associate_fields_from_line_basis
+    from ..backend.line_basis_import import import_company_line_basis
 
     try:
         line_df, warnings = import_company_line_basis(path, regnskapslinjer=page._regnskapslinjer)
@@ -119,8 +119,8 @@ def on_import_associate_pdf_support(page: "ConsolidationPage") -> None:
     )
     if not path:
         return
-    from consolidation.associate_equity_method import suggest_associate_fields_from_line_basis
-    from consolidation.pdf_line_suggestions import suggest_line_basis_from_pdf
+    from ..backend.associate_equity_method import suggest_associate_fields_from_line_basis
+    from ..backend.pdf_line_suggestions import suggest_line_basis_from_pdf
 
     try:
         line_df = suggest_line_basis_from_pdf(path, regnskapslinjer=page._regnskapslinjer)
@@ -201,7 +201,7 @@ def create_or_update_associate_case_from_ar_relation(
     )
     case.notes = extra_note or case.notes
 
-    from consolidation.associate_equity_method import mark_associate_case_stale
+    from ..backend.associate_equity_method import mark_associate_case_stale
 
     mark_associate_case_stale(case, proj)
     storage.save_project(proj)

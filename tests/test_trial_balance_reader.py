@@ -194,7 +194,7 @@ def test_netto_only_consolidation_uses_ub(tmp_path: Path) -> None:
 
 def test_session_import_normalizes(tmp_path: Path) -> None:
     """Verify that _normalize_columns produces canonical TB format."""
-    from consolidation.tb_import import _normalize_columns
+    from src.pages.consolidation.backend.tb_import import _normalize_columns
 
     # Simulate a session TB with mixed casing
     raw = pd.DataFrame({
@@ -213,7 +213,7 @@ def test_session_import_normalizes(tmp_path: Path) -> None:
 
 def test_normalize_columns_derives_ub_from_netto() -> None:
     """_normalize_columns must derive UB = IB + Netto when UB is all zero."""
-    from consolidation.tb_import import _normalize_columns
+    from src.pages.consolidation.backend.tb_import import _normalize_columns
 
     # Simulate a netto-only TB (IB=0, UB missing, Netto=values)
     raw = pd.DataFrame({
@@ -231,7 +231,7 @@ def test_normalize_columns_derives_ub_from_netto() -> None:
 
 def test_normalize_columns_preserves_existing_ub() -> None:
     """_normalize_columns must NOT overwrite UB when it already has values."""
-    from consolidation.tb_import import _normalize_columns
+    from src.pages.consolidation.backend.tb_import import _normalize_columns
 
     raw = pd.DataFrame({
         "konto": ["1000"],
@@ -333,7 +333,7 @@ def test_netto_invariant_after_normalize(scenario: str, input_cols: dict) -> Non
     Definition: netto = ub - ib (endring i perioden).
     This is the canonical invariant for all TB data in the consolidation pipeline.
     """
-    from consolidation.tb_import import _normalize_columns
+    from src.pages.consolidation.backend.tb_import import _normalize_columns
 
     raw = pd.DataFrame({
         "konto": ["1000", "3000"],

@@ -13,8 +13,8 @@ except Exception:  # pragma: no cover
     simpledialog = None  # type: ignore
     messagebox = None  # type: ignore
 
-from consolidation import storage
-from consolidation.models import AssociateAdjustmentRow, AssociateCase
+from ..backend import storage
+from ..backend.models import AssociateAdjustmentRow, AssociateCase
 from .associate_state import _build_case_from_form, _parse_float, _parse_int, clear_associate_case_form, current_associate_case, populate_associate_case_form, refresh_associate_adjustment_tree, refresh_associate_case_actions, refresh_associate_case_tree, refresh_associate_case_views
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def on_save_associate_case(page: "ConsolidationPage") -> None:
             existing = AssociateCase()
             page._project.associate_cases.append(existing)
         case = _build_case_from_form(page, existing=existing)
-        from consolidation.associate_equity_method import mark_associate_case_stale
+        from ..backend.associate_equity_method import mark_associate_case_stale
 
         mark_associate_case_stale(case, page._project)
         storage.save_project(page._project)
@@ -89,7 +89,7 @@ def on_delete_associate_case(page: "ConsolidationPage") -> None:
         return
     if not messagebox.askyesno("Slett tilknyttet", f"Slett '{case.name}'?"):
         return
-    from consolidation.associate_equity_method import delete_associate_case
+    from ..backend.associate_equity_method import delete_associate_case
 
     delete_associate_case(case.case_id, page._project)
     storage.save_project(page._project)
@@ -112,7 +112,7 @@ def on_generate_associate_journal(page: "ConsolidationPage") -> None:
     if case is None:
         return
     try:
-        from consolidation.associate_equity_method import sync_associate_case_journal
+        from ..backend.associate_equity_method import sync_associate_case_journal
 
         journal = sync_associate_case_journal(case, page._project)
         storage.save_project(page._project)

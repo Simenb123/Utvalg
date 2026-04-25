@@ -1,7 +1,7 @@
 import pandas as pd
 from openpyxl import Workbook
 
-from motpost.excel_sheets.common import _write_df_table
+from src.audit_actions.motpost.excel_sheets.common import _write_df_table
 
 
 def test_autowidth_ignores_hyperlink_formula_text() -> None:

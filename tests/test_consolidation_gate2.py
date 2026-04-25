@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -21,16 +21,16 @@ from consolidation.models import (
     MappingConfig,
     RunResult,
 )
-from consolidation.storage import (
+from src.pages.consolidation.backend.storage import (
     delete_project,
     load_company_tb,
     load_project,
     save_company_tb,
     save_project,
 )
-from consolidation.engine import run_consolidation
-from consolidation.export import save_consolidation_workbook
-from consolidation.mapping import map_company_tb
+from src.pages.consolidation.backend.engine import run_consolidation
+from src.pages.consolidation.backend.export import save_consolidation_workbook
+from src.pages.consolidation.backend.mapping import map_company_tb
 
 
 # ---------------------------------------------------------------------------

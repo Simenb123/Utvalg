@@ -1,7 +1,7 @@
 import pandas as pd
 from openpyxl import load_workbook
 
-from motpost.konto_core import build_motpost_data
+from src.audit_actions.motpost.konto_core import build_motpost_data
 from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 
 

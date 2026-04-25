@@ -9,7 +9,7 @@ import pandas as pd
 from . import mapping_state as _mapping_state
 from . import readiness_ui as _readiness_ui
 from . import session as _session
-from consolidation.models import ConsolidationProject
+from ..backend.models import ConsolidationProject
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

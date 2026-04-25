@@ -19,9 +19,9 @@ except Exception:  # pragma: no cover
 import pandas as pd
 
 import session
-from consolidation import storage, tb_import
-from consolidation.control_rows import append_control_rows
-from consolidation.models import (
+from ..backend import storage, tb_import
+from ..backend.control_rows import append_control_rows
+from ..backend.models import (
     AssociateAdjustmentRow,
     AssociateCase,
     CompanyTB,

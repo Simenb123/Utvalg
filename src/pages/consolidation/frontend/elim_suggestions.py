@@ -10,9 +10,9 @@ try:
 except Exception:  # pragma: no cover
     messagebox = None  # type: ignore
 
-from consolidation import storage
-from consolidation.models import EliminationSuggestion
-from consolidation.suggestions import (
+from ..backend import storage
+from ..backend.models import EliminationSuggestion
+from ..backend.suggestions import (
     create_journal_from_suggestion,
     generate_suggestions,
     ignore_suggestion,

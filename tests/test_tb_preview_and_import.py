@@ -19,8 +19,8 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from consolidation.models import CompanyTB, ConsolidationProject
-from consolidation.tb_import import _normalize_columns, validate_tb
+from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
+from src.pages.consolidation.backend.tb_import import _normalize_columns, validate_tb
 from tb_preview_dialog import TBPreviewDialog, _NONE_CHOICE
 
 
@@ -137,7 +137,7 @@ class TestValidateTb:
         _write_xlsx(p, {"Saldobalanse": tb})
 
         # Direct path
-        from consolidation.tb_import import import_company_tb
+        from src.pages.consolidation.backend.tb_import import import_company_tb
         _, df_direct, warnings_direct = import_company_tb(p, "TestCo")
 
         # Preview path: normalize + validate (same as _finalize_import)
@@ -267,7 +267,7 @@ class TestFinalizeImport:
         """_finalize_import should create CompanyTB, save, and update tree."""
         import client_store
         from src.pages.consolidation.frontend.page import ConsolidationPage
-        from consolidation import storage
+        from src.pages.consolidation.backend import storage
 
         monkeypatch.setattr(
             client_store, "years_dir",

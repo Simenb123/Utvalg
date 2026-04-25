@@ -311,7 +311,7 @@ class TestConsolidationSessionTb:
     def test_update_session_tb_button_hides_when_already_imported(self):
         """Button should be hidden when parent is already a session company."""
         from src.pages.consolidation.frontend.page import ConsolidationPage
-        from consolidation.models import CompanyTB, ConsolidationProject
+        from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
 
         page = ConsolidationPage.__new__(ConsolidationPage)
         page._tk_ok = False
@@ -338,8 +338,8 @@ class TestConsolidationSessionTb:
         import session as _session
         import client_store
         from src.pages.consolidation.frontend.page import ConsolidationPage
-        from consolidation.models import ConsolidationProject
-        from consolidation import storage
+        from src.pages.consolidation.backend.models import ConsolidationProject
+        from src.pages.consolidation.backend import storage
 
         # Setup session
         tb = _sample_tb()
@@ -531,8 +531,8 @@ class TestNumpyBoolSerialization:
         """Project with numpy.bool_ in has_ib should save without error."""
         import numpy as np
         import client_store
-        from consolidation.models import CompanyTB, ConsolidationProject
-        from consolidation import storage
+        from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
+        from src.pages.consolidation.backend import storage
 
         monkeypatch.setattr(
             client_store, "years_dir",
@@ -565,7 +565,7 @@ class TestNumpyBoolSerialization:
         """_SafeEncoder should handle numpy.bool_, numpy.int64, numpy.float64."""
         import json
         import numpy as np
-        from consolidation.storage import _SafeEncoder
+        from src.pages.consolidation.backend.storage import _SafeEncoder
 
         data = {
             "bool_val": np.True_,

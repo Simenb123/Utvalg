@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from motpost.view_konto_filters import available_mva_codes, filter_bilag_details_by_mva
+from src.audit_actions.motpost.view_konto_filters import available_mva_codes, filter_bilag_details_by_mva
 
 
 def _details_df() -> pd.DataFrame:

@@ -99,8 +99,8 @@ def _compute_kombinasjoner_export(df_all: pd.DataFrame, df_rl: pd.DataFrame) -> 
     if not rl_kontoer:
         return pd.DataFrame(columns=empty_cols)
     try:
-        from motpost.konto_core import build_motpost_data
-        from motpost.combinations import build_motkonto_combinations
+        from src.audit_actions.motpost.konto_core import build_motpost_data
+        from src.audit_actions.motpost.combinations import build_motkonto_combinations
         mp = build_motpost_data(df_all, rl_kontoer, selected_direction="Alle")
         return build_motkonto_combinations(mp.df_scope, rl_kontoer)
     except Exception as exc:

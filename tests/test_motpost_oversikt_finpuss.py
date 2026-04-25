@@ -1,7 +1,7 @@
 import pandas as pd
 
-from motpost.excel_sheets.common import DEFAULT_INT_FORMAT
-from motpost.konto_core import build_motpost_data
+from src.audit_actions.motpost.excel_sheets.common import DEFAULT_INT_FORMAT
+from src.audit_actions.motpost.konto_core import build_motpost_data
 from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 
 

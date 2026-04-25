@@ -6,7 +6,7 @@ import pandas as pd
 from unittest.mock import patch
 
 import src.pages.consolidation.backend.readiness as readiness
-from consolidation.models import AssociateCase, CompanyTB, ConsolidationProject, EliminationJournal, EliminationLine
+from src.pages.consolidation.backend.models import AssociateCase, CompanyTB, ConsolidationProject, EliminationJournal, EliminationLine
 
 
 class _DummyVar:

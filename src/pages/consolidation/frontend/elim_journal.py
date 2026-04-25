@@ -10,8 +10,8 @@ try:
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
 
-from consolidation import storage
-from consolidation.models import EliminationJournal, EliminationLine
+from ..backend import storage
+from ..backend.models import EliminationJournal, EliminationLine
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

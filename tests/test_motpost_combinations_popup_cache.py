@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from motpost import combinations_popup
+from src.audit_actions.motpost import combinations_popup
 
 
 def test_get_drilldown_payload_uses_combo_bilag_map_and_caches_result() -> None:
@@ -112,7 +112,7 @@ def test_populate_account_sum_tree_empty_df_noop() -> None:
 
 def test_build_bilag_rows_nan_dato_tekst() -> None:
     """build_bilag_rows should fill NaN Dato/Tekst with empty string, not 'nan'."""
-    from motpost.combinations_popup_helpers import build_bilag_rows
+    from src.audit_actions.motpost.combinations_popup_helpers import build_bilag_rows
 
     df_combo = pd.DataFrame([
         {"Bilag_str": "10", "Konto_str": "1500", "Beløp_num": 100.0, "Dato": "2025-01-01", "Tekst": "Salg"},
@@ -137,7 +137,7 @@ def test_build_bilag_rows_nan_dato_tekst() -> None:
 
 def test_build_bilag_rows_no_date_column() -> None:
     """build_bilag_rows should handle missing Dato column gracefully."""
-    from motpost.combinations_popup_helpers import build_bilag_rows
+    from src.audit_actions.motpost.combinations_popup_helpers import build_bilag_rows
 
     df_combo = pd.DataFrame([
         {"Bilag_str": "10", "Konto_str": "1500", "Beløp_num": 100.0, "Tekst": "Salg"},

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     AssociateAdjustmentRow,
     AssociateCase,
     CompanyTB,

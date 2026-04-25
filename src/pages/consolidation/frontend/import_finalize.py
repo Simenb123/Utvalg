@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from consolidation.models import CompanyTB
+from ..backend.models import CompanyTB
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage
@@ -17,7 +17,7 @@ def ensure_line_import_config(page: "ConsolidationPage", *, messagebox_module) -
     if page._regnskapslinjer is not None:
         return True
     try:
-        from consolidation.mapping import load_shared_config
+        from ..backend.mapping import load_shared_config
 
         intervals, regnskapslinjer = load_shared_config()
         page._intervals = intervals
@@ -45,7 +45,7 @@ def finalize_import(
     tb_import_module,
     messagebox_module,
 ) -> CompanyTB:
-    from consolidation.tb_import import _normalize_columns, validate_tb
+    from ..backend.tb_import import _normalize_columns, validate_tb
 
     df = _normalize_columns(df)
     warnings = validate_tb(df)
@@ -107,7 +107,7 @@ def finalize_line_basis_import(
     storage_module,
     messagebox_module,
 ) -> None:
-    from consolidation.line_basis_import import validate_company_line_basis
+    from ..backend.line_basis_import import validate_company_line_basis
 
     if not ensure_line_import_config(page, messagebox_module=messagebox_module):
         return

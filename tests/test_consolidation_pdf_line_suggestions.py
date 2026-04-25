@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from consolidation.pdf_line_suggestions import suggest_line_basis_from_pdf
+from src.pages.consolidation.backend.pdf_line_suggestions import suggest_line_basis_from_pdf
 
 
 def _regnskapslinjer_df() -> pd.DataFrame:

@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
     messagebox = None  # type: ignore
     ttk = None  # type: ignore
 
-from consolidation import storage
+from ..backend import storage
 from .common import (
     format_company_row_count,
     is_line_basis_company,
@@ -148,7 +148,7 @@ def on_change_mapping(page: "ConsolidationPage") -> None:
     regnskapslinjer = page._regnskapslinjer
     if regnskapslinjer is None:
         try:
-            from consolidation.mapping import load_shared_config
+            from ..backend.mapping import load_shared_config
             _, regnskapslinjer = load_shared_config()
         except Exception as exc:
             messagebox.showerror("Konfigurasjon", f"Kunne ikke laste regnskapslinjer:\n{exc}")

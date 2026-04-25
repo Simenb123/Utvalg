@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from consolidation.models import AssociateCase
+from ..backend.models import AssociateCase
 from ui_managed_treeview import ColumnSpec
 
 SOURCE_LABELS = {

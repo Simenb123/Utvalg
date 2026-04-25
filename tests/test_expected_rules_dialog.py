@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from motpost.expected_rules import ExpectedRule
-from motpost.expected_rules_dialog import (
+from src.audit_actions.motpost.expected_rules import ExpectedRule
+from src.audit_actions.motpost.expected_rules_dialog import (
     accounts_in_target_rl,
     build_mva_group_map,
     build_rl_options,

@@ -31,7 +31,7 @@ def on_export_company_line_template(
     if not path:
         return
 
-    from consolidation.line_basis_import import export_line_basis_template
+    from ..backend.line_basis_import import export_line_basis_template
 
     try:
         saved = export_line_basis_template(path, regnskapslinjer=page._regnskapslinjer)
@@ -59,7 +59,7 @@ def on_import_company_lines(
     if not path:
         return
 
-    from consolidation.line_basis_import import import_company_line_basis
+    from ..backend.line_basis_import import import_company_line_basis
 
     try:
         df, _warnings = import_company_line_basis(path, regnskapslinjer=page._regnskapslinjer)
@@ -105,7 +105,7 @@ def on_import_company_pdf(
     if not path:
         return
 
-    from consolidation.pdf_line_suggestions import suggest_line_basis_from_pdf
+    from ..backend.pdf_line_suggestions import suggest_line_basis_from_pdf
     from .pdf_review_dialog import review_pdf_line_suggestions
 
     try:

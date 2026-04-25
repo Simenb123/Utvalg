@@ -17,8 +17,8 @@ def _regnskapslinjer_df() -> pd.DataFrame:
 
 def test_finalize_line_basis_import_creates_company_and_persists(monkeypatch, tmp_path: Path) -> None:
     import client_store
-    from consolidation import storage
-    from consolidation.models import ConsolidationProject
+    from src.pages.consolidation.backend import storage
+    from src.pages.consolidation.backend.models import ConsolidationProject
     from src.pages.consolidation.frontend.page import ConsolidationPage
 
     monkeypatch.setattr(

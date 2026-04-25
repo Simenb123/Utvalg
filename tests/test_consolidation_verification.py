@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -24,7 +24,7 @@ from consolidation.models import (
     project_to_dict,
     project_from_dict,
 )
-from consolidation.engine import run_consolidation
+from src.pages.consolidation.backend.engine import run_consolidation
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +385,7 @@ class TestV3HideZeroFilter:
 class TestV4Persistence:
     def test_full_project_roundtrip(self, tmp_path):
         """Save and load a project with parent_company_id, companies, and overrides."""
-        from consolidation import storage
+        from src.pages.consolidation.backend import storage
 
         proj = _project_3_companies(with_elim=True)
         proj.mapping_config.company_overrides = {"mor": {"9999": 30}}
@@ -403,7 +403,7 @@ class TestV4Persistence:
 
     def test_parent_survives_storage_roundtrip(self, tmp_path, monkeypatch):
         """Save to disk and reload — parent_company_id must survive."""
-        from consolidation import storage
+        from src.pages.consolidation.backend import storage
 
         # Point storage at tmp_path
         monkeypatch.setattr(

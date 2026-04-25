@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import pandas as pd
 
-from consolidation.models import (
+from src.pages.consolidation.backend.models import (
     CompanyTB,
     ConsolidationProject,
     EliminationJournal,
@@ -14,7 +14,7 @@ from consolidation.models import (
     project_from_dict,
     project_to_dict,
 )
-from consolidation.suggestions import (
+from src.pages.consolidation.backend.suggestions import (
     create_journal_from_suggestion,
     generate_suggestions,
     ignore_suggestion,
@@ -436,7 +436,7 @@ class TestFuzzyMatching:
         }
         # These match the "konsernfordring"/"konserngjeld" patterns via
         # keyword containment after normalization
-        from consolidation.suggestions import _match_pattern
+        from src.pages.consolidation.backend.suggestions import _match_pattern
         assert _match_pattern("Konsernfordringer", r"konsernfordring")
         assert _match_pattern("Konserngjeld langsiktig", r"konserngjeld")
 
@@ -460,7 +460,7 @@ class TestKontoElimination:
     """Test konto-level elimination aggregation."""
 
     def test_aggregate_by_konto(self):
-        from consolidation.elimination import aggregate_eliminations_by_konto
+        from src.pages.consolidation.backend.elimination import aggregate_eliminations_by_konto
         journal = EliminationJournal(
             lines=[
                 EliminationLine(regnr=10, amount=100.0, konto="1500"),
@@ -472,7 +472,7 @@ class TestKontoElimination:
         assert result == {"1500": 100.0, "2400": -100.0}
 
     def test_aggregate_by_regnr_excludes_konto_lines(self):
-        from consolidation.elimination import aggregate_eliminations_by_regnr
+        from src.pages.consolidation.backend.elimination import aggregate_eliminations_by_regnr
         journal = EliminationJournal(
             lines=[
                 EliminationLine(regnr=10, amount=100.0, konto="1500"),

@@ -2,9 +2,9 @@ import pandas as pd
 import pytest
 from openpyxl import Workbook
 
-from motpost.konto_core import build_motpost_data
+from src.audit_actions.motpost.konto_core import build_motpost_data
 from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
-from motpost.excel_sheets.sheet_outlier_full_bilag import write_outlier_detail_sheets
+from src.audit_actions.motpost.excel_sheets.sheet_outlier_full_bilag import write_outlier_detail_sheets
 
 
 def test_outlier_detail_boxes_stop_at_col_h_and_prefilled_handling():

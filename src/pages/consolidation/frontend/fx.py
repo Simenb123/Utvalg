@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
     simpledialog = None  # type: ignore
     ttk = None  # type: ignore
 
-from consolidation import storage
+from ..backend import storage
 from .common import reset_sort_state
 from ui_managed_treeview import ColumnSpec, ManagedTreeview
 

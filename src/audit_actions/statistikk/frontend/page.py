@@ -1091,8 +1091,8 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         if df_all is None or df_all.empty or not rl_kontoer:
             return pd.DataFrame(columns=empty_cols), {}
         try:
-            from motpost.konto_core import build_motpost_data
-            from motpost.combinations import (
+            from src.audit_actions.motpost.konto_core import build_motpost_data
+            from src.audit_actions.motpost.combinations import (
                 build_bilag_to_motkonto_combo,
                 build_motkonto_combinations,
             )
@@ -1106,7 +1106,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
 
     def _kombo_rl_label(self, combo: str) -> str:
         """Oversett kombinasjon-streng fra konto-numre til RL-navn."""
-        from motpost.combo_workflow import combo_display_name_for_mode
+        from src.audit_actions.motpost.combo_workflow import combo_display_name_for_mode
 
         page = self._analyse_page
         konto_rl_map: dict[str, str] = {}

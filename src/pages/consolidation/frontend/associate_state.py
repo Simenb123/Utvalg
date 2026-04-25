@@ -12,8 +12,8 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
-from consolidation import storage
-from consolidation.models import AssociateAdjustmentRow, AssociateCase
+from ..backend import storage
+from ..backend.models import AssociateAdjustmentRow, AssociateCase
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage
@@ -142,7 +142,7 @@ def on_reset_associate_mapping(page: "ConsolidationPage") -> None:
 
 
 def _update_goodwill_display(page: "ConsolidationPage") -> None:
-    from consolidation.associate_equity_method import _safe_float, compute_goodwill_amortization
+    from ..backend.associate_equity_method import _safe_float, compute_goodwill_amortization
 
     cost = _parse_float(getattr(page, "_associate_acq_cost_var", tk.StringVar()).get())
     net_assets = _parse_float(getattr(page, "_associate_net_assets_var", tk.StringVar()).get())
@@ -464,7 +464,7 @@ def refresh_associate_case_views(page: "ConsolidationPage", case: AssociateCase 
         page._tree_associate_journal.delete(*page._tree_associate_journal.get_children())
         return
 
-    from consolidation.associate_equity_method import build_associate_case_calculation
+    from ..backend.associate_equity_method import build_associate_case_calculation
 
     calc = build_associate_case_calculation(case)
     page._associate_calc_summary_var.set(

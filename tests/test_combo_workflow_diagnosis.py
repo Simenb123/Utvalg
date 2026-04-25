@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pandas as pd
 
-from motpost.combo_workflow import (
+from src.audit_actions.motpost.combo_workflow import (
     ComboDiagnosis,
     DIAG_EXPECTED,
     DIAG_NO_RULES,
     DIAG_REJECTED,
     diagnose_combos_against_rule_set,
 )
-from motpost.expected_rules import BalancePair, ExpectedRule, ExpectedRuleSet
+from src.audit_actions.motpost.expected_rules import BalancePair, ExpectedRule, ExpectedRuleSet
 
 
 def _base_df() -> pd.DataFrame:

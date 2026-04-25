@@ -42,7 +42,7 @@ def _make_page(project):
 
 def test_import_company_from_client_name_returns_company(monkeypatch, tmp_path) -> None:
     import client_store
-    from consolidation.models import ConsolidationProject
+    from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(
         client_store,
@@ -78,7 +78,7 @@ def test_import_company_from_client_name_returns_company(monkeypatch, tmp_path) 
 
 
 def test_create_or_update_associate_case_from_ar_relation_upserts_case(monkeypatch) -> None:
-    from consolidation.models import CompanyTB, ConsolidationProject
+    from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
 
     monkeypatch.setattr("src.pages.consolidation.frontend.page.storage.save_project", MagicMock())
 
@@ -131,7 +131,7 @@ def test_create_or_update_associate_case_from_ar_relation_upserts_case(monkeypat
 def test_batch_import_daughters_multiple(monkeypatch, tmp_path) -> None:
     """Batch-import 3 companies with active SB — all should succeed."""
     import client_store
-    from consolidation.models import ConsolidationProject
+    from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(
         client_store,
@@ -163,7 +163,7 @@ def test_batch_import_daughters_multiple(monkeypatch, tmp_path) -> None:
 def test_batch_import_skips_missing_sb(monkeypatch, tmp_path) -> None:
     """Batch-import with a mix of importable and non-importable rows."""
     import client_store
-    from consolidation.models import ConsolidationProject
+    from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(
         client_store,
@@ -194,7 +194,7 @@ def test_batch_import_skips_missing_sb(monkeypatch, tmp_path) -> None:
 
 def test_batch_import_associates_multiple(monkeypatch) -> None:
     """Batch-create 2 associate cases from AR rows."""
-    from consolidation.models import CompanyTB, ConsolidationProject
+    from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
 
     monkeypatch.setattr("src.pages.consolidation.frontend.page.storage.save_project", MagicMock())
 
@@ -236,7 +236,7 @@ def test_batch_import_associates_multiple(monkeypatch) -> None:
 
 
 def test_associate_next_step_text_warns_about_duplicate_company() -> None:
-    from consolidation.models import AssociateCase, CompanyTB, ConsolidationProject
+    from src.pages.consolidation.backend.models import AssociateCase, CompanyTB, ConsolidationProject
     from src.pages.consolidation.frontend.page import ConsolidationPage
 
     project = ConsolidationProject(
@@ -264,7 +264,7 @@ def test_associate_next_step_text_warns_about_duplicate_company() -> None:
 
 def test_default_line_mapping_applied_to_new_case() -> None:
     """Project-level default line mapping should merge into new AssociateCase."""
-    from consolidation.models import AssociateCase, ConsolidationProject
+    from src.pages.consolidation.backend.models import AssociateCase, ConsolidationProject
 
     project = ConsolidationProject(
         client="Mor AS",

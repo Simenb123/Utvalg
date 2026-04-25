@@ -13,8 +13,8 @@ except Exception:  # pragma: no cover
 
 import pandas as pd
 
-from consolidation import storage
-from consolidation.models import EliminationJournal, EliminationLine
+from ..backend import storage
+from ..backend.models import EliminationJournal, EliminationLine
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage
@@ -66,7 +66,7 @@ def compute_preview(page: "ConsolidationPage", draft_lines: list[EliminationLine
         page._clear_preview()
         return
 
-    from consolidation.elimination import aggregate_eliminations_by_regnr
+    from ..backend.elimination import aggregate_eliminations_by_regnr
 
     preview_journal = EliminationJournal(name="Preview", lines=draft_lines)
     preview_by_regnr = aggregate_eliminations_by_regnr([preview_journal])
@@ -83,7 +83,7 @@ def compute_preview(page: "ConsolidationPage", draft_lines: list[EliminationLine
     )
 
     try:
-        from consolidation.mapping import load_shared_config
+        from ..backend.mapping import load_shared_config
         from regnskap_mapping import compute_sumlinjer
 
         _, regnskapslinjer = load_shared_config()

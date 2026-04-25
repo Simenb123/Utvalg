@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from motpost.combo_workflow import find_expected_combos_by_rule_set
-from motpost.expected_rules import BalancePair, ExpectedRule, ExpectedRuleSet
+from src.audit_actions.motpost.combo_workflow import find_expected_combos_by_rule_set
+from src.audit_actions.motpost.expected_rules import BalancePair, ExpectedRule, ExpectedRuleSet
 
 
 def _sample_df() -> pd.DataFrame:

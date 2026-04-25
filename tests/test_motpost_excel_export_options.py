@@ -1,11 +1,11 @@
 import pandas as pd
 from openpyxl import Workbook
 
-from motpost.excel_sheets.sheet_outlier_full_bilag import (
+from src.audit_actions.motpost.excel_sheets.sheet_outlier_full_bilag import (
     build_outlier_frames,
     write_outlier_transactions_sheet,
 )
-from motpost.konto_core import build_motpost_data
+from src.audit_actions.motpost.konto_core import build_motpost_data
 from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 
 

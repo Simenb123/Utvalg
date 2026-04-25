@@ -4,7 +4,7 @@ from __future__ import annotations
 def test_roundtrip_mixed_account_modes(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    from motpost.expected_rules import (
+    from src.audit_actions.motpost.expected_rules import (
         ExpectedRule,
         ExpectedRuleSet,
         load_rule_set,
@@ -42,7 +42,7 @@ def test_roundtrip_mixed_account_modes(tmp_path, monkeypatch) -> None:
 def test_empty_rule_set_returned_for_missing_client(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    from motpost.expected_rules import load_rule_set
+    from src.audit_actions.motpost.expected_rules import load_rule_set
 
     loaded = load_rule_set("Ikke-lagret", source_regnr=10)
     assert loaded.source_regnr == 10
@@ -54,7 +54,7 @@ def test_empty_rule_set_returned_for_missing_client(tmp_path, monkeypatch) -> No
 def test_direction_normalized_on_load(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    from motpost.expected_rules import (
+    from src.audit_actions.motpost.expected_rules import (
         ExpectedRule,
         ExpectedRuleSet,
         load_rule_set,
@@ -77,7 +77,7 @@ def test_direction_normalized_on_load(tmp_path, monkeypatch) -> None:
 def test_remove_rule_set_drops_preset(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    from motpost.expected_rules import (
+    from src.audit_actions.motpost.expected_rules import (
         ExpectedRule,
         ExpectedRuleSet,
         load_rule_set,
@@ -102,7 +102,7 @@ def test_invalid_rule_entries_are_skipped(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
     import regnskap_client_overrides
-    from motpost.expected_rules import load_rule_set
+    from src.audit_actions.motpost.expected_rules import load_rule_set
 
     regnskap_client_overrides.save_expected_motpost_rules(
         "Testklient",
@@ -129,7 +129,7 @@ def test_invalid_rule_entries_are_skipped(tmp_path, monkeypatch) -> None:
 def test_roundtrip_excluded_accounts(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    from motpost.expected_rules import (
+    from src.audit_actions.motpost.expected_rules import (
         ExpectedRule,
         ExpectedRuleSet,
         load_rule_set,
@@ -160,7 +160,7 @@ def test_account_overrides_and_motpost_rules_preserve_each_other(
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
     import regnskap_client_overrides
-    from motpost.expected_rules import (
+    from src.audit_actions.motpost.expected_rules import (
         ExpectedRule,
         ExpectedRuleSet,
         load_rule_set,
@@ -188,7 +188,7 @@ def test_account_overrides_and_motpost_rules_preserve_each_other(
 def test_balance_pairs_roundtrip(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    from motpost.expected_rules import (
+    from src.audit_actions.motpost.expected_rules import (
         BalancePair,
         ExpectedRule,
         ExpectedRuleSet,
@@ -216,7 +216,7 @@ def test_legacy_requires_netting_field_is_ignored(tmp_path, monkeypatch) -> None
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
     import regnskap_client_overrides
-    from motpost.expected_rules import ExpectedRule, load_rule_set
+    from src.audit_actions.motpost.expected_rules import ExpectedRule, load_rule_set
 
     regnskap_client_overrides.save_expected_motpost_rules(
         "Testklient",

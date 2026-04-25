@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 import views_motpost_konto as vm
-from motpost.konto_core import MotpostData
+from src.audit_actions.motpost.konto_core import MotpostData
 
 
 def _dummy_data(direction: str = "Alle") -> MotpostData:
@@ -48,7 +48,7 @@ def test_build_motpost_scope_label_and_value_for_regnskapslinjer() -> None:
 
 
 def test_build_motpost_rule_set_summary_text_uses_rule_list() -> None:
-    from motpost.expected_rules import ExpectedRule, ExpectedRuleSet
+    from src.audit_actions.motpost.expected_rules import ExpectedRule, ExpectedRuleSet
 
     label_map = {
         "1500": "610 Kundefordringer",

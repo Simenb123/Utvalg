@@ -10,8 +10,8 @@ from typing import Dict
 import tkinter as tk
 from tkinter import ttk
 
-from motpost.combo_comment_dialog import edit_combo_comment
-from motpost.combinations_popup_helpers import truncate_text
+from .combo_comment_dialog import edit_combo_comment
+from .combinations_popup_helpers import truncate_text
 
 
 def _combo_from_tree_item(tree: ttk.Treeview, item: str) -> str:

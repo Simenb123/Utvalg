@@ -2,9 +2,9 @@ import pandas as pd
 from datetime import datetime
 import pytest
 
-from motpost.combinations import build_bilag_to_motkonto_combo
-from motpost.combinations import build_motkonto_combinations_per_selected_account
-from motpost.combo_workflow import (
+from src.audit_actions.motpost.combinations import build_bilag_to_motkonto_combo
+from src.audit_actions.motpost.combinations import build_motkonto_combinations_per_selected_account
+from src.audit_actions.motpost.combo_workflow import (
     account_display_name_for_mode,
     apply_combo_status,
     combo_display_name_for_mode,

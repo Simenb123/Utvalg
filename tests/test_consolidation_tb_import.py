@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from consolidation.tb_import import import_company_tb, _normalize_columns
+from src.pages.consolidation.backend.tb_import import import_company_tb, _normalize_columns
 
 
 class TestNormalizeColumns:

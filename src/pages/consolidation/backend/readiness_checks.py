@@ -252,7 +252,7 @@ def _build_line_basis_issues(page: Any) -> list[ReadinessIssue]:
             )
             continue
         try:
-            from consolidation.line_basis_import import validate_company_line_basis
+            from ..line_basis_import import validate_company_line_basis
 
             validate_company_line_basis(basis, regnskapslinjer=regnskapslinjer)
         except Exception as exc:
@@ -362,7 +362,7 @@ def _build_associate_case_issues(page: Any) -> list[ReadinessIssue]:
                     ),
                 )
             )
-        from consolidation.associate_equity_method import validate_associate_case
+        from ..associate_equity_method import validate_associate_case
 
         validation_errors = validate_associate_case(case, project)
         for error in validation_errors:

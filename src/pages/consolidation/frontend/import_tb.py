@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
-from consolidation.models import CompanyTB
+from ..backend.models import CompanyTB
 
 from .import_finalize import ensure_line_import_config, finalize_import, finalize_line_basis_import
 
@@ -317,7 +317,7 @@ def on_reimport_company(
             if not ensure_line_import_config(page, messagebox_module=messagebox_module):
                 return
             assert page._regnskapslinjer is not None
-            from consolidation.pdf_line_suggestions import suggest_line_basis_from_pdf
+            from ..backend.pdf_line_suggestions import suggest_line_basis_from_pdf
             from .pdf_review_dialog import review_pdf_line_suggestions
 
             try:
@@ -349,7 +349,7 @@ def on_reimport_company(
         if not ensure_line_import_config(page, messagebox_module=messagebox_module):
             return
         assert page._regnskapslinjer is not None
-        from consolidation.line_basis_import import import_company_line_basis
+        from ..backend.line_basis_import import import_company_line_basis
 
         try:
             df, _warnings = import_company_line_basis(path, regnskapslinjer=page._regnskapslinjer)
@@ -422,7 +422,7 @@ def on_reimport_company(
         return
 
     df, _name = result
-    from consolidation.tb_import import _normalize_columns
+    from ..backend.tb_import import _normalize_columns
 
     finalize_import(
         page,

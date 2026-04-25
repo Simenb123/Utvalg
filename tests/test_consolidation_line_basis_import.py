@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from consolidation.line_basis_import import (
+from src.pages.consolidation.backend.line_basis_import import (
     export_line_basis_template,
     normalize_company_line_basis,
     validate_company_line_basis,

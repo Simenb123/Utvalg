@@ -11,19 +11,19 @@ from tkinter import ttk
 import pandas as pd
 
 from bilag_drilldialog import BilagDrillDialog
-from motpost.combinations import build_bilag_to_motkonto_combo
+from .combinations import build_bilag_to_motkonto_combo
 from formatting import fmt_amount, fmt_date
-from motpost.combinations_popup_helpers import build_bilag_rows, format_combo_df_for_display, truncate_text
-from motpost.combo_comment_workflow import edit_comment_for_focus, edit_comment_for_tree_item
-from motpost.expected_rules import (
+from .combinations_popup_helpers import build_bilag_rows, format_combo_df_for_display, truncate_text
+from .combo_comment_workflow import edit_comment_for_focus, edit_comment_for_tree_item
+from .expected_rules import (
     ExpectedRuleSet,
     empty_rule_set,
     load_rule_set,
     save_rule_set,
 )
-from motpost.expected_rules_dialog import choose_expected_rules, format_rule_summary
+from .expected_rules_dialog import choose_expected_rules, format_rule_summary
 
-from motpost.combo_workflow import (
+from .combo_workflow import (
     STATUS_EXPECTED,
     STATUS_NEUTRAL,
     STATUS_OUTLIER,
@@ -40,7 +40,7 @@ from motpost.combo_workflow import (
     status_label,
     compute_selected_net_sum_by_combo,
 )
-from motpost.utils import _bilag_str, _clean_name, _konto_str, _safe_float
+from .utils import _bilag_str, _clean_name, _konto_str, _safe_float
 from ui_treeview_sort import enable_treeview_sorting
 
 logger = logging.getLogger(__name__)

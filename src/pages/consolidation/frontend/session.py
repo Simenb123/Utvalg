@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 
 import pandas as pd
 
-from consolidation.models import CompanyTB, ConsolidationProject
+from ..backend.models import CompanyTB, ConsolidationProject
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage
@@ -215,7 +215,7 @@ def on_use_session_tb(
     if not name:
         return
 
-    from consolidation.tb_import import _normalize_columns, validate_tb
+    from ..backend.tb_import import _normalize_columns, validate_tb
 
     tb = _normalize_columns(tb.copy())
     warnings = validate_tb(tb)
@@ -262,7 +262,7 @@ def load_company_tbs(page: "ConsolidationPage", *, storage_module) -> None:
     if page._project is None:
         return
 
-    from consolidation.tb_import import _normalize_columns
+    from ..backend.tb_import import _normalize_columns
 
     for company in page._project.companies:
         if _is_line_basis_company(company):
@@ -282,7 +282,7 @@ def load_company_line_bases(page: "ConsolidationPage", *, storage_module) -> Non
     if page._project is None:
         return
 
-    from consolidation.line_basis_import import normalize_company_line_basis
+    from ..backend.line_basis_import import normalize_company_line_basis
 
     for company in page._project.companies:
         if not _is_line_basis_company(company):

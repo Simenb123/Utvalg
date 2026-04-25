@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from consolidation.associate_equity_method import (
+from src.pages.consolidation.backend.associate_equity_method import (
     build_associate_case_calculation,
     compute_goodwill_amortization,
     delete_associate_case,
@@ -10,7 +10,7 @@ from consolidation.associate_equity_method import (
     suggest_associate_fields_from_line_basis,
     sync_associate_case_journal,
 )
-from consolidation.models import AssociateAdjustmentRow, AssociateCase, CompanyTB, ConsolidationProject
+from src.pages.consolidation.backend.models import AssociateAdjustmentRow, AssociateCase, CompanyTB, ConsolidationProject
 
 
 def _project() -> ConsolidationProject:
