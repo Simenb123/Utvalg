@@ -68,7 +68,7 @@ except Exception:  # pragma: no cover
     _enable_treeview_sorting = None  # type: ignore
 
 try:
-    from selection_studio_drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
+    from selection_studio.drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
 except Exception:  # pragma: no cover
     _open_bilag_drill_dialog = None  # type: ignore
 

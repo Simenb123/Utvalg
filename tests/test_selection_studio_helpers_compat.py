@@ -1,7 +1,7 @@
 # tests/test_selection_studio_helpers_compat.py
 import pandas as pd
 
-from selection_studio_helpers import (
+from selection_studio.helpers import (
     PopulationMetrics,
     build_sample_summary_text,
     build_source_text,

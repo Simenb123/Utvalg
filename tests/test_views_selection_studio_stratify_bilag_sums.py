@@ -2,7 +2,7 @@ import pandas as pd
 
 from views_selection_studio_ui import stratify_bilag_sums
 
-from selection_studio_bilag import _format_interval_no, _format_number_no
+from selection_studio.bilag import _format_interval_no, _format_number_no
 
 
 def _assert_masks_cover_all(groups, index):

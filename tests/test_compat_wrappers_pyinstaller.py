@@ -12,22 +12,10 @@ import pytest
 #
 # If someone accidentally reintroduces importlib.import_module-based wrappers,
 # the Windows onefile exe build may miss the package and crash at runtime.
-WRAPPERS = [
-    # selection_studio wrappers
-    ("selectionstudio_filters", "selection_studio.filters", "filter_selectionstudio_dataframe"),
-    ("selection_studio_adapters", "selection_studio.adapters", "build_bilag_dataframe"),
-    ("selection_studio_bilag", "selection_studio.bilag", "build_bilag_dataframe"),
-    ("selection_studio_drill", "selection_studio.drill", "normalize_bilag_value"),
-    ("selection_studio_helpers", "selection_studio.helpers", "parse_amount"),
-    ("selection_studio_specific", "selection_studio.specific", "compute_specific_selection_recommendation"),
-    ("selection_studio_ui_builder", "selection_studio.ui_builder", "build_ui"),
-    ("selection_studio_ui_logic", "selection_studio.ui_logic", "parse_custom_strata_bounds"),
-    # motpost wrappers
-    ("motpost_combinations", "motpost.combinations", "build_motkonto_combinations"),
-    ("motpost_combinations_popup", "motpost.combinations_popup", "show_motkonto_combinations_popup"),
-    ("motpost_excel", "motpost.excel", "build_motpost_excel_workbook"),
-    ("motpost_konto_core", "motpost.konto_core", "build_motpost_data"),
-    ("motpost_utils", "motpost.utils", "_clean_name"),
+WRAPPERS: list[tuple[str, str, str]] = [
+    # Tom etter pilot 13: alle compat-wrappers er fjernet siden eksterne
+    # importerere er oppdatert til ny lokasjon. Listen beholdes som
+    # dokumentasjon på mønsteret i tilfelle nye wrappers legges til.
 ]
 
 

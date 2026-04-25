@@ -1,6 +1,6 @@
 import pandas as pd
 
-from selection_studio_helpers import (
+from selection_studio.helpers import (
     build_bilag_split_summary_text,
     compute_bilag_split_summary,
 )

@@ -35,7 +35,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from src.pages.materiality.backend.store import DEFAULT_SELECTION_THRESHOLD_KEY, SELECTION_THRESHOLD_LABELS
-from selection_studio_helpers import (
+from selection_studio.helpers import (
     PopulationMetrics,
     build_population_summary_text,
     compute_bilag_split_summary,
@@ -52,7 +52,7 @@ from selection_studio_helpers import (
 
 try:
     # Preferred drilldown dialog for bilag
-    from selection_studio_drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
+    from selection_studio.drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
 except Exception:  # pragma: no cover
     _open_bilag_drill_dialog = None
 
@@ -60,7 +60,7 @@ except Exception:  # pragma: no cover
 # ---------------------------------------------------------------------------
 # Helper-/beregningsfunksjoner som brukes av Selection Studio (og testene).
 # Disse er flyttet ut for å holde UI-modulen mer lesbar.
-from selection_studio_ui_logic import (
+from selection_studio.ui_logic import (
     format_amount_input_no,
     no_break_spaces_in_numbers,
     parse_custom_strata_bounds,
@@ -74,7 +74,7 @@ from selection_studio_ui_logic import (
     stratify_bilag_sums,
 )
 
-from selection_studio_ui_builder import build_ui as _build_selection_studio_ui
+from selection_studio.ui_builder import build_ui as _build_selection_studio_ui
 
 # Refactor: extracted UI logic
 from selection_studio import ui_widget_actions as _actions
@@ -441,4 +441,4 @@ __all__ = [
 ]
 
 # Ensure these names exist at module-level (some older code/tests import them from here).
-from selection_studio_bilag import build_bilag_dataframe, stratify_bilag_sums  # noqa: E402,F401
+from selection_studio.bilag import build_bilag_dataframe, stratify_bilag_sums  # noqa: E402,F401
