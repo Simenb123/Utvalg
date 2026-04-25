@@ -367,10 +367,22 @@ def project_to_dict(project: ConsolidationProject) -> dict[str, Any]:
     """Serialiser prosjekt til JSON-kompatibel dict."""
     d = asdict(project)
     d["schema_version"] = SCHEMA_VERSION
-    # Strip runtime-only fields from RunResult that are not JSON-serializable
-    for run in d.get("runs", []):
-        run.pop("account_details", None)
-        run.pop("currency_details", None)
+    # Strip runtime-only fields from RunResult that are not JSON-serializable.
+    # asdict() konverterer dataklasser rekursivt, men hvis et element er en
+    # SimpleNamespace (typisk fra tester eller mock-objekter) blir det
+    # passert gjennom som-er. Vi normaliserer til dict først så pop ikke
+    # krasjer på slike tilfeller.
+    runs = d.get("runs")
+    if isinstance(runs, list):
+        for i, run in enumerate(runs):
+            if not isinstance(run, dict):
+                try:
+                    run = vars(run) if hasattr(run, "__dict__") else dict(run)
+                except Exception:
+                    continue
+                runs[i] = run
+            run.pop("account_details", None)
+            run.pop("currency_details", None)
     return d
 
 
