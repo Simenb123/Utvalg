@@ -135,16 +135,16 @@ def _filter_df(df: pd.DataFrame, ranges: list[tuple[int, int]]) -> pd.DataFrame:
         return pd.DataFrame(columns=df.columns)
 
 
-# TODO(pilot 3): Refaktor signaturen til å ta intervals + regnskapslinjer
-# direkte i stedet for page-objekt. Krever også å erstatte
-# context_from_page(page) med en variant som tar rene data inn.
-def _get_konto_set_for_regnr(
-    page: object,
+def get_konto_set_for_regnr(
+    intervals: pd.DataFrame | None,
+    regnskapslinjer: pd.DataFrame | None,
     regnr: int,
     ranges: list[tuple[int, int]],
     df_all: pd.DataFrame | None,
     sb_df: pd.DataFrame | None,
     sb_prev_df: pd.DataFrame | None,
+    *,
+    context: object | None = None,
 ) -> set[str] | None:
     """Returner konto-set som faktisk mapper til ``regnr`` etter override-bevisst mapping.
 
@@ -152,11 +152,12 @@ def _get_konto_set_for_regnr(
     Statistikk-fanen får samme konto-utvalg som pivot-raden for regnr. Returnerer
     ``None`` hvis mapping-context ikke er tilgjengelig (brukeren skal da falle
     tilbake til rent intervall-filter).
+
+    Hvis ``context`` ikke gis, bygges den fra ``intervals``/``regnskapslinjer``
+    + session.client/year via ``regnskapslinje_mapping_service.load_rl_mapping_context``.
     """
     if not ranges:
         return set()
-    intervals = getattr(page, "_rl_intervals", None)
-    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
     if intervals is None or regnskapslinjer is None:
         return None
 
@@ -171,7 +172,7 @@ def _get_konto_set_for_regnr(
             if expanded:
                 leaf_set = {int(x) for x in expanded}
     except Exception as exc:
-        log.warning("_get_konto_set_for_regnr (leaf expand): %s", exc)
+        log.warning("get_konto_set_for_regnr (leaf expand): %s", exc)
 
     candidates: set[str] = set()
     try:
@@ -191,18 +192,38 @@ def _get_konto_set_for_regnr(
                     mask |= (num >= fra) & (num <= til)
                 candidates.update(sb.loc[mask, "konto"].astype(str).unique())
     except Exception as exc:
-        log.warning("_get_konto_set_for_regnr (candidates): %s", exc)
+        log.warning("get_konto_set_for_regnr (candidates): %s", exc)
         return None
 
     if not candidates:
         return set()
 
     try:
-        from regnskapslinje_mapping_service import context_from_page, resolve_accounts_to_rl
-        ctx = context_from_page(page)
-        mapping = resolve_accounts_to_rl(sorted(candidates), context=ctx)
+        from regnskapslinje_mapping_service import (
+            load_rl_mapping_context,
+            resolve_accounts_to_rl,
+        )
+        if context is None:
+            # Bygg standard-context fra session (klient/år for overrides).
+            client: str | None = None
+            year: str | None = None
+            try:
+                import session as _session
+
+                client = getattr(_session, "client", None) or None
+                year_val = getattr(_session, "year", None)
+                year = str(year_val) if year_val else None
+            except Exception:
+                client, year = None, None
+            context = load_rl_mapping_context(
+                client=client,
+                year=year,
+                intervals=intervals,
+                regnskapslinjer=regnskapslinjer,
+            )
+        mapping = resolve_accounts_to_rl(sorted(candidates), context=context)
     except Exception as exc:
-        log.warning("_get_konto_set_for_regnr (resolve): %s", exc)
+        log.warning("get_konto_set_for_regnr (resolve): %s", exc)
         return None
 
     if mapping is None or mapping.empty:
@@ -210,6 +231,33 @@ def _get_konto_set_for_regnr(
 
     kept = mapping[mapping["regnr"].isin(leaf_set)]
     return set(kept["konto"].astype(str).tolist())
+
+
+# Bakoverkompat-shim — eldre kallere (særlig tester) bruker page-signaturen.
+# Den henter intervals/regnskapslinjer fra page og delegerer videre.
+def _get_konto_set_for_regnr(
+    page: object,
+    regnr: int,
+    ranges: list[tuple[int, int]],
+    df_all: pd.DataFrame | None,
+    sb_df: pd.DataFrame | None,
+    sb_prev_df: pd.DataFrame | None,
+) -> set[str] | None:
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+    # Bruk context_from_page(page) for å bevare gammel oppførsel — dette
+    # holder bakoverkompat for tester som monkeypatcher context_from_page.
+    context: object | None = None
+    try:
+        from regnskapslinje_mapping_service import context_from_page
+        context = context_from_page(page)
+    except Exception:
+        context = None
+    return get_konto_set_for_regnr(
+        intervals, regnskapslinjer, regnr, ranges,
+        df_all=df_all, sb_df=sb_df, sb_prev_df=sb_prev_df,
+        context=context,
+    )
 
 
 def _sb_kontoer_in_ranges(
@@ -249,11 +297,10 @@ def _sb_kontoer_in_ranges(
 # Compute-funksjoner
 # ---------------------------------------------------------------------------
 
-# TODO(pilot 3): Refaktor til å ta sb_df, sb_prev_df som rene argumenter
-# i stedet for å hente dem fra page-objektet via getattr/_get_effective_sb_df.
-def _compute_kontoer(
+def compute_kontoer(
     df_rl: pd.DataFrame,
-    page: object,
+    sb_df: pd.DataFrame | None,
+    sb_prev_df: pd.DataFrame | None,
     *,
     ranges: list[tuple[int, int]] | None = None,
     konto_set: set[str] | None = None,
@@ -264,6 +311,10 @@ def _compute_kontoer(
     saldobalansen innenfor RL-intervallet med IB≠0 eller UB≠0. Dette gir
     revisor et komplett bilde av regnskapslinjen — også konti som er urørte
     i år men hadde UB fra fjor.
+
+    Pure-data signatur: ``sb_df`` er aktiv (effective) saldobalanse,
+    ``sb_prev_df`` er fjorårs SB. Frontend må ekstrahere disse fra page
+    før kall (f.eks. via ``page._get_effective_sb_df()``).
     """
     empty_cols = ["Konto", "Kontonavn", "IB", "Bevegelse", "UB", "Antall"]
 
@@ -290,17 +341,14 @@ def _compute_kontoer(
     _yr = active_year_from_session()
     ib_col_id = "IB"
 
-    sb_prev = getattr(page, "_rl_sb_prev_df", None)
+    sb_prev = sb_prev_df
     if sb_prev is not None and not sb_prev.empty and "konto" in sb_prev.columns:
         for _, r in sb_prev.iterrows():
             k = str(r["konto"])
             ib_map[k] = _safe_float(r.get("ub"))   # fjorår UB = årets IB
         ib_col_id = "UB_fjor"
 
-    try:
-        sb = page._get_effective_sb_df()  # type: ignore[union-attr]
-    except Exception:
-        sb = getattr(page, "_rl_sb_df", None)
+    sb = sb_df
     if sb is not None and not sb.empty and "konto" in sb.columns:
         fallback_ib = not bool(ib_map)  # sb_prev manglet — bruk sb.ib som IB
         for _, r in sb.iterrows():
@@ -361,6 +409,24 @@ def _compute_kontoer(
     grp_tx["Antall"] = pd.to_numeric(grp_tx["Antall"], errors="coerce").fillna(0).astype(int)
     grp_tx = grp_tx.sort_values("Konto").reset_index(drop=True)
     return grp_tx[empty_cols], ib_label
+
+
+# Bakoverkompat-shim — eldre kallere bruker page-signaturen.
+def _compute_kontoer(
+    df_rl: pd.DataFrame,
+    page: object,
+    *,
+    ranges: list[tuple[int, int]] | None = None,
+    konto_set: set[str] | None = None,
+) -> tuple[pd.DataFrame, str]:
+    try:
+        sb_df = page._get_effective_sb_df()  # type: ignore[union-attr]
+    except Exception:
+        sb_df = getattr(page, "_rl_sb_df", None)
+    sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+    return compute_kontoer(
+        df_rl, sb_df, sb_prev_df, ranges=ranges, konto_set=konto_set,
+    )
 
 
 def _compute_extra_stats(df_rl: pd.DataFrame) -> dict:

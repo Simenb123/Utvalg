@@ -26,9 +26,8 @@ except Exception:  # pragma: no cover
 
 
 # Data-beregning (backend — uten Tk-avhengighet).
-# get_konto_ranges (uten underscore) er ny ren-data-signatur.
-# _get_konto_ranges (med underscore) beholdes som bakoverkompat-alias
-# som tar page-objekt — fjernes når _get_konto_set_for_regnr refaktoreres.
+# Pure-data-API: get_konto_ranges, get_konto_set_for_regnr, compute_kontoer.
+# Underscore-prefiksede funksjoner beholdes som bakoverkompat for tester.
 from ..backend.compute import (  # noqa: E402
     _AMT_FMT,
     _compute_bilag,
@@ -44,7 +43,9 @@ from ..backend.compute import (  # noqa: E402
     _safe_float,
     _safe_int,
     _sb_kontoer_in_ranges,
+    compute_kontoer,
     get_konto_ranges,
+    get_konto_set_for_regnr,
 )
 
 
@@ -537,11 +538,10 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             sb_df_eff = page._get_effective_sb_df()  # type: ignore[union-attr]
         except Exception:
             sb_df_eff = getattr(page, "_rl_sb_df", None)
-        konto_set = _get_konto_set_for_regnr(
-            page, self._current_regnr, ranges,
-            df_all=df_all,
-            sb_df=sb_df_eff,
-            sb_prev_df=getattr(page, "_rl_sb_prev_df", None),
+        sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+        konto_set = get_konto_set_for_regnr(
+            intervals, regnskapslinjer, self._current_regnr, ranges,
+            df_all=df_all, sb_df=sb_df_eff, sb_prev_df=sb_prev_df,
         )
         if konto_set is not None and "Konto" in df_rl.columns:
             df_rl = df_rl[df_rl["Konto"].astype(str).isin(konto_set)].copy()
@@ -551,7 +551,9 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         self._df_all_last = df_all
 
         self._update_kpi(page, self._current_regnr)
-        kontoer_data, ib_label = _compute_kontoer(df_rl, page, ranges=ranges, konto_set=konto_set)
+        kontoer_data, ib_label = compute_kontoer(
+            df_rl, sb_df_eff, sb_prev_df, ranges=ranges, konto_set=konto_set,
+        )
         self._populate_kontoer(kontoer_data, ib_label)
         self._rebuild_maned_pivot(df_rl)
         self._populate_bilag(_compute_bilag(df_rl))
@@ -1456,18 +1458,26 @@ link.on("mousemove", function(event, d) {{
                 sb_eff = page._get_effective_sb_df()  # type: ignore[union-attr]
             except Exception:
                 sb_eff = getattr(page, "_rl_sb_df", None)
-            konto_set = _get_konto_set_for_regnr(
-                page, self._current_regnr, ranges,
-                df_all=df_all,
-                sb_df=sb_eff,
-                sb_prev_df=getattr(page, "_rl_sb_prev_df", None),
+            sb_prev = getattr(page, "_rl_sb_prev_df", None)
+            konto_set = get_konto_set_for_regnr(
+                intervals, regnskapslinjer, self._current_regnr, ranges,
+                df_all=df_all, sb_df=sb_eff, sb_prev_df=sb_prev,
             )
             if konto_set is not None and "Konto" in df_rl.columns:
                 df_rl = df_rl[df_rl["Konto"].astype(str).isin(konto_set)].copy()
+            # Bygg context én gang for å gi excel-eksporten ren data
+            try:
+                from regnskapslinje_mapping_service import context_from_page
+                ctx = context_from_page(page)
+            except Exception:
+                ctx = None
+            pivot_df_rl = getattr(page, "_pivot_df_rl", None)
             _write_workbook(
                 path, regnr=self._current_regnr, rl_name=self._current_rl_name,
-                df_rl=df_rl, df_all=df_all, page=page, client=client, year=year,
+                df_rl=df_rl, df_all=df_all, client=client, year=year,
                 konto_set=konto_set,
+                pivot_df_rl=pivot_df_rl, sb_df=sb_eff, sb_prev_df=sb_prev,
+                context=ctx,
             )
             self._status_var.set(f"Eksportert: {Path(path).name}")
             _open_file(path)

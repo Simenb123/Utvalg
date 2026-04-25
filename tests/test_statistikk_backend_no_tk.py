@@ -1,12 +1,14 @@
 """Lint-test: statistikk/backend/ får ikke importere tkinter.
 
-Pilot 2 av frontend/backend-mønsteret. Samme prinsipp som
+Pilot 2/3 av frontend/backend-mønsteret. Samme prinsipp som
 ``test_driftsmidler_backend_no_tk.py`` — backend må kunne kjøres
 hodeløst og senere eksponeres som REST-endepunkt.
 
-Status: ``compute._get_konto_set_for_regnr`` og ``compute._compute_kontoer``
-tar fortsatt ``page``-objekt (TODO i pilot 3). De importerer **ikke**
-tkinter likevel, så lint-testen passerer.
+Status etter pilot 3: pure-data-API er på plass
+(``get_konto_set_for_regnr``, ``compute_kontoer``, ``compute_motpost_rl``,
+``write_workbook`` med ``pivot_df_rl``/``sb_df``/``sb_prev_df``/``context``).
+Underscore-prefiksede shims tar fortsatt ``page`` for bakoverkompat med
+tester, men ingen av dem importerer tkinter.
 """
 from __future__ import annotations
 

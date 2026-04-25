@@ -20,17 +20,24 @@ from .compute import _AMT_FMT
 log = logging.getLogger(__name__)
 
 
-def _compute_motpost_rl(grp_mp: pd.DataFrame, page: object) -> pd.DataFrame:
-    """Aggregér konto-motpost på regnskapslinje-nivå (samme logikk som GUI-toggle)."""
+def compute_motpost_rl(
+    grp_mp: pd.DataFrame,
+    *,
+    context: object | None = None,
+) -> pd.DataFrame:
+    """Aggregér konto-motpost på regnskapslinje-nivå (samme logikk som GUI-toggle).
+
+    Pure-data signatur: ``context`` er ferdig bygget RLMappingContext.
+    Hvis None, returneres tomt resultat.
+    """
     empty = pd.DataFrame(columns=["Regnr", "Regnskapslinje", "Beløp", "Andel", "AntallBilag"])
-    if grp_mp is None or grp_mp.empty or page is None:
+    if grp_mp is None or grp_mp.empty or context is None:
         return empty
     try:
-        from regnskapslinje_mapping_service import context_from_page, resolve_accounts_to_rl
-        ctx = context_from_page(page)
-        mapping = resolve_accounts_to_rl(grp_mp["Konto"].astype(str).tolist(), context=ctx)
+        from regnskapslinje_mapping_service import resolve_accounts_to_rl
+        mapping = resolve_accounts_to_rl(grp_mp["Konto"].astype(str).tolist(), context=context)
     except Exception as exc:
-        log.warning("_compute_motpost_rl: %s", exc)
+        log.warning("compute_motpost_rl: %s", exc)
         return empty
 
     df = grp_mp.copy()
@@ -64,6 +71,18 @@ def _compute_motpost_rl(grp_mp: pd.DataFrame, page: object) -> pd.DataFrame:
     return agg[["Regnr", "Regnskapslinje", "Beløp", "Andel", "AntallBilag"]].reset_index(drop=True)
 
 
+# Bakoverkompat-shim — eldre kallere bruker page-signaturen.
+def _compute_motpost_rl(grp_mp: pd.DataFrame, page: object) -> pd.DataFrame:
+    if grp_mp is None or grp_mp.empty or page is None:
+        return pd.DataFrame(columns=["Regnr", "Regnskapslinje", "Beløp", "Andel", "AntallBilag"])
+    try:
+        from regnskapslinje_mapping_service import context_from_page
+        ctx = context_from_page(page)
+    except Exception:
+        ctx = None
+    return compute_motpost_rl(grp_mp, context=ctx)
+
+
 def _compute_kombinasjoner_export(df_all: pd.DataFrame, df_rl: pd.DataFrame) -> pd.DataFrame:
     """Bygg kombinasjonstabell for eksport (samme engine som GUI-fanen)."""
     empty_cols = [
@@ -92,22 +111,55 @@ def _compute_kombinasjoner_export(df_all: pd.DataFrame, df_rl: pd.DataFrame) -> 
 def write_workbook(
     path: str, *, regnr: int, rl_name: str,
     df_rl: pd.DataFrame, df_all: pd.DataFrame,
-    page: object, client: str = "", year: str = "",
+    client: str = "", year: str = "",
     konto_set: set[str] | None = None,
+    pivot_df_rl: pd.DataFrame | None = None,
+    sb_df: pd.DataFrame | None = None,
+    sb_prev_df: pd.DataFrame | None = None,
+    context: object | None = None,
+    page: object | None = None,
 ) -> None:
+    """Skriv arbeidsdokument-Excel for statistikk-fanen.
+
+    Pure-data signatur:
+    - ``pivot_df_rl``: RL-pivot for KPI-lookup (ellers tom)
+    - ``sb_df`` / ``sb_prev_df``: aktiv + fjorårs saldobalanse (rene DataFrames)
+    - ``context``: ferdig bygget ``RLMappingContext`` for motpost-RL-aggregering
+
+    ``page``-argumentet er bevart for bakoverkompat — hvis pure-data ikke er
+    sendt inn, hentes verdiene fra page (gammel oppførsel).
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
     from .compute import (
         _compute_bilag,
-        _compute_kontoer,
         _compute_maned_pivot,
         _compute_motpost,
         _compute_mva,
         _safe_float,
         _safe_int,
+        compute_kontoer,
     )
+
+    # Bakoverkompat — hent fra page hvis pure-data ikke er gitt
+    if page is not None:
+        if pivot_df_rl is None:
+            pivot_df_rl = getattr(page, "_pivot_df_rl", None)
+        if sb_df is None:
+            try:
+                sb_df = page._get_effective_sb_df()  # type: ignore[union-attr]
+            except Exception:
+                sb_df = getattr(page, "_rl_sb_df", None)
+        if sb_prev_df is None:
+            sb_prev_df = getattr(page, "_rl_sb_prev_df", None)
+        if context is None:
+            try:
+                from regnskapslinje_mapping_service import context_from_page
+                context = context_from_page(page)
+            except Exception:
+                context = None
 
     TITLE_FILL = PatternFill("solid", fgColor="DDEBF7")
     HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")
@@ -194,9 +246,9 @@ def write_workbook(
         heading("Antall_bilag"),
         "",
     ])
-    # Bruk _pivot_df_rl (RL-spesifikk), ikke _pivot_df_last — sistnevnte
+    # Bruk pivot_df_rl (RL-spesifikk), ikke pivot_df_last — sistnevnte
     # kan være konto-pivot uten regnr.
-    pivot_df = getattr(page, "_pivot_df_rl", None)
+    pivot_df = pivot_df_rl
     kpi = None
     if pivot_df is not None and not pivot_df.empty:
         kpi = next((r for _, r in pivot_df.iterrows() if _safe_int(r.get("regnr", -1)) == regnr), None)
@@ -220,7 +272,7 @@ def write_workbook(
         heading("UB", year=_yr),
         heading("Antall"),
     ])
-    grp_k, _ib_label = _compute_kontoer(df_rl, page, konto_set=konto_set)
+    grp_k, _ib_label = compute_kontoer(df_rl, sb_df, sb_prev_df, konto_set=konto_set)
     dr = 9
     sum_ib = sum_bev = sum_ub = 0.0
     sum_ant = 0
@@ -407,7 +459,7 @@ def write_workbook(
     dr += 1
     _header(ws5, dr, ["Nr", "Regnskapslinje", "Beløp", "Andel %", "Antall bilag"])
     dr += 1
-    grp_rl = _compute_motpost_rl(grp_mp, page)
+    grp_rl = compute_motpost_rl(grp_mp, context=context)
     sum_bel_rl = 0.0
     sum_andel_rl = 0.0
     sum_bilag_rl = 0
