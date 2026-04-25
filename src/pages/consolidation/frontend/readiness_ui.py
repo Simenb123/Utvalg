@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import consolidation_readiness as readiness
+from ..backend import readiness
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

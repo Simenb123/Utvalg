@@ -59,7 +59,7 @@ def on_run(page: "ConsolidationPage") -> None:
 
     page._compute_mapping_status()
 
-    import consolidation_readiness
+    from ..backend import readiness as consolidation_readiness
     from consolidation.engine import run_consolidation
     from consolidation.mapping import ConfigNotLoadedError
 
@@ -170,7 +170,7 @@ def on_export(page: "ConsolidationPage") -> None:
 
     stale = False
     try:
-        import consolidation_readiness
+        from ..backend import readiness as consolidation_readiness
         stale = consolidation_readiness.build_readiness_report(page).is_stale
     except Exception:
         stale = page._consolidated_result_df is None
@@ -184,7 +184,7 @@ def on_export(page: "ConsolidationPage") -> None:
             return
         page._rerun_consolidation()
         try:
-            import consolidation_readiness
+            from ..backend import readiness as consolidation_readiness
             stale = consolidation_readiness.build_readiness_report(page).is_stale
         except Exception:
             stale = page._result_df is None

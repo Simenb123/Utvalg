@@ -106,7 +106,7 @@ def on_import_company_pdf(
         return
 
     from consolidation.pdf_line_suggestions import suggest_line_basis_from_pdf
-    from consolidation_pdf_review_dialog import review_pdf_line_suggestions
+    from .pdf_review_dialog import review_pdf_line_suggestions
 
     try:
         suggestions = suggest_line_basis_from_pdf(path, regnskapslinjer=page._regnskapslinjer)

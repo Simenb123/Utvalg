@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
-from consolidation_mapping_tab import MappingTab
+from .mapping_tab import MappingTab
 from .common import DETAIL_TB_COLUMN_SPECS
 from treeview_column_manager import TreeviewColumnManager
 from ui_managed_treeview import ColumnSpec, ManagedTreeview
