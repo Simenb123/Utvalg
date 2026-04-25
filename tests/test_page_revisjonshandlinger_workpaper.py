@@ -1,10 +1,26 @@
-"""Integration tests for Handlinger 2.0 slice 1 — workpaper confirmation in UI."""
+"""Integration tests for Handlinger 2.0 slice 1 — workpaper confirmation in UI.
+
+Mange av testene under interagerer med CRM-handlinger via tree-iid-er
+(``_tree.selection_set("1")``). CRM-rader rendres ikke lenger i
+Handlinger-fanens tabell — de er bevisst skjult fordi regnskapslinjer
+fra appens lokale handlingsbibliotek skal være primær. CRM-data og
+underliggende workpaper-logikk er beholdt og fortsatt testbar i andre
+tester (CRM-bridge / store-modulene). Disse end-to-end-testene blir
+re-aktivert når vi kobler CRM-handlinger på igjen som sekundær info
+per regnskapslinje.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+
+# Markér alle CRM-rad-avhengige tester som skipped for nå.
+_CRM_HIDDEN_REASON = (
+    "CRM-rader vises ikke i Handlinger-fanen for tiden — testen "
+    "re-aktiveres når CRM-kobling som sekundær info per RL er klar."
+)
 
 
 def _make_page(tmp_path, monkeypatch):
@@ -92,6 +108,7 @@ def _row(page, iid):
     return {col: values[i] for i, col in enumerate(cols)}
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_apply_filter_shows_auto_source_for_unconfirmed(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
@@ -105,6 +122,7 @@ def test_apply_filter_shows_auto_source_for_unconfirmed(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_apply_filter_shows_confirmed_source_and_tag(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
@@ -124,6 +142,7 @@ def test_apply_filter_shows_confirmed_source_and_tag(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_on_confirm_current_persists_auto_match(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
@@ -142,6 +161,7 @@ def test_on_confirm_current_persists_auto_match(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_on_confirm_current_skips_when_no_auto_match(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
@@ -160,6 +180,7 @@ def test_on_confirm_current_skips_when_no_auto_match(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_on_clear_confirmation_removes_entry(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
@@ -178,6 +199,7 @@ def test_on_clear_confirmation_removes_entry(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_action_buttons_reflect_selection_state(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
@@ -208,6 +230,7 @@ def test_action_buttons_reflect_selection_state(tmp_path, monkeypatch):
         root.destroy()
 
 
+@pytest.mark.skip(reason=_CRM_HIDDEN_REASON)
 def test_select_shows_workpaper_info_in_detail_panel(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:

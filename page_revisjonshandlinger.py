@@ -371,16 +371,14 @@ class RevisjonshandlingerPage(ttk.Frame):
                 pass
 
     def _update_phase_counts(self) -> None:
-        """Oppdater tall-badgene i sidebar-en basert på tilgjengelige handlinger."""
+        """Oppdater tall-badgene i sidebar-en basert på tilgjengelige handlinger.
+
+        CRM-handlinger telles ikke med — de vises ikke i listen lenger,
+        så å inkludere dem i tellingen ville gitt forvirrende tall.
+        Lokale handlinger fra appen og scopede regnskapslinjer er
+        det som faktisk vises.
+        """
         counts: dict[str, int] = {p: 0 for p in ("Alle", *PHASE_ORDER)}
-        for a in self._actions:
-            p = infer_phase(
-                navn=getattr(a, "procedure_name", "") or "",
-                omraade=getattr(a, "area_name", "") or "",
-                action_type=getattr(a, "action_type", "") or "",
-            )
-            counts[p] = counts.get(p, 0) + 1
-            counts["Alle"] += 1
         for item in self._local_lib:
             p = infer_phase(
                 navn=getattr(item, "navn", "") or "",
@@ -661,32 +659,34 @@ class RevisjonshandlingerPage(ttk.Frame):
 
         shown = 0
         covered_regnr: set[str] = set()
-        # CRM-handlinger
-        if origin_filter in ("Alle", "CRM"):
-            shown += self._render_crm_rows(
-                type_filter, status_filter, area_filter, regnr_filter, search,
-                covered=covered_regnr,
-            )
-        # Lokale handlinger
+        # CRM-handlinger skjules fra visningen — regnskapslinjer er
+        # primær struktur, og handlinger fra det lokale biblioteket
+        # (admin-fanen) skal ta over som sekundær info per RL.
+        # Dataene lastes fortsatt slik at vi kan koble dem på igjen
+        # senere uten ny implementasjon. Render-kallet er bevisst
+        # utkommentert; _render_crm_rows-funksjonen er urørt.
+        # Lokale handlinger vises som før (filtrert på fase).
         if origin_filter in ("Alle", "Lokal"):
             shown += self._render_local_rows(
                 type_filter, status_filter, area_filter, regnr_filter, search,
                 covered=covered_regnr,
             )
 
-        # RL uten handling (toggle på)
-        gap_rows = 0
         # RL-rader (regnskapslinjer i scope) hører til Utførelse-fasen.
-        # I andre faser (Oppdragsvurdering, Planlegging, Avslutning)
-        # vises kun handlinger merket den fasen — ingen RL-rader.
+        # Siden CRM-handlinger ikke lenger renderes, er covered_regnr
+        # bevisst tom her — alle scoped-IN RLs vises som rader (ikke
+        # bare "gap"-rader).
+        gap_rows = 0
         rl_phases = {"Alle", "Utførelse"}
         if self.var_show_rl_gaps.get() and phase_filter in rl_phases:
             gap_rows = self._render_rl_gap_rows(covered_regnr)
 
-        # Update status with filter count if different from total
-        total = len(self._actions) + len(self._local_lib)
-        if shown != total and self._engagement:
-            extra = f"  +{gap_rows} RL uten handling" if gap_rows else ""
+        # Update status — CRM-handlinger telles ikke i total siden de
+        # ikke renderes lenger. shown teller bare lokale handlinger;
+        # gap_rows er antall regnskapslinjer som vises som rader.
+        total = len(self._local_lib)
+        if self._engagement:
+            extra = f"  +{gap_rows} regnskapslinjer" if gap_rows else ""
             self.var_status.set(
                 f"{self._engagement.client_name} — viser {shown} av {total} handlinger{extra}"
             )
