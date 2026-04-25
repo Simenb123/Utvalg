@@ -55,8 +55,8 @@ def _workspace_item(
 
 
 def test_build_saldobalanse_df_merges_ao_and_mapping(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(
         dataset=pd.DataFrame(
@@ -131,8 +131,8 @@ def test_build_saldobalanse_df_merges_ao_and_mapping(monkeypatch) -> None:
 
 
 def test_build_saldobalanse_df_filters_unmapped_and_search(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(
         dataset=pd.DataFrame(
@@ -193,8 +193,8 @@ def test_build_saldobalanse_df_filters_unmapped_and_search(monkeypatch) -> None:
 
 
 def test_build_saldobalanse_df_filters_mapping_source_and_ao(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(
         dataset=pd.DataFrame(
@@ -277,8 +277,8 @@ def test_build_saldobalanse_df_filters_mapping_source_and_ao(monkeypatch) -> Non
 
 
 def test_preset_name_for_visible_columns_matches_known_and_custom_presets() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     assert page_saldobalanse._preset_name_for_visible_columns(
         list(page_saldobalanse.COLUMN_PRESETS["Mapping"])
@@ -289,8 +289,8 @@ def test_preset_name_for_visible_columns_matches_known_and_custom_presets() -> N
 
 
 def test_build_saldobalanse_df_adds_payroll_columns_and_filters(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5000", "5210"], "Beløp": [1.0, 2.0]}))
     sb = _make_sb(
@@ -350,8 +350,8 @@ def test_build_saldobalanse_df_adds_payroll_columns_and_filters(monkeypatch) -> 
 
 
 def test_build_saldobalanse_df_adds_kol_for_balance_and_profit_loss(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["2940", "3000"], "Belop": [1.0, 2.0]}))
     sb = _make_sb(
@@ -378,8 +378,8 @@ def test_build_saldobalanse_df_adds_kol_for_balance_and_profit_loss(monkeypatch)
 
 
 def test_focus_payroll_accounts_switches_to_payroll_preset_and_selects_account() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Var:
         def __init__(self, value):
@@ -442,8 +442,8 @@ def test_focus_payroll_accounts_switches_to_payroll_preset_and_selects_account()
 
 
 def test_prepare_context_menu_selection_preserves_existing_multiselect() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Tree:
         def __init__(self) -> None:
@@ -479,8 +479,8 @@ def test_prepare_context_menu_selection_preserves_existing_multiselect() -> None
 
 
 def test_refresh_restores_visible_multiselect_after_render(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Tree:
         def __init__(self) -> None:
@@ -573,8 +573,8 @@ def test_refresh_restores_visible_multiselect_after_render(monkeypatch) -> None:
 
 
 def test_build_saldobalanse_df_searches_suggested_payroll_fields(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5210"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -604,8 +604,8 @@ def test_build_saldobalanse_df_searches_suggested_payroll_fields(monkeypatch) ->
 
 
 def test_build_saldobalanse_df_leaves_payroll_columns_blank_for_weak_irrelevant_hint(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["1280"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -646,8 +646,8 @@ def test_build_saldobalanse_df_leaves_payroll_columns_blank_for_weak_irrelevant_
 
 
 def test_build_saldobalanse_df_can_skip_payroll_enrichment(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5210"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -685,8 +685,8 @@ def test_build_saldobalanse_df_can_skip_payroll_enrichment(monkeypatch) -> None:
 
 
 def test_build_saldobalanse_df_filters_suspicious_saved_payroll_profiles(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["1930", "5000"], "Beløp": [1.0, 2.0]}))
     sb = _make_sb(
@@ -736,8 +736,8 @@ def test_build_saldobalanse_df_filters_suspicious_saved_payroll_profiles(monkeyp
 
 
 def test_should_include_payroll_payload_depends_on_scope_or_visible_columns() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Var:
         def __init__(self, value):
@@ -771,8 +771,8 @@ def test_should_include_payroll_payload_depends_on_scope_or_visible_columns() ->
 
 
 def test_payroll_preset_contains_core_columns() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     # A07-workflow tracking columns (A07-forslag, A07 OK, RF-1022-forslag,
     # RF-1022 OK, Status) are no longer part of the Saldobalanse schema — the
@@ -788,8 +788,8 @@ def test_payroll_preset_contains_core_columns() -> None:
 
 
 def test_apply_best_suggestions_updates_only_actionable_deltas() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     persisted: list[tuple[dict[str, dict[str, object]], dict[str, object]]] = []
     statuses: list[str] = []
@@ -845,8 +845,8 @@ def test_apply_best_suggestions_updates_only_actionable_deltas() -> None:
 
 
 def test_apply_best_suggestions_reports_when_everything_is_skipped() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     persisted: list[object] = []
     statuses: list[str] = []
@@ -888,8 +888,8 @@ def test_apply_best_suggestions_reports_when_everything_is_skipped() -> None:
 
 
 def test_apply_history_skips_missing_and_identical_profiles() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     persisted: list[tuple[dict[str, dict[str, object]], dict[str, object]]] = []
     statuses: list[str] = []
@@ -949,8 +949,8 @@ def test_apply_history_skips_missing_and_identical_profiles() -> None:
 
 
 def test_rf1022_treatment_text_for_cost_account() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     text = page_saldobalanse._rf1022_treatment_text(
         "5000",
@@ -965,8 +965,8 @@ def test_rf1022_treatment_text_for_cost_account() -> None:
 
 
 def test_rf1022_treatment_text_for_accrual_account() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     text = page_saldobalanse._rf1022_treatment_text(
         "2940",
@@ -982,8 +982,8 @@ def test_rf1022_treatment_text_for_accrual_account() -> None:
 
 
 def test_selected_payroll_detail_text_shows_lazy_suggestion_summary(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5210"], "Beløp": [1.0]}))
     df = pd.DataFrame(
@@ -1078,8 +1078,8 @@ def test_selected_payroll_detail_text_shows_lazy_suggestion_summary(monkeypatch)
 
 
 def test_selected_payroll_detail_text_prefers_reset_for_suspicious_saved_profile(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     df = pd.DataFrame(
         {
@@ -1138,8 +1138,8 @@ def test_selected_payroll_detail_text_prefers_reset_for_suspicious_saved_profile
 
 
 def test_selected_payroll_detail_text_explains_accrual_treatment() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     df = pd.DataFrame(
         {
@@ -1187,8 +1187,8 @@ def test_selected_payroll_detail_text_explains_accrual_treatment() -> None:
 
 
 def test_update_map_button_state_enables_visible_payroll_actions() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Button:
         def __init__(self) -> None:
@@ -1220,8 +1220,8 @@ def test_update_map_button_state_enables_visible_payroll_actions() -> None:
 
 
 def test_update_map_button_state_enables_reset_for_suspicious_selection() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Button:
         def __init__(self) -> None:
@@ -1249,8 +1249,8 @@ def test_update_map_button_state_enables_reset_for_suspicious_selection() -> Non
 
 
 def test_clear_selected_suspicious_payroll_fields_only_resets_flagged_accounts() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     persisted: list[dict[str, dict[str, object]]] = []
     statuses: list[str] = []
@@ -1272,8 +1272,8 @@ def test_clear_selected_suspicious_payroll_fields_only_resets_flagged_accounts()
 
 
 def test_clear_selected_suspicious_payroll_fields_reports_when_nothing_is_flagged() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     persisted: list[dict[str, dict[str, object]]] = []
     statuses: list[str] = []
@@ -1290,8 +1290,8 @@ def test_clear_selected_suspicious_payroll_fields_reports_when_nothing_is_flagge
 
 
 def test_on_work_mode_changed_resets_and_restores_hidden_filters_for_payroll_mode() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
     calls: list[str] = []
 
     class _Var:
@@ -1359,8 +1359,8 @@ def test_on_work_mode_changed_resets_and_restores_hidden_filters_for_payroll_mod
 
 
 def test_sync_mode_ui_hides_source_filter_and_relabels_payroll_controls() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Widget:
         def __init__(self, name: str) -> None:
@@ -1416,8 +1416,8 @@ def test_sync_mode_ui_hides_source_filter_and_relabels_payroll_controls() -> Non
 
 
 def test_leave_payroll_mode_switches_back_to_standard() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Var:
         def __init__(self, value: str) -> None:
@@ -1442,8 +1442,8 @@ def test_leave_payroll_mode_switches_back_to_standard() -> None:
 
 
 def test_sync_selection_actions_visibility_summarizes_selected_payroll_accounts() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Var:
         def __init__(self) -> None:
@@ -1495,8 +1495,8 @@ def test_sync_selection_actions_visibility_summarizes_selected_payroll_accounts(
 
 
 def test_refresh_detail_panel_shows_payroll_intro_without_selection() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Var:
         def __init__(self) -> None:
@@ -1535,8 +1535,8 @@ def test_refresh_detail_panel_shows_payroll_intro_without_selection() -> None:
 
 
 def test_refresh_detail_panel_guides_multi_selection() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     class _Var:
         def __init__(self) -> None:
@@ -1585,7 +1585,7 @@ def test_refresh_detail_panel_guides_multi_selection() -> None:
     assert "Åpne klassifisering" in dummy._detail_next_var.get()
     assert statuses[-1] == "2 valgte kontoer | Åpne klassifisering"
 def test_append_selected_account_name_to_rf1022_alias_is_disabled(monkeypatch) -> None:
-    import page_saldobalanse
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
 
     saved: dict[str, object] = {}
     monkeypatch.setattr(
@@ -1606,9 +1606,9 @@ def test_append_selected_account_name_to_rf1022_alias_is_disabled(monkeypatch) -
     assert "RF-1022-aliaser er fjernet" in statuses[-1]
 
 def test_append_selected_account_name_to_a07_alias_refreshes_after_save(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_actions
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.frontend.actions as saldobalanse_actions
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     calls: list[str] = []
     learned: list[tuple[str, str, bool]] = []
@@ -1653,8 +1653,8 @@ def test_append_selected_account_name_to_a07_alias_refreshes_after_save(monkeypa
 def test_export_current_view_to_excel_uses_visible_columns_and_selected_sheet(monkeypatch, tmp_path) -> None:
     import analyse_export_excel
     import controller_export
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     captured: dict[str, object] = {}
     statuses: list[str] = []
@@ -1707,8 +1707,8 @@ def test_export_current_view_to_excel_uses_visible_columns_and_selected_sheet(mo
 
 
 def test_export_current_view_to_excel_reports_when_nothing_to_export() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     statuses: list[str] = []
     dummy = SimpleNamespace(
@@ -1723,8 +1723,8 @@ def test_export_current_view_to_excel_reports_when_nothing_to_export() -> None:
 
 def test_build_saldobalanse_df_decorates_only_filtered_subset(monkeypatch) -> None:
     """Cheap filters (only_unmapped etc.) must narrow the set before payroll decoration runs."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5000", "5210"], "Beløp": [1.0, 2.0]}))
     sb = _make_sb(
@@ -1780,8 +1780,8 @@ def test_build_saldobalanse_df_decorates_only_filtered_subset(monkeypatch) -> No
 
 def test_schedule_refresh_coalesces_rapid_triggers() -> None:
     """Multiple rapid _schedule_refresh calls must cancel earlier timers and run refresh once."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     after_calls: list[tuple[int, object]] = []
     cancelled: list[object] = []
@@ -1821,8 +1821,8 @@ def test_schedule_refresh_coalesces_rapid_triggers() -> None:
 
 def test_refresh_cancels_pending_scheduled_refresh() -> None:
     """A direct refresh() call must cancel any queued debounced refresh to avoid duplicate work."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     cancelled: list[object] = []
 
@@ -1881,8 +1881,8 @@ def _build_cache_refresh_dummy(page_saldobalanse, analyse_page, **extras):
 
 def test_refresh_reuses_base_payload_cache_for_search_changes(monkeypatch) -> None:
     """Changing search_text must NOT rebuild the expensive payroll-decorated base."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5000"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -1929,8 +1929,8 @@ def test_refresh_reuses_base_payload_cache_for_search_changes(monkeypatch) -> No
 
 def test_refresh_reuses_base_payload_cache_for_payroll_scope_changes(monkeypatch) -> None:
     """Changing payroll_scope must NOT rebuild the expensive payroll-decorated base."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5000"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -1975,8 +1975,8 @@ def test_refresh_reuses_base_payload_cache_for_payroll_scope_changes(monkeypatch
 
 def test_hard_refresh_invalidates_payload_cache(monkeypatch) -> None:
     """Explicit Oppfrisk must drop the cached base and force a fresh decorate."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5000"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2022,8 +2022,8 @@ def test_hard_refresh_invalidates_payload_cache(monkeypatch) -> None:
 
 def test_invalidate_payload_cache_clears_state() -> None:
     """_invalidate_payload_cache must reset both cache object and key."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     dummy = SimpleNamespace(
         _base_payload_cache=SimpleNamespace(df=pd.DataFrame()),
@@ -2038,8 +2038,8 @@ def test_invalidate_payload_cache_clears_state() -> None:
 
 def test_build_saldobalanse_payload_accepts_precomputed_base(monkeypatch) -> None:
     """If base_payload is provided, build_saldobalanse_payload must not rerun the decorate pipeline."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     def _fail(*_args, **_kwargs):
         raise AssertionError("_build_decorated_base_payload must not be called when base_payload is supplied")
@@ -2104,8 +2104,8 @@ def test_build_saldobalanse_payload_accepts_precomputed_base(monkeypatch) -> Non
 
 def test_build_decorated_base_payload_uses_preloaded_context(monkeypatch) -> None:
     """When preloaded document/history/catalog are passed, _load_payroll_context must NOT be called."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     sb = _make_sb(
         konto=["5000"],
@@ -2160,8 +2160,8 @@ def test_build_decorated_base_payload_uses_preloaded_context(monkeypatch) -> Non
 
 def test_build_decorated_base_payload_without_preloaded_args_still_loads(monkeypatch) -> None:
     """Without preloaded args, loading path must still execute (back-compat)."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     sb = _make_sb(
         konto=["5000"],
@@ -2199,8 +2199,8 @@ def test_refresh_uses_side_caches_for_payroll_context(monkeypatch) -> None:
     """On a cache miss, refresh() must pull document/history/catalog from page-level
     side caches (``_ensure_payroll_context_loaded`` / ``_ensure_payroll_usage_features_loaded``)
     and pass them into _build_decorated_base_payload, so _load_payroll_context is not hit."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["5000"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2240,8 +2240,8 @@ def test_refresh_uses_side_caches_for_payroll_context(monkeypatch) -> None:
 
 def test_map_selected_account_invalidates_cache(monkeypatch) -> None:
     """Remapping a konto must drop the base-payload cache so the next refresh rebuilds."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -2265,8 +2265,8 @@ def test_map_selected_account_invalidates_cache(monkeypatch) -> None:
 
 def test_on_include_ao_toggled_invalidates_cache(monkeypatch) -> None:
     """Toggling include-ÅO must drop the cache since underlying SB frames swap."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     refresh_calls = {"n": 0}
 
@@ -2287,8 +2287,8 @@ def test_on_include_ao_toggled_invalidates_cache(monkeypatch) -> None:
 def test_a07_options_cached_across_refreshes(monkeypatch) -> None:
     """_ensure_a07_options_loaded must call load_a07_code_options only once across
     consecutive refreshes, and _hard_refresh must force a re-fetch."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     load_calls = {"n": 0}
 
@@ -2318,8 +2318,8 @@ def test_a07_options_cached_across_refreshes(monkeypatch) -> None:
 def test_render_df_semantic_equivalence(monkeypatch) -> None:
     """_render_df must produce the same (iid, values, tags) triples as before for
     representative payroll/locked/mapping states — protects the render refactor."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     inserted: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
 
@@ -2394,8 +2394,8 @@ def test_render_df_semantic_equivalence(monkeypatch) -> None:
 
 def test_render_df_tolerates_missing_columns() -> None:
     """If some ALL_COLUMNS fields are absent in df, render must still emit blanks."""
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     inserted: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
 
@@ -2433,16 +2433,16 @@ def test_render_df_tolerates_missing_columns() -> None:
 
 
 def test_all_columns_includes_detail_class_and_owned_company() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     assert "Detaljklassifisering" in page_saldobalanse.ALL_COLUMNS
     assert "Eid selskap" in page_saldobalanse.ALL_COLUMNS
 
 
 def test_sb_detail_class_uses_profile_override_when_set(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["2740"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2484,8 +2484,8 @@ def test_sb_detail_class_uses_profile_override_when_set(monkeypatch) -> None:
 
 
 def test_sb_detail_class_falls_back_to_global_rule_when_no_override(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["2740"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2514,8 +2514,8 @@ def test_sb_detail_class_falls_back_to_global_rule_when_no_override(monkeypatch)
 
 
 def test_sb_owned_company_uses_profile_orgnr_and_ownership_name(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["1380"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2559,8 +2559,8 @@ def test_sb_owned_company_uses_profile_orgnr_and_ownership_name(monkeypatch) -> 
 
 
 def test_sb_owned_company_shows_stale_label_when_orgnr_missing(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["1380"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2598,8 +2598,8 @@ def test_sb_owned_company_shows_stale_label_when_orgnr_missing(monkeypatch) -> N
 
 
 def test_sb_owned_company_empty_when_profile_has_no_orgnr(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["1000"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2627,8 +2627,8 @@ def test_sb_owned_company_empty_when_profile_has_no_orgnr(monkeypatch) -> None:
 def test_sb_include_payroll_false_still_populates_detail_columns(monkeypatch) -> None:
     """include_payroll=False skal ikke kalle _load_payroll_context, men likevel vise kolonnene."""
 
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     analyse_page = SimpleNamespace(dataset=pd.DataFrame({"Konto": ["2740"], "Beløp": [1.0]}))
     sb = _make_sb(
@@ -2681,16 +2681,16 @@ def test_sb_include_payroll_false_still_populates_detail_columns(monkeypatch) ->
 
 
 def test_format_owned_company_display_empty_for_blank_orgnr() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     assert page_saldobalanse._format_owned_company_display("", {}) == ""
     assert page_saldobalanse._format_owned_company_display(None, {}) == ""
 
 
 def test_format_owned_company_display_strips_non_digits_before_lookup() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     assert (
         page_saldobalanse._format_owned_company_display(
@@ -2701,16 +2701,16 @@ def test_format_owned_company_display_strips_non_digits_before_lookup() -> None:
 
 
 def test_load_owned_company_name_map_returns_empty_without_client() -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     assert page_saldobalanse._load_owned_company_name_map("", 2025) == {}
     assert page_saldobalanse._load_owned_company_name_map(None, 2025) == {}
 
 
 def test_load_owned_company_name_map_filters_invalid_rows(monkeypatch) -> None:
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     # Cache er modul-level og kan være forurenset fra tidligere tester.
     saldobalanse_payload._invalidate_owned_company_cache()
@@ -2736,8 +2736,8 @@ def test_load_owned_company_name_map_filters_invalid_rows(monkeypatch) -> None:
 def test_sb_context_menu_handlers_persist_updates(monkeypatch) -> None:
     """Handlers skal kalle _persist_payroll_updates med rett felt og verdi."""
 
-    import page_saldobalanse
-    import saldobalanse_payload
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
+    import src.pages.saldobalanse.backend.payload as saldobalanse_payload
 
     captured: list[tuple[dict, str]] = []
 

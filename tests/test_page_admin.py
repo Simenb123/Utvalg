@@ -1137,8 +1137,8 @@ def test_regnskapslinje_editor_tree_columns_include_baseline_view() -> None:
     assert "Overlay" not in cols
 
 
-def test_build_rl_baseline_rows_returns_excel_rows_with_kontointervall() -> None:
-    """Baseline-builder leser Excel og fletter på kontointervall."""
+def test_build_rl_baseline_rows_returns_json_baseline_rows_with_kontointervall() -> None:
+    """Baseline-builder leser JSON-baseline via regnskap_config og fletter på kontointervall."""
 
     import pandas as pd
 
@@ -1246,13 +1246,13 @@ def test_format_sumtilknytning_text_skips_missing_levels() -> None:
     assert "  " not in text
 
 
-def test_regnskapslinje_editor_uses_global_baseline_section_title() -> None:
-    """LabelFrame skal nå hete 'Global baseline', ikke 'Baseline (Excel)'."""
+def test_regnskapslinje_editor_uses_felles_baseline_section_title() -> None:
+    """LabelFrame skal nå hete 'Felles baseline', ikke 'Baseline (Excel)'."""
 
     import inspect
 
     source = inspect.getsource(page_admin._RegnskapslinjeEditor.__init__)
-    assert 'text="Global baseline"' in source
+    assert 'text="Felles baseline"' in source
     assert "Baseline (Excel)" not in source
 
 
@@ -1290,27 +1290,22 @@ def test_regnskapslinje_editor_has_split_baseline_and_overlay_path_vars() -> Non
     assert "self._path_var" not in source
 
 
-def test_format_baseline_source_line_handles_json_excel_and_missing(tmp_path) -> None:
+def test_format_baseline_source_line_handles_shared_json_and_missing(tmp_path) -> None:
     class _Status:
-        def __init__(self, src, rj=None, rp=None):
-            self.regnskapslinjer_active_source = src
+        def __init__(self, rj=None, rp=None):
             self.regnskapslinjer_json_path = rj
             self.regnskapslinjer_path = rp
 
     json_path = tmp_path / "regnskapslinjer.json"
-    excel_path = tmp_path / "regnskapslinjer.xlsx"
-    assert page_admin._format_baseline_source_line(_Status("json", rj=json_path)).startswith(
-        "Baseline (json):"
+    assert page_admin._format_baseline_source_line(_Status(rj=json_path)) == (
+        f"Felles baseline: {json_path}"
     )
-    assert str(json_path) in page_admin._format_baseline_source_line(
-        _Status("json", rj=json_path)
+    assert page_admin._format_baseline_source_line(_Status()) == (
+        "Felles baseline: (ikke funnet i datamappen)"
     )
-    assert page_admin._format_baseline_source_line(_Status("excel", rp=excel_path)).startswith(
-        "Baseline (excel):"
+    assert page_admin._format_baseline_source_line(None) == (
+        "Felles baseline: (ikke funnet i datamappen)"
     )
-    assert "mangler" in page_admin._format_baseline_source_line(_Status("missing"))
-    assert "mangler" in page_admin._format_baseline_source_line(None)
-
 
 def test_format_overlay_source_line_handles_empty_and_path() -> None:
     assert page_admin._format_overlay_source_line("") == "Finjustering: (ikke lagret)"

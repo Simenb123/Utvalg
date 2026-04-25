@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 
 def test_refresh_detail_panel_mentions_when_suggestion_matches_saved_values() -> None:
-    import page_saldobalanse
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
 
     class _Var:
         def __init__(self) -> None:
@@ -64,7 +64,7 @@ def test_refresh_detail_panel_mentions_when_suggestion_matches_saved_values() ->
 
 
 def test_refresh_detail_panel_mentions_when_saved_classification_is_used_without_new_suggestion() -> None:
-    import page_saldobalanse
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
 
     class _Var:
         def __init__(self) -> None:
@@ -125,7 +125,7 @@ def test_refresh_detail_panel_mentions_when_saved_classification_is_used_without
 
 
 def test_refresh_detail_panel_mentions_rf1022_treatment_for_accrual_account() -> None:
-    import page_saldobalanse
+    import src.pages.saldobalanse.frontend.page as page_saldobalanse
 
     class _Var:
         def __init__(self) -> None:

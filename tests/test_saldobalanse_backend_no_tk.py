@@ -68,7 +68,7 @@ def test_toplevel_shim_aliasses_same_module_object() -> None:
     Dette sikrer at eksisterende ``monkeypatch.setattr(saldobalanse_payload, ...)``
     i tester treffer samme objekt som det frontend/admin-koden importerer.
     """
-    import saldobalanse_payload as legacy
+    import src.pages.saldobalanse.backend.payload as legacy
     from src.pages.saldobalanse.backend import payload as new
 
     assert legacy is new, (

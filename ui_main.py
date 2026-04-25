@@ -24,7 +24,7 @@ _ADMIN_PASSWORD_TITLE = "Admin"
 # Pages / views
 from page_dataset import DatasetPage
 from page_analyse import AnalysePage
-from page_saldobalanse import SaldobalansePage
+from src.pages.saldobalanse.frontend.page import SaldobalansePage
 from page_admin import AdminPage
 from src.pages.a07 import A07Page
 from page_utvalg_strata import UtvalgStrataPage
@@ -909,7 +909,7 @@ class App(tk.Tk):
         except Exception:
             pass
 
-        if selected_widget is getattr(self, "src.pages.consolidation.frontend.page", None):
+        if selected_widget is getattr(self, "page_consolidation", None):
             try:
                 self.after_idle(self._refresh_consolidation_from_session)
             except Exception:
@@ -937,7 +937,7 @@ class App(tk.Tk):
                 self._refresh_admin_from_session()
             return
 
-        if selected_widget is getattr(self, "src.pages.ar.frontend.page", None):
+        if selected_widget is getattr(self, "page_ar", None):
             try:
                 self.after_idle(self._refresh_ar_from_session)
             except Exception:
@@ -1223,7 +1223,7 @@ class App(tk.Tk):
 
             t0 = _time.perf_counter()
             try:
-                from saldobalanse_payload import _load_owned_company_name_map
+                from src.pages.saldobalanse.backend.payload import _load_owned_company_name_map
                 _load_owned_company_name_map(client, year_int)
             except Exception:
                 # Stille feil — hvis preload feiler laster SB den syncront som før.

@@ -8,7 +8,7 @@ import pandas as pd
 import classification_config
 import regnskapslinje_suggest
 import session
-from saldobalanse_payload import _resolve_sb_views
+from src.pages.saldobalanse.backend.payload import _resolve_sb_views
 
 
 def _client_year() -> tuple[str, int | None]:

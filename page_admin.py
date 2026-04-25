@@ -19,7 +19,7 @@ import regnskapslinje_suggest
 import session
 from account_profile import AccountProfileDocument
 from regnskap_mapping import normalize_regnskapslinjer
-from page_saldobalanse import _resolve_sb_views
+from src.pages.saldobalanse.frontend.page import _resolve_sb_views
 
 try:
     import tkinter as tk
@@ -232,6 +232,230 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
             style="Secondary.TButton",
             command=self._on_open_settings,
         ).grid(row=0, column=2, sticky="e", padx=(4, 8), pady=(0, 8))
+
+        # Landing-overlay som dekker hele admin-siden inntil bruker
+        # låser opp via "Oppsett…"-knappen. Sørger for at sensitive
+        # admin-faner (Kontoklassifisering, A07-regler osv.) ikke vises
+        # for uautorisert bruker.
+        self._build_admin_landing()
+
+    def _build_admin_landing(self) -> None:
+        """Lag og vis landing-overlay over admin-innholdet."""
+        try:
+            import vaak_tokens as _vt
+            bg_color = "#" + _vt.BG_SAND_SOFT
+            text_color = "#" + _vt.FOREST
+            font_family = _vt.FONT_FAMILY_BODY
+        except Exception:
+            bg_color = "#F4EDDC"
+            text_color = "#325B1E"
+            font_family = "Segoe UI"
+
+        landing = tk.Frame(self, background=bg_color, borderwidth=0)
+        # place(...) i stedet for grid: lar overlayen dekke ALT i admin,
+        # uavhengig av hvilke rader/kolonner som er konfigurert.
+        landing.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+        # Hold logo-bildet i live så GC ikke fjerner det.
+        self._landing_logo_img = self._load_aarvaaken_logo()
+        if self._landing_logo_img is not None:
+            tk.Label(
+                landing,
+                image=self._landing_logo_img,
+                background=bg_color,
+                borderwidth=0,
+            ).pack(pady=(120, 24))
+        else:
+            # Fallback hvis bildet ikke kan lastes — vis tekst-banner.
+            tk.Label(
+                landing,
+                text="AarVaaken",
+                background=bg_color,
+                foreground=text_color,
+                font=(font_family, 32, "bold"),
+            ).pack(pady=(160, 24))
+
+        tk.Label(
+            landing,
+            text="Admin-tilgang krever passord",
+            background=bg_color,
+            foreground=text_color,
+            font=(font_family, 11),
+        ).pack(pady=(0, 12))
+
+        # Passord-felt direkte på landing — bruker slipper popup-dialog.
+        self._landing_password_var = tk.StringVar(value="")
+        pw_entry = ttk.Entry(
+            landing,
+            textvariable=self._landing_password_var,
+            show="*",
+            width=30,
+            justify="center",
+        )
+        pw_entry.pack(pady=(0, 24))
+        # Enter i passord-feltet utløser samme handling som "Gå til Admin".
+        pw_entry.bind("<Return>", lambda _e: self._on_landing_unlock())
+        self._landing_password_entry = pw_entry
+
+        btn_row = tk.Frame(landing, background=bg_color)
+        btn_row.pack()
+
+        ttk.Button(
+            btn_row,
+            text="Ytelsesmonitor…",
+            style="Secondary.TButton",
+            command=self._on_open_monitoring,
+        ).pack(side="left", padx=6)
+
+        ttk.Button(
+            btn_row,
+            text="Oppsett…",
+            style="Secondary.TButton",
+            command=self._on_open_settings,
+        ).pack(side="left", padx=6)
+
+        ttk.Button(
+            btn_row,
+            text="Gå til Admin",
+            style="Primary.TButton",
+            command=self._on_landing_unlock,
+        ).pack(side="left", padx=6)
+
+        self._landing_frame = landing
+
+        # Skjul landing umiddelbart hvis admin allerede er låst opp i denne
+        # økten (kan skje hvis AdminPage rebygges etter unlock).
+        try:
+            app = self.winfo_toplevel()
+            if getattr(app, "_admin_unlocked", False):
+                self.hide_admin_landing()
+        except Exception:
+            pass
+
+    def _load_aarvaaken_logo(self):
+        """Last AarVaaken-logoen som PhotoImage. Returnerer None ved feil."""
+        try:
+            from PIL import Image, ImageTk  # type: ignore[import-untyped]
+            from pathlib import Path
+            import sys
+
+            candidates = []
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "doc" / "pictures" / "AarVaaken.png")
+            candidates.append(Path(__file__).resolve().parent / "doc" / "pictures" / "AarVaaken.png")
+
+            pic_path = next((p for p in candidates if p.exists()), None)
+            if pic_path is None:
+                return None
+
+            img = Image.open(str(pic_path))
+            # Auto-crop near-white kanter (samme prinsipp som splash).
+            try:
+                gray = img.convert("L")
+                bw = gray.point(lambda p: 255 if p < 250 else 0)
+                bbox = bw.getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+            except Exception:
+                pass
+
+            # Skaler til ~40% av skjermbredden, behold aspekt-ratio.
+            try:
+                screen_w = self.winfo_screenwidth()
+            except Exception:
+                screen_w = 1280
+            target_w = int(screen_w * 0.40)
+            ratio = target_w / img.width
+            target_h = int(img.height * ratio)
+            img = img.resize((target_w, target_h), Image.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def hide_admin_landing(self) -> None:
+        """Skjul landing-overlayen så det egentlige admin-innholdet vises."""
+        landing = getattr(self, "_landing_frame", None)
+        if landing is None:
+            return
+        try:
+            landing.place_forget()
+        except Exception:
+            pass
+
+    def show_admin_landing(self) -> None:
+        """Vis landing-overlayen igjen (f.eks. ved sesjons-låsing)."""
+        landing = getattr(self, "_landing_frame", None)
+        if landing is None:
+            return
+        try:
+            landing.place(relx=0, rely=0, relwidth=1, relheight=1)
+            landing.lift()
+        except Exception:
+            pass
+
+    def _on_landing_unlock(self) -> None:
+        """Klikk på 'Gå til Admin' (eller Enter i passord-feltet) — valider
+        passordet fra input-feltet og lås opp admin ved riktig passord."""
+        var = getattr(self, "_landing_password_var", None)
+        password = ""
+        try:
+            password = (var.get() if var is not None else "") or ""
+        except Exception:
+            password = ""
+
+        if not password:
+            # Sett fokus i passord-feltet så bruker ser hvor de skal skrive.
+            entry = getattr(self, "_landing_password_entry", None)
+            if entry is not None:
+                try:
+                    entry.focus_set()
+                except Exception:
+                    pass
+            return
+
+        # Hent passord-konstant fra ui_main (faller tilbake på "123").
+        admin_password = "123"
+        try:
+            admin_password = getattr(
+                __import__("ui_main"), "_ADMIN_PASSWORD", admin_password
+            )
+        except Exception:
+            pass
+
+        if password == admin_password:
+            try:
+                app = self.winfo_toplevel()
+                app._admin_unlocked = True
+            except Exception:
+                pass
+            # Tøm feltet før vi gjemmer landing — slik at neste tilbakekomst
+            # (hvis lås gjenopptas) starter blankt.
+            try:
+                if var is not None:
+                    var.set("")
+            except Exception:
+                pass
+            self.hide_admin_landing()
+            return
+
+        # Feil passord — vis melding og tøm feltet for ny innskriving.
+        try:
+            if messagebox is not None:
+                messagebox.showerror("Admin", "Feil passord.", parent=self)
+        except Exception:
+            pass
+        try:
+            if var is not None:
+                var.set("")
+        except Exception:
+            pass
+        entry = getattr(self, "_landing_password_entry", None)
+        if entry is not None:
+            try:
+                entry.focus_set()
+            except Exception:
+                pass
 
     def set_analyse_page(self, page: Any) -> None:
         self._analyse_page = page
