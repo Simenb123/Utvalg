@@ -14,7 +14,7 @@ from typing import Any, Callable
 import tkinter as tk
 
 from formatting import fmt_amount
-from motpost_konto_core import _fmt_date_ddmmyyyy, _fmt_percent_points, _konto_str
+from src.audit_actions.motpost.konto_core import _fmt_date_ddmmyyyy, _fmt_percent_points, _konto_str
 from .view_konto_filters import available_mva_codes, filter_bilag_details_by_mva
 
 

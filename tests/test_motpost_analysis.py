@@ -12,7 +12,7 @@ from motpost.combo_workflow import (
     find_expected_combos_by_regnskapslinjer,
     compute_selected_net_sum_by_combo,
 )
-from motpost_konto_core import build_bilag_details, build_motpost_excel_workbook
+from src.audit_actions.motpost.konto_core import build_bilag_details, build_motpost_excel_workbook
 from views_motpost_konto import build_motpost_data
 
 

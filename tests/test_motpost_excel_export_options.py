@@ -6,7 +6,7 @@ from motpost.excel_sheets.sheet_outlier_full_bilag import (
     write_outlier_transactions_sheet,
 )
 from motpost.konto_core import build_motpost_data
-from motpost_konto_core import build_motpost_excel_workbook
+from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 
 
 def test_excel_export_can_omit_outlier_transactions_and_remove_hyperlinks():

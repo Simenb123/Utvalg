@@ -73,12 +73,12 @@ from motpost.view_konto_ui import (
 
 logger = logging.getLogger(__name__)
 
-from motpost_combinations_popup import show_motkonto_combinations_popup
-from motpost_combinations import (
+from src.audit_actions.motpost.combinations_popup import show_motkonto_combinations_popup
+from src.audit_actions.motpost.combinations import (
     build_motkonto_combinations,
     build_motkonto_combinations_per_selected_account,
 )
-from motpost_konto_core import (
+from src.audit_actions.motpost.konto_core import (
     MotpostData,
     build_bilag_details,
     build_motpost_data,

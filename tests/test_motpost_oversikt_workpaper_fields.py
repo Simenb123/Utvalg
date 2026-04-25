@@ -1,6 +1,6 @@
 import pandas as pd
 
-from motpost_konto_core import build_motpost_excel_workbook
+from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 from views_motpost_konto import build_motpost_data
 
 

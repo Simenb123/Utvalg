@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from motpost_konto_core import build_motpost_data, build_motpost_excel_workbook
+from src.audit_actions.motpost.konto_core import build_motpost_data, build_motpost_excel_workbook
 
 
 def _find_table_by_required_headers(ws, required_headers: set[str]):

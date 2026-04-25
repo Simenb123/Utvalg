@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from motpost_konto_core import _konto_str
+from src.audit_actions.motpost.konto_core import _konto_str
 
 
 def treeview_value_from_iid(

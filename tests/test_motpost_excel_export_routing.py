@@ -2,7 +2,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from motpost.konto_core import build_motpost_data
-from motpost_konto_core import build_motpost_excel_workbook
+from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 
 
 def _sample_df() -> pd.DataFrame:

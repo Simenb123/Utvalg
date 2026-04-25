@@ -3,7 +3,7 @@ import pytest
 from openpyxl import Workbook
 
 from motpost.konto_core import build_motpost_data
-from motpost_konto_core import build_motpost_excel_workbook
+from src.audit_actions.motpost.konto_core import build_motpost_excel_workbook
 from motpost.excel_sheets.sheet_outlier_full_bilag import write_outlier_detail_sheets
 
 

@@ -19,7 +19,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from formatting import fmt_amount
-from motpost_konto_core import MotpostData
+from src.audit_actions.motpost.konto_core import MotpostData
 from .expected_rules_dialog import format_rule_summary
 
 
