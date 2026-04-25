@@ -626,13 +626,20 @@ class RevisjonshandlingerPage(ttk.Frame):
             from regnskap_config import load_regnskapslinjer
 
             df = load_regnskapslinjer()
-            rl_list = [
-                RegnskapslinjeInfo(
+            rl_list = []
+            for _, row in df.iterrows():
+                rb = str(row.get("resultat/balanse", "")).strip().lower()
+                if rb.startswith("res"):
+                    lt = "PL"
+                elif rb.startswith("bal"):
+                    lt = "BS"
+                else:
+                    lt = ""
+                rl_list.append(RegnskapslinjeInfo(
                     nr=str(row["nr"]).strip(),
                     regnskapslinje=str(row["regnskapslinje"]).strip(),
-                )
-                for _, row in df.iterrows()
-            ]
+                    line_type=lt,
+                ))
             matches = match_actions_to_regnskapslinjer(self._actions, rl_list)
             self._match_by_action_id = {m.action.action_id: m for m in matches}
             self._rl_list = rl_list
@@ -765,6 +772,36 @@ class RevisjonshandlingerPage(ttk.Frame):
             shown += 1
         return shown
 
+    def _resolve_local_action_rls(self, item: LocalAction) -> list[tuple[str, str]]:
+        """Returner [(regnr, regnskapslinje), …] som handlingen er relevant for.
+
+        Bruker applies_to_scope/applies_to_regnr/default_regnr i nevnt
+        rekkefølge. Returnerer tom liste hvis ingen RL er valgt og det
+        ikke finnes default — handlingen vises da som én rad uten regnr.
+        """
+        scope = (getattr(item, "applies_to_scope", "") or "").strip().lower()
+        applies_list = list(getattr(item, "applies_to_regnr", []) or [])
+        if scope or applies_list:
+            out: list[tuple[str, str]] = []
+            seen: set[str] = set()
+            for rl in self._rl_list:
+                nr = str(getattr(rl, "nr", "") or "").strip()
+                if not nr or nr in seen:
+                    continue
+                line_type = str(getattr(rl, "line_type", "") or "")
+                if item.applies_to(nr, line_type):
+                    out.append((nr, str(getattr(rl, "regnskapslinje", "") or "")))
+                    seen.add(nr)
+            return out
+        if item.default_regnr:
+            navn = ""
+            for rl in self._rl_list:
+                if str(getattr(rl, "nr", "") or "").strip() == str(item.default_regnr).strip():
+                    navn = str(getattr(rl, "regnskapslinje", "") or "")
+                    break
+            return [(str(item.default_regnr).strip(), navn)]
+        return []
+
     def _render_local_rows(self, type_filter, status_filter, area_filter, regnr_filter, search,
                            *, covered: set[str] | None = None) -> int:
         shown = 0
@@ -785,36 +822,56 @@ class RevisjonshandlingerPage(ttk.Frame):
                 )
                 if p != phase_filter:
                     continue
-            if regnr_filter == "Uten match" and item.default_regnr:
-                continue
-            if regnr_filter not in ("Alle", "Uten match"):
-                filter_nr = regnr_filter.split()[0] if regnr_filter else ""
-                if item.default_regnr != filter_nr:
-                    continue
             if search and search not in item.navn.lower() and search not in item.omraade.lower():
                 continue
-            iid = f"L:{item.id}"
-            ansvarlig = self._assignments.get(iid, "")
-            self._tree.insert("", "end", iid=iid, values=(
-                "Lokal",
-                item.default_regnr,
-                "",
-                self._format_amount(item.default_regnr),
-                self._format_scope(item.default_regnr),
-                "",
-                item.omraade,
-                item.type,
-                item.navn,
-                "",
-                "",
-                ansvarlig,
-                "",
-                "",
-                "",
-            ), tags=("wp_local",))
-            if covered is not None and item.default_regnr:
-                covered.add(str(item.default_regnr).strip())
-            shown += 1
+
+            rl_targets = self._resolve_local_action_rls(item)
+            filter_nr = ""
+            if regnr_filter not in ("", "Alle", "Uten match"):
+                filter_nr = regnr_filter.split()[0] if regnr_filter else ""
+
+            if not rl_targets:
+                if regnr_filter not in ("Alle", "Uten match"):
+                    continue
+                iid = f"L:{item.id}"
+                ansvarlig = self._assignments.get(iid, "")
+                self._tree.insert("", "end", iid=iid, values=(
+                    "Lokal", "", "",
+                    "", "",
+                    "", item.omraade, item.type, item.navn,
+                    "", "", ansvarlig, "", "", "",
+                ), tags=("wp_local",))
+                shown += 1
+                continue
+
+            if regnr_filter == "Uten match":
+                continue
+
+            for regnr, rl_name in rl_targets:
+                if filter_nr and regnr != filter_nr:
+                    continue
+                iid = f"L:{item.id}:{regnr}" if len(rl_targets) > 1 else f"L:{item.id}"
+                ansvarlig = self._assignments.get(iid, "")
+                self._tree.insert("", "end", iid=iid, values=(
+                    "Lokal",
+                    regnr,
+                    rl_name,
+                    self._format_amount(regnr),
+                    self._format_scope(regnr),
+                    "",
+                    item.omraade,
+                    item.type,
+                    item.navn,
+                    "",
+                    "",
+                    ansvarlig,
+                    "",
+                    "",
+                    "",
+                ), tags=("wp_local",))
+                if covered is not None and regnr:
+                    covered.add(str(regnr).strip())
+                shown += 1
         return shown
 
     def _render_rl_gap_rows(self, covered: set[str]) -> int:
@@ -869,6 +926,15 @@ class RevisjonshandlingerPage(ttk.Frame):
         return added
 
     _NUMERIC_SORT_COLS = {"regnr", "belop"}
+
+    @staticmethod
+    def _local_action_id_from_iid(iid: str) -> str:
+        """Pakk ut LocalAction.id fra iid på formen ``L:<id>`` eller
+        ``L:<id>:<regnr>`` (multi-RL). UUID-id-er inneholder ikke ``:``
+        så split på første kolon er trygt."""
+        if not iid.startswith("L:"):
+            return ""
+        return iid[2:].split(":", 1)[0]
 
     def _on_heading_click(self, col: str) -> None:
         state = self._sort_state
@@ -940,7 +1006,7 @@ class RevisjonshandlingerPage(ttk.Frame):
             return
 
         if iid.startswith("L:"):
-            item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+            item = next((x for x in self._local_lib if x.id == self._local_action_id_from_iid(iid)), None)
             if item is None:
                 self._detail_var.set("")
             else:
@@ -1051,7 +1117,7 @@ class RevisjonshandlingerPage(ttk.Frame):
             self._btn_confirm.configure(state="disabled")
             self._btn_override.configure(state="disabled")
             self._btn_clear.configure(state="disabled")
-            item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+            item = next((x for x in self._local_lib if x.id == self._local_action_id_from_iid(iid)), None)
             has_builtin = bool(item) and any(
                 workpaper_library.is_builtin(w) for w in (item.workpaper_ids if item else [])
             )
@@ -1085,7 +1151,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         iid = sel[0]
         if not iid.startswith("L:"):
             return None
-        return next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+        return next((x for x in self._local_lib if x.id == self._local_action_id_from_iid(iid)), None)
 
     def _on_run_workpaper(self) -> None:
         item = self._selected_local_action()
@@ -1208,7 +1274,13 @@ class RevisjonshandlingerPage(ttk.Frame):
                 handling_navn = item.navn
                 handling_type = getattr(item, "type", "") or ""
                 omraade = getattr(item, "omraade", "") or ""
-                regnr = getattr(item, "default_regnr", "") or ""
+                # Multi-RL: hent regnr fra iid-suffiks ("L:<id>:<regnr>");
+                # ellers fall tilbake til default_regnr.
+                rest = action_key[2:]
+                if ":" in rest:
+                    regnr = rest.split(":", 1)[1]
+                else:
+                    regnr = getattr(item, "default_regnr", "") or ""
                 beskrivelse = getattr(item, "beskrivelse", "") or ""
         else:
             try:
@@ -1497,7 +1569,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         from page_revisjonshandlinger_detail import ActionDetailDialog
 
         if iid.startswith("L:"):
-            item = next((x for x in self._local_lib if f"L:{x.id}" == iid), None)
+            item = next((x for x in self._local_lib if x.id == self._local_action_id_from_iid(iid)), None)
             if item is None:
                 return
             header = [

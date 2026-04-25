@@ -20,6 +20,7 @@ from crmsystem_actions import AuditAction
 class RegnskapslinjeInfo:
     nr: str = ""               # e.g. "10", "605"
     regnskapslinje: str = ""   # e.g. "Salgsinntekt"
+    line_type: str = ""        # "PL" | "BS" | "" — utledet fra resultat/balanse
 
 
 @dataclass
