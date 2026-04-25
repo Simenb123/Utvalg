@@ -113,8 +113,13 @@ def build_client_store_widgets(parent: tk.Widget, *, init_client: str = "", init
         ("knr", "Knr:"),
         ("orgform", "Org.form:"),
         ("naering", "N\u00e6ring:"),
-        ("mva", "MVA:"),
+        ("mva", "MVA-reg:"),
         ("address", "Adresse:"),
+        ("stiftelsesdato", "Stiftelsesdato:"),
+        ("ansatte", "Ansatte:"),
+        ("hjemmeside", "Hjemmeside:"),
+        ("kapital", "Kapital:"),
+        ("antall_aksjer", "Antall aksjer:"),
         ("status", "Status:"),  # skjules når ingen rødt flagg
     ]):
         v, k = _add_kv_row(company_frame, row_idx, text)

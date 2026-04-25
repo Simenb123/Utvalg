@@ -188,7 +188,7 @@ class _RegnskapslinjeEditor(ttk.Frame):  # type: ignore[misc]
         detail_host.columnconfigure(0, weight=1)
         body.add(detail_host, weight=3)
 
-        baseline_frame = ttk.LabelFrame(detail_host, text="Global baseline", padding=(8, 6, 8, 8))
+        baseline_frame = ttk.LabelFrame(detail_host, text="Felles baseline", padding=(8, 6, 8, 8))
         baseline_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         baseline_frame.columnconfigure(1, weight=1)
 
@@ -876,8 +876,7 @@ class _RegnskapslinjeEditor(ttk.Frame):  # type: ignore[misc]
             self._select_tree_item(first)
         elif self._status_var is not None:
             self._status_var.set(
-                "Fant ingen regnskapslinjer. Importer regnskapslinjer.xlsx og "
-                "kontoplan_mapping.xlsx for å bruke editoren."
+                "Fant ingen felles mapping. Kontroller regnskapslinjer og kontoplanmapping i datamappen."
             )
 
     def save(self) -> None:

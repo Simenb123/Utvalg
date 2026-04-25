@@ -19,11 +19,13 @@ from typing import Callable, List, Optional
 
 import logging
 import os
+import webbrowser
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import app_paths
+from formatting import format_int_no
 
 from dataset_pane_store_import_ui import import_client_list_with_progress
 from dataset_pane_store_ui import build_client_store_widgets
@@ -55,6 +57,24 @@ except Exception:
     preferences = None
     _HAS_PREFS = False
 
+
+def _format_date_no(raw: object) -> str:
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    parts = s[:10].split("-")
+    if len(parts) == 3 and len(parts[0]) == 4 and all(p.isdigit() for p in parts):
+        return f"{parts[2]}.{parts[1]}.{parts[0]}"
+    return s
+
+
+def _normalize_homepage_url(raw: object) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    if "://" in s:
+        return s
+    return f"https://{s}"
 
 def get_active_version_path(display_name: str, year: str, dtype: str = "hb") -> Optional[str]:
     """Kompat-hjelper: returnerer aktiv versjon som *strengpath* (eller None).
@@ -492,7 +512,7 @@ class ClientStoreSection:
         self._brreg_current_orgnr = orgnr
 
         if not orgnr:
-            for key in ("orgform", "naering", "mva", "address"):
+            for key in ("orgform", "naering", "mva", "address", "stiftelsesdato", "ansatte", "hjemmeside", "kapital", "antall_aksjer"):
                 lbl = company.get(key)
                 if lbl is None:
                     continue
@@ -519,7 +539,7 @@ class ClientStoreSection:
         if orgform_lbl is not None:
             try: orgform_lbl.configure(text="Laster\u2026", foreground="")
             except Exception: pass
-        for key in ("naering", "mva", "address"):
+        for key in ("naering", "mva", "address", "stiftelsesdato", "ansatte", "hjemmeside", "kapital", "antall_aksjer"):
             lbl = company.get(key)
             if lbl is None:
                 continue
@@ -578,14 +598,36 @@ class ClientStoreSection:
 
         org_form = str(enhet.get("organisasjonsform") or "").strip() or "\u2013"
         naering = str(enhet.get("naeringsnavn") or "").strip() or "\u2013"
-        mva = "\u2713" if enhet.get("registrertIMvaregisteret") else "\u2013"
+        mva_raw = enhet.get("registrertIMvaregisteret")
+        if mva_raw is True:
+            mva = "JA \u2713"
+            mva_fg = "#2e7d32"
+        elif mva_raw is False and "registrertIMvaregisteret" in enhet:
+            mva = "NEI \u2715"
+            mva_fg = "#ef6c00"
+        else:
+            mva = "\u2013"
+            mva_fg = ""
         adresse = str(enhet.get("forretningsadresse") or "").strip() or "\u2013"
+        stiftelsesdato = _format_date_no(enhet.get("stiftelsesdato")) or "\u2013"
+        ansatte_raw = enhet.get("antallAnsatte")
+        ansatte = "\u2013" if ansatte_raw in (None, "") else str(ansatte_raw)
+        hjemmeside = str(enhet.get("hjemmeside") or "").strip() or "\u2013"
+        kapital_belop_raw = enhet.get("kapital_belop")
+        kapital_valuta = str(enhet.get("kapital_valuta") or "").strip()
+        kapital_belop = format_int_no(kapital_belop_raw) if kapital_belop_raw not in (None, "") else ""
+        kapital = (f"{kapital_belop} {kapital_valuta}".strip() if kapital_belop else "\u2013")
+        antall_aksjer_raw = enhet.get("kapital_antall_aksjer")
+        antall_aksjer = format_int_no(antall_aksjer_raw) if antall_aksjer_raw not in (None, "") else "\u2013"
 
         for key, text in (
             ("orgform", org_form),
             ("naering", naering),
-            ("mva", mva),
             ("address", adresse),
+            ("stiftelsesdato", stiftelsesdato),
+            ("ansatte", ansatte),
+            ("kapital", kapital),
+            ("antall_aksjer", antall_aksjer),
         ):
             lbl = company.get(key)
             if lbl is None:
@@ -594,6 +636,24 @@ class ClientStoreSection:
             except Exception: pass
 
         # Status-rad: kun når det er noe bekymringsverdig å varsle om.
+        mva_lbl = company.get("mva")
+        if mva_lbl is not None:
+            try: mva_lbl.configure(text=mva, foreground=mva_fg)
+            except Exception: pass
+
+        hjemmeside_lbl = company.get("hjemmeside")
+        if hjemmeside_lbl is not None:
+            try: hjemmeside_lbl.configure(text=hjemmeside, foreground="", cursor="")
+            except Exception: pass
+            try: hjemmeside_lbl.unbind("<Button-1>")
+            except Exception: pass
+            if hjemmeside != "\u2013":
+                homepage_url = _normalize_homepage_url(hjemmeside)
+                try: hjemmeside_lbl.configure(foreground="#1565c0", cursor="hand2")
+                except Exception: pass
+                try: hjemmeside_lbl.bind("<Button-1>", lambda _e, u=homepage_url: webbrowser.open_new_tab(u))
+                except Exception: pass
+
         slettedato = enhet.get("slettedato")
         if enhet.get("konkurs"):
             flag_text = "Konkurs"

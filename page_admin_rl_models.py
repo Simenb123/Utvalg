@@ -14,10 +14,10 @@ from page_admin_helpers import (
 
 @dataclass(frozen=True)
 class RLBaselineRow:
-    """En global RL-baseline-rad bygget fra Excel-filene.
+    """En felles RL-baseline-rad bygget fra delt JSON-baseline.
 
     Brukes som viewmodel for ``Regnskapslinjer``-fanen. Inneholder baseline
-    (Excel) og om kontoen har overlay. Er ikke avhengig av klient/session/SB.
+    og om kontoen har overlay. Er ikke avhengig av klient/session/SB.
     """
 
     regnr: str
@@ -40,7 +40,7 @@ class RLBaselineRow:
 
 
 def _raw_cell_text(value: object) -> str:
-    """Normaliser en celleverdi fra Excel til en lesbar streng."""
+    """Normaliser en celleverdi til en lesbar streng."""
     if value is None:
         return ""
     try:
@@ -86,18 +86,11 @@ def _format_sumtilknytning_text(row: RLBaselineRow) -> str:
 
 
 def _format_baseline_source_line(status: Any) -> str:
-    """Bygg 'Baseline: …'-linje basert på regnskap_config.get_status()."""
-    source = getattr(status, "regnskapslinjer_active_source", "missing")
-    if source == "json":
-        path = getattr(status, "regnskapslinjer_json_path", None)
-    elif source == "excel":
-        path = getattr(status, "regnskapslinjer_path", None)
-    else:
-        path = None
-    if source == "missing" or path is None:
-        return "Baseline: (mangler — importer regnskapslinjer.xlsx)"
-    return f"Baseline ({source}): {path}"
-
+    """Bygg en lesbar linje for den aktive delte baseline-filen."""
+    path = getattr(status, "regnskapslinjer_json_path", None) or getattr(status, "regnskapslinjer_path", None)
+    if path is None:
+        return "Felles baseline: (ikke funnet i datamappen)"
+    return f"Felles baseline: {path}"
 
 def _format_overlay_source_line(path_text: str) -> str:
     return f"Finjustering: {path_text}" if path_text else "Finjustering: (ikke lagret)"
@@ -171,9 +164,9 @@ def build_rl_baseline_rows(
     *,
     overlay_regnrs: set[str] | None = None,
 ) -> list[RLBaselineRow]:
-    """Bygg globale RL-baseline-rader fra Excel-filene.
+    """Bygg felles RL-baseline-rader fra delt JSON-baseline.
 
-    Leser ``regnskapslinjer.xlsx`` og ``kontoplan_mapping.xlsx`` og
+    Leser ``regnskapslinjer.json`` og ``kontoplan_mapping.json`` og
     returnerer én rad per regnskapslinje — inkludert sumposter — med
     baseline-felter, lesbart kontointervall og flagg for overlay-treff.
     """

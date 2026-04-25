@@ -2,15 +2,18 @@ from __future__ import annotations
 
 """Regnskap-konfigurasjon (regnskapslinjer + kontoplan-mapping).
 
-Vi ønsker en enkel og robust måte å lagre felles oppsett i datamappen:
+Aktiv mapping for regnskapslinjer og kontoplan lagres i delt ``data_dir`` slik
+at teamet bruker samme sannhet. Klientspesifikke profiler og andre
+overstyringer bor fortsatt andre steder i den delte datamappen.
+
+Denne modulen er JSON-only i runtime:
 
   <data_dir>/config/regnskap/
-    - regnskapslinjer.xlsx
-    - kontoplan_mapping.xlsx
+    - regnskapslinjer.json
+    - kontoplan_mapping.json
     - regnskap_config.json
 
-Dette gjør at oppsettet følger datamappen (som ofte er en felles share),
-og ikke blandes inn i repo/onefile-exe katalogen.
+Excel brukes ikke som aktiv kilde eller fallback.
 """
 
 import hashlib
@@ -28,7 +31,6 @@ log = logging.getLogger("app")
 
 
 ACTIVE_SOURCE_JSON = "json"
-ACTIVE_SOURCE_EXCEL = "excel"
 ACTIVE_SOURCE_MISSING = "missing"
 
 
@@ -45,17 +47,17 @@ class RegnskapConfigStatus:
 
 
 def config_dir() -> Path:
-    d = app_paths.data_dir() / "config" / "regnskap"
+    d = Path(app_paths.data_dir()) / "config" / "regnskap"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def regnskapslinjer_path() -> Path:
-    return config_dir() / "regnskapslinjer.xlsx"
+    return config_dir() / "regnskapslinjer.json"
 
 
 def kontoplan_mapping_path() -> Path:
-    return config_dir() / "kontoplan_mapping.xlsx"
+    return config_dir() / "kontoplan_mapping.json"
 
 
 def meta_path() -> Path:
@@ -63,88 +65,71 @@ def meta_path() -> Path:
 
 
 def regnskapslinjer_json_path() -> Path:
-    return config_dir() / "regnskapslinjer.json"
+    return regnskapslinjer_path()
 
 
 def kontoplan_mapping_json_path() -> Path:
-    return config_dir() / "kontoplan_mapping.json"
+    return kontoplan_mapping_path()
 
 
-def _active_source(json_path: Path, excel_path: Path) -> str:
+def legacy_shared_config_dir() -> Path:
+    return config_dir()
+
+
+def _effective_regnskapslinjer_json_path() -> Path | None:
+    json_path = regnskapslinjer_json_path()
     if json_path.exists():
-        return ACTIVE_SOURCE_JSON
-    if excel_path.exists():
-        return ACTIVE_SOURCE_EXCEL
-    return ACTIVE_SOURCE_MISSING
+        return json_path
+    return None
+
+
+def _effective_kontoplan_mapping_json_path() -> Path | None:
+    json_path = kontoplan_mapping_json_path()
+    if json_path.exists():
+        return json_path
+    return None
 
 
 def get_status() -> RegnskapConfigStatus:
     meta = _read_meta()
-    rpath = regnskapslinjer_path()
-    mpath = kontoplan_mapping_path()
-    rjson = regnskapslinjer_json_path()
-    mjson = kontoplan_mapping_json_path()
+    rjson = _effective_regnskapslinjer_json_path()
+    mjson = _effective_kontoplan_mapping_json_path()
     return RegnskapConfigStatus(
-        regnskapslinjer_path=rpath if rpath.exists() else None,
-        kontoplan_mapping_path=mpath if mpath.exists() else None,
+        regnskapslinjer_path=rjson,
+        kontoplan_mapping_path=mjson,
         regnskapslinjer_meta=dict(meta.get("regnskapslinjer") or {}),
         kontoplan_mapping_meta=dict(meta.get("kontoplan_mapping") or {}),
-        regnskapslinjer_json_path=rjson if rjson.exists() else None,
-        kontoplan_mapping_json_path=mjson if mjson.exists() else None,
-        regnskapslinjer_active_source=_active_source(rjson, rpath),
-        kontoplan_mapping_active_source=_active_source(mjson, mpath),
+        regnskapslinjer_json_path=rjson,
+        kontoplan_mapping_json_path=mjson,
+        regnskapslinjer_active_source=ACTIVE_SOURCE_JSON if rjson is not None else ACTIVE_SOURCE_MISSING,
+        kontoplan_mapping_active_source=ACTIVE_SOURCE_JSON if mjson is not None else ACTIVE_SOURCE_MISSING,
     )
 
 
+def _assert_local_admin_writable() -> None:
+    """Beholdes for bakoverkompatibilitet; aktiv mapping lagres i delt data_dir."""
+    return None
+
+
 def import_regnskapslinjer(src_path: str | Path) -> Path:
-    """Importer regnskapslinjer.xlsx inn i datamappen + regenerer JSON.
+    """Importer regnskapslinjer fra en JSON-fil til delt mapping-oppsett."""
 
-    Importen er atomisk: hvis JSON-refresh feiler rulles Excel-bytes og meta
-    tilbake, slik at vi ikke ender med ny Excel og gammel JSON.
-    """
-
-    return _import_with_json_refresh(
+    return _import_json_baseline(
         kind="regnskapslinjer",
         src_path=Path(src_path),
     )
 
 
 def import_kontoplan_mapping(src_path: str | Path) -> Path:
-    """Importer kontoplan_mapping.xlsx inn i datamappen + regenerer JSON."""
+    """Importer kontoplan-mapping fra en JSON-fil til delt mapping-oppsett."""
 
-    return _import_with_json_refresh(
+    return _import_json_baseline(
         kind="kontoplan_mapping",
         src_path=Path(src_path),
     )
 
 
 _JSON_SCHEMA_VERSION = 1
-
-
-def _read_excel_regnskapslinjer(*, sheet_name: str = "Sheet1"):
-    p = regnskapslinjer_path()
-    if not p.exists():
-        raise FileNotFoundError("Regnskapslinjer er ikke importert (mangler regnskapslinjer.xlsx i datamappen).")
-
-    import pandas as pd
-
-    df = pd.read_excel(p, sheet_name=sheet_name)
-    df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-
-def _read_excel_kontoplan_mapping(*, sheet_name: str = "Intervall"):
-    p = kontoplan_mapping_path()
-    if not p.exists():
-        raise FileNotFoundError("Kontoplan-mapping er ikke importert (mangler kontoplan_mapping.xlsx i datamappen).")
-
-    import pandas as pd
-
-    df = pd.read_excel(p, sheet_name=sheet_name)
-    df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
 
 
 def _df_to_rows(df) -> list[Dict[str, Any]]:
@@ -191,58 +176,92 @@ def _write_json_file(path: Path, rows) -> None:
     tmp.replace(path)
 
 
+def _normalize_rows_payload(data: Any, *, strict: bool) -> list[Dict[str, Any]]:
+    rows = data.get("rows") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        if strict:
+            raise ValueError("JSON-filen m? inneholde en liste under 'rows'.")
+        return []
+    out: list[Dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            out.append(dict(row))
+        elif strict:
+            raise ValueError("Alle rader i JSON-filen m? v?re objekter.")
+    return out
+
+
 def _read_json_rows(path: Path) -> list[Dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    rows = data.get("rows") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        return []
-    return [dict(r) for r in rows if isinstance(r, dict)]
+    return _normalize_rows_payload(data, strict=False)
+
+
+def _load_rows_from_json_file(path: Path) -> list[Dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Kunne ikke lese JSON-fil: {path}") from exc
+    return _normalize_rows_payload(data, strict=True)
 
 
 def load_regnskapslinjer_json():
     """Les regnskapslinjer fra JSON. Returnerer pandas DataFrame."""
 
-    p = regnskapslinjer_json_path()
-    if not p.exists():
-        raise FileNotFoundError(str(p))
+    p = _effective_regnskapslinjer_json_path()
+    if p is None:
+        raise FileNotFoundError(str(regnskapslinjer_json_path()))
     return _rows_to_df(_read_json_rows(p))
 
 
 def save_regnskapslinjer_json(rows) -> Path:
     """Lagre regnskapslinjer som JSON. Aksepterer DataFrame eller liste av dicts."""
 
+    _assert_local_admin_writable()
     if hasattr(rows, "to_dict"):
         rows = _df_to_rows(rows)
     else:
         rows = [dict(r) for r in rows]
     p = regnskapslinjer_json_path()
     _write_json_file(p, rows)
+    _update_meta_entry(
+        "regnskapslinjer",
+        filename=p.name,
+        source="shared_json",
+    )
+    _invalidate_config_caches()
     return p
 
 
 def load_kontoplan_mapping_json():
     """Les kontoplan-mapping fra JSON. Returnerer pandas DataFrame."""
 
-    p = kontoplan_mapping_json_path()
-    if not p.exists():
-        raise FileNotFoundError(str(p))
+    p = _effective_kontoplan_mapping_json_path()
+    if p is None:
+        raise FileNotFoundError(str(kontoplan_mapping_json_path()))
     return _rows_to_df(_read_json_rows(p))
 
 
 def save_kontoplan_mapping_json(rows) -> Path:
     """Lagre kontoplan-mapping som JSON. Aksepterer DataFrame eller liste av dicts."""
 
+    _assert_local_admin_writable()
     if hasattr(rows, "to_dict"):
         rows = _df_to_rows(rows)
     else:
         rows = [dict(r) for r in rows]
     p = kontoplan_mapping_json_path()
     _write_json_file(p, rows)
+    _update_meta_entry(
+        "kontoplan_mapping",
+        filename=p.name,
+        source="shared_json",
+    )
+    _invalidate_config_caches()
     return p
 
 
 # ---------------------------------------------------------------------------
-# Global RL-baseline editor-kontrakt
+# Felles RL-baseline editor-kontrakt
 # ---------------------------------------------------------------------------
 
 
@@ -273,7 +292,7 @@ class RLBaselineInterval:
 
 @dataclass
 class RLBaselineDocument:
-    """Samlet global RL-baseline (lines + intervals)."""
+    """Samlet felles RL-baseline (lines + intervals)."""
 
     lines: List[RLBaselineLine] = field(default_factory=list)
     intervals: List[RLBaselineInterval] = field(default_factory=list)
@@ -434,22 +453,20 @@ def _row_from_interval(interval: RLBaselineInterval, lines_by_regnr: Dict[str, R
 
 
 def load_rl_baseline_document() -> RLBaselineDocument:
-    """Les global RL-baseline fra JSON (bootstrap fra Excel ved behov)."""
-
-    ensure_json_baseline_from_excel()
+    """Les felles RL-baseline fra delt JSON-sannhet."""
 
     lines: List[RLBaselineLine] = []
     intervals: List[RLBaselineInterval] = []
 
-    rjson = regnskapslinjer_json_path()
-    if rjson.exists():
+    rjson = _effective_regnskapslinjer_json_path()
+    if rjson is not None:
         for row in _read_json_rows(rjson):
             line = _line_from_row(row)
             if line is not None:
                 lines.append(line)
 
-    mjson = kontoplan_mapping_json_path()
-    if mjson.exists():
+    mjson = _effective_kontoplan_mapping_json_path()
+    if mjson is not None:
         for row in _read_json_rows(mjson):
             interval = _interval_from_row(row)
             if interval is not None:
@@ -465,7 +482,7 @@ def load_rl_baseline_document() -> RLBaselineDocument:
 
 
 def save_rl_baseline_document(document: RLBaselineDocument) -> Tuple[Path, Path]:
-    """Lagre global RL-baseline til begge JSON-filene. Returnerer (lines_path, intervals_path)."""
+    """Lagre felles RL-baseline til begge JSON-filene. Returnerer (lines_path, intervals_path)."""
 
     lines = list(document.lines)
     intervals = list(document.intervals)
@@ -479,67 +496,9 @@ def save_rl_baseline_document(document: RLBaselineDocument) -> Tuple[Path, Path]
     return r_path, m_path
 
 
-def refresh_regnskapslinjer_json_from_excel() -> Path:
-    """Regenerer regnskapslinjer.json fra Excel. Kaster hvis Excel mangler/ikke kan leses."""
-
-    df = _read_excel_regnskapslinjer()
-    return save_regnskapslinjer_json(_df_to_rows(df))
-
-
-def refresh_kontoplan_mapping_json_from_excel() -> Path:
-    """Regenerer kontoplan_mapping.json fra Excel. Kaster hvis Excel mangler/ikke kan leses."""
-
-    df = _read_excel_kontoplan_mapping()
-    return save_kontoplan_mapping_json(_df_to_rows(df))
-
-
-def refresh_json_baseline_from_excel(*, kind: str) -> Path:
-    """Regenerer JSON-baseline for gitt kind fra nyimportert Excel."""
-
-    if kind == "regnskapslinjer":
-        return refresh_regnskapslinjer_json_from_excel()
-    if kind == "kontoplan_mapping":
-        return refresh_kontoplan_mapping_json_from_excel()
-    raise ValueError(f"Ukjent kind: {kind}")
-
-
-def ensure_json_baseline_from_excel() -> Tuple[bool, bool]:
-    """Bootstrap JSON-baseline fra Excel hvis JSON mangler.
-
-    Returnerer (regnskapslinjer_bootstrapet, kontoplan_bootstrapet).
-    Overskriver aldri eksisterende JSON-filer.
-    """
-
-    created_r = False
-    created_k = False
-
-    rjson = regnskapslinjer_json_path()
-    if not rjson.exists() and regnskapslinjer_path().exists():
-        try:
-            df = _read_excel_regnskapslinjer()
-            save_regnskapslinjer_json(_df_to_rows(df))
-            created_r = True
-            log.info("Bootstrappet regnskapslinjer.json fra Excel: %s", rjson)
-        except Exception:
-            log.exception("Klarte ikke å bootstrappe regnskapslinjer.json fra Excel")
-
-    kjson = kontoplan_mapping_json_path()
-    if not kjson.exists() and kontoplan_mapping_path().exists():
-        try:
-            df = _read_excel_kontoplan_mapping()
-            save_kontoplan_mapping_json(_df_to_rows(df))
-            created_k = True
-            log.info("Bootstrappet kontoplan_mapping.json fra Excel: %s", kjson)
-        except Exception:
-            log.exception("Klarte ikke å bootstrappe kontoplan_mapping.json fra Excel")
-
-    return created_r, created_k
-
-
 # Module-level cache for de hyppigst-leste konfig-filene. Disse leses
-# fra disk hver gang en RL-pivot bygges — uten cache gir det ~250-300 ms
-# overhead pr aggregering, som dominerer Analyse-refresh-tid (jf. bench).
-# Cache invalideres når filen på disk endres (mtime sjekk).
+# fra disk hver gang en RL-pivot bygges uten cache gir det ~250-300 ms
+# overhead pr aggregering, som dominerer Analyse-refresh-tid.
 _REGNSKAPSLINJER_CACHE: tuple[float, object] | None = None
 _KONTOPLAN_CACHE: tuple[float, object] | None = None
 
@@ -552,17 +511,12 @@ def _path_mtime(path) -> float:
 
 
 def load_regnskapslinjer(*, sheet_name: str = "Sheet1"):
-    """Les regnskapslinjer (JSON-first; Excel er bootstrap-kilde).
-
-    Returnerer en pandas DataFrame. Caches i minne — invalideres når
-    JSON-filen på disk endres (mtime).
-    """
+    """Les regnskapslinjer fra delt JSON-baseline."""
+    _ = sheet_name
     global _REGNSKAPSLINJER_CACHE
 
-    ensure_json_baseline_from_excel()
-
-    json_path = regnskapslinjer_json_path()
-    if json_path.exists():
+    json_path = _effective_regnskapslinjer_json_path()
+    if json_path is not None:
         mtime = _path_mtime(json_path)
         cached = _REGNSKAPSLINJER_CACHE
         if cached is not None and cached[0] == mtime:
@@ -571,20 +525,16 @@ def load_regnskapslinjer(*, sheet_name: str = "Sheet1"):
         _REGNSKAPSLINJER_CACHE = (mtime, df)
         return df.copy() if hasattr(df, "copy") else df
 
-    return _read_excel_regnskapslinjer(sheet_name=sheet_name)
+    raise FileNotFoundError(str(regnskapslinjer_json_path()))
 
 
 def load_kontoplan_mapping(*, sheet_name: str = "Intervall"):
-    """Les konto→regnnr intervallmapping (JSON-first; Excel er bootstrap-kilde).
-
-    Caches i minne — invalideres når JSON-filen på disk endres (mtime).
-    """
+    """Les konto til regnnr-intervallmapping fra delt JSON-baseline."""
+    _ = sheet_name
     global _KONTOPLAN_CACHE
 
-    ensure_json_baseline_from_excel()
-
-    json_path = kontoplan_mapping_json_path()
-    if json_path.exists():
+    json_path = _effective_kontoplan_mapping_json_path()
+    if json_path is not None:
         mtime = _path_mtime(json_path)
         cached = _KONTOPLAN_CACHE
         if cached is not None and cached[0] == mtime:
@@ -593,84 +543,79 @@ def load_kontoplan_mapping(*, sheet_name: str = "Intervall"):
         _KONTOPLAN_CACHE = (mtime, df)
         return df.copy() if hasattr(df, "copy") else df
 
-    return _read_excel_kontoplan_mapping(sheet_name=sheet_name)
+    raise FileNotFoundError(str(kontoplan_mapping_json_path()))
 
 
 def _invalidate_config_caches() -> None:
-    """Tving re-lesing fra disk neste gang. Brukes av tester eller etter
-    eksplisitt config-import."""
+    """Tving re-lesing fra disk neste gang."""
     global _REGNSKAPSLINJER_CACHE, _KONTOPLAN_CACHE
     _REGNSKAPSLINJER_CACHE = None
     _KONTOPLAN_CACHE = None
 
 
-def _import_with_json_refresh(*, kind: str, src_path: Path) -> Path:
+def bootstrap_local_json_from_shared(*, overwrite: bool = False) -> dict[str, Path]:
+    """Beholdt for bakoverkompatibilitet; aktiv mapping er allerede delt."""
+
+    source_dir = legacy_shared_config_dir()
+    imported: dict[str, Path] = {}
+    targets = {
+        "regnskapslinjer": (source_dir / "regnskapslinjer.json", regnskapslinjer_json_path()),
+        "kontoplan_mapping": (source_dir / "kontoplan_mapping.json", kontoplan_mapping_json_path()),
+    }
+    for kind, (src, dst) in targets.items():
+        try:
+            same_path = src.resolve() == dst.resolve()
+        except Exception:
+            same_path = False
+        if same_path:
+            continue
+        if not src.exists():
+            continue
+        if dst.exists() and not overwrite:
+            continue
+        imported[kind] = _import_json_baseline(kind=kind, src_path=src)
+    return imported
+
+
+def _import_json_baseline(*, kind: str, src_path: Path) -> Path:
+    if not src_path.exists():
+        raise FileNotFoundError(str(src_path))
+
     if kind == "regnskapslinjer":
-        dst_path = regnskapslinjer_path()
-        json_path = regnskapslinjer_json_path()
-        refresh = refresh_regnskapslinjer_json_from_excel
+        dst_path = regnskapslinjer_json_path()
+        writer = save_regnskapslinjer_json
     elif kind == "kontoplan_mapping":
-        dst_path = kontoplan_mapping_path()
-        json_path = kontoplan_mapping_json_path()
-        refresh = refresh_kontoplan_mapping_json_from_excel
+        dst_path = kontoplan_mapping_json_path()
+        writer = save_kontoplan_mapping_json
     else:
         raise ValueError(f"Ukjent kind: {kind}")
 
-    prior_excel_bytes = dst_path.read_bytes() if dst_path.exists() else None
-    prior_json_bytes = json_path.read_bytes() if json_path.exists() else None
+    prior_bytes = dst_path.read_bytes() if dst_path.exists() else None
     prior_meta = _read_meta()
-
-    result = _import_file(kind=kind, src_path=src_path, dst_path=dst_path)
+    rows = _load_rows_from_json_file(src_path)
 
     try:
-        refresh()
-    except Exception as exc:
-        if prior_excel_bytes is None:
+        result = writer(rows)
+        _update_meta_entry(
+            kind,
+            filename=src_path.name,
+            source="json_import",
+            original_path=str(src_path),
+            sha256=hashlib.sha256(src_path.read_bytes()).hexdigest(),
+            imported_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        return result
+    except Exception:
+        if prior_bytes is None:
             try:
                 dst_path.unlink()
             except FileNotFoundError:
                 pass
         else:
-            dst_path.write_bytes(prior_excel_bytes)
-        if prior_json_bytes is None:
-            try:
-                json_path.unlink()
-            except FileNotFoundError:
-                pass
-        else:
-            json_path.write_bytes(prior_json_bytes)
+            dst_path.write_bytes(prior_bytes)
         _write_meta(prior_meta)
-        log.exception("JSON-refresh feilet for %s — rullet tilbake import", kind)
-        raise RuntimeError(
-            f"Excel-import lyktes, men JSON-regenerering for {kind} feilet: {exc}. "
-            "Importen ble rullet tilbake."
-        ) from exc
-
-    return result
-
-
-def _import_file(*, kind: str, src_path: Path, dst_path: Path) -> Path:
-    if not src_path.exists():
-        raise FileNotFoundError(str(src_path))
-
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Kopier bytes (bevar original urørt)
-    data = src_path.read_bytes()
-    dst_path.write_bytes(data)
-
-    sha = hashlib.sha256(data).hexdigest()
-    meta = _read_meta()
-    meta[kind] = {
-        "imported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "filename": src_path.name,
-        "sha256": sha,
-        "original_path": str(src_path),
-    }
-    _write_meta(meta)
-
-    log.info("Importerte %s: %s → %s", kind, src_path, dst_path)
-    return dst_path
+        _invalidate_config_caches()
+        raise
 
 
 def _read_meta() -> Dict[str, Any]:
@@ -688,3 +633,12 @@ def _write_meta(meta: Dict[str, Any]) -> None:
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(p)
+
+
+def _update_meta_entry(kind: str, **updates: Any) -> None:
+    meta = _read_meta()
+    entry = dict(meta.get(kind) or {})
+    entry.update({k: v for k, v in updates.items() if v not in (None, "")})
+    entry.setdefault("updated_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    meta[kind] = entry
+    _write_meta(meta)

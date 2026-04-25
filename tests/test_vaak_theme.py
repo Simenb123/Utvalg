@@ -19,6 +19,7 @@ def test_color_tokens_are_6digit_hex() -> None:
     names = [
         "BG_SAND", "BG_SAND_SOFT", "BG_NEUTRAL", "BG_DATA", "BG_ZEBRA",
         "SAGE", "SAGE_DARK", "FOREST", "FOREST_HOVER", "OLIVE",
+        "SELECT_BG", "SELECT_FG",
         "TEXT_PRIMARY", "TEXT_MUTED", "TEXT_ON_SAND", "TEXT_ON_FOREST",
         "BORDER", "BORDER_SOFT",
         "POS_TEXT", "NEG_TEXT", "WARN_TEXT",
@@ -32,6 +33,11 @@ def test_color_tokens_are_6digit_hex() -> None:
 def test_hex_gui_adds_hash_prefix() -> None:
     assert vt.hex_gui("DAC79E") == "#DAC79E"
     assert vt.hex_gui("#DAC79E") == "#DAC79E"
+
+
+def test_treeview_selection_token_is_distinct_from_status_sand() -> None:
+    assert vt.SELECT_BG != vt.BG_SAND
+    assert vt.SELECT_FG == vt.TEXT_ON_FOREST
 
 
 def test_apply_theme_does_not_raise() -> None:

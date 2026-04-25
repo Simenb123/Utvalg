@@ -287,3 +287,110 @@ def test_tab_change_to_a07_syncs_dataset_context_and_refreshes_page() -> None:
     finally:
         session.client = original_client
         session.year = original_year
+
+
+def test_tab_change_to_admin_requires_password_and_reverts_on_wrong_password(monkeypatch) -> None:
+    class _Notebook:
+        def __init__(self, selected):
+            self.selected = selected
+
+        def select(self, tab=None):
+            if tab is None:
+                return self.selected
+            self.selected = tab
+            return tab
+
+        def tab(self, *_args, **_kwargs):
+            return "Admin"
+
+        def tabs(self):
+            return ["oversikt", "admin"]
+
+    app = ui_main.App.__new__(ui_main.App)
+    app.page_admin = object()
+    app.page_oversikt = object()
+    app.page_dataset = object()
+    app.page_consolidation = object()
+    app.page_a07 = object()
+    app.page_saldobalanse = object()
+    app.page_ar = object()
+    app.page_revisjonshandlinger = object()
+    app.page_scoping = object()
+    app.page_materiality = object()
+    app.page_documents = object()
+    app.nb = _Notebook(app.page_admin)
+    app.nametowidget = lambda widget_id: widget_id
+    app.after_idle = lambda fn: fn()
+    app.clear_selection_summary = lambda: None
+    app._sync_session_context_from_dataset_store = lambda: None
+    app._post_load_dirty_refreshers = {}
+    app._admin_unlocked = False
+    app._last_allowed_tab_widget = app.page_oversikt
+
+    saved_calls: list[str] = []
+    app._save_current_tab = lambda: saved_calls.append("saved")
+
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(ui_main.simpledialog, "askstring", lambda *args, **kwargs: "wrong")
+    monkeypatch.setattr(ui_main.messagebox, "showerror", lambda title, message, **kwargs: errors.append((title, message)))
+
+    app._on_notebook_tab_changed()
+
+    assert app.nb.selected is app.page_oversikt
+    assert app._admin_unlocked is False
+    assert saved_calls == []
+    assert errors == [("Admin", "Feil passord.")]
+
+
+def test_tab_change_to_admin_unlocks_on_correct_password(monkeypatch) -> None:
+    class _Notebook:
+        def __init__(self, selected):
+            self.selected = selected
+
+        def select(self, tab=None):
+            if tab is None:
+                return self.selected
+            self.selected = tab
+            return tab
+
+        def tab(self, *_args, **_kwargs):
+            return "Admin"
+
+        def tabs(self):
+            return ["oversikt", "admin"]
+
+    app = ui_main.App.__new__(ui_main.App)
+    app.page_admin = object()
+    app.page_oversikt = object()
+    app.page_dataset = object()
+    app.page_consolidation = object()
+    app.page_a07 = object()
+    app.page_saldobalanse = object()
+    app.page_ar = object()
+    app.page_revisjonshandlinger = object()
+    app.page_scoping = object()
+    app.page_materiality = object()
+    app.page_documents = object()
+    app.nb = _Notebook(app.page_admin)
+    app.nametowidget = lambda widget_id: widget_id
+    app.after_idle = lambda fn: fn()
+    app.clear_selection_summary = lambda: None
+    app._sync_session_context_from_dataset_store = lambda: None
+    app._post_load_dirty_refreshers = {}
+    app._admin_unlocked = False
+    app._last_allowed_tab_widget = app.page_oversikt
+
+    saved_calls: list[str] = []
+    refresh_calls: list[str] = []
+    app._save_current_tab = lambda: saved_calls.append("saved")
+    app._refresh_admin_from_session = lambda: refresh_calls.append("admin")
+
+    monkeypatch.setattr(ui_main.simpledialog, "askstring", lambda *args, **kwargs: "123")
+    monkeypatch.setattr(ui_main.messagebox, "showerror", lambda *args, **kwargs: None)
+
+    app._on_notebook_tab_changed()
+
+    assert app.nb.selected is app.page_admin
+    assert app._admin_unlocked is True
+    assert saved_calls == ["saved"]
+    assert refresh_calls == ["admin"]

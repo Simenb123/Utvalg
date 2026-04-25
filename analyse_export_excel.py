@@ -1,7 +1,7 @@
-"""analyse_export_excel.py — Felles Excel-eksport for MVA, Lønn, Skatt.
+"""analyse_export_excel.py — Felles Excel-eksport for MVA og Skatt.
 
 Eksporterer data fra ttk.Treeview-tabeller til et formatert Excel-ark.
-Brukes av page_mva, page_lonn og page_skatt.
+Brukes av page_mva og page_skatt.
 """
 from __future__ import annotations
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,12 +25,22 @@ class FakeLabel:
         self.text = ""
         self.foreground = None
         self.visible = True  # grid/grid_remove-tracking
+        self.cursor = ""
+        self.bindings = {}
 
     def configure(self, **kwargs) -> None:
         if "text" in kwargs:
             self.text = kwargs["text"]
         if "foreground" in kwargs:
             self.foreground = kwargs["foreground"]
+        if "cursor" in kwargs:
+            self.cursor = kwargs["cursor"]
+
+    def bind(self, event: str, callback) -> None:
+        self.bindings[event] = callback
+
+    def unbind(self, event: str) -> None:
+        self.bindings.pop(event, None)
 
     def grid(self, *a, **kw) -> None:
         self.visible = True
@@ -63,6 +74,11 @@ def _make_section(monkeypatch, tmp_path) -> "dataset_pane_store.ClientStoreSecti
         "naering": FakeLabel(),
         "mva": FakeLabel(),
         "address": FakeLabel(),
+        "stiftelsesdato": FakeLabel(),
+        "ansatte": FakeLabel(),
+        "hjemmeside": FakeLabel(),
+        "kapital": FakeLabel(),
+        "antall_aksjer": FakeLabel(),
         "status": FakeLabel(),
     }
     sec._company_key_labels = {  # type: ignore[attr-defined]
@@ -72,6 +88,11 @@ def _make_section(monkeypatch, tmp_path) -> "dataset_pane_store.ClientStoreSecti
         "naering": FakeLabel(),
         "mva": FakeLabel(),
         "address": FakeLabel(),
+        "stiftelsesdato": FakeLabel(),
+        "ansatte": FakeLabel(),
+        "hjemmeside": FakeLabel(),
+        "kapital": FakeLabel(),
+        "antall_aksjer": FakeLabel(),
         "status": FakeLabel(),
     }
     sec._role_labels = {  # type: ignore[attr-defined]
@@ -102,21 +123,53 @@ def test_render_brreg_labels_fills_orgform_naering_mva_address(monkeypatch, tmp_
         "registrertIMvaregisteret": True,
         "naeringsnavn": "Utvikling av programvare",
         "forretningsadresse": "Storgata 1, 0155 Oslo",
+        "stiftelsesdato": "2018-06-01",
+        "antallAnsatte": 12,
+        "hjemmeside": "www.eksempel.no",
+        "kapital_belop": 100000,
+        "kapital_antall_aksjer": 1000,
+        "kapital_valuta": "NOK",
     }
     sec._render_brreg_labels(enhet, [])
 
     assert sec._company_labels["orgform"].text == "Aksjeselskap"
     assert sec._company_labels["naering"].text == "Utvikling av programvare"
-    assert sec._company_labels["mva"].text == "\u2713"
+    assert sec._company_labels["mva"].text == "JA \u2713"
+    assert sec._company_labels["mva"].foreground == "#2e7d32"
     assert sec._company_labels["address"].text == "Storgata 1, 0155 Oslo"
+    assert sec._company_labels["stiftelsesdato"].text == "01.06.2018"
+    assert sec._company_labels["ansatte"].text == "12"
+    assert sec._company_labels["hjemmeside"].text == "www.eksempel.no"
+    assert sec._company_labels["kapital"].text == "100 000 NOK"
+    assert sec._company_labels["antall_aksjer"].text == "1 000"
+    assert sec._company_labels["hjemmeside"].foreground == "#1565c0"
+    assert sec._company_labels["hjemmeside"].cursor == "hand2"
 
 
-def test_render_brreg_labels_mva_dash_when_not_registered(monkeypatch, tmp_path):
+
+def test_render_brreg_labels_homepage_link_opens_browser(monkeypatch, tmp_path):
+    sec = _make_section(monkeypatch, tmp_path)
+
+    import dataset_pane_store_section as section
+
+    opened: list[str] = []
+    monkeypatch.setattr(section.webbrowser, "open_new_tab", lambda url: opened.append(url))
+
+    sec._render_brreg_labels({"organisasjonsform": "AS", "hjemmeside": "www.eksempel.no"}, [])
+
+    callback = sec._company_labels["hjemmeside"].bindings.get("<Button-1>")
+    assert callback is not None
+    callback(SimpleNamespace())
+    assert opened == ["https://www.eksempel.no"]
+
+
+def test_render_brreg_labels_mva_text_when_not_registered(monkeypatch, tmp_path):
     sec = _make_section(monkeypatch, tmp_path)
     enhet = {"organisasjonsform": "AS", "registrertIMvaregisteret": False}
     sec._render_brreg_labels(enhet, [])
 
-    assert sec._company_labels["mva"].text == "\u2013"
+    assert sec._company_labels["mva"].text == "NEI \u2715"
+    assert sec._company_labels["mva"].foreground == "#ef6c00"
 
 
 def test_render_brreg_labels_missing_fields_show_dash(monkeypatch, tmp_path):
@@ -126,7 +179,13 @@ def test_render_brreg_labels_missing_fields_show_dash(monkeypatch, tmp_path):
     assert sec._company_labels["orgform"].text == "\u2013"
     assert sec._company_labels["naering"].text == "\u2013"
     assert sec._company_labels["mva"].text == "\u2013"
+    assert sec._company_labels["mva"].foreground in (None, "")
     assert sec._company_labels["address"].text == "\u2013"
+    assert sec._company_labels["stiftelsesdato"].text == "\u2013"
+    assert sec._company_labels["ansatte"].text == "\u2013"
+    assert sec._company_labels["hjemmeside"].text == "\u2013"
+    assert sec._company_labels["kapital"].text == "\u2013"
+    assert sec._company_labels["antall_aksjer"].text == "\u2013"
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +270,8 @@ def test_update_brreg_fields_renders_from_cache(monkeypatch, tmp_path):
     sec._update_brreg_fields({"org_number": "915321445"})
 
     assert sec._company_labels["orgform"].text == "Aksjeselskap"
-    assert sec._company_labels["mva"].text == "\u2713"
+    assert sec._company_labels["mva"].text == "JA \u2713"
+    assert sec._company_labels["mva"].foreground == "#2e7d32"
     assert sec._company_labels["naering"].text == "Utvikling av programvare"
     assert sec._role_labels["daglig_leder"].text == "Ola Nordmann"
     assert sec._role_labels["styreleder"].text == "Kari Hansen"
@@ -229,7 +289,7 @@ def test_update_brreg_fields_no_orgnr_sets_dash_and_hides_status(monkeypatch, tm
 
     sec._update_brreg_fields({})
 
-    for key in ("orgform", "naering", "mva", "address"):
+    for key in ("orgform", "naering", "mva", "address", "stiftelsesdato", "ansatte", "hjemmeside", "kapital", "antall_aksjer"):
         assert sec._company_labels[key].text == "\u2013"
     assert sec._company_labels["status"].visible is False
     assert sec._role_labels["daglig_leder"].text == "\u2013"

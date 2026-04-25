@@ -69,17 +69,19 @@ def data_dir_hint_file() -> Path:
     return executable_dir() / DATA_DIR_HINT_FILENAME
 
 
-def read_data_dir_hint() -> Optional[Path]:
-    """Les data-dir hint fra ``utvalg_data_dir.txt`` hvis den finnes."""
+def sources_dir_hint_file() -> Path:
+    """Sti til valgfri fil som kan overstyre sources_dir."""
 
+    return executable_dir() / SOURCES_DIR_HINT_FILENAME
+
+
+def _read_hint_path(path: Path) -> Optional[Path]:
     try:
-        p = data_dir_hint_file()
-        if not p.exists() or not p.is_file():
+        if not path.exists() or not path.is_file():
             return None
-        raw = p.read_text(encoding="utf-8", errors="ignore").strip()
+        raw = path.read_text(encoding="utf-8", errors="ignore").strip()
         if not raw:
             return None
-        # Tillat anførselstegn rundt stien
         raw = raw.strip().strip('"').strip("'").strip()
         if not raw:
             return None
@@ -88,11 +90,55 @@ def read_data_dir_hint() -> Optional[Path]:
         return None
 
 
+def read_data_dir_hint() -> Optional[Path]:
+    """Les data-dir hint fra ``utvalg_data_dir.txt`` hvis den finnes."""
+
+    return _read_hint_path(data_dir_hint_file())
+
+
+def read_sources_dir_hint() -> Optional[Path]:
+    """Les sources-dir hint fra ``utvalg_sources_dir.txt`` hvis den finnes."""
+
+    return _read_hint_path(sources_dir_hint_file())
+
+
 def write_data_dir_hint(path: str | Path) -> Path:
     """Skriv/oppdater ``utvalg_data_dir.txt`` ved siden av prosjektet/.exe."""
 
     p = data_dir_hint_file()
     p.write_text(str(Path(path).expanduser()), encoding="utf-8")
+    return p
+
+
+def write_sources_dir_hint(path: str | Path) -> Path:
+    """Skriv/oppdater ``utvalg_sources_dir.txt`` ved siden av prosjektet/.exe."""
+
+    p = sources_dir_hint_file()
+    p.write_text(str(Path(path).expanduser()), encoding="utf-8")
+    return p
+
+
+def clear_data_dir_hint() -> Path:
+    """Fjern ``utvalg_data_dir.txt`` hvis den finnes."""
+
+    p = data_dir_hint_file()
+    try:
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
+    return p
+
+
+def clear_sources_dir_hint() -> Path:
+    """Fjern ``utvalg_sources_dir.txt`` hvis den finnes."""
+
+    p = sources_dir_hint_file()
+    try:
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
     return p
 
 
@@ -163,14 +209,9 @@ def sources_dir() -> Optional[Path]:
             return p
 
     try:
-        hint_path = executable_dir() / SOURCES_DIR_HINT_FILENAME
-        if hint_path.exists() and hint_path.is_file():
-            raw = hint_path.read_text(encoding="utf-8", errors="ignore").strip()
-            raw = raw.strip('"').strip("'").strip()
-            if raw:
-                p = Path(raw).expanduser().resolve()
-                if p.is_dir():
-                    return p
+        hint_path = read_sources_dir_hint()
+        if hint_path is not None and hint_path.is_dir():
+            return hint_path
     except Exception:
         pass
 

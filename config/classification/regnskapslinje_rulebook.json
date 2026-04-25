@@ -4,7 +4,11 @@
   },
   "rules": {
     "10": {
-      "label": "Salgsinntekt"
+      "label": "Salgsinntekt",
+      "aliases": [
+        "Salgsinntekt",
+        "Salgsinntekter"
+      ]
     },
     "30": {
       "label": "End. beh. varer u. tilv. og ferdigvarer"
@@ -235,7 +239,10 @@
       "normal_balance_hint": "kredit_typisk"
     },
     "70": {
-      "label": "Annen driftskostnad"
+      "label": "Annen driftskostnad",
+      "aliases": [
+        "Annen driftskostnad"
+      ]
     },
     "555": {
       "label": "Sum varige driftsmidler"
@@ -391,6 +398,28 @@
     },
     "565": {
       "label": "Investering i annet foretak i samme konsern"
+    },
+    "15": {
+      "label": "Annen driftsinntekt",
+      "aliases": [
+        "Leieinntekt",
+        "Leie",
+        "Leie utenfor",
+        "Leie innenfor"
+      ]
+    },
+    "40": {
+      "label": "Lønnskostnad",
+      "aliases": [
+        "Lønnskostnad"
+      ],
+      "normal_balance_hint": "debet_typisk"
+    },
+    "20": {
+      "label": "Varekostnad",
+      "aliases": [
+        "Varekostnad"
+      ]
     }
   }
 }

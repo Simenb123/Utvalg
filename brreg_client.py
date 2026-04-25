@@ -27,6 +27,7 @@ _ROLLER_URL   = "https://data.brreg.no/enhetsregisteret/api/enheter/{orgnr}/roll
 _REGNSKAP_URL = "https://data.brreg.no/regnskapsregisteret/regnskap/{orgnr}"
 _CACHE_TTL    = 86_400   # 24 timer
 _TIMEOUT      = 10       # sekunder per request
+_ENHET_SCHEMA_VERSION = "3"      # bump naar felt-mappingen for enhet endres
 _REGNSKAP_SCHEMA_VERSION = "6"   # bump når felt-mappingen endres
 _MAX_YEARS    = 5        # maks antall innleverte år å ta med fra BRREG-respons
 
@@ -77,6 +78,12 @@ def _cache_path() -> Path:
     base = Path(os.path.expanduser("~")) / ".utvalg"
     base.mkdir(parents=True, exist_ok=True)
     return base / "brreg_cache.json"
+
+
+def cache_path() -> Path:
+    """Public wrapper for plasseringen til BRREG-cachen."""
+
+    return _cache_path()
 
 
 def _load_cache() -> dict[str, Any]:
@@ -175,7 +182,9 @@ def fetch_enhet(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
     Returnerte nøkler:
       orgnr, navn, konkurs, underAvvikling, underTvangsavvikling,
       registrertIMvaregisteret, naeringskode, naeringsnavn,
-      organisasjonsform, slettedato, forretningsadresse
+      organisasjonsform, slettedato, forretningsadresse,
+      stiftelsesdato, antallAnsatte, hjemmeside,
+      kapital_belop, kapital_antall_aksjer, kapital_valuta
     Returnerer None hvis orgnr ikke er gyldig eller ikke funnet.
     """
     orgnr = orgnr.strip().replace(" ", "")
@@ -183,7 +192,7 @@ def fetch_enhet(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
         return None
 
     cache = _load_cache() if use_cache else {}
-    cache_key = f"enhet:{orgnr}"
+    cache_key = f"enhet_v{_ENHET_SCHEMA_VERSION}:{orgnr}"
     entry = cache.get(cache_key)
     if entry and time.time() - entry.get("_ts", 0) < _CACHE_TTL:
         return entry.get("data")
@@ -193,6 +202,7 @@ def fetch_enhet(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
         result: dict[str, Any] | None = None
     else:
         nk = data.get("naeringskode1") or {}
+        kapital = data.get("kapital") or {}
         result = {
             "orgnr":                    orgnr,
             "navn":                     data.get("navn", ""),
@@ -207,6 +217,12 @@ def fetch_enhet(orgnr: str, *, use_cache: bool = True) -> dict[str, Any] | None:
                 "beskrivelse", ""),
             "slettedato":               data.get("slettedato", ""),
             "forretningsadresse":       _fmt_adresse(data.get("forretningsadresse")),
+            "stiftelsesdato":           data.get("stiftelsesdato", ""),
+            "antallAnsatte":            data.get("antallAnsatte"),
+            "hjemmeside":               data.get("hjemmeside", ""),
+            "kapital_belop":            kapital.get("belop"),
+            "kapital_antall_aksjer":    kapital.get("antallAksjer"),
+            "kapital_valuta":           kapital.get("valuta", ""),
         }
 
     cache[cache_key] = {"_ts": time.time(), "data": result}
