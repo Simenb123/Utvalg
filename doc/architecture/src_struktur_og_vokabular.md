@@ -98,6 +98,24 @@ skje uten å bryte resten.
 - `src/pages/driftsmidler/` (1 fil) — pilot, validerte oppskriften
 - `src/pages/statistikk/` (3 filer) — første flerfilet klynge
 
+### Planlagt neste store klynge
+
+- `src/pages/a07/`
+
+For A07 er vedtatt retning aa flytte den offentlige page-entrypointen foerst,
+ikke hele runtime-klyngen i ett steg.
+
+Det betyr:
+
+- `src/pages/a07/` blir kanonisk page-importflate
+- `page_a07.py` beholdes som compat-shim i en overgangsperiode
+- intern motorlogikk i `a07_feature/` splittes videre foer eventuell senere
+  fysisk flytting
+
+Se:
+
+- [A07 Refaktor- Og `src/`-Plan](a07_refaktor_og_src_plan.md)
+
 ## Felles kolonne-vokabular
 
 **Modul:** [src/shared/columns_vocabulary.py](../../src/shared/columns_vocabulary.py)

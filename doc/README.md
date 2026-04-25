@@ -7,6 +7,10 @@
 - [`KLASSIFISERINGSFELTER_LONN.md`](KLASSIFISERINGSFELTER_LONN.md) - forklaring av felter, forslag, historikk, status og lønnsflagg.
 - [`RF1022_BEHANDLINGSLOGIKK.md`](RF1022_BEHANDLINGSLOGIKK.md) - workbook-logikken for RF-1022, inkludert skyldig/påløpt og periodisering.
 
+## Datakilder og struktur
+
+- [`architecture/datakilder_og_mapping_navaerende_struktur.md`](architecture/datakilder_og_mapping_navaerende_struktur.md) - gjeldende modell for delt datamappe, aktiv mapping, lokal cache og hva som ble ryddet i stabiliseringsrunden.
+
 ---
 
 ## Arbeidsmetode — ideer og oppgaver
