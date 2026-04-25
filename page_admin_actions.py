@@ -18,6 +18,39 @@ from action_library import LocalAction
 from workpaper_library import Workpaper
 
 
+def _load_rl_options() -> list[tuple[str, str, str]]:
+    """Returner [(regnr, navn, "PL"|"BS"), …] uten sumposter.
+
+    Bruker `regnskap_config.load_regnskapslinjer_json()` som primær kilde.
+    Faller tilbake til tom liste hvis lasting feiler — admin-GUI håndterer
+    det ved å vise en informasjonsmelding.
+    """
+    try:
+        import regnskap_config
+
+        df = regnskap_config.load_regnskapslinjer_json()
+    except Exception:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for _, row in df.iterrows():
+        sumpost = str(row.get("sumpost", "")).strip().lower()
+        if sumpost == "ja":
+            continue
+        nr = str(row.get("nr", "")).strip()
+        navn = str(row.get("regnskapslinje", "")).strip()
+        if not nr or not navn:
+            continue
+        rb = str(row.get("resultat/balanse", "")).strip().lower()
+        if rb.startswith("res"):
+            line_type = "PL"
+        elif rb.startswith("bal"):
+            line_type = "BS"
+        else:
+            line_type = ""
+        out.append((nr, navn, line_type))
+    return out
+
+
 class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
     def __init__(
         self,
@@ -41,6 +74,12 @@ class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
         self._type_var = tk.StringVar(value="substansiv")
         self._omraade_var = tk.StringVar()
         self._default_regnr_var = tk.StringVar()
+
+        # Multi-RL-felter
+        self._scope_var = tk.StringVar(value="spesifikke")
+        self._rl_options: list[tuple[str, str, str]] = []
+        self._rl_check_vars: dict[str, tk.BooleanVar] = {}
+        self._rl_check_widgets: dict[str, ttk.Checkbutton] = {}
 
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=2)
@@ -112,6 +151,57 @@ class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
         ttk.Entry(right, textvariable=self._default_regnr_var, width=10).grid(row=row, column=1, sticky="w", pady=2)
         row += 1
 
+        # Gjelder regnskapslinjer
+        rl_frame = ttk.LabelFrame(right, text="Gjelder regnskapslinjer", padding=6)
+        rl_frame.grid(row=row, column=0, columnspan=2, sticky="nsew", pady=(6, 4))
+        rl_frame.columnconfigure(0, weight=1)
+        rl_frame.rowconfigure(2, weight=1)
+        right.rowconfigure(row, weight=2)
+        row += 1
+
+        radio_row = ttk.Frame(rl_frame)
+        radio_row.grid(row=0, column=0, sticky="w")
+        for value, label in (
+            ("spesifikke", "Spesifikke linjer"),
+            ("alle_pl", "Alle PL-linjer"),
+            ("alle_bs", "Alle BS-linjer"),
+            ("alle", "Alle linjer"),
+        ):
+            ttk.Radiobutton(
+                radio_row,
+                text=label,
+                variable=self._scope_var,
+                value=value,
+                command=self._on_scope_changed,
+            ).pack(side="left", padx=(0, 10))
+
+        quick_row = ttk.Frame(rl_frame)
+        quick_row.grid(row=1, column=0, sticky="w", pady=(4, 4))
+        ttk.Button(quick_row, text="Hak av alle PL", command=lambda: self._bulk_check("PL")).pack(side="left")
+        ttk.Button(quick_row, text="Hak av alle BS", command=lambda: self._bulk_check("BS")).pack(side="left", padx=(6, 0))
+        ttk.Button(quick_row, text="Fjern alle", command=lambda: self._bulk_check("")).pack(side="left", padx=(6, 0))
+
+        list_holder = ttk.Frame(rl_frame)
+        list_holder.grid(row=2, column=0, sticky="nsew")
+        list_holder.columnconfigure(0, weight=1)
+        list_holder.rowconfigure(0, weight=1)
+        self._rl_canvas = tk.Canvas(list_holder, height=180, highlightthickness=0)
+        self._rl_canvas.grid(row=0, column=0, sticky="nsew")
+        rl_yscroll = ttk.Scrollbar(list_holder, orient="vertical", command=self._rl_canvas.yview)
+        rl_yscroll.grid(row=0, column=1, sticky="ns")
+        self._rl_canvas.configure(yscrollcommand=rl_yscroll.set)
+        self._rl_inner = ttk.Frame(self._rl_canvas)
+        self._rl_inner_id = self._rl_canvas.create_window((0, 0), window=self._rl_inner, anchor="nw")
+
+        def _on_inner_config(_e=None):
+            self._rl_canvas.configure(scrollregion=self._rl_canvas.bbox("all"))
+
+        def _on_canvas_config(e):
+            self._rl_canvas.itemconfigure(self._rl_inner_id, width=e.width)
+
+        self._rl_inner.bind("<Configure>", _on_inner_config)
+        self._rl_canvas.bind("<Configure>", _on_canvas_config)
+
         ttk.Label(right, text="Arbeidspapir:").grid(row=row, column=0, sticky="nw", pady=2)
         wp_frame = ttk.Frame(right)
         wp_frame.grid(row=row, column=1, sticky="nsew", pady=2)
@@ -144,9 +234,63 @@ class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
         self._cb_type.configure(values=self._types)
         if self._type_var.get() not in self._types and self._types:
             self._type_var.set(self._types[0])
+        if not self._rl_options:
+            self._rl_options = _load_rl_options()
+            self._build_rl_check_list()
         self._refresh_tree()
         self._refresh_workpaper_list()
+        self._update_rl_enabled_state()
         self._status_var.set(f"{len(self._items)} handling(er) lagret i {action_library.library_path()}")
+
+    def _build_rl_check_list(self) -> None:
+        for child in self._rl_inner.winfo_children():
+            child.destroy()
+        self._rl_check_vars.clear()
+        self._rl_check_widgets.clear()
+
+        if not self._rl_options:
+            ttk.Label(
+                self._rl_inner,
+                text="Ingen regnskapslinjer funnet. Sjekk regnskap_config.",
+                style="Muted.TLabel",
+            ).pack(anchor="w", padx=4, pady=4)
+            return
+
+        for nr, navn, line_type in self._rl_options:
+            var = tk.BooleanVar(value=False)
+            self._rl_check_vars[nr] = var
+            label = f"{nr}  {navn}"
+            if line_type:
+                label = f"{label}    [{line_type}]"
+            cb = ttk.Checkbutton(self._rl_inner, text=label, variable=var)
+            cb.pack(anchor="w", padx=4, pady=1)
+            self._rl_check_widgets[nr] = cb
+
+    def _on_scope_changed(self) -> None:
+        self._update_rl_enabled_state()
+
+    def _update_rl_enabled_state(self) -> None:
+        scope = self._scope_var.get()
+        enable = scope == "spesifikke"
+        state = "normal" if enable else "disabled"
+        for cb in self._rl_check_widgets.values():
+            try:
+                cb.configure(state=state)
+            except Exception:
+                pass
+
+    def _bulk_check(self, line_type: str) -> None:
+        """Hak av alle med matching ``line_type``. Tom streng = fjern alle."""
+        if self._scope_var.get() != "spesifikke":
+            self._scope_var.set("spesifikke")
+            self._update_rl_enabled_state()
+        if not line_type:
+            for var in self._rl_check_vars.values():
+                var.set(False)
+            return
+        for nr, _navn, lt in self._rl_options:
+            if lt == line_type and nr in self._rl_check_vars:
+                self._rl_check_vars[nr].set(True)
 
     def _refresh_workpaper_list(self) -> None:
         self._wp_listbox.delete(0, "end")
@@ -316,6 +460,16 @@ class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
         self._refresh_workpaper_list()
         self._beskr_txt.delete("1.0", "end")
         self._beskr_txt.insert("1.0", item.beskrivelse)
+        # Multi-RL — sett scope + checkboxes
+        scope = (item.applies_to_scope or "").strip().lower()
+        if scope in ("alle", "alle_pl", "alle_bs"):
+            self._scope_var.set(scope)
+        else:
+            self._scope_var.set("spesifikke")
+        selected = set(str(x).strip() for x in (item.applies_to_regnr or []) if str(x).strip())
+        for nr, var in self._rl_check_vars.items():
+            var.set(nr in selected)
+        self._update_rl_enabled_state()
 
     def _on_new(self) -> None:
         self._selected_id = ""
@@ -326,6 +480,10 @@ class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
         self._current_workpaper_ids = []
         self._refresh_workpaper_list()
         self._beskr_txt.delete("1.0", "end")
+        self._scope_var.set("spesifikke")
+        for var in self._rl_check_vars.values():
+            var.set(False)
+        self._update_rl_enabled_state()
         try:
             self._tree.selection_remove(self._tree.selection())
         except Exception:
@@ -364,6 +522,15 @@ class _ActionLibraryEditor(ttk.Frame):  # type: ignore[misc]
         item.default_regnr = self._default_regnr_var.get().strip()
         item.workpaper_ids = list(self._current_workpaper_ids)
         item.beskrivelse = beskrivelse
+        scope = self._scope_var.get().strip().lower()
+        if scope in ("alle", "alle_pl", "alle_bs"):
+            item.applies_to_scope = scope
+            item.applies_to_regnr = []
+        else:
+            item.applies_to_scope = ""
+            item.applies_to_regnr = [
+                nr for nr, var in self._rl_check_vars.items() if var.get()
+            ]
         action_library.upsert_action(item)
         self._selected_id = item.id
         self._reload()
