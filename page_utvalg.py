@@ -45,7 +45,7 @@ from views_virtual_transactions import VirtualTransactionsPanel
 import preferences
 import session
 from bus import emit, set_utvalg_page
-from materiality_store import load_state as _load_materiality_state
+from src.pages.materiality.backend.store import load_state as _load_materiality_state
 
 
 def _apply_materiality_to_studio(studio: object) -> None:

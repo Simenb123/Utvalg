@@ -60,7 +60,7 @@ def main() -> None:
         "page_reskontro",
         "page_regnskap",
         "src.pages.driftsmidler",
-        "page_materiality",
+        "src.pages.materiality.frontend.page",
         "page_scoping",
         "page_mva",
         "page_skatt",

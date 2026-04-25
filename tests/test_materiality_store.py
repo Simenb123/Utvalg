@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import materiality_store as mod
+import src.pages.materiality.backend.store as mod
 
 
 def test_build_candidate_client_numbers_handles_visena_prefix() -> None:

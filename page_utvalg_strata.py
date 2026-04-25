@@ -29,7 +29,7 @@ from typing import Any, Callable, List, Optional
 import pandas as pd
 
 import session
-from materiality_store import load_state
+from src.pages.materiality.backend.store import load_state
 from views_selection_studio_ui import SelectionStudio
 
 

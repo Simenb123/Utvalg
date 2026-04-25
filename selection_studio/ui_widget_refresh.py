@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from materiality_store import (
+from src.pages.materiality.backend.store import (
     DEFAULT_SELECTION_THRESHOLD_KEY,
     SELECTION_THRESHOLD_LABELS,
     get_selection_threshold_label,

@@ -322,7 +322,7 @@ class ScopingPage(ttk.Frame):
         import session as _session
         from page_analyse_rl import build_rl_pivot, load_rl_config, load_sb_for_session
 
-        import materiality_store
+        import src.pages.materiality.backend.store as materiality_store
         import previous_year_comparison
         import regnskap_client_overrides as _rco
         from scoping_engine import build_scoping

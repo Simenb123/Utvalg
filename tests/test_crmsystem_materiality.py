@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import crmsystem_materiality as mod
+import src.pages.materiality.backend.crmsystem as mod
 
 
 def _prepare_db(path: Path) -> None:

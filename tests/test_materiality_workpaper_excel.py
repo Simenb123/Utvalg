@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from openpyxl import load_workbook
 
-from materiality_workpaper_excel import export_materiality_workpaper
+from src.pages.materiality.backend.workpaper_excel import export_materiality_workpaper
 
 
 def _sheet_kv_map(ws) -> dict[str, object]:

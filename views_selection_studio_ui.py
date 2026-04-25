@@ -34,7 +34,7 @@ import pandas as pd
 import tkinter as tk
 from tkinter import ttk
 
-from materiality_store import DEFAULT_SELECTION_THRESHOLD_KEY, SELECTION_THRESHOLD_LABELS
+from src.pages.materiality.backend.store import DEFAULT_SELECTION_THRESHOLD_KEY, SELECTION_THRESHOLD_LABELS
 from selection_studio_helpers import (
     PopulationMetrics,
     build_population_summary_text,

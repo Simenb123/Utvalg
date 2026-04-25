@@ -60,16 +60,3 @@ def test_backend_can_be_imported_headless() -> None:
     assert hasattr(crmsystem, "load_materiality_from_crm")
 
 
-def test_toplevel_shims_aliasser_same_module_object() -> None:
-    """Toppnivå-shims skal være SAMME modul-objekt som backend-modulen."""
-    import crmsystem_materiality as legacy_crm
-    import materiality_engine as legacy_engine
-    import materiality_store as legacy_store
-    import materiality_workpaper_excel as legacy_excel
-
-    from src.pages.materiality.backend import crmsystem, engine, store, workpaper_excel
-
-    assert legacy_crm is crmsystem
-    assert legacy_engine is engine
-    assert legacy_store is store
-    assert legacy_excel is workpaper_excel

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-import materiality_engine as mod
+import src.pages.materiality.backend.engine as mod
 
 
 def test_build_benchmark_amounts_from_rl_df_uses_key_regnskapslinjer() -> None:

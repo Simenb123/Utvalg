@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
-from crmsystem_materiality import discover_crm_db_path, suggest_client_numbers_from_name
+from src.pages.materiality.backend.crmsystem import discover_crm_db_path, suggest_client_numbers_from_name
 
 
 @dataclass

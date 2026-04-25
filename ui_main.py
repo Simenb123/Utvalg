@@ -39,7 +39,7 @@ from src.pages.logg import LoggPage
 from src.pages.consolidation.frontend.page import ConsolidationPage
 from src.pages.ar.frontend.page import ARPage
 from page_regnskap import RegnskapPage
-from page_materiality import MaterialityPage
+from src.pages.materiality.frontend.page import MaterialityPage
 from page_mva import MvaPage
 from page_skatt import SkattPage
 from page_reskontro import ReskontroPage
@@ -958,7 +958,7 @@ class App(tk.Tk):
                 self._refresh_scoping_from_session()
             return
 
-        if selected_widget is getattr(self, "page_materiality", None):
+        if selected_widget is getattr(self, "src.pages.materiality.frontend.page", None):
             # Auto-refresh ved aktivering — Vesentlighet leser session.client/year
             # og må synkes hver gang brukeren bytter klient eller år, ikke kun
             # ved første dataset-load.
@@ -1139,7 +1139,7 @@ class App(tk.Tk):
         lastet før eller etter at fanen ble besøkt.
         """
         try:
-            page = getattr(self, "page_materiality", None)
+            page = getattr(self, "src.pages.materiality.frontend.page", None)
             if page is None:
                 return
             if hasattr(page, "refresh_from_session") and callable(getattr(page, "refresh_from_session")):
@@ -1463,7 +1463,7 @@ class App(tk.Tk):
         candidate_refreshers: list[tuple[object | None, callable]] = [
             (getattr(self, "page_saldobalanse", None), _refresh_saldobalanse),
             (getattr(self, "page_regnskap", None),     _refresh_regnskap),
-            (getattr(self, "page_materiality", None),  _refresh_materiality),
+            (getattr(self, "src.pages.materiality.frontend.page", None),  _refresh_materiality),
             (getattr(self, "page_mva", None),          _refresh_mva),
             (getattr(self, "page_skatt", None),        _refresh_skatt),
             (getattr(self, "page_reskontro", None),    _refresh_reskontro),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import page_materiality as mod
+import src.pages.materiality.frontend.page as mod
 
 
 class _DummyVar:
