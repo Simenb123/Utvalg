@@ -15,7 +15,7 @@ import pandas as pd
 
 from src.shared.columns_vocabulary import active_year_from_session, heading
 
-from .page_statistikk_compute import _AMT_FMT
+from .compute import _AMT_FMT
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ def write_workbook(
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
-    from .page_statistikk_compute import (
+    from .compute import (
         _compute_bilag,
         _compute_kontoer,
         _compute_maned_pivot,

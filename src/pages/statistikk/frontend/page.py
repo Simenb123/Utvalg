@@ -25,8 +25,11 @@ except Exception:  # pragma: no cover
     messagebox = None  # type: ignore
 
 
-# Data-beregning (utskilt til page_statistikk_compute)
-from .page_statistikk_compute import (  # noqa: E402
+# Data-beregning (backend — uten Tk-avhengighet).
+# get_konto_ranges (uten underscore) er ny ren-data-signatur.
+# _get_konto_ranges (med underscore) beholdes som bakoverkompat-alias
+# som tar page-objekt — fjernes når _get_konto_set_for_regnr refaktoreres.
+from ..backend.compute import (  # noqa: E402
     _AMT_FMT,
     _compute_bilag,
     _compute_extra_stats,
@@ -37,11 +40,11 @@ from .page_statistikk_compute import (  # noqa: E402
     _filter_df,
     _fmt_amount,
     _fmt_pct,
-    _get_konto_ranges,
     _get_konto_set_for_regnr,
     _safe_float,
     _safe_int,
     _sb_kontoer_in_ranges,
+    get_konto_ranges,
 )
 
 
@@ -522,7 +525,9 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             self._status_var.set("Ingen transaksjonsdata lastet")
             return
 
-        ranges = _get_konto_ranges(page, self._current_regnr)
+        intervals = getattr(page, "_rl_intervals", None)
+        regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+        ranges = get_konto_ranges(intervals, regnskapslinjer, self._current_regnr)
         df_rl = _filter_df(df_all, ranges)
 
         # Post-filtrer på faktisk regnr-mapping (respekterer klient-overrides).
@@ -1443,7 +1448,9 @@ link.on("mousemove", function(event, d) {{
         if not path:
             return
         try:
-            ranges = _get_konto_ranges(page, self._current_regnr)
+            intervals = getattr(page, "_rl_intervals", None)
+            regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+            ranges = get_konto_ranges(intervals, regnskapslinjer, self._current_regnr)
             df_rl = _filter_df(df_all, ranges)
             try:
                 sb_eff = page._get_effective_sb_df()  # type: ignore[union-attr]
@@ -1471,10 +1478,10 @@ link.on("mousemove", function(event, d) {{
 
 
 # ---------------------------------------------------------------------------
-# Excel (re-eksport fra page_statistikk_excel)
+# Excel (re-eksport fra backend)
 # ---------------------------------------------------------------------------
 
-from .page_statistikk_excel import (  # noqa: E402
+from ..backend.excel import (  # noqa: E402
     _compute_kombinasjoner_export,
     _compute_motpost_rl,
     write_workbook as _write_workbook,

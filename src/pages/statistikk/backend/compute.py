@@ -76,9 +76,17 @@ def _fmt_pct(v: object) -> str:
 # RL-range / konto-set
 # ---------------------------------------------------------------------------
 
-def _get_konto_ranges(page: object, regnr: int) -> list[tuple[int, int]]:
-    intervals = getattr(page, "_rl_intervals", None)
-    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+def get_konto_ranges(
+    intervals: pd.DataFrame | None,
+    regnskapslinjer: pd.DataFrame | None,
+    regnr: int,
+) -> list[tuple[int, int]]:
+    """Hent kontorange for et regnr fra intervall-tabellen.
+
+    Tar rene DataFrames inn — ingen kobling til Tk-side. Frontend må
+    selv hente ``_rl_intervals`` og ``_rl_regnskapslinjer`` fra Analyse-
+    siden og sende dem inn.
+    """
     if intervals is None or (hasattr(intervals, "empty") and intervals.empty):
         return []
     leaf_set: set[int] = {regnr}
@@ -93,15 +101,24 @@ def _get_konto_ranges(page: object, regnr: int) -> list[tuple[int, int]]:
                 if expanded:
                     leaf_set = set(expanded)
         except Exception as exc:
-            log.warning("_get_konto_ranges: %s", exc)
+            log.warning("get_konto_ranges: %s", exc)
     ranges: list[tuple[int, int]] = []
     try:
         for _, row in intervals.iterrows():
             if int(row["regnr"]) in leaf_set:
                 ranges.append((int(row["fra"]), int(row["til"])))
     except Exception as exc:
-        log.warning("_get_konto_ranges loop: %s", exc)
+        log.warning("get_konto_ranges loop: %s", exc)
     return ranges
+
+
+# Bakoverkompat-alias — internt kalt fra _get_konto_set_for_regnr som
+# fortsatt tar 'page'. Fjernes når den siste page-koblede funksjonen
+# refaktoreres (TODO i pilot 3).
+def _get_konto_ranges(page: object, regnr: int) -> list[tuple[int, int]]:
+    intervals = getattr(page, "_rl_intervals", None)
+    regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
+    return get_konto_ranges(intervals, regnskapslinjer, regnr)
 
 
 def _filter_df(df: pd.DataFrame, ranges: list[tuple[int, int]]) -> pd.DataFrame:
@@ -118,6 +135,9 @@ def _filter_df(df: pd.DataFrame, ranges: list[tuple[int, int]]) -> pd.DataFrame:
         return pd.DataFrame(columns=df.columns)
 
 
+# TODO(pilot 3): Refaktor signaturen til å ta intervals + regnskapslinjer
+# direkte i stedet for page-objekt. Krever også å erstatte
+# context_from_page(page) med en variant som tar rene data inn.
 def _get_konto_set_for_regnr(
     page: object,
     regnr: int,
@@ -229,6 +249,8 @@ def _sb_kontoer_in_ranges(
 # Compute-funksjoner
 # ---------------------------------------------------------------------------
 
+# TODO(pilot 3): Refaktor til å ta sb_df, sb_prev_df som rene argumenter
+# i stedet for å hente dem fra page-objektet via getattr/_get_effective_sb_df.
 def _compute_kontoer(
     df_rl: pd.DataFrame,
     page: object,
