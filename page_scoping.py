@@ -70,7 +70,10 @@ class ScopingPage(ttk.Frame):
         # scopet-ut totalt per gruppe, med fargekodet OK/ADVARSEL.
         agg = ttk.Frame(self)
         agg.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
-        agg.columnconfigure(2, weight=1)
+        # Begge kortene skal ekspandere horisontalt og dele plassen likt;
+        # lås/eksport-knappene legger seg helt til høyre.
+        agg.columnconfigure(0, weight=1, uniform="card")
+        agg.columnconfigure(1, weight=1, uniform="card")
 
         # Metric-kort: tk.Frame med strukturerte felt (tittel, stort
         # scopet-ut-tall, PM-tall, progress bar, prosent, linje-teller).
@@ -78,11 +81,11 @@ class ScopingPage(ttk.Frame):
         # _populate_card oppdaterer dem senere.
         self._card_pl_refs = self._build_metric_card(agg, "Resultat (PL)")
         self._card_pl = self._card_pl_refs["frame"]
-        self._card_pl.grid(row=0, column=0, sticky="w")
+        self._card_pl.grid(row=0, column=0, sticky="ew")
 
         self._card_bs_refs = self._build_metric_card(agg, "Balanse (BS)")
         self._card_bs = self._card_bs_refs["frame"]
-        self._card_bs.grid(row=0, column=1, sticky="w", padx=(12, 0))
+        self._card_bs.grid(row=0, column=1, sticky="ew", padx=(12, 0))
 
         # Bakoverkompat-StringVars — brukes ikke lenger direkte men
         # beholdes for tester/loggere som leser dem.
@@ -109,36 +112,44 @@ class ScopingPage(ttk.Frame):
         filt = ttk.Frame(self)
         filt.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 4))
 
-        ttk.Label(filt, text="Klassifisering:").pack(side="left", padx=(0, 4))
+        # Filter-grupper med tydelige labels og vertikale separatorer
+        # mellom gruppene slik at det er klart hva som hører sammen.
+        def _filter_separator() -> None:
+            ttk.Frame(filt, width=12).pack(side="left")
+            ttk.Separator(filt, orient="vertical").pack(
+                side="left", fill="y", pady=2
+            )
+            ttk.Frame(filt, width=12).pack(side="left")
+
+        # — Gruppe 1: Klassifisering —
+        ttk.Label(filt, text="Klassifisering:", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 6))
         cb_class = ttk.Combobox(
             filt, textvariable=self.var_filter_class, state="readonly",
             values=["Alle", "Vesentlig", "Moderat", "Ikke vesentlig", "Manuell"], width=14,
         )
-        cb_class.pack(side="left", padx=(4, 0))
+        cb_class.pack(side="left")
         cb_class.bind("<<ComboboxSelected>>", lambda _: self._apply_filter())
-        ttk.Frame(filt, width=16).pack(side="left")
+        _filter_separator()
 
-        ttk.Label(filt, text="Type:").pack(side="left", padx=(0, 4))
-        # Radio-bokser (ikke kombiboks) for Type — tre valg: Alle /
-        # Resultat (PL) / Balanse (BS). "Resultat" og "Balanse" er
-        # internt BS/PL, men vises med tydelige norske labels.
+        # — Gruppe 2: Type —
+        ttk.Label(filt, text="Type:", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 6))
         for label, value in (("Alle", "Alle"), ("Resultat", "PL"), ("Balanse", "BS")):
             ttk.Radiobutton(
                 filt, text=label,
                 variable=self.var_filter_type, value=value,
                 command=self._apply_filter,
-            ).pack(side="left", padx=(4, 10))
-        # Seksjonsskille mellom filter-gruppene
-        ttk.Frame(filt, width=16).pack(side="left")
+            ).pack(side="left", padx=(0, 10))
+        _filter_separator()
 
-        ttk.Label(filt, text="Scoping:").pack(side="left", padx=(0, 4))
+        # — Gruppe 3: Scoping —
+        ttk.Label(filt, text="Scoping:", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 6))
         for label in ("Alle", "I scope", "Ut av scope"):
             ttk.Radiobutton(
                 filt, text=label,
                 variable=self.var_filter_scoping, value=label,
                 command=self._apply_filter,
-            ).pack(side="left", padx=(4, 10))
-        ttk.Frame(filt, width=16).pack(side="left")
+            ).pack(side="left", padx=(0, 10))
+        _filter_separator()
 
         ttk.Checkbutton(
             filt, text="Skjul sumposter", variable=self.var_hide_summary,
@@ -981,21 +992,19 @@ class ScopingPage(ttk.Frame):
         )
 
     def _build_metric_card(self, parent, title: str):
-        """Bygg et metric-kort som kommuniserer scoping-status tydelig.
+        """Bygg et metric-kort med horisontal layout — bredt, men lavt.
 
-        Layout (rader i en tk.Frame):
-          Rad 0: tittel  "Resultat (PL)"                             (liten, dempet)
-          Rad 1: to kolonner — "Scopet ut" + "av PM"                  (labels)
-          Rad 2: to kolonner — [STORT TALL]  +  [mindre PM-tall]
-          Rad 3: progressbar (34% fylt)
-          Rad 4: linje-teller  "7 av 25 linjer ut av scope"           (liten, dempet)
+        Layout (3 rader × 2 kolonner i en tk.Frame):
+          Rad 0: tittel (full bredde)
+          Rad 1: [stort tall] [bar + prosent]
+          Rad 2: [PM-undertekst]  [linje-teller]
 
         Returnerer dict med widget-referanser som _populate_card oppdaterer.
         """
         bg = "#FFFFFF"
         card = tk.Frame(parent, relief="solid", borderwidth=1, background=bg)
-        card.columnconfigure(0, weight=1)
-        card.columnconfigure(1, weight=0)
+        card.columnconfigure(0, weight=0, minsize=140)  # tall-kolonnen
+        card.columnconfigure(1, weight=1, minsize=240)  # bar-kolonnen vokser
 
         title_lbl = ttk.Label(
             card, text=title,
@@ -1003,64 +1012,54 @@ class ScopingPage(ttk.Frame):
             foreground="#344054", background=bg,
         )
         title_lbl.grid(row=0, column=0, columnspan=2, sticky="w",
-                       padx=14, pady=(10, 2))
+                       padx=12, pady=(6, 2))
 
-        # Rad 1: feltetiketter
-        ttk.Label(
-            card, text="Scopet ut",
-            font=("Segoe UI", 8),
-            foreground="#667085", background=bg,
-        ).grid(row=1, column=0, sticky="w", padx=(14, 4))
-        ttk.Label(
-            card, text="av PM",
-            font=("Segoe UI", 8),
-            foreground="#667085", background=bg,
-        ).grid(row=1, column=1, sticky="e", padx=(4, 14))
-
-        # Rad 2: selve tallene
+        # Rad 1: stort tall i venstre kol, bar + prosent i høyre kol
         value_lbl = ttk.Label(
             card, text="—",
-            font=("Segoe UI", 18, "bold"),
+            font=("Segoe UI", 16, "bold"),
             foreground="#1F2937", background=bg,
         )
-        value_lbl.grid(row=2, column=0, sticky="w", padx=(14, 4))
-        pm_lbl = ttk.Label(
-            card, text="—",
-            font=("Segoe UI", 12),
-            foreground="#475569", background=bg,
-        )
-        pm_lbl.grid(row=2, column=1, sticky="e", padx=(4, 14))
+        value_lbl.grid(row=1, column=0, sticky="w", padx=(12, 8))
 
-        # Rad 3: progress bar med prosent-tekst
-        # Egen style per kort så vi kan farge den uavhengig
+        # Bar-kolonnen: progressbar + prosent-tekst over hverandre
+        bar_holder = tk.Frame(card, background=bg)
+        bar_holder.grid(row=1, column=1, sticky="ew", padx=(0, 12))
+        bar_holder.columnconfigure(0, weight=1)
+
         style_name = f"ScopingMetric{title.replace(' ', '').replace('(', '').replace(')', '')}.Horizontal.TProgressbar"
         style = ttk.Style()
         try:
             style.configure(style_name, troughcolor="#EEF2F7", background="#3B82F6",
-                            thickness=10)
+                            thickness=8)
         except Exception:
             pass
         bar = ttk.Progressbar(
-            card, orient="horizontal", mode="determinate",
-            style=style_name, length=200, maximum=100, value=0,
+            bar_holder, orient="horizontal", mode="determinate",
+            style=style_name, length=240, maximum=100, value=0,
         )
-        bar.grid(row=3, column=0, columnspan=2, sticky="ew",
-                 padx=14, pady=(8, 4))
+        bar.grid(row=0, column=0, sticky="ew", pady=(8, 2))
         pct_lbl = ttk.Label(
-            card, text="",
+            bar_holder, text="",
             font=("Segoe UI", 8),
             foreground="#667085", background=bg,
         )
-        pct_lbl.grid(row=4, column=0, sticky="w", padx=(14, 4), pady=(0, 2))
+        pct_lbl.grid(row=1, column=0, sticky="w")
 
-        # Rad 5: linje-teller
+        # Rad 2: PM-undertekst i venstre kol, linje-teller i høyre kol
+        pm_lbl = ttk.Label(
+            card, text="—",
+            font=("Segoe UI", 9),
+            foreground="#475569", background=bg,
+        )
+        pm_lbl.grid(row=2, column=0, sticky="w", padx=(12, 8), pady=(0, 8))
+
         count_lbl = ttk.Label(
             card, text="",
             font=("Segoe UI", 9),
             foreground="#4B5563", background=bg,
         )
-        count_lbl.grid(row=5, column=0, columnspan=2, sticky="w",
-                       padx=14, pady=(2, 10))
+        count_lbl.grid(row=2, column=1, sticky="w", padx=(0, 12), pady=(0, 8))
 
         return {
             "frame": card,
@@ -1070,6 +1069,7 @@ class ScopingPage(ttk.Frame):
             "pm": pm_lbl,
             "bar": bar,
             "bar_style": style_name,
+            "bar_holder": bar_holder,
             "pct": pct_lbl,
             "count": count_lbl,
         }
@@ -1080,24 +1080,24 @@ class ScopingPage(ttk.Frame):
 
         if scoped_out is None:
             refs["value"].configure(text="—")
-            refs["pm"].configure(text="—")
+            refs["pm"].configure(text="ingen data")
             refs["bar"].configure(value=0)
             refs["pct"].configure(text="")
-            refs["count"].configure(text="ingen data")
+            refs["count"].configure(text="")
             self._set_card_status(refs, ok=None)
             return
 
         refs["value"].configure(text=_fmt(scoped_out))
         if pm > 0:
             pct = round(scoped_out / pm * 100, 1)
-            refs["pm"].configure(text=_fmt(pm))
+            refs["pm"].configure(text=f"av PM {_fmt(pm)}")
             refs["bar"].configure(value=min(pct, 100))
             refs["pct"].configure(text=f"{pct}% brukt")
             ok = scoped_out <= pm
         else:
-            refs["pm"].configure(text="—")
+            refs["pm"].configure(text="PM ikke satt")
             refs["bar"].configure(value=0)
-            refs["pct"].configure(text="PM ikke satt")
+            refs["pct"].configure(text="")
             ok = None
 
         # Linje-teller: X ut av total
@@ -1148,19 +1148,14 @@ class ScopingPage(ttk.Frame):
             refs["pm"].configure(background=bg, foreground=pm_fg)
             refs["pct"].configure(background=bg, foreground=muted_fg)
             refs["count"].configure(background=bg, foreground=count_fg)
+            # Bar-holder må også få rett bakgrunn
+            holder = refs.get("bar_holder")
+            if holder is not None:
+                holder.configure(background=bg)
             # Oppdater bar-stilen
             style = ttk.Style()
             style.configure(refs["bar_style"], troughcolor=bg, background=bar_color,
-                            thickness=10)
-            # Fellesetikettene for "Scopet ut" / "av PM" (rad 1) — de er
-            # ikke lagret i refs siden de ikke endrer innhold, men de må
-            # oppdateres for å matche bakgrunnen. Vi traverserer frame
-            # sine barn og fargelegger alle ttk.Label-er med dempet farge.
-            for w in refs["frame"].winfo_children():
-                if isinstance(w, ttk.Label) and w not in (
-                    refs["title"], refs["value"], refs["pm"], refs["pct"], refs["count"]
-                ):
-                    w.configure(background=bg, foreground=muted_fg)
+                            thickness=8)
         except Exception:
             pass
 
