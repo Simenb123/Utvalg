@@ -44,9 +44,19 @@ from page_mva import MvaPage
 from page_skatt import SkattPage
 from page_reskontro import ReskontroPage
 
-try:
-    from src.pages.fagchat import FagchatPage
-except Exception:
+# Fagchat-fanen er midlertidig deaktivert — utviklingen er parkert.
+# Sett _FAGCHAT_ENABLED = True (eller miljøvariabel UTVALG_ENABLE_FAGCHAT=1)
+# for å bygge og vise fanen igjen. Importen er beholdt så vi ikke mister
+# referansen til modulen.
+import os as _os_fagchat
+_FAGCHAT_ENABLED = _os_fagchat.getenv("UTVALG_ENABLE_FAGCHAT", "").strip().lower() in {"1", "true", "yes", "on"}
+
+if _FAGCHAT_ENABLED:
+    try:
+        from src.pages.fagchat import FagchatPage
+    except Exception:
+        FagchatPage = None  # type: ignore
+else:
     FagchatPage = None  # type: ignore
 
 try:
@@ -204,6 +214,24 @@ class App(tk.Tk):
         except Exception:
             pass
 
+        # Stoppeklokker for app-init-faser. Sendes som startup.app.<fase>
+        # til Utvalg Monitor.
+        import time as _t_init
+        try:
+            from src.monitoring.perf import record_event as _rec_init
+        except Exception:
+            _rec_init = None  # type: ignore[assignment]
+
+        def _phase_init(label: str, t0: float) -> float:
+            t1 = _t_init.perf_counter()
+            if _rec_init is not None:
+                try:
+                    _rec_init(f"startup.app.{label}", (t1 - t0) * 1000.0)
+                except Exception:
+                    pass
+            return t1
+
+        _ti = _t_init.perf_counter()
         try:
             super().__init__()
         except Exception as e:  # TclError / display-problemer
@@ -211,6 +239,7 @@ class App(tk.Tk):
             self._tk_init_error = e
             self._init_headless()
             return
+        _ti = _phase_init("tk_init", _ti)
 
         # --- Normal GUI-init ---
         self.title("Utvalg – revisjonsverktøy")
@@ -223,17 +252,20 @@ class App(tk.Tk):
         # Hovedvinduet skjules midlertidig så brukeren ser kun splash.
         self.withdraw()
         _splash_started_at = self._show_splash()
+        _ti = _phase_init("splash", _ti)
 
         try:
             theme.apply_theme(self)
         except Exception:
             pass
+        _ti = _phase_init("theme", _ti)
 
         # Global footer må pakkes før notebook slik at den reserverer plass
         # i bunnen før notebooken fyller resten.
         self.nb = ttk.Notebook(self)
         self._build_global_footer()
         self.nb.pack(fill="both", expand=True)
+        _ti = _phase_init("notebook+footer", _ti)
 
         # App-nivå LoadingOverlay som dekker hele vinduet. Brukes til å
         # holde "Bygger Analyse..." synlig fra dataset er ferdig lastet og
@@ -244,19 +276,29 @@ class App(tk.Tk):
         except Exception:
             self._app_loading_overlay = None
 
-        # Pages — instrumentert med valgfri timing for å diagnostisere
-        # treg oppstart. Aktiveres med UTVALG_PROFILE_REFRESH=1 (samme
-        # flagg som refresh-profilen).
+        # Pages — alltid målt og sendt til Utvalg Monitor som
+        # startup.page.<navn>-events. Brukes til å diagnostisere treg
+        # app-oppstart uten miljøvariabler.
         import os as _os
         import time as _time
+        try:
+            from src.monitoring.perf import record_event as _record_event_startup
+        except Exception:
+            _record_event_startup = None  # type: ignore[assignment]
         _profile_pages = _os.environ.get("UTVALG_PROFILE_REFRESH", "").strip().lower() in {"1", "true", "yes", "on"}
         _page_times: dict[str, float] = {}
 
         def _build(label: str, fn):
-            t0 = _time.perf_counter() if _profile_pages else 0.0
+            t0 = _time.perf_counter()
             result = fn()
+            duration_ms = (_time.perf_counter() - t0) * 1000.0
             if _profile_pages:
-                _page_times[label] = (_time.perf_counter() - t0) * 1000
+                _page_times[label] = duration_ms
+            if _record_event_startup is not None:
+                try:
+                    _record_event_startup(f"startup.page.{label}", duration_ms)
+                except Exception:
+                    pass
             return result
 
         self.page_dataset = _build("dataset", lambda: DatasetPage(self.nb))
@@ -292,6 +334,7 @@ class App(tk.Tk):
             for label, ms in ranked:
                 parts.append(f"{label}={ms:.0f}ms")
             print(" | ".join(parts), file=_sys.stderr, flush=True)
+        _ti = _phase_init("all_pages", _ti)
 
         if self.page_oversikt is not None:
             self.nb.add(self.page_oversikt, text="Oversikt")

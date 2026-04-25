@@ -408,11 +408,29 @@ class DatasetPane(ttk.Frame):
             messagebox.showerror("Datasett", str(e))
             return
 
+        # Stoppeklokke fra klikk → ferdig — inkluderer bakgrunnsbygging,
+        # ikke bare GUI-vente.
+        import time as _t_ds
+        try:
+            from src.monitoring.perf import record_event as _rec_ds
+        except Exception:
+            _rec_ds = None  # type: ignore[assignment]
+        _t0_build = _t_ds.perf_counter()
+
         def work() -> BuildResult:
             return build_dataset(req)
 
         def done(res: BuildResult) -> None:
             self._apply_build_result(res, update_ml=True, show_message=False)
+            if _rec_ds is not None:
+                try:
+                    _rec_ds(
+                        "dataset.build_total",
+                        (_t_ds.perf_counter() - _t0_build) * 1000.0,
+                        meta={"cache_hit": bool(getattr(res, "loaded_from_cache", False))},
+                    )
+                except Exception:
+                    pass
 
         def err(ex: BaseException, tb: str = "") -> None:
             logger.exception("Build dataset failed")
@@ -800,17 +818,38 @@ class DatasetPane(ttk.Frame):
             store_version_id=store_version_id,
         )
     def _apply_build_result(self, res: BuildResult, *, update_ml: bool, show_message: bool) -> None:
+        # Per-fase timing for å finne hvor tid forsvinner mellom build_dataset
+        # og GUI-oppdatert. _on_ready og bus.emit kan trigge tunge listenere.
+        import time as _t_apply
+        try:
+            from src.monitoring.perf import record_event as _rec_apply
+        except Exception:
+            _rec_apply = None  # type: ignore[assignment]
+        _ta = _t_apply.perf_counter()
+
+        def _apply_phase(label: str) -> None:
+            nonlocal _ta
+            t1 = _t_apply.perf_counter()
+            if _rec_apply is not None:
+                try:
+                    _rec_apply(f"dataset.apply.{label}", (t1 - _ta) * 1000.0)
+                except Exception:
+                    pass
+            _ta = t1
+
         self._last_build = (res.df, res.cols)
 
         try:
             session.set_dataset(res.df, res.cols)
         except Exception:
             session.dataset = (res.df, res.cols)
+        _apply_phase("session_set_dataset")
 
         try:
             bus.emit("DATASET_BUILT", res.df)
         except Exception:
             pass
+        _apply_phase("bus_emit_DATASET_BUILT")
 
         if update_ml and not is_saft_path(self.path_var.get()):
             # NB: update_ml_map() har signatur (headers, mapping, ml=None, path=None)
@@ -876,6 +915,7 @@ class DatasetPane(ttk.Frame):
                 self._on_ready(res.df)
             except Exception:
                 logger.exception("on_ready callback failed")
+        _apply_phase("on_ready_callback")
     def _set_status(self, text: str, *, level: str = "info") -> None:
         if self.status_lbl is None:
             return

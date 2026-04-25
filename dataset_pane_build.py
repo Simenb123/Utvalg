@@ -83,6 +83,23 @@ def build_dataset(req: BuildRequest) -> BuildResult:
 
     Returnerer alltid en BuildResult med df + Columns.
     """
+    # Per-fase timing til Utvalg Monitor.
+    import time as _t_bd
+    try:
+        from src.monitoring.perf import record_event as _rec_bd
+    except Exception:
+        _rec_bd = None  # type: ignore[assignment]
+    _bd_t = _t_bd.perf_counter()
+
+    def _bd_phase(label: str) -> None:
+        nonlocal _bd_t
+        t1 = _t_bd.perf_counter()
+        if _rec_bd is not None:
+            try:
+                _rec_bd(f"dataset.build.{label}", (t1 - _bd_t) * 1000.0)
+            except Exception:
+                pass
+        _bd_t = t1
 
     stored_path = None
     stored_version_id = None
@@ -182,7 +199,9 @@ def build_dataset(req: BuildRequest) -> BuildResult:
                     )
 
                 if db_path and db_path.exists():
+                    _bd_phase("setup_before_cache_load")
                     df, cache_db_meta = dataset_cache_sqlite.load_cache(db_path)
+                    _bd_phase("load_cache")
                     cols = _columns_for_canonical_df(df)
                     loaded_from_cache = True
                     cache_path = str(db_path)
@@ -224,10 +243,11 @@ def build_dataset(req: BuildRequest) -> BuildResult:
             # Ikke la lagring feile selve datasettbyggingen
             logger.exception("Auto-store version failed")
 
+    _bd_phase("setup_before_parse")
     # Cache miss / ingen store_client-year: bygg datasett på vanlig måte
     if is_saft_path(build_path):
         df = saft_reader.read_saft_ledger(build_path)
-
+        _bd_phase("parse_saft")
     else:
         df = build_from_file(
             build_path,
@@ -235,6 +255,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
             sheet_name=req.sheet_name,
             header_row=req.header_row,
         )
+        _bd_phase("parse_excel_csv")
 
     # Normaliser bilagsnummer: mange eksporter har bilag bare på første linje i en bilagsbunt.
     # Forward-fill gjør at alle linjer får bilagsnummer og at "Antall bilag" og motpost fungerer.
@@ -244,6 +265,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
         dataset_cache_sqlite.fill_down_bilag_inplace(df)
     except Exception:
         logger.exception("Normalizing bilag failed")
+    _bd_phase("fill_down_bilag")
 
     cols = _columns_for_canonical_df(df)
 

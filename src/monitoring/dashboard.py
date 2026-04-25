@@ -59,11 +59,25 @@ def _parse_ts(ts: str) -> Optional[datetime]:
 
 
 def _format_duration(ms: float) -> str:
+    """Vis alt i ms så det er enkelt å sammenligne tall mot hverandre.
+    Tusenskille for store tall slik at 4 160 ms er lett å lese."""
     if ms < 1:
-        return f"{ms * 1000:.0f}µs"
-    if ms < 1000:
-        return f"{ms:.1f}ms"
-    return f"{ms / 1000:.2f}s"
+        return f"{ms:.2f} ms"
+    if ms < 100:
+        return f"{ms:.1f} ms"
+    # ≥100 ms: heltall med tusenskille (norsk: bruk mellomrom)
+    return f"{int(round(ms)):,} ms".replace(",", " ")
+
+
+def _duration_severity(ms: float) -> str:
+    """Returner fargenivå for varigheten — brukes som tag i Treeview."""
+    if ms >= 1000:
+        return "sev_high"      # rød
+    if ms >= 200:
+        return "sev_medium"    # oransje
+    if ms >= 50:
+        return "sev_low"       # gul
+    return ""                  # ingen markering — fast nok
 
 
 def _format_time(ts_iso: str) -> str:
@@ -205,6 +219,19 @@ class MonitoringDashboardMixin:
         self._tree.configure(yscrollcommand=ysb.set)
         self._tree.bind("<<TreeviewSelect>>", lambda _e: self._refresh_detail())
 
+        # Fargeskala for varighet (sett som tags på radene). Diskrete farger
+        # som matcher Vaak-paletten — ikke skrikende, men tydelig nok til
+        # å skanne lange lister og se hva som tar tid.
+        self._tree.tag_configure(
+            "sev_high", background="#F3DDD7", foreground="#8B2A1F"
+        )
+        self._tree.tag_configure(
+            "sev_medium", background="#F6E5C8", foreground="#B7791F"
+        )
+        self._tree.tag_configure(
+            "sev_low", background="#FCF4E0"
+        )
+
         # Detalj-panel
         right = ttk.Frame(paned, padding=(8, 4, 4, 4))
         right.columnconfigure(0, weight=1)
@@ -319,11 +346,14 @@ class MonitoringDashboardMixin:
         for ev in events:
             iid = f"{ev.ts}|{ev.pid}|{ev.op}"
             meta_str = _format_meta(ev.meta)
+            severity_tag = _duration_severity(ev.duration_ms)
+            tags = (severity_tag,) if severity_tag else ()
             try:
                 self._tree.insert(
                     "", "end", iid=iid,
                     values=(_format_time(ev.ts), ev.area, ev.op,
                             _format_duration(ev.duration_ms), meta_str),
+                    tags=tags,
                 )
             except tk.TclError:
                 # Duplikat iid (kan skje hvis samme event sees to ganger i buffer)
