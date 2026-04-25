@@ -72,12 +72,22 @@ _PHASE_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
-def infer_phase(*, navn: str = "", omraade: str = "", action_type: str = "") -> str:
+def infer_phase(
+    *,
+    navn: str = "",
+    omraade: str = "",
+    action_type: str = "",
+    explicit: str = "",
+) -> str:
     """Avled fase fra handlingens tekst-felter.
 
-    Returnerer én av ``PHASE_ORDER``-verdiene. Default er "Utførelse"
-    (substansive/kontroll-handlinger er hoved-arbeidet).
+    Hvis ``explicit`` er satt (f.eks. ``LocalAction.fase``), respekteres
+    den uten gjetting. Ellers brukes keyword-heuristikk på navn/område/
+    type. Default er "Utførelse" (substansive/kontroll-handlinger er
+    hoved-arbeidet).
     """
+    if explicit and explicit in PHASE_ORDER:
+        return explicit
     haystack = f"{navn} {omraade} {action_type}".lower()
     for phase, keywords in _PHASE_KEYWORDS.items():
         if any(kw in haystack for kw in keywords):
@@ -376,6 +386,7 @@ class RevisjonshandlingerPage(ttk.Frame):
                 navn=getattr(item, "navn", "") or "",
                 omraade=getattr(item, "omraade", "") or "",
                 action_type=getattr(item, "type", "") or "",
+                explicit=getattr(item, "fase", "") or "",
             )
             counts[p] = counts.get(p, 0) + 1
             counts["Alle"] += 1
@@ -665,7 +676,11 @@ class RevisjonshandlingerPage(ttk.Frame):
 
         # RL uten handling (toggle på)
         gap_rows = 0
-        if self.var_show_rl_gaps.get():
+        # RL-rader (regnskapslinjer i scope) hører til Utførelse-fasen.
+        # I andre faser (Oppdragsvurdering, Planlegging, Avslutning)
+        # vises kun handlinger merket den fasen — ingen RL-rader.
+        rl_phases = {"Alle", "Utførelse"}
+        if self.var_show_rl_gaps.get() and phase_filter in rl_phases:
             gap_rows = self._render_rl_gap_rows(covered_regnr)
 
         # Update status with filter count if different from total
@@ -766,6 +781,7 @@ class RevisjonshandlingerPage(ttk.Frame):
                     navn=getattr(item, "navn", "") or "",
                     omraade=getattr(item, "omraade", "") or "",
                     action_type=getattr(item, "type", "") or "",
+                    explicit=getattr(item, "fase", "") or "",
                 )
                 if p != phase_filter:
                     continue

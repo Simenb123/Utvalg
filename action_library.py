@@ -41,6 +41,9 @@ class LocalAction:
     beskrivelse: str = ""
     opprettet: str = ""
     endret: str = ""
+    # Hvilken fase i revisjonsprosessen handlingen tilhører.
+    # Tom streng = ikke satt (faller tilbake til keyword-gjetting i UI).
+    fase: str = ""
 
     @staticmethod
     def new(navn: str, **kwargs: object) -> "LocalAction":
@@ -83,6 +86,7 @@ def _normalize(item: dict) -> LocalAction | None:
             beskrivelse=str(item.get("beskrivelse", "")).strip(),
             opprettet=str(item.get("opprettet", "")).strip(),
             endret=str(item.get("endret", "")).strip(),
+            fase=str(item.get("fase", "")).strip(),
         )
     except Exception:
         return None
