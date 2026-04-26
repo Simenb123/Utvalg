@@ -208,7 +208,10 @@ def test_enrich_reskontro_propagates_supplier_to_cost_line() -> None:
 
     assert len(view) == 1
     assert view.loc[0, "Konto"] == "6320"
-    assert view.loc[0, "Kunder"] == "Leverandør AS"
+    # Leverandør vises i egen "Leverandør"-kolonne (ikke "Kunder") etter
+    # quickfix 2026-04-26 — Kunder/Leverandør er skilt.
+    assert view.loc[0, "Kunder"] == ""
+    assert view.loc[0, "Leverandør"] == "Leverandør AS"
 
 
 def test_enrich_reskontro_optional_columns_use_derived_when_direct_missing() -> None:
@@ -253,3 +256,31 @@ def test_enrich_reskontro_skips_when_bilag_has_multiple_customers() -> None:
 
     # 3000-linjen skal IKKE arve — Kunder er tom
     assert view.loc[0, "Kunder"] == ""
+
+
+def test_kunder_and_leverandor_are_separate_columns() -> None:
+    """"Kunder" og "Leverandør" skal være SEPARATE kolonner i default-visning.
+
+    Quickfix 2026-04-26: tidligere ble leverandør slått sammen med kunde i
+    aggregerte "Kunder"-kolonnen — nå har vi egen "Leverandør"-kolonne så
+    revisor kan se kunde- og leverandør-info hver for seg.
+    """
+    assert "Kunder" in analyse_viewdata.DEFAULT_TX_COLS
+    assert "Leverandør" in analyse_viewdata.DEFAULT_TX_COLS
+
+    df = pd.DataFrame(
+        {
+            "Bilag": ["100", "200"],
+            "Konto": ["3000", "6320"],
+            "Beløp": [-1000.0, 1000.0],
+            "Kundenavn": ["Kunde AS", ""],
+            "Leverandørnavn": ["", "Leverandør AS"],
+        }
+    )
+
+    view = analyse_viewdata.build_transactions_view_df(df)
+
+    assert view.loc[0, "Kunder"] == "Kunde AS"
+    assert view.loc[0, "Leverandør"] == ""
+    assert view.loc[1, "Kunder"] == ""
+    assert view.loc[1, "Leverandør"] == "Leverandør AS"

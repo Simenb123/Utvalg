@@ -153,6 +153,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         "Tekst",
         "Beløp",
         "Kunder",
+        "Leverandør",
         "MVA-kode",
         "MVA-beløp",
         "MVA-prosent",

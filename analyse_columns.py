@@ -51,6 +51,7 @@ _DISPLAY_ALIAS_GROUPS: dict[str, tuple[str, ...]] = {
     "Kunder": ("Kunder", "kunder"),
     "Kundenr": ("Kundenr", "kundenr", "KundeNr", "kunde_nr", "Customer", "customer"),
     "Kundenavn": ("Kundenavn", "kundenavn", "CustomerName", "customername"),
+    "Leverandør": ("Leverandør", "Leverandor", "leverandør", "leverandor", "Supplier", "supplier"),
     "Leverandørnr": ("Leverandørnr", "Leverandornr", "leverandørnr", "leverandornr"),
     "Leverandørnavn": ("Leverandørnavn", "Leverandornavn", "leverandørnavn", "leverandornavn"),
     "MVA-kode": ("MVA-kode", "MVA kode", "Mva", "mva", "mva-kode", "mva_kode"),

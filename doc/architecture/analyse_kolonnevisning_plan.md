@@ -121,7 +121,40 @@ heading-lengde, og pct-kolonner har lengre heading enn beløpskolonner.
 (eksisterende har lagrede bredder). Likevel kan det forvirre etablerte
 brukere ved kombinasjoner av "noen kolonner mine, noen nye defaults".
 
-### 2.3 Kolonnenavn — ønsker tydeligere "UB"-prefiks
+### 2.3 Kunde og leverandør i transaksjons-treet (delvis fikset 2026-04-26)
+
+**Brukerønske:** Skille kunde og leverandør i visningen. Tidligere ble
+de slått sammen i én "Kunder"-kolonne via `first_nonempty_series` med
+fallback gjennom både kunde- og leverandør-felter.
+
+**Quickfix gjort 2026-04-26:**
+- Lagt til `Leverandør` som egen default-kolonne i `DEFAULT_TX_COLS`
+- Ny `DEFAULT_SUPPLIER_COLS` med fallback `Leverandør` →
+  `Leverandørnavn` → `Supplier` → `SupplierName` →
+  `_AnalyseLeverandørnavn` (utledet fra reskontro-bilag)
+- Fjernet leverandør-felter fra `DEFAULT_CUSTOMER_COLS` så `Kunder` nå
+  viser KUN kunde-info
+- `_AnalyseKunder` (utledet fra reskontro-helper) reflekterer kun
+  kunde-info, ikke kombinert med leverandør
+- `analyse_columns._DISPLAY_ALIAS_GROUPS` har ny `Leverandør` med
+  aliaser (Leverandor, Supplier osv.)
+
+**TODO (gjenstår, fremtidig pilot):**
+- `page_analyse_export.py:32,51,56` aggregerer fortsatt til "Kunder" i
+  Excel-eksport — bør oppdateres for å skille kunde/leverandør i
+  eksport-arket også
+- `analysis_filters.py:241` har "Kunder" som filter-kategori — vurder
+  om "Leverandør" skal bli egen filter
+- `overstyring/ui_panel.py:499` har "Kunder" — uavklart hva som ønskes
+- For brukere med lagrede kolonneinnstillinger: ny `Leverandør`-kolonne
+  vises ikke automatisk (preferanse-systemet bevarer eldre utvalg).
+  Brukeren må legge den til manuelt via kolonnemenyen, eller vi kan
+  bygge en migrerings-helper som auto-legger inn ny kolonne første
+  gang etter oppdatering
+- Vurder om "Kunder"-kolonnenavnet bør endres til "Kunde" (entall) for
+  konsistens med "Leverandør"
+
+### 2.4 Kolonnenavn — ønsker tydeligere "UB"-prefiks
 
 **Brukerønske:** "Får lyst til å [ha] UB foran begge, da jeg tenker det
 bør være standard at dette er fra saldobalansen."
@@ -141,7 +174,7 @@ en annen kolonne. Mulige tolkninger:
 
 **Avklaring trengs** — ta opp med bruker neste gang dette diskuteres.
 
-### 2.4 Kolonne-popupen er ikke intuitiv
+### 2.5 Kolonne-popupen er ikke intuitiv
 
 **Problem:** Brukeren er usikker på om popupen "fungerer som tiltenkt".
 

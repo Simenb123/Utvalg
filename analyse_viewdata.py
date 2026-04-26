@@ -43,6 +43,7 @@ DEFAULT_TX_COLS: tuple[str, ...] = (
     "Beløp",
     "Tekst",
     "Kunder",
+    "Leverandør",
     "Konto",
     "Kontonavn",
     "Dato",
@@ -60,11 +61,22 @@ DEFAULT_CUSTOMER_COLS: tuple[str, ...] = (
     "Kundenavn",
     "Kunde",
     "Motpart",
-    "Leverandør",
-    "Leverandørnavn",
     "Customer",
     "CustomerName",
-    "_AnalyseKunder",
+    "_AnalyseKundenavn",
+)
+
+# Kandidatkolonner for "Leverandør" (separat fra "Kunder" så bruker
+# kan se kunde og leverandør hver for seg når begge er aktuelle på
+# samme transaksjon — f.eks. interimskontoer eller motpost-bilag).
+# ``_AnalyseLeverandørnavn`` er utledet fra reskontrolinjen i samme
+# bilag (jf. ``enrich_reskontro_counterparty_for_view``).
+DEFAULT_SUPPLIER_COLS: tuple[str, ...] = (
+    "Leverandør",
+    "Leverandørnavn",
+    "Supplier",
+    "SupplierName",
+    "_AnalyseLeverandørnavn",
 )
 
 # Skjulte kolonner som ``enrich_reskontro_counterparty_for_view`` setter.
@@ -281,11 +293,10 @@ def enrich_reskontro_counterparty_for_view(df: pd.DataFrame) -> pd.DataFrame:
     df[_ENRICHED_SUPPLIER_NUMBER_COL] = supp_nr_per_bilag
     df[_ENRICHED_SUPPLIER_NAME_COL] = supp_name_per_bilag
 
-    # Bygg samlet "_AnalyseKunder" (kundenavn først, ellers leverandørnavn).
-    # Direkte verdier (eksisterende Kundenavn/Leverandørnavn på raden) vinner
-    # via build_transactions_view_df som sjekker dem først.
-    combined = cust_name_per_bilag.where(cust_name_per_bilag != "", supp_name_per_bilag)
-    df[_ENRICHED_KUNDER_COL] = combined
+    # ``_AnalyseKunder`` reflekterer kun kunde-info (ikke leverandør).
+    # Leverandør har egen visningskolonne (DEFAULT_SUPPLIER_COLS) som
+    # bruker ``_AnalyseLeverandørnavn`` som fallback.
+    df[_ENRICHED_KUNDER_COL] = cust_name_per_bilag
 
     return df
 
@@ -327,8 +338,13 @@ def build_transactions_view_df(
     else:
         out["Tekst"] = ""
 
-    # Kunder/motpart
+    # Kunder/motpart (kun kunde-felter etter quickfix 2026-04-26 — leverandør
+    # vises i egen kolonne "Leverandør")
     out["Kunder"] = first_nonempty_series(df, customer_cols)
+
+    # Leverandør (separat kolonne — viser kun leverandør-info, ikke kunde)
+    if "Leverandør" in tx_cols:
+        out["Leverandør"] = first_nonempty_series(df, DEFAULT_SUPPLIER_COLS)
 
     # Konto
     if "Konto" in df.columns:
