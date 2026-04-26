@@ -17,12 +17,12 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
 
 import formatting
-from reskontro_brreg_helpers import _brreg_has_risk, _brreg_status_text
-from reskontro_open_items import (
+from ..backend.brreg_helpers import _brreg_has_risk, _brreg_status_text
+from ..backend.open_items import (
     _compute_open_items_with_confidence,
     _match_open_against_period,
 )
-from reskontro_tree_helpers import (
+from .tree_helpers import (
     _DETAIL_COLS,
     _LOWER_VIEW_BETALT,
     _LOWER_VIEW_BRREG,

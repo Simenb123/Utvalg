@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from reskontro_report_engine import (
+from src.pages.reskontro.backend.report_engine import (
     compute_reskontro_report,
     _build_party_rows,
     _build_hb_accounts,

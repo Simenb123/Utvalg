@@ -14,7 +14,7 @@ from pathlib import Path
 from string import Template
 from typing import Sequence
 
-from reskontro_report_engine import (
+from .report_engine import (
     AgingBucket,
     HbAccountRow,
     MotpostRow,

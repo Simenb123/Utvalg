@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
-from reskontro_brreg_helpers import (
+from ..backend.brreg_helpers import (
     _brreg_status_text,
     _brreg_has_risk,
     _fmt_nok,

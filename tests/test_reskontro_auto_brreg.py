@@ -7,7 +7,7 @@ import pytest
 
 def test_auto_brreg_all_skips_already_fetched(monkeypatch) -> None:
     """_auto_brreg_all should not trigger fetch if all orgnr are already in cache."""
-    import page_reskontro
+    import src.pages.reskontro.frontend.page as page_reskontro
 
     started = []
 
@@ -26,7 +26,7 @@ def test_auto_brreg_all_skips_already_fetched(monkeypatch) -> None:
 
 def test_auto_brreg_all_triggers_for_missing(monkeypatch) -> None:
     """_auto_brreg_all should trigger fetch if orgnr not yet fetched."""
-    import page_reskontro
+    import src.pages.reskontro.frontend.page as page_reskontro
 
     started = []
 
@@ -45,7 +45,7 @@ def test_auto_brreg_all_triggers_for_missing(monkeypatch) -> None:
 
 def test_auto_brreg_all_skips_empty_data(monkeypatch) -> None:
     """_auto_brreg_all should not trigger fetch if no data loaded."""
-    import page_reskontro
+    import src.pages.reskontro.frontend.page as page_reskontro
 
     started = []
 

@@ -10,8 +10,8 @@ import threading
 
 import pandas as pd
 
-from reskontro_brreg_helpers import _brreg_has_risk
-from reskontro_tree_helpers import _LOWER_VIEW_BRREG
+from ..backend.brreg_helpers import _brreg_has_risk
+from .tree_helpers import _LOWER_VIEW_BRREG
 
 log = logging.getLogger(__name__)
 

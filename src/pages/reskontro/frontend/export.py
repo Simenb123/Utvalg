@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 
-from reskontro_tree_helpers import (
+from .tree_helpers import (
     _TAG_BRREG_WARN,
     _TAG_HEADER,
     _TAG_MVA_WARN,
@@ -90,8 +90,8 @@ def export_pdf_report(page) -> None:
         return
     try:
         import session as _session
-        from reskontro_report_engine import compute_reskontro_report
-        from reskontro_report_html import save_report_pdf
+        from ..backend.report_engine import compute_reskontro_report
+        from ..backend.report_html import save_report_pdf
 
         client = getattr(_session, "client", None) or ""
         year = str(getattr(_session, "year", "") or "")

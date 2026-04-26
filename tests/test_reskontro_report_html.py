@@ -4,8 +4,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from reskontro_report_engine import compute_reskontro_report
-from reskontro_report_html import build_report_html, build_html_from_df
+from src.pages.reskontro.backend.report_engine import compute_reskontro_report
+from src.pages.reskontro.backend.report_html import build_report_html, build_html_from_df
 
 
 def _make_df() -> pd.DataFrame:

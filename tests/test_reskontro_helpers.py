@@ -4,14 +4,14 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from reskontro_brreg_helpers import (
+from src.pages.reskontro.backend.brreg_helpers import (
     _brreg_has_risk,
     _brreg_status_text,
     _compute_nokkeltall,
     _fmt_nok,
     _fmt_pct,
 )
-from reskontro_open_items import (
+from src.pages.reskontro.backend.open_items import (
     _compute_aging_buckets,
     _compute_open_items,
     _compute_open_items_with_confidence,
@@ -246,13 +246,13 @@ class TestAgingBuckets:
 # ---------------------------------------------------------------------------
 
 def test_reskontro_brreg_panel_importable():
-    import reskontro_brreg_panel
+    import src.pages.reskontro.frontend.brreg_panel as reskontro_brreg_panel
     assert hasattr(reskontro_brreg_panel, "build_brreg_panel")
     assert hasattr(reskontro_brreg_panel, "update_brreg_panel")
 
 
 def test_reskontro_popups_importable():
-    import reskontro_popups
+    import src.pages.reskontro.frontend.popups as reskontro_popups
     assert hasattr(reskontro_popups, "open_bilag_popup")
     assert hasattr(reskontro_popups, "show_open_items_popup")
     assert hasattr(reskontro_popups, "show_saldoliste_popup")

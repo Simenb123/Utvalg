@@ -591,7 +591,7 @@ def _build_aging_all(
     if not reference_date:
         return []
     try:
-        from reskontro_open_items import (
+        from .open_items import (
             _compute_open_items,
             _compute_aging_buckets,
         )

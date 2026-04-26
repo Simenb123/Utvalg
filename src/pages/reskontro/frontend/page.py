@@ -25,13 +25,13 @@ except Exception:  # pragma: no cover
 
 import pandas as pd
 
-import reskontro_brreg_actions  # noqa: E402
-import reskontro_brreg_panel  # noqa: E402
-import reskontro_export  # noqa: E402
-import reskontro_popups  # noqa: E402
-import reskontro_selection  # noqa: E402
-import reskontro_ui_build  # noqa: E402
-from reskontro_tree_helpers import (  # noqa: E402
+from . import brreg_actions as reskontro_brreg_actions  # noqa: E402
+from . import brreg_panel as reskontro_brreg_panel  # noqa: E402
+from . import export as reskontro_export  # noqa: E402
+from . import popups as reskontro_popups  # noqa: E402
+from . import selection as reskontro_selection  # noqa: E402
+from . import ui_build as reskontro_ui_build  # noqa: E402
+from .tree_helpers import (  # noqa: E402
     _DETAIL_COLS,
     _has_reskontro_data,
 )

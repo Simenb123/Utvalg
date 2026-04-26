@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
 
 import formatting
-from reskontro_open_items import (
+from ..backend.open_items import (
     _compute_open_items,
     _compute_open_items_with_confidence,
     _compute_aging_buckets,
@@ -32,13 +32,13 @@ _TAG_MVA_LINE = "mva_line"
 
 def _get_make_popup(page: Any):
     """Hent _make_popup fra page_reskontro modulen."""
-    import page_reskontro
+    from . import page as page_reskontro
     return page_reskontro._make_popup
 
 
 def _get_setup_tree(page: Any):
     """Hent _setup_tree fra page_reskontro modulen."""
-    import page_reskontro
+    from . import page as page_reskontro
     return page_reskontro._setup_tree
 
 
@@ -48,7 +48,7 @@ def open_bilag_popup(page: Any, bilag: str) -> None:
     Søker i hele datasettet (ikke kun reskontro-linjer), slik at
     motkonto, inntektslinje og MVA-linje vises med tilhørende MVA-kode.
     """
-    import page_reskontro
+    from . import page as page_reskontro
     _make_popup = page_reskontro._make_popup
     _setup_tree = page_reskontro._setup_tree
 
@@ -153,7 +153,7 @@ def open_bilag_popup(page: Any, bilag: str) -> None:
 
 def show_open_items_popup(page: Any) -> None:
     """Vis popup med åpne (ubetalte) fakturaer for valgt kunde/leverandør."""
-    import page_reskontro
+    from . import page as page_reskontro
     _make_popup = page_reskontro._make_popup
     _setup_tree = page_reskontro._setup_tree
 
@@ -262,7 +262,7 @@ def show_open_items_popup(page: Any) -> None:
 
 def show_saldoliste_popup(page: Any) -> None:
     """Vis saldoliste — alle åpne poster på tvers av kunder/leverandører."""
-    import page_reskontro
+    from . import page as page_reskontro
     _make_popup = page_reskontro._make_popup
     _setup_tree = page_reskontro._setup_tree
 
@@ -476,7 +476,7 @@ def show_saldoliste_popup(page: Any) -> None:
 
 def show_subsequent_match_popup(page: Any) -> None:
     """Vis popup med matching av åpne poster mot etterfølgende periode."""
-    import page_reskontro
+    from . import page as page_reskontro
     _make_popup = page_reskontro._make_popup
     _setup_tree = page_reskontro._setup_tree
 

@@ -42,7 +42,7 @@ from src.pages.regnskap.frontend.page import RegnskapPage
 from src.pages.materiality.frontend.page import MaterialityPage
 from src.pages.mva.frontend.page import MvaPage
 from src.pages.skatt import SkattPage
-from page_reskontro import ReskontroPage
+from src.pages.reskontro.frontend.page import ReskontroPage
 
 # Fagchat-fanen er midlertidig deaktivert — utviklingen er parkert.
 # Sett _FAGCHAT_ENABLED = True (eller miljøvariabel UTVALG_ENABLE_FAGCHAT=1)

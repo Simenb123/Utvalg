@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
-from reskontro_tree_helpers import (
+from .tree_helpers import (
     _COL_ANT,
     _COL_BEV,
     _COL_BRANSJE,
