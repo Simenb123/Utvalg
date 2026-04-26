@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Hold samme feltsett som resten av appen.
 # Øk denne når saft_reader legger til nye felter, slik at SQLite-cachen
 # invalideres automatisk og SAF-T-filer reparseres med ny kode.
-READER_VERSION = "2"  # BalanceAccount IB/UB + RegistrationNumber + TaxRegistrationNumber
+READER_VERSION = "3"  # + TaxTable lookup for MVA-prosent + beregnet MVA-beløp
 
 FALLBACK_CANON_FIELDS: list[str] = [
     "Konto",
@@ -98,6 +98,10 @@ class _Lookup:
     supplier_ub: dict[str, float]
     supplier_balance_acct: dict[str, str]
     supplier_tax_reg: dict[str, str]
+    # Master TaxTable: TaxCode → TaxPercentage. Brukes som fallback når
+    # transaksjonslinjer ikke inkluderer per-linje TaxPercentage (vanlig
+    # i SAF-T-eksporter fra Tripletex, Visma m.fl. som kun gir TaxCode).
+    tax_pct_by_code: dict[str, float]
 
 
 def _local_name(tag: str) -> str:
@@ -323,8 +327,12 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
         customer_balance_acct={}, customer_tax_reg={},
         supplier_ib={}, supplier_ub={},
         supplier_balance_acct={}, supplier_tax_reg={},
+        tax_pct_by_code={},
     )
     rows: list[dict[str, Any]] = []
+    # Logger source-system så vi har spor i logg når noe er rart med en fil.
+    # Strategi: detect og logg, ikke branch parser-logikk per system.
+    _software_logged = False
 
     # iterparse gir lavere minnebruk enn full parse.
     # Vi bruker kun 'end' events.
@@ -335,6 +343,29 @@ def _read_saft_stream(stream: IO[bytes]) -> pd.DataFrame:
 
     for _event, elem in context:
         tag = _local_name(elem.tag)
+
+        if not _software_logged and tag == "Header":
+            sw_company = _txt(elem.find(".//{*}SoftwareCompanyName"))
+            sw_id = _txt(elem.find(".//{*}SoftwareID"))
+            sw_version = _txt(elem.find(".//{*}SoftwareVersion"))
+            if sw_company or sw_id:
+                logger.info(
+                    "SAF-T eksportert fra: %s (%s) v%s",
+                    sw_company or "?", sw_id or "?", sw_version or "?",
+                )
+            _software_logged = True
+            # Header er liten — ikke clear, vi trenger ikke å gå videre i den.
+
+        if tag == "TaxCodeDetails":
+            # Master TaxTable-oppføring: bygg TaxCode → TaxPercentage-lookup
+            # slik at vi kan fylle inn MVA-prosent på linjer som mangler det.
+            code = _txt(elem.find(".//{*}TaxCode")) or _txt(elem.find(".//{*}StandardTaxCode"))
+            pct_text = _txt(elem.find(".//{*}TaxPercentage"))
+            pct = _safe_float(pct_text)
+            if code and pct is not None:
+                look.tax_pct_by_code.setdefault(code, pct)
+            elem.clear()
+            continue
 
         if tag == "Account":
             acc_id = _normalize_account_id(_txt(elem.find(".//{*}AccountID")))
@@ -537,7 +568,7 @@ def _parse_line(
 
     # Tax info (best effort)
     tax_code = _txt(line.find(".//{*}TaxInformation/{*}TaxCode")) or _txt(line.find(".//{*}TaxCode"))
-    tax_pct = (
+    tax_pct_text = (
         _txt(line.find(".//{*}TaxInformation/{*}TaxPercentage"))
         or _txt(line.find(".//{*}TaxInformation/{*}TaxPercent"))
         or _txt(line.find(".//{*}TaxPercentage"))
@@ -546,6 +577,30 @@ def _parse_line(
         line.find(".//{*}TaxAmount/{*}Amount")
     )
     tax_amt = _safe_float(tax_amt_text)
+    tax_pct_num = _safe_float(tax_pct_text)
+
+    # Fallback 1: Hvis per-linje TaxPercentage mangler, slå opp i master
+    # TaxTable. Vanlig hos Tripletex/Visma/m.fl. som kun setter TaxCode
+    # på linjene.
+    if tax_pct_num is None and tax_code:
+        tax_pct_num = look.tax_pct_by_code.get(tax_code)
+
+    # Fallback 2: Hvis per-linje TaxAmount mangler, beregn fra Beløp + sats.
+    # Bruker bruttoføring-formel: tax = abs(beløp) * pct / (100 + pct).
+    # Dette er standard for norsk regnskap (beløpet på linjen inkluderer
+    # MVA). Returnerer None hvis vi ikke har nok info.
+    if tax_amt is None and tax_pct_num is not None and tax_pct_num > 0 and amt is not None:
+        try:
+            tax_amt = abs(amt) * tax_pct_num / (100.0 + tax_pct_num)
+            # Behold fortegn fra debit/credit for konsistens med Beløp.
+            if sign < 0:
+                tax_amt = -tax_amt
+        except Exception:
+            tax_amt = None
+
+    # tax_pct til output: hvis vi har et tall, bruk det; ellers behold
+    # original streng (kan være tom).
+    tax_pct = tax_pct_num if tax_pct_num is not None else tax_pct_text
     reference = (
         _txt(line.find(".//{*}ReferenceNumber"))
         or _txt(line.find(".//{*}DocumentNumber"))
