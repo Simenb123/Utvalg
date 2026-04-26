@@ -1,6 +1,6 @@
 import pandas as pd
 
-from page_utvalg import filter_utvalg_dataframe
+from src.pages.utvalg.frontend.page import filter_utvalg_dataframe
 
 
 def _make_df():

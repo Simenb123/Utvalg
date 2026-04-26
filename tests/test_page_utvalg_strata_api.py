@@ -37,7 +37,7 @@ def test_utvalg_strata_page_constructor_uses_on_commit_selection_keyword() -> No
     """
 
     root = Path(__file__).resolve().parents[1]
-    path = root / "page_utvalg_strata.py"
+    path = root / "src" / "pages" / "utvalg" / "frontend" / "strata.py"
     assert path.exists(), f"Mangler fil: {path}"
 
     tree = _load_ast(path)
@@ -71,7 +71,7 @@ def test_utvalg_strata_page_refresh_calls_load_data_without_df_all_keyword() -> 
     """
 
     root = Path(__file__).resolve().parents[1]
-    path = root / "page_utvalg_strata.py"
+    path = root / "src" / "pages" / "utvalg" / "frontend" / "strata.py"
     tree = _load_ast(path)
     cls = _find_class(tree, "UtvalgStrataPage")
     refresh = _find_method(cls, "_refresh")

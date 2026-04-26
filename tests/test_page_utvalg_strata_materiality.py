@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import page_utvalg_strata as mod
+import src.pages.utvalg.frontend.strata as mod
 
 
 def test_apply_materiality_to_studio_reads_active_state(monkeypatch) -> None:

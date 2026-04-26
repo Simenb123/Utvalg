@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import page_utvalg as mod
+import src.pages.utvalg.frontend.page as mod
 
 
 def test_apply_materiality_to_studio_reads_active_state(monkeypatch) -> None:

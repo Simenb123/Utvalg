@@ -27,12 +27,12 @@ from page_analyse import AnalysePage
 from src.pages.saldobalanse.frontend.page import SaldobalansePage
 from page_admin import AdminPage
 from src.pages.a07 import A07Page
-from page_utvalg_strata import UtvalgStrataPage
+from src.pages.utvalg.frontend.strata import UtvalgStrataPage
 
 # UtvalgPage brukes tidligere som "Resultat"-fane, men den er fjernet.
 # Importen beholdes som no-op-trygg hvis annen kode senere referer til den.
 try:
-    from page_utvalg import UtvalgPage  # noqa: F401
+    from src.pages.utvalg.frontend.page import UtvalgPage  # noqa: F401
 except Exception:
     UtvalgPage = None  # type: ignore
 from src.pages.logg import LoggPage
