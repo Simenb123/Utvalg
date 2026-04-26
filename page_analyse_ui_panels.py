@@ -535,24 +535,49 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     if _var_search_shared is not None:
         tx_search_row = ttk.Frame(tx_outer)
         tx_search_row.grid(row=1, column=0, sticky="ew", pady=(0, 2))
+        # Entry stretcher (column 1), scope-knapp får fast plass etter (column 2)
         tx_search_row.columnconfigure(1, weight=1)
         ttk.Label(tx_search_row, text="Søk:").grid(row=0, column=0, sticky="w", padx=(0, 4))
         tx_search_entry = ttk.Entry(tx_search_row, textvariable=_var_search_shared)
         tx_search_entry.grid(row=0, column=1, sticky="ew")
         page._tx_search_entry = tx_search_entry  # type: ignore[attr-defined]
 
-        # "Søk i: [Alle ▾]"-knapp rett til høyre for søkefeltet.
-        # Åpner popup med checkbokser for å begrense søk til spesifikke
-        # kolonner. Tom valgliste = søk i alle vanlige kolonner.
+        # "Søk i: [Alle ▾]" — rullgardin (Combobox) matcher entry-høyden
+        # eksakt så TX-treet ikke skyves. Single-select: enten "Alle" (søk
+        # i hele default-settet) eller én spesifikk kolonne.
         try:
-            from page_analyse_ui_toolbar import _open_tx_search_scope_popup
-            btn_tx_scope = ttk.Button(
+            ttk.Label(tx_search_row, text="i:").grid(row=0, column=2, sticky="w", padx=(8, 2))
+
+            # Hent kolonneliste fra ManagedTreeview hvis mulig.
+            scope_cols = ["Alle"]
+            scope_cols.extend(getattr(page, "TX_COLS_DEFAULT", ()))
+
+            page._var_tx_search_scope = tk.StringVar(master=page, value="Alle")  # type: ignore[attr-defined]
+            cmb_scope = ttk.Combobox(
                 tx_search_row,
-                text="Søk i: Alle ▾",
-                command=lambda: _open_tx_search_scope_popup(page=page, btn=btn_tx_scope),
+                textvariable=page._var_tx_search_scope,
+                values=scope_cols,
+                state="readonly",
+                width=18,
             )
-            btn_tx_scope.grid(row=0, column=2, sticky="e", padx=(8, 0))
-            page._btn_tx_search_scope = btn_tx_scope  # type: ignore[attr-defined]
+            cmb_scope.grid(row=0, column=3, sticky="w")
+            page._cmb_tx_search_scope = cmb_scope  # type: ignore[attr-defined]
+
+            def _on_scope_changed(_evt=None):
+                val = page._var_tx_search_scope.get()
+                sel = getattr(page, "_tx_search_cols", None)
+                if sel is None:
+                    sel = set()
+                    page._tx_search_cols = sel  # type: ignore[attr-defined]
+                sel.clear()
+                if val and val != "Alle":
+                    sel.add(val)
+                try:
+                    page._apply_filters_and_refresh()
+                except Exception:
+                    pass
+
+            cmb_scope.bind("<<ComboboxSelected>>", _on_scope_changed)
         except Exception:
             pass
 

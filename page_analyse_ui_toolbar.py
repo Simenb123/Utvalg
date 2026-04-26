@@ -303,9 +303,10 @@ def build_toolbar(
     row1 = ttk.Frame(filter_frame)
     row1.pack(fill="x")
 
-    ttk.Label(row1, text="Søk:").grid(row=0, column=0, sticky="w")
+    # Det globale søkefeltet er fjernet — TX og Pivot har hver sitt
+    # søkefelt rett over sine listbokser. ent_search beholdes som
+    # ugridded widget så bindings senere i fila (line ~653) ikke krasjer.
     ent_search = ttk.Entry(row1, width=28, textvariable=var_search)
-    ent_search.grid(row=0, column=1, sticky="w", padx=(4, 12))
 
     ttk.Label(row1, text="Retning:").grid(row=0, column=2, sticky="w")
     cmb_dir = ttk.Combobox(
