@@ -63,7 +63,9 @@ def build_pivot_column_specs(
                 width=analyse_treewidths.default_column_width(col),
                 minwidth=analyse_treewidths.column_minwidth(col),
                 anchor=analyse_treewidths.column_anchor(col),
-                stretch=(col == "Kontonavn"),
+                # stretch=False per playbook-regel (samme som TX og SB):
+                # Tk's stretch-logikk overstyrer brukerens manuelle resize.
+                stretch=False,
                 visible_by_default=col in default_visible,
                 pinned=col in pinned_set,
                 sortable=True,

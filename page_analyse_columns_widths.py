@@ -19,7 +19,11 @@ import preferences
 # Konstanter — bredde/drag
 # =====================================================================
 
-PIVOT_STRETCH_COLS = ("Kontonavn",)
+# Tom — ingen kolonne skal stretches automatisk. Tidligere stretchet
+# Kontonavn, men det overstyrer brukerens manuelle resize ved hver
+# auto-fit-runde (samme bug-mønster som TX/SB/Oversikt — se
+# doc/TREEVIEW_PLAYBOOK.md).
+PIVOT_STRETCH_COLS: tuple[str, ...] = ()
 PIVOT_FILL_PRIORITY = ("Kontonavn", "Konto")
 PIVOT_FILL_WEIGHTS = {"Kontonavn": 9, "Konto": 1}
 TX_HEADER_DRAG_THRESHOLD_PX = 10
