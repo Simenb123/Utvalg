@@ -805,10 +805,15 @@ def configure_tx_tree_columns(*, page: Any) -> None:
     if managed is not None:
         try:
             from page_analyse_columns_presets import build_tx_column_specs
-            cols = tuple(getattr(page, "TX_COLS", page.TX_COLS_DEFAULT))
+            # Send HELE kolonnesettet (TX_COLS_DEFAULT), ikke bare det
+            # synlige (TX_COLS). Da vet ManagedTreeview om alle tilgjengelige
+            # kolonner, og høyreklikk-velgeren kan vise tilbake skjulte.
+            # Brukerens vis/skjul-valg per kolonne håndteres av ManagedTreeview
+            # selv via sin _visible-state (preserved av update_columns-fix).
+            all_cols = tuple(getattr(page, "TX_COLS_DEFAULT", page.TX_COLS_DEFAULT))
             managed.update_columns(
                 build_tx_column_specs(
-                    tx_cols_default=cols,
+                    tx_cols_default=all_cols,
                     pinned_cols=getattr(page, "PINNED_TX_COLS", ("Konto", "Kontonavn")),
                 )
             )
