@@ -233,15 +233,68 @@ def open_bilag_drill_dialog(
     frm = ttk.Frame(top, padding=10)
     frm.pack(fill="both", expand=True)
 
+    hdr_row = ttk.Frame(frm)
+    hdr_row.pack(fill="x", pady=(0, 8))
+
     hdr = ttk.Label(
-        frm,
+        hdr_row,
         text=(
             f"Bilag: {bilag_norm} | Rader: {formatting.format_int_no(len(rows))} | "
             f"Sum: {formatting.fmt_amount(sum_all)} | "
             f"I kontoutvalg: {formatting.fmt_amount(sum_sel)} | Motposter: {formatting.fmt_amount(sum_mot)}"
         ),
     )
-    hdr.pack(anchor="w", pady=(0, 8))
+    hdr.pack(side="left", anchor="w")
+
+    # "Se bilag"-knapp: åpner PDF for bilaget hvis et voucher-arkiv
+    # (Tripletex-PDF eller PowerOffice GO-ZIP) er lastet inn for klienten.
+    # Bruker eksisterende infra fra document_control_voucher_index.
+    def _open_voucher_pdf() -> None:
+        try:
+            import session as _session
+            client = getattr(_session, "client", None)
+            year = getattr(_session, "year", None)
+        except Exception:
+            client = None
+            year = None
+        try:
+            from document_control_voucher_index import find_and_extract_bilag
+        except Exception as exc:
+            messagebox.showerror("Se bilag", f"Bilag-modulen kunne ikke lastes:\n{exc}")
+            return
+        try:
+            pdf_path = find_and_extract_bilag(
+                bilag_norm,
+                client=str(client) if client else None,
+                year=str(year) if year else None,
+            )
+        except Exception as exc:
+            messagebox.showerror("Se bilag", f"Feil ved oppslag:\n{exc}")
+            return
+        if pdf_path is None:
+            messagebox.showinfo(
+                "Bilag ikke funnet",
+                f"Fant ingen PDF for bilag {bilag_norm}.\n\n"
+                "Last først inn et voucher-arkiv (Tripletex-PDF eller "
+                "PowerOffice GO-ZIP) for klienten via Dokumenter-fanen.",
+            )
+            return
+        # Åpne med systemets standard PDF-viewer
+        try:
+            import os
+            import sys
+            import subprocess
+            if sys.platform.startswith("win"):
+                os.startfile(str(pdf_path))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(pdf_path)])
+            else:
+                subprocess.Popen(["xdg-open", str(pdf_path)])
+        except Exception as exc:
+            messagebox.showerror("Se bilag", f"Kunne ikke åpne PDF:\n{exc}")
+
+    btn_voucher = ttk.Button(hdr_row, text="📎 Se bilag", command=_open_voucher_pdf)
+    btn_voucher.pack(side="right")
 
     desired_cols = ["I kontoutvalg", "Dato", "Konto", "Kontonavn", "Beløp", "Tekst", "Motpart"]
     cols = [c for c in desired_cols if c in rows.columns]
@@ -267,7 +320,9 @@ def open_bilag_drill_dialog(
     for c in cols:
         tree.heading(c, text=c)
         anchor = "e" if c in ("Beløp",) else "w"
-        tree.column(c, width=col_width(c), anchor=anchor, stretch=True)
+        # stretch=False per playbook-regel: brukerens manuelle resize
+        # skal ikke overstyres av Tk's stretch-logikk.
+        tree.column(c, width=col_width(c), anchor=anchor, stretch=False)
 
     # Styling tags
     try:
