@@ -130,6 +130,9 @@ Ferdig migrert (bruker `ManagedTreeview` direkte):
   [mapping_tab.py](../src/pages/consolidation/frontend/mapping_tab.py).
 - [page_revisjonshandlinger.py](../page_revisjonshandlinger.py) — Handlinger-
   fanen (15 kolonner, view_id="revisjonshandlinger"). Migrert 2026-04-26.
+- [page_scoping.py](../page_scoping.py) — Scoping-fanen (12 kolonner,
+  view_id="scoping"; ub_fjor/endring/endring_pct har `visible_by_default=False`
+  som default skjul). Migrert 2026-04-26.
 
 Bruker bare deler av stacken:
 
@@ -150,7 +153,6 @@ Disse har egne sort/kolonne-menyer som kan konsolideres senere:
 |-----|----------|--------------|-----------|
 | `page_analyse.py` | TX-tree + Pivot | Middels | Har egen `page_analyse_columns` med dynamiske kolonner — må flyttes til en `build_column_specs`-bygger. |
 | `reskontro_ui_build.py` | 5-6 tre-er | Høy | Flere paralelle visninger; behandles en om gangen. |
-| `page_scoping.py` | 1-2 tabeller | Lav | Ingen spesiell dynamikk. |
 | `page_admin_brreg_mapping.py` | 1 tabell | Lav |  |
 | `rl_mapping_drift_dialog.py` | 1 tabell | Lav |  |
 

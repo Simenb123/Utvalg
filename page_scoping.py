@@ -17,6 +17,22 @@ from typing import Any, Optional
 log = logging.getLogger(__name__)
 
 
+# Filter-mapping mellom GUI-strenger og interne klassifiserings-tokens.
+# Modul-nivå for å unngå re-allokering ved hvert filter-bytte.
+_CLASS_FILTER_MAP = {
+    "Vesentlig": "vesentlig",
+    "Moderat": "moderat",
+    "Ikke vesentlig": "ikke_vesentlig",
+    "Manuell": "manuell",
+}
+_CLASS_DISPLAY_LABELS = {
+    "vesentlig": "Vesentlig",
+    "moderat": "Moderat",
+    "ikke_vesentlig": "Ikke vesentlig",
+    "manuell": "Manuell",
+}
+
+
 class ScopingPage(ttk.Frame):
     def __init__(self, parent: ttk.Notebook) -> None:
         super().__init__(parent, padding=0)
@@ -162,49 +178,31 @@ class ScopingPage(ttk.Frame):
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        cols = (
-            "regnr", "regnskapslinje", "type", "ub", "ub_fjor", "endring",
-            "endring_pct", "pct_pm", "klassifisering", "scoping", "revisjon", "handlinger",
-        )
-        self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended")
-
-        self._tree.heading("regnr", text="Regnr")
-        self._tree.heading("regnskapslinje", text="Regnskapslinje")
-        self._tree.heading("type", text="Type")
-        self._tree.heading("ub", text="UB")
-        self._tree.heading("ub_fjor", text="UB i fjor")
-        self._tree.heading("endring", text="Endring")
-        self._tree.heading("endring_pct", text="Endring %")
-        self._tree.heading("pct_pm", text="% av PM")
-        self._tree.heading("klassifisering", text="Klassifisering")
-        self._tree.heading("scoping", text="Scoping")
-        self._tree.heading("revisjon", text="Revisjonshandling")
-        self._tree.heading("handlinger", text="Handl.")
-
-        self._tree.column("regnr", width=50, minwidth=40, anchor="e")
-        self._tree.column("regnskapslinje", width=200, minwidth=120)
-        self._tree.column("type", width=45, minwidth=35, anchor="center")
-        self._tree.column("ub", width=100, minwidth=70, anchor="e")
-        self._tree.column("ub_fjor", width=100, minwidth=70, anchor="e")
-        self._tree.column("endring", width=100, minwidth=70, anchor="e")
-        self._tree.column("endring_pct", width=85, minwidth=60, anchor="e")
-        self._tree.column("pct_pm", width=65, minwidth=50, anchor="e")
-        self._tree.column("klassifisering", width=100, minwidth=80, anchor="center")
-        self._tree.column("scoping", width=70, minwidth=50, anchor="center")
-        self._tree.column("revisjon", width=160, minwidth=80)
-        self._tree.column("handlinger", width=50, minwidth=40, anchor="center")
-        self._tree.configure(
-            displaycolumns=(
-                "regnr",
-                "regnskapslinje",
-                "type",
-                "ub",
-                "pct_pm",
-                "klassifisering",
-                "scoping",
-                "revisjon",
-                "handlinger",
-            )
+        # Standard tabell-oppsett via ManagedTreeview (sortering, kolonne-
+        # synlighet/rekkefølge/bredde, høyreklikk-meny på header — alt
+        # persisteres mellom økter). Se doc/TREEVIEW_PLAYBOOK.md.
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        column_specs = [
+            ColumnSpec("regnr",          heading="Regnr",             width=50,  minwidth=40,  anchor="e", pinned=True),
+            ColumnSpec("regnskapslinje", heading="Regnskapslinje",    width=200, minwidth=120, stretch=True),
+            ColumnSpec("type",           heading="Type",              width=45,  minwidth=35,  anchor="center"),
+            ColumnSpec("ub",             heading="UB",                width=100, minwidth=70,  anchor="e"),
+            ColumnSpec("ub_fjor",        heading="UB i fjor",         width=100, minwidth=70,  anchor="e", visible_by_default=False),
+            ColumnSpec("endring",        heading="Endring",           width=100, minwidth=70,  anchor="e", visible_by_default=False),
+            ColumnSpec("endring_pct",    heading="Endring %",         width=85,  minwidth=60,  anchor="e", visible_by_default=False),
+            ColumnSpec("pct_pm",         heading="% av PM",           width=65,  minwidth=50,  anchor="e"),
+            ColumnSpec("klassifisering", heading="Klassifisering",    width=100, minwidth=80,  anchor="center"),
+            ColumnSpec("scoping",        heading="Scoping",           width=70,  minwidth=50,  anchor="center"),
+            ColumnSpec("revisjon",       heading="Revisjonshandling", width=160, minwidth=80),
+            ColumnSpec("handlinger",     heading="Handl.",            width=50,  minwidth=40,  anchor="center"),
+        ]
+        col_ids = tuple(spec.id for spec in column_specs)
+        self._tree = ttk.Treeview(tree_frame, columns=col_ids, show="headings", selectmode="extended")
+        self._managed_tree = ManagedTreeview(
+            self._tree,
+            view_id="scoping",
+            column_specs=column_specs,
+            on_body_right_click=self._on_right_click,
         )
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self._tree.yview)
@@ -214,7 +212,6 @@ class ScopingPage(ttk.Frame):
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
         self._tree.bind("<Double-1>", self._on_double_click)
-        self._tree.bind("<Button-3>", self._on_right_click)
         self._tree.bind("<Control-a>", self._select_all)
         self._tree.bind("<Control-A>", self._select_all)
         self._tree.bind("<Delete>", self._on_key_remove_scoping)
@@ -374,11 +371,12 @@ class ScopingPage(ttk.Frame):
         # Vesentlighet
         materiality = materiality_store.load_state(self._client, self._year)
 
-        # CRM-handlinger (valgfritt)
-        action_counts = self._load_action_counts(rl_pivot)
+        # CRM-handlinger (valgfritt) — pass regnskapslinjer ned så vi
+        # slipper å re-laste fra disk (cached, men unngår copy + lookup).
+        action_counts = self._load_action_counts(rl_pivot, regnskapslinjer)
 
-        # IB/UB-avvik (valgfritt)
-        ib_ub_avvik = self._load_ib_ub_avvik(df_hb, sb_df, intervals)
+        # IB/UB-avvik (valgfritt) — samme: regnskapslinjer er allerede i minnet.
+        ib_ub_avvik = self._load_ib_ub_avvik(df_hb, sb_df, intervals, regnskapslinjer)
 
         # Manuelle overstyringer
         import scoping_store
@@ -442,52 +440,15 @@ class ScopingPage(ttk.Frame):
         except (TypeError, ValueError):
             return None
 
-    def _has_previous_year_data(self) -> bool:
-        if not self._result:
-            return False
-        return any(line.amount_prior is not None for line in self._result.lines)
-
     def _configure_tree_columns(self) -> None:
+        """Oppdater dynamiske header-tekster (årstall) — kolonne-synlighet
+        styres av brukerens valg via høyreklikk-menyen (ManagedTreeview)."""
         year = self._resolve_year_int()
         ub_label = f"UB {year}" if year is not None else "UB"
         ub_fjor_label = f"UB {year - 1}" if year is not None else "UB i fjor"
 
         self._tree.heading("ub", text=ub_label)
         self._tree.heading("ub_fjor", text=ub_fjor_label)
-        self._tree.heading("endring", text="Endring")
-        self._tree.heading("endring_pct", text="Endring %")
-
-        if self._has_previous_year_data():
-            self._tree.configure(
-                displaycolumns=(
-                    "regnr",
-                    "regnskapslinje",
-                    "type",
-                    "ub",
-                    "ub_fjor",
-                    "endring",
-                    "endring_pct",
-                    "pct_pm",
-                    "klassifisering",
-                    "scoping",
-                    "revisjon",
-                    "handlinger",
-                )
-            )
-        else:
-            self._tree.configure(
-                displaycolumns=(
-                    "regnr",
-                    "regnskapslinje",
-                    "type",
-                    "ub",
-                    "pct_pm",
-                    "klassifisering",
-                    "scoping",
-                    "revisjon",
-                    "handlinger",
-                )
-            )
 
     def _display_column_id(self, column_name: str) -> str | None:
         display = self._tree.cget("displaycolumns")
@@ -501,8 +462,12 @@ class ScopingPage(ttk.Frame):
             return None
         return f"#{idx + 1}"
 
-    def _load_action_counts(self, rl_pivot) -> dict[str, int]:
-        """Hent antall CRM-handlinger per regnr."""
+    def _load_action_counts(self, rl_pivot, regnskapslinjer) -> dict[str, int]:
+        """Hent antall CRM-handlinger per regnr.
+
+        ``regnskapslinjer`` sendes inn fra ``_build_scoping_data`` i stedet
+        for å re-laste fra disk — den er allerede i minnet derfra.
+        """
         try:
             from crmsystem_action_matching import (
                 RegnskapslinjeInfo,
@@ -510,16 +475,17 @@ class ScopingPage(ttk.Frame):
                 match_actions_to_regnskapslinjer,
             )
             from crmsystem_actions import load_audit_actions
-            from regnskap_config import load_regnskapslinjer
 
             result = load_audit_actions(self._client, self._year)
             if result.error or not result.actions:
                 return {}
 
-            df = load_regnskapslinjer()
             rl_list = [
-                RegnskapslinjeInfo(nr=str(row["nr"]).strip(), regnskapslinje=str(row["regnskapslinje"]).strip())
-                for _, row in df.iterrows()
+                RegnskapslinjeInfo(
+                    nr=str(row["nr"]).strip(),
+                    regnskapslinje=str(row["regnskapslinje"]).strip(),
+                )
+                for _, row in regnskapslinjer.iterrows()
             ]
             matches = match_actions_to_regnskapslinjer(result.actions, rl_list)
             groups = group_by_regnskapslinje(matches)
@@ -527,17 +493,19 @@ class ScopingPage(ttk.Frame):
         except Exception:
             return {}
 
-    def _load_ib_ub_avvik(self, df_hb, sb_df, intervals) -> set[str]:
-        """Finn regnr med IB/UB-avvik."""
+    def _load_ib_ub_avvik(self, df_hb, sb_df, intervals, regnskapslinjer) -> set[str]:
+        """Finn regnr med IB/UB-avvik.
+
+        ``regnskapslinjer`` sendes inn fra ``_build_scoping_data`` i stedet
+        for å re-laste fra disk.
+        """
         try:
             from ib_ub_control import build_account_reconciliation, build_rl_reconciliation
-            from regnskap_config import load_regnskapslinjer
 
             if sb_df is None or df_hb is None:
                 return set()
 
             acct_recon = build_account_reconciliation(sb_df, df_hb, "Konto", "Beløp")
-            regnskapslinjer = load_regnskapslinjer()
             rl_recon = build_rl_reconciliation(acct_recon, intervals, regnskapslinjer)
             if rl_recon is None or rl_recon.empty:
                 return set()
@@ -560,20 +528,6 @@ class ScopingPage(ttk.Frame):
         type_filter = self.var_filter_type.get()
         scoping_filter = self.var_filter_scoping.get()
 
-        class_map = {
-            "Vesentlig": "vesentlig",
-            "Moderat": "moderat",
-            "Ikke vesentlig": "ikke_vesentlig",
-            "Manuell": "manuell",
-        }
-
-        class_labels = {
-            "vesentlig": "Vesentlig",
-            "moderat": "Moderat",
-            "ikke_vesentlig": "Ikke vesentlig",
-            "manuell": "Manuell",
-        }
-
         hide_summary = self.var_hide_summary.get()
         row_idx = 0
 
@@ -581,7 +535,7 @@ class ScopingPage(ttk.Frame):
             if line.is_summary and hide_summary:
                 continue
             if not line.is_summary:
-                if class_filter != "Alle" and line.classification != class_map.get(class_filter, ""):
+                if class_filter != "Alle" and line.classification != _CLASS_FILTER_MAP.get(class_filter, ""):
                     continue
                 if type_filter != "Alle" and line.line_type != type_filter:
                     continue
@@ -608,7 +562,7 @@ class ScopingPage(ttk.Frame):
                 _fmt_optional(line.change_amount),
                 _fmt_pct(line.change_pct),
                 "" if line.is_summary else f"{line.pct_of_pm:.0f}%",
-                class_labels.get(line.classification, ""),
+                _CLASS_DISPLAY_LABELS.get(line.classification, ""),
                 "Ut" if line.scoping == "ut" else "",
                 line.audit_action if not line.is_summary else "",
                 str(line.action_count) if line.action_count else "",

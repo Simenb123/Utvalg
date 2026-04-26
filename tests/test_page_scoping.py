@@ -52,9 +52,6 @@ class _FakePage:
     def _resolve_year_int(self):
         return ScopingPage._resolve_year_int(self)
 
-    def _has_previous_year_data(self):
-        return ScopingPage._has_previous_year_data(self)
-
 
 def test_detail_amount_line_uses_ub_year_and_prior_year():
     line = ScopingLine(
@@ -74,7 +71,10 @@ def test_detail_amount_line_uses_ub_year_and_prior_year():
     assert "Endring %: +20.0%" in text
 
 
-def test_configure_tree_columns_shows_prior_year_columns_when_available():
+def test_configure_tree_columns_sets_year_in_headers():
+    """``_configure_tree_columns`` skal sette årstall i UB- og UB-fjor-
+    overskriftene. Synlighet av kolonnene styres nå av brukerens valg
+    via ManagedTreeview, ikke av denne metoden."""
     page = _FakePage(
         "2025",
         [ScopingLine(regnr="10", regnskapslinje="Salgsinntekt", amount=100.0, amount_prior=90.0)],
@@ -84,48 +84,16 @@ def test_configure_tree_columns_shows_prior_year_columns_when_available():
 
     assert page._tree.headings["ub"] == "UB 2025"
     assert page._tree.headings["ub_fjor"] == "UB 2024"
-    assert page._tree.displaycolumns == (
-        "regnr",
-        "regnskapslinje",
-        "type",
-        "ub",
-        "ub_fjor",
-        "endring",
-        "endring_pct",
-        "pct_pm",
-        "klassifisering",
-        "scoping",
-        "revisjon",
-        "handlinger",
-    )
 
 
-def test_configure_tree_columns_hides_prior_year_columns_when_missing():
+def test_configure_tree_columns_falls_back_when_year_missing():
+    """Uten gyldig år skal generiske labels brukes."""
     page = _FakePage(
-        "2025",
+        None,
         [ScopingLine(regnr="10", regnskapslinje="Salgsinntekt", amount=100.0, amount_prior=None)],
     )
 
     ScopingPage._configure_tree_columns(page)
 
-    assert page._tree.displaycolumns == (
-        "regnr",
-        "regnskapslinje",
-        "type",
-        "ub",
-        "pct_pm",
-        "klassifisering",
-        "scoping",
-        "revisjon",
-        "handlinger",
-    )
-
-
-def test_display_column_id_respects_dynamic_displaycolumns():
-    page = _FakePage(
-        "2025",
-        [ScopingLine(regnr="10", regnskapslinje="Salgsinntekt", amount=100.0, amount_prior=None)],
-    )
-    ScopingPage._configure_tree_columns(page)
-
-    assert ScopingPage._display_column_id(page, "scoping") == "#7"
+    assert page._tree.headings["ub"] == "UB"
+    assert page._tree.headings["ub_fjor"] == "UB i fjor"
