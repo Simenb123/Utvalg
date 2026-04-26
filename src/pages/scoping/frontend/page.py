@@ -322,12 +322,12 @@ class ScopingPage(ttk.Frame):
         import src.pages.materiality.backend.store as materiality_store
         import previous_year_comparison
         import regnskap_client_overrides as _rco
-        from scoping_engine import build_scoping
+        from ..backend.engine import build_scoping
 
         # Regnskapslinjer og mapping
         intervals, regnskapslinjer = load_rl_config()
         if intervals is None or regnskapslinjer is None:
-            from scoping_engine import ScopingResult
+            from ..backend.engine import ScopingResult
             return ScopingResult()
 
         # HB-data fra session
@@ -379,7 +379,7 @@ class ScopingPage(ttk.Frame):
         ib_ub_avvik = self._load_ib_ub_avvik(df_hb, sb_df, intervals, regnskapslinjer)
 
         # Manuelle overstyringer
-        import scoping_store
+        from ..backend import store as scoping_store
         overrides = scoping_store.load_overrides(self._client, self._year)
 
         # Beregn auto-scope-ut-forslag fra scoping-motoren. Brukes for
@@ -392,7 +392,7 @@ class ScopingPage(ttk.Frame):
             # å få ordentlig line_type (PL/BS) + is_summary-klassifisering,
             # deretter beregner vi auto og kjører build_scoping en gang
             # til med auto. Det er to kall men de er billige på ren logikk.
-            from scoping_engine import compute_auto_scope_out
+            from ..backend.engine import compute_auto_scope_out
 
             preliminary = build_scoping(
                 rl_pivot, materiality,
@@ -719,7 +719,7 @@ class ScopingPage(ttk.Frame):
         if not self._client or not self._year:
             return
         try:
-            import scoping_store
+            from ..backend import store as scoping_store
             scoping_store.update_line(
                 self._client, self._year, regnr,
                 scoping=scoping, rationale=rationale, audit_action=audit_action,
@@ -855,7 +855,7 @@ class ScopingPage(ttk.Frame):
             return
         if not messagebox.askyesno("Nullstill", "Nullstille all scoping for denne klienten?"):
             return
-        import scoping_store
+        from ..backend import store as scoping_store
         overrides = scoping_store.load_overrides(self._client, self._year)
         for line in self._result.lines:
             if line.is_summary:
@@ -932,7 +932,7 @@ class ScopingPage(ttk.Frame):
             self._populate_card(which="BS", scoped_out=None, pm=0, n_ut=0)
             return
 
-        from scoping_engine import scoped_out_totals_by_group
+        from ..backend.engine import scoped_out_totals_by_group
         totals = scoped_out_totals_by_group(self._result.lines)
         pm = self._result.pm
 

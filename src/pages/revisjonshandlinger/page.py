@@ -529,7 +529,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         except Exception:
             self._rl_amounts = {}
         try:
-            import scoping_store
+            import src.pages.scoping.backend.store as scoping_store
             overrides = scoping_store.load_overrides(self._client, self._year) or {}
         except Exception:
             overrides = {}

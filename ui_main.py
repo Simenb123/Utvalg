@@ -85,7 +85,7 @@ except Exception:
     RevisjonshandlingerPage = None  # type: ignore
 
 try:
-    from page_scoping import ScopingPage
+    from src.pages.scoping.frontend.page import ScopingPage
 except Exception:
     ScopingPage = None  # type: ignore
 

@@ -41,7 +41,7 @@ def _make_page(tmp_path, monkeypatch):
     monkeypatch.setattr(asg_store.client_store, "years_dir", fake_years_dir)
     monkeypatch.setattr(wp_store.client_store, "years_dir", fake_years_dir)
 
-    import scoping_store
+    import src.pages.scoping.backend.store as scoping_store
     monkeypatch.setattr(scoping_store, "_overrides_path",
                         lambda c, y: fake_years_dir(c, year=y) / "scoping_overrides.json")
 

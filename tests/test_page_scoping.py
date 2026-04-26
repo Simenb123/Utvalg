@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from page_scoping import ScopingPage, _detail_amount_line
-from scoping_engine import ScopingLine
+from src.pages.scoping.frontend.page import ScopingPage, _detail_amount_line
+from src.pages.scoping.backend.engine import ScopingLine
 
 
 class _FakeTree:

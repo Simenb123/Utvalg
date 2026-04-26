@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from scoping_engine import (
+from src.pages.scoping.backend.engine import (
     ScopingLine,
     ScopingResult,
     build_scoping,

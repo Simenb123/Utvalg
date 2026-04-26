@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from scoping_engine import ScopingLine, ScopingResult
-from scoping_export import export_scoping
+from src.pages.scoping.backend.engine import ScopingLine, ScopingResult
+from src.pages.scoping.backend.export import export_scoping
 
 
 @pytest.fixture()

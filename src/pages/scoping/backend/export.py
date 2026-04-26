@@ -14,7 +14,7 @@ import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from scoping_engine import ScopingResult
+from .engine import ScopingResult
 
 log = logging.getLogger(__name__)
 
