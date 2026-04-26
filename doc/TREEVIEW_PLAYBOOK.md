@@ -171,6 +171,30 @@ Default-prefix er `"ui"`. Hvis siden allerede har et annet prefix
 vi det; `legacy_pref_keys` brukes fortsatt for å migrere fra gamle
 flate nøkkelnavn.
 
+## Regel: Ikke bruk `stretch=True` på `ColumnSpec`
+
+**Bruk alltid `stretch=False`** (default i `ColumnSpec`) på alle kolonner.
+
+**Hvorfor:** Tk's stretch-logikk gir kolonnen ekstra plass når vinduet
+er bredere enn summen av kolonnebredder. Hvis brukeren manuelt prøver
+å krympe en stretch-kolonne, fyller Tk den opp igjen ved neste
+layout-runde — kolonnen "spretter tilbake". Det er en av de mest
+irriterende UX-buggene i hele appen.
+
+**Hva med ledig plass på høyre i brede vinduer?** Det er akseptabelt.
+Bedre at brukeren har full kontroll over kolonnebredder enn at én
+kolonne stjeler all ekstra plass. Brukeren kan dra kolonner bredere
+hvis hen vil bruke plassen.
+
+**Bekreftet bug-forekomster (alle nå fikset):**
+- [src/pages/oversikt/page_oversikt.py](../src/pages/oversikt/page_oversikt.py) — Klient-kolonne (commit `d17387e`)
+- [page_analyse_columns_presets.py](../page_analyse_columns_presets.py) — TX-treets Tekst (commit `314a119`)
+- [page_analyse_columns_presets.py](../page_analyse_columns_presets.py) — SB-treets Kontonavn (commit `812a46c`)
+
+Hvis du ser samme symptom andre steder: en `stretch=True` (eller
+`stretch=col == "X"`) i et `ColumnSpec(...)`-kall er nesten alltid
+synderen. Bytt til `stretch=False`.
+
 ## Kjent teknisk gjeld
 
 - Det finnes tre parallelle sort-motorer i repoet:
