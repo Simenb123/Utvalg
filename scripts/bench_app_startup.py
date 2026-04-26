@@ -53,7 +53,7 @@ def main() -> None:
     page_modules = [
         "page_oversikt",
         "page_dataset",
-        "page_revisjonshandlinger",
+        "src.pages.revisjonshandlinger",
         "page_analyse",
         "page_saldobalanse",
         "page_admin",

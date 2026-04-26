@@ -44,7 +44,7 @@ def _make_page(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store.client_store, "years_dir", fake_years_dir)
 
-    import page_revisjonshandlinger as page_mod
+    from src.pages.revisjonshandlinger import page as page_mod
     from crmsystem_action_matching import ActionMatch, RegnskapslinjeInfo
     from crmsystem_actions import AuditAction, EngagementInfo
 
@@ -95,7 +95,7 @@ def test_kilde_column_is_added():
     nb = ttk.Notebook(root)
     nb.pack()
     try:
-        import page_revisjonshandlinger as page_mod
+        from src.pages.revisjonshandlinger import page as page_mod
         page = page_mod.RevisjonshandlingerPage(nb)
         assert "kilde" in page._tree["columns"]
     finally:

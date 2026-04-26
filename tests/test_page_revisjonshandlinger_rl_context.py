@@ -45,7 +45,7 @@ def _make_page(tmp_path, monkeypatch):
     monkeypatch.setattr(scoping_store, "_overrides_path",
                         lambda c, y: fake_years_dir(c, year=y) / "scoping_overrides.json")
 
-    import page_revisjonshandlinger as page_mod
+    from src.pages.revisjonshandlinger import page as page_mod
     from crmsystem_action_matching import ActionMatch, RegnskapslinjeInfo
     from crmsystem_actions import AuditAction, EngagementInfo
 

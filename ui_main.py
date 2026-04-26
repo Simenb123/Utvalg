@@ -80,7 +80,7 @@ except Exception:
     DriftsmidlerPage = None  # type: ignore
 
 try:
-    from page_revisjonshandlinger import RevisjonshandlingerPage
+    from src.pages.revisjonshandlinger import RevisjonshandlingerPage
 except Exception:
     RevisjonshandlingerPage = None  # type: ignore
 

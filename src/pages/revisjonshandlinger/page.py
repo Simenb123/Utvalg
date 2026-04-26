@@ -1518,7 +1518,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         )
 
     def _open_detail_dialog(self, iid: str) -> None:
-        from page_revisjonshandlinger_detail import ActionDetailDialog
+        from .detail import ActionDetailDialog
 
         if iid.startswith("L:"):
             item = next((x for x in self._local_lib if x.id == self._local_action_id_from_iid(iid)), None)
