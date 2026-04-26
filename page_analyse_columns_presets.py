@@ -164,11 +164,13 @@ def build_tx_column_specs(
                 width=analyse_treewidths.default_column_width(col),
                 minwidth=analyse_treewidths.column_minwidth(col),
                 anchor=analyse_treewidths.column_anchor(col),
-                # Bare Tekst skal absorbere ekstra plass. Tidligere stretchet
-                # også Kontonavn, som gjorde at brukerens manuelle resize ble
-                # overstyrt av neste layout-runde (samme bug som Oversikt's
-                # Klient-kolonne).
-                stretch=col == "Tekst",
+                # Ingen kolonne skal stretche. Når en kolonne har stretch=True
+                # vil Tk fylle ledig plass med den, og brukerens manuelle
+                # resize blir overstyrt av neste layout-runde — kolonnen
+                # "spretter tilbake" til opprinnelig størrelse. Tom plass på
+                # høyre i brede vinduer er akseptabelt; brukeren vil heller
+                # ha kontroll over kolonnebreddene.
+                stretch=False,
                 visible_by_default=col not in optional_set,
                 pinned=col in pinned_set,
                 sortable=True,

@@ -440,20 +440,29 @@ def build_transactions_view_df(
         try:
             import regnskapslinje_mapping_service as _rl_svc
             _rl_ctx = _rl_svc.load_rl_mapping_context()
-            unique_kontoer = [k for k in out["Konto"].unique() if k]
+            # Sikre at vi sammenligner stringer på begge sider (out["Konto"]
+            # er allerede normalisert via konto_to_str, men være eksplisitt).
+            konto_str_series = out["Konto"].astype(str)
+            unique_kontoer = list({k for k in konto_str_series if k})
             _rl_resolved = _rl_svc.resolve_accounts_to_rl(unique_kontoer, context=_rl_ctx)
             if not _rl_resolved.empty:
-                _rl_lookup = _rl_resolved.set_index("konto")
+                # Bygg dict eksplisitt med string-nøkler
+                _konto_keys = _rl_resolved["konto"].astype(str)
                 if "Regnr" in tx_cols:
-                    regnr_map = _rl_lookup["regnr"].to_dict()
-                    out["Regnr"] = out["Konto"].map(regnr_map).astype("Int64")
-                if "Regnskapslinje" in tx_cols and "regnskapslinje" in _rl_lookup.columns:
-                    rl_map = _rl_lookup["regnskapslinje"].to_dict()
-                    out["Regnskapslinje"] = out["Konto"].map(rl_map).fillna("")
-        except Exception:
-            # RL-config mangler eller noe annet feilet — la fallback-løkken
-            # under fylle med tom streng.
-            pass
+                    regnr_by_konto = dict(zip(_konto_keys, _rl_resolved["regnr"]))
+                    mapped = konto_str_series.map(regnr_by_konto)
+                    # Vis som streng: "1234" eller "" hvis ingen mapping.
+                    # (Treeview viser <NA> bokstavelig om vi bruker Int64.)
+                    out["Regnr"] = mapped.apply(
+                        lambda v: "" if pd.isna(v) else str(int(v))
+                    )
+                if "Regnskapslinje" in tx_cols and "regnskapslinje" in _rl_resolved.columns:
+                    rl_by_konto = dict(zip(_konto_keys, _rl_resolved["regnskapslinje"].astype(str)))
+                    out["Regnskapslinje"] = konto_str_series.map(rl_by_konto).fillna("")
+        except Exception as exc:
+            # Logg synlig så vi merker når RL-mapping ikke virker (f.eks.
+            # manglende RL-config). Fallback-løkken under fyller med tom.
+            log.warning("RL-beriking i build_transactions_view_df feilet: %s", exc, exc_info=True)
 
     # Sikre kolonner i riktig rekkefølge.
     #
