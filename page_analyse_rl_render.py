@@ -615,7 +615,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
             if active_year is not None:
                 fjor_year = active_year - 1
                 try:
-                    import brreg_fjor_fallback
+                    import src.shared.brreg.fjor_fallback as brreg_fjor_fallback
                     if brreg_fjor_fallback.has_brreg_for_year(brreg_data_try, fjor_year):
                         pivot_df = brreg_fjor_fallback.build_brreg_fjor_pivot_columns(
                             pivot_df, regnskapslinjer, brreg_data_try, fjor_year,
@@ -663,7 +663,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         has_brreg = bool(brreg_data)
         if has_brreg:
             try:
-                import brreg_rl_comparison
+                import src.shared.brreg.rl_comparison as brreg_rl_comparison
                 pivot_df = brreg_rl_comparison.add_brreg_columns(
                     pivot_df, regnskapslinjer, brreg_data,
                 )

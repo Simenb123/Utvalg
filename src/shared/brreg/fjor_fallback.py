@@ -16,7 +16,7 @@ from typing import Optional
 
 import pandas as pd
 
-from brreg_rl_comparison import build_brreg_by_regnr
+from .rl_comparison import build_brreg_by_regnr
 
 log = logging.getLogger("app")
 

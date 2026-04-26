@@ -206,7 +206,7 @@ def _nk_fetch_brreg(page: Any) -> None:
 
     if not orgnr or len(orgnr) != 9:
         try:
-            import client_store as _cs
+            import src.shared.client_store.store as _cs
             client_name = getattr(_sess, "client", "") if _sess is not None else ""
             if client_name:
                 cmeta = _cs.read_client_meta(client_name)
@@ -242,7 +242,7 @@ def _nk_fetch_brreg(page: Any) -> None:
 
     def _worker():
         try:
-            import brreg_client
+            import src.shared.brreg.client as brreg_client
             data = brreg_client.fetch_regnskap(orgnr)
         except Exception as exc:
             page.after(0, lambda: _on_done(None, str(exc)))
@@ -309,7 +309,7 @@ def _nk_auto_fetch_brreg(page: Any) -> None:
 
     if not orgnr or len(orgnr) != 9:
         try:
-            import client_store as _cs
+            import src.shared.client_store.store as _cs
             client_name = getattr(_sess, "client", "") if _sess is not None else ""
             if client_name:
                 cmeta = _cs.read_client_meta(client_name)
@@ -323,7 +323,7 @@ def _nk_auto_fetch_brreg(page: Any) -> None:
 
     def _worker():
         try:
-            import brreg_client
+            import src.shared.brreg.client as brreg_client
             data = brreg_client.fetch_regnskap(orgnr)
         except Exception:
             return

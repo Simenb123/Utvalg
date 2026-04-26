@@ -7,8 +7,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import brreg_rl_comparison as _brc
-import brreg_mapping_config
+import src.shared.brreg.rl_comparison as _brc
+import src.shared.brreg.mapping_config as brreg_mapping_config
 import classification_config
 
 

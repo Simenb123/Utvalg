@@ -202,7 +202,7 @@ def fetch_brreg_roles(page: Any) -> None:
         pass
 
     try:
-        import brreg_client
+        import src.shared.brreg.client as brreg_client
         # Enhetsinfo
         enhet = brreg_client.fetch_enhet(orgnr)
         if enhet:

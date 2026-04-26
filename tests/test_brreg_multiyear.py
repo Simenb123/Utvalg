@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-import brreg_client as _bc
+import src.shared.brreg.client as _bc
 
 
 def _mk_entry(

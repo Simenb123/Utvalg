@@ -109,7 +109,7 @@ def update_brreg_panel(page: Any, orgnr: str) -> None:
         return
 
     try:
-        import brreg_client as _brreg
+        import src.shared.brreg.client as _brreg
         exempt = _brreg.is_likely_exempt(enhet.get("naeringskode", ""))
     except Exception:
         exempt = False

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import brreg_fjor_fallback as _bff
+import src.shared.brreg.fjor_fallback as _bff
 
 
 def _regnskapslinjer_df() -> pd.DataFrame:

@@ -41,7 +41,7 @@ DEFAULT_YEAR = "2025"  # ønsket default
 
 
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 
     _HAS_CLIENT_STORE = True
 except Exception:
@@ -423,7 +423,7 @@ class ClientStoreSection:
             return
 
         try:
-            from client_meta_index import get_index
+            from src.shared.client_store.meta_index import get_index
             meta = get_index().get(client, {})
         except Exception:
             meta = {}
@@ -566,7 +566,7 @@ class ClientStoreSection:
         enhet = None
         roller = None
         try:
-            import brreg_client
+            import src.shared.brreg.client as brreg_client
             enhet = brreg_client.fetch_enhet(orgnr)
             roller = brreg_client.fetch_roller(orgnr)
         except Exception:
@@ -757,7 +757,7 @@ class ClientStoreSection:
 
         # Last metadata-indeks for rik visning
         try:
-            from client_meta_index import get_index
+            from src.shared.client_store.meta_index import get_index
             meta = get_index()
         except Exception:
             meta = None

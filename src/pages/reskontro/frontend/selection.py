@@ -283,7 +283,7 @@ def auto_fetch_brreg_single(page, orgnr: str) -> None:
 
     def _run() -> None:
         try:
-            import brreg_client as _brreg
+            import src.shared.brreg.client as _brreg
             enhet = _brreg.fetch_enhet(orgnr)
             regnskap = _brreg.fetch_regnskap(orgnr)
             result = {"enhet": enhet, "regnskap": regnskap}

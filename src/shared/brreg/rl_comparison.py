@@ -600,7 +600,7 @@ def add_brreg_columns(
 
     if rl_mapping is _UNSET:
         try:
-            import brreg_mapping_config
+            from . import mapping_config as brreg_mapping_config
             rl_mapping = brreg_mapping_config.load_brreg_rl_mapping()
         except Exception as exc:
             log.debug("brreg_mapping_config ikke tilgjengelig: %s", exc)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import brreg_mapping_config as bmc
+import src.shared.brreg.mapping_config as bmc
 import classification_config
 
 
@@ -59,7 +59,7 @@ def test_null_value_preserved_as_disabled(tmp_path: Path) -> None:
 
 
 def test_list_brreg_keys_matches_brreg_keys_module() -> None:
-    import brreg_rl_comparison as brc
+    import src.shared.brreg.rl_comparison as brc
 
     result = bmc.list_brreg_keys()
     assert len(result) == len(brc._BRREG_KEYS)

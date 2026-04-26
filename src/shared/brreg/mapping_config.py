@@ -84,7 +84,7 @@ def suggest_mapping_from_aliases(
     hvilke BRREG-linjer som allerede ville truffet via alias (uten mapping).
     Første alias-treff vinner; duplikate BRREG-nøkler ignoreres.
     """
-    import brreg_rl_comparison as _brc
+    from . import rl_comparison as _brc
 
     try:
         import pandas as _pd
@@ -119,7 +119,7 @@ def list_brreg_keys() -> list[tuple[str, str]]:
     ``human_label`` er første alias for nøkkelen (første bokstav stor) — ment
     som en lesbar beskrivelse i admin-GUI.
     """
-    import brreg_rl_comparison as _brc
+    from . import rl_comparison as _brc
 
     out: list[tuple[str, str]] = []
     for key, cfg in _brc._BRREG_KEYS.items():

@@ -387,7 +387,7 @@ def build_data_source_rows() -> list[DataSourceRow]:
         workpaper_library_path = data_dir / "workpaper_library.json"
 
     try:
-        import brreg_client
+        import src.shared.brreg.client as brreg_client
 
         brreg_cache_path = brreg_client.cache_path()
     except Exception:
@@ -1799,7 +1799,7 @@ class SettingsView:
         if not messagebox.askyesno("BRREG-cache", "Tomme lokal BRREG-cache og tvinge ny henting ved neste oppslag?", parent=self.win):
             return
         try:
-            import brreg_client
+            import src.shared.brreg.client as brreg_client
             brreg_client.clear_cache()
         except Exception as exc:
             messagebox.showerror("BRREG-cache", f"Kunne ikke tomme cache: {exc}", parent=self.win)

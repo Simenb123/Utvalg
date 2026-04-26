@@ -65,7 +65,7 @@ def brreg_worker(page, orgnr: str, request_id: int, use_cache: bool) -> None:
     regnskap = None
     error: str | None = None
     try:
-        import brreg_client
+        import src.shared.brreg.client as brreg_client
         enhet = brreg_client.fetch_enhet(orgnr, use_cache=use_cache)
         regnskap = brreg_client.fetch_regnskap(orgnr, use_cache=use_cache)
     except Exception as exc:

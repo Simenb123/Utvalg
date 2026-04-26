@@ -117,7 +117,7 @@ def start_brreg_sjekk(page) -> None:
 
     def _run() -> None:
         try:
-            import brreg_client as _brreg
+            import src.shared.brreg.client as _brreg
             results = _brreg.fetch_many(
                 list(set(orgnrs)),
                 progress_cb=_progress,

@@ -33,8 +33,8 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
 
-import brreg_mapping_config
-import brreg_rl_comparison
+import src.shared.brreg.mapping_config as brreg_mapping_config
+import src.shared.brreg.rl_comparison as brreg_rl_comparison
 
 
 _TITLE = "BRREG-mapping"
