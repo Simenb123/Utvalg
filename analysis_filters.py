@@ -179,6 +179,7 @@ def filter_dataset(
     mva_code: str | Iterable[str] | None = None,
     mva_codes: Iterable[str] | None = None,
     mva_mode: str | None = None,
+    search_cols: Iterable[str] | None = None,
     **_: Any,
 ) -> pd.DataFrame:
     """
@@ -196,22 +197,33 @@ def filter_dataset(
         search = query
 
     # 1) General search
+    # Hvis search_cols er gitt (typisk via Ctrl+klikk-merking i UI),
+    # søk KUN i de valgte kolonnene. Ellers fall tilbake på et
+    # utvidet default-sett som dekker både tekst- og tall-/kode-kolonner.
     search_text = str(search or "").strip().lower()
     if search_text:
-        cols = [
-            c
-            for c in (
-                "Konto",
-                "Kontonavn",
-                "Tekst",
-                "Kundenr",
-                "Kundenavn",
-                "Leverandørnr",
-                "Leverandørnavn",
-                "Bilag",
-            )
-            if c in out.columns
-        ]
+        if search_cols:
+            cols = [c for c in search_cols if c in out.columns]
+        else:
+            cols = [
+                c
+                for c in (
+                    "Konto",
+                    "Kontonavn",
+                    "Tekst",
+                    "Kundenr",
+                    "Kundenavn",
+                    "Leverandørnr",
+                    "Leverandørnavn",
+                    "Bilag",
+                    "Beløp",
+                    "Dato",
+                    "MVA-kode",
+                    "Regnr",
+                    "Regnskapslinje",
+                )
+                if c in out.columns
+            ]
         if cols:
             mask = pd.Series(False, index=out.index)
             for c in cols:

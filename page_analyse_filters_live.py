@@ -196,6 +196,11 @@ def build_filtered_df(*, page: Any, dir_options: Sequence[Any]) -> Optional[pd.D
     kontoserier = [i for i, v in enumerate(page._series_vars) if v.get()]
     kontoserier_arg = kontoserier if kontoserier else None
 
+    # Ctrl+klikk-markerte kolonner overstyrer default-søkesettet.
+    # Tom set = søk i hele default-listen (vanlig oppførsel).
+    selected_search_cols = getattr(page, "_tx_search_cols", None)
+    search_cols_arg = sorted(selected_search_cols) if selected_search_cols else None
+
     df_f = filter_dataset(
         dataset,
         search=search,
@@ -210,6 +215,7 @@ def build_filtered_df(*, page: Any, dir_options: Sequence[Any]) -> Optional[pd.D
         kontoserier=kontoserier_arg,
         mva_code=mva_code,
         mva_mode=mva_mode,
+        search_cols=search_cols_arg,
     )
 
     # Normalise Konto for safe selection/filtering.
