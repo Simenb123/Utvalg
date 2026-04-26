@@ -15,6 +15,7 @@
 - [`architecture/dataset_klientoversikt_plan.md`](architecture/dataset_klientoversikt_plan.md) - status quo + ønsket retning for Dataset-fanen → Klientoversikt + Datasett-popup. Inkluderer Visena-import-flyt, regnskapssystem-håndtering og fasedelt implementering.
 - [`architecture/analyse_kolonnevisning_plan.md`](architecture/analyse_kolonnevisning_plan.md) - Analyse-fanen kolonnehåndtering: BRREG vises som default, kolonnebredder hardkodet, kolonnemeny ikke `ManagedTreeview`. Konkrete problemer + foreslått rekkefølge for fiks.
 - [`architecture/dataset_compare_plan.md`](architecture/dataset_compare_plan.md) - Bevart kunnskap fra slettet ab_*-prototype + plan for å bygge datasett-sammenligning på riktig sted i fremtiden (`src/audit_actions/dataset_compare/`).
+- [`architecture/mva_leverandorflagg_plan.md`](architecture/mva_leverandorflagg_plan.md) - Plan for kontroll under MVA-fanen som flagger inngående MVA-fradrag på ikke-MVA-registrerte leverandører (BRREG-kryssjekk).
 
 ---
 
