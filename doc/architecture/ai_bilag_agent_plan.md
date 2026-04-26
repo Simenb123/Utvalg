@@ -2,6 +2,18 @@
 
 **Sist oppdatert:** 2026-04-27
 
+> ⚠️ **IKKE NESTE STEG.** Dette er endgame-visjonen og ligger godt
+> frem i tid. Brukeren har eksplisitt signalisert at vi først må
+> komme oss gjennom mer grunnleggende arbeid (root-cleanup, pilot
+> 24+ av src-migrasjonen, gjenstående Analyse-/Saldobalanse-/
+> Reskontro-polish, eksisterende plan-doc'er som
+> [analyse_pivot_plan.md](analyse_pivot_plan.md)) før vi i det
+> hele tatt begynner på Nivå 2 her. Denne planen er dokumentert
+> SÅ visjonen ligger trygt for fremtiden, ikke som en kø-jobb.
+> Selv Nivå 1 (PDF-visning, ferdig 2026-04-27) ble laget som en
+> bivirkning av en bilag-popup-forbedring, ikke som første steg
+> mot endgame.
+
 Brukerens langsiktige ambisjon for Utvalg: bygge et revisjonsverktøy
 hvor en AI-agent har **sylskarp kontekstforståelse** av både den
 strukturerte regnskapsdataen, de underliggende bilag-dokumentene og

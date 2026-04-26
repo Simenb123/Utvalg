@@ -2,6 +2,18 @@
 
 **Sist oppdatert:** 2026-04-27
 
+> ⚠️ **IKKE NESTE STEG.** Brukeren har signalisert at dette er et
+> stykke frem i tid. Vi må først igjennom det grunnleggende:
+> root-cleanup, pilot 24+ av src-migrasjonen, gjenstående polish
+> i Analyse/Saldobalanse/Reskontro, og andre plan-doc'er før denne.
+> Denne planen er dokumentert SÅ den ligger trygt for fremtiden,
+> ikke som en kø-jobb. Selv Lag 1 (action-logging-rammeverket) skal
+> ikke startes før mer basic ting er på plass.
+>
+> Se også [ai_bilag_agent_plan.md](ai_bilag_agent_plan.md) — denne
+> planen er grunnmuren for AI-agenten, og begge har samme "vent til
+> basics er ferdig"-status.
+
 Plan for "gransknings-økt"-funksjonalitet i Utvalg: revisor klikker
 "start økt" og appen logger både hva som blir gjort (klikk, bilag-
 oppslag, filter-endringer) og hva som blir sagt (lokal transkripsjon
