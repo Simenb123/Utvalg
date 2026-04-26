@@ -24,6 +24,35 @@ repoet til `src/pages/`, `src/audit_actions/`, `src/shared/` og
 | 11A | 2026-04-26 | `8166108` | consolidation (backend pkg) | 15 | 6 000 | Eksisterende `consolidation/`-pakka flyttet til ny lokasjon |
 | 11B | 2026-04-26 | `c090bf5` | consolidation (frontend) | 27 | 7 800 | `page_consolidation*.py` → `frontend/` |
 | 11C | 2026-04-26 | `ce5d5a2` | consolidation (resten) | 5 | 1 200 | `consolidation_*.py` (3 backend, 2 frontend) + lint-test |
+| 14 | 2026-04-26 | `be8428e` | skatt | 1 | 515 | Én-fil-pilot uten backend/frontend-skille (visningsside med selectmode="none") |
+| 15 | 2026-04-26 | `4e426a1` | revisjonshandlinger | 2 | 2 224 | ManagedTreeview-migrering tidligere samme dag (`d785aac`) |
+| 16 | 2026-04-26 | `3b34db0` | scoping | 4 | 1 787 | 1 frontend + 3 backend (engine, store, export) + ManagedTreeview-migrering |
+| 17 | 2026-04-26 | `1ea4829` | utvalg | 3 | 1 042 | UtvalgPage + UtvalgStrataPage + utvalg_excel_report; AST-test-sti måtte oppdateres |
+| 18 | 2026-04-26 | `b86c7ee` | mva | 9 | 4 054 | 6 backend + 3 frontend (avstemming, kontroller, melding-parser, dialoger) |
+| 19 | 2026-04-26 | `8d75210` | dataset | 14 | 5 066 | 6 backend + 8 frontend; bryter to roller (datakilde + klient-info) — `dataset_klientoversikt_plan.md` beskriver senere splitt |
+| 20 | 2026-04-26 | `9bb636b` | reskontro | 12 | 5 048 | 4 backend + 8 frontend; treeview-migrering utestående (5-6 trær, høy kompleksitet) |
+
+## src/shared/ — cross-cutting utility-pakker
+
+Når roten av faner var flyttet, ble shared-utilities samlet til
+`src/shared/<domene>/`. Mønster: ren backend (verifisert med lint-test),
+brukt av flere faner.
+
+| Pilot | Dato | Commit | Pakke | Filer | Notat |
+|---|---|---|---|---|---|
+| 21 | 2026-04-26 | `459f935` | `src/shared/regnskap/` | 6 backend + 3 frontend | `regnskap_*.py` splittet: 6 til shared, 3 frontend-helpers (export, klient, noter) til `src/pages/regnskap/frontend/` |
+| 22 | 2026-04-26 | `d8d6594` | `src/shared/client_store/` | 5 backend | `client_store/{store, meta_index, enrich, importer, versions}.py`. Tk-koblede dialoger (`client_picker_dialog`, `client_store_enrich_ui`) beholdt på toppnivå |
+| 23 | 2026-04-26 | `e573951` | `src/shared/brreg/` | 4 backend | BRREG-API-klient med cache + RL-sammenligning + fallback-logikk |
+
+## Andre forbedringer 2026-04-26
+
+| Commit | Beskrivelse |
+|---|---|
+| `eea102d` | Slett dødt kode (~2 700 linjer): page_ab*, page_studio, ab_*, analysis_pkg/pack — bevart kunnskap i `dataset_compare_plan.md` |
+| `2105dea` | Reskontro-berikelse: kunde/leverandør propageres til alle linjer i samme bilag (Analyse-fanen) |
+| `3d1c90b` | Skille kunde og leverandør i transaksjons-treet (quickfix) |
+| `d785aac` | `page_revisjonshandlinger` migrert til `ManagedTreeview` |
+| `922c1fa` | `page_scoping` migrert til `ManagedTreeview` + ytelses-rydding (regnskapslinjer lastes nå 1× per refresh i stedet for 3×) |
 
 ## Opprydding (pilot 12-13)
 
@@ -45,13 +74,51 @@ holdt eksterne importerere virksomme. Pilot 12-13 ryddet 67 av dem ved
 **Totalt etter rydding:** 67 shim-filer slettet, hundrevis av importerere
 oppdatert til ny lokasjon, alle pre-existing test-failures uendret.
 
-## Gjenværende på toppnivå
+## Status etter pilot 23 (2026-04-26)
 
-To shim-filer er bevisst beholdt:
+**Roten:** 226 .py-filer (var 254 før dagens ettermiddag).
+
+**`src/`-strukturen:**
+```
+src/
+├── pages/             18 mapper (a07, ar, consolidation, dataset, documents,
+│                      driftsmidler, fagchat, logg, materiality, mva, oversikt,
+│                      regnskap, reskontro, revisjonshandlinger, saldobalanse,
+│                      scoping, skatt, utvalg)
+├── audit_actions/     2 mapper (motpost, statistikk)
+├── shared/            3 mapper (regnskap, client_store, brreg) + columns_vocabulary.py
+└── monitoring/        ferdig (perf, events, dashboard, baseline, bench)
+```
+
+**Bevisst beholdt på toppnivå (shim-filer):**
 
 1. **`saldobalanse_payload.py`** — `a07_feature/payroll/saldobalanse_bridge.py`
    bruker den fortsatt. A07-utvikler oppdaterer importen ved neste runde.
 2. **`bilag_drilldialog.py`** — Fra eldre refaktor, ikke vårt arbeid.
+
+**Tk-koblede dialoger fortsatt på toppnivå (kandidater for senere
+`src/shared/dialogs/`):**
+
+- `client_picker_dialog.py` — klient-velger
+- `client_store_enrich_ui.py` — Visena-berikelse-dialog
+
+## Neste mulige piloter
+
+| Pilot | Pakke | Filer | Risiko |
+|---|---|---|---|
+| 24 | `src/shared/saft/` | 4 (saft_importer, saft_reader, saft_tax_table, saft_trial_balance) | Lav |
+| 25 | `src/shared/workpapers/` | 9 (workpaper_*) | Middels — mange importerere |
+| 26 | `src/shared/ui/` | 9 (vaak_*, ui_*) | Middels — brukes av alle faner |
+| 27 | `src/shared/classification/` | ~10 (account_*, konto_klassifisering, classification_*) | Middels |
+| 28 | `src/shared/actions/` | 7 (action_*) | Lav |
+| 29 | `src/audit_actions/document_control/` | ~21 (controller*, document_control_*) | Høy — 21 filer, kompleks |
+
+**Hold-unna (andres område):**
+- A07/admin (~17 filer)
+- Analyse (~46 filer — `page_analyse*.py` + `analyse_*.py`)
+
+**Senere "annet"** (~70 filer): brreg fallbacks, build_exe, column_*,
+convert_*, diverse helpers — vurderes case-by-case.
 
 ## Erfaringer og prinsipper etablert
 
@@ -98,11 +165,3 @@ andre utvikleres pågående arbeid (typisk A07 i denne perioden). Bruk
 **alltid** spesifikke filnavn ved staging når andre utviklere har skitne
 working dir-modifikasjoner.
 
-## Neste store kandidater (ikke gjort)
-
-- **Analyse-fanen** — 28+ filer, ~12 000 linjer. Brukerens eget
-  arbeidsområde, holdes utenfor refaktor inntil avtalt.
-- **Mva, Reskontro, Dataset, Skatt, Scoping, Utvalg, Revisjonshandlinger**
-  — én-fane-grupper med diverse hjelpefiler.
-- **Diverse utility i rot** — formatting, preferences, session, theme-moduler
-  (kandidater for `src/shared/`).
