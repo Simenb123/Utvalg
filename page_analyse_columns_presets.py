@@ -152,12 +152,15 @@ def build_tx_column_specs(
 
     pinned_set = set(pinned_cols)
     optional_set = set(optional_cols)
+    # Heading-overrides for konsistens med pivot-siden (RL-mode bruker
+    # "Nr" som heading for regnr-kolonnen — samme bør gjelde i TX-treet).
+    _HEADING_OVERRIDES = {"Regnr": "Nr"}
     specs = []
     for col in tx_cols_default:
         specs.append(
             ColumnSpec(
                 id=col,
-                heading=col,
+                heading=_HEADING_OVERRIDES.get(col, col),
                 width=analyse_treewidths.default_column_width(col),
                 minwidth=analyse_treewidths.column_minwidth(col),
                 anchor=analyse_treewidths.column_anchor(col),

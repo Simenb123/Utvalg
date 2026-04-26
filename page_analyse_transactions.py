@@ -122,7 +122,19 @@ def refresh_transactions_view(*, page: Any) -> None:
             ),
         )
 
+    # Hent tx_cols fra ManagedTreeview hvis tilgjengelig — den er
+    # autoritativ for hvilke kolonner brukeren har valgt synlige
+    # (inkludert opt-in via høyreklikk-velgeren). page.TX_COLS er
+    # legacy fallback og oppdateres ikke av høyreklikk-toggle.
     tx_cols = list(getattr(page, "TX_COLS", analyse_viewdata.DEFAULT_TX_COLS))
+    managed = getattr(page, "_tx_managed", None)
+    if managed is not None:
+        try:
+            visible = list(managed.column_manager.visible_cols)
+            if visible:
+                tx_cols = visible
+        except Exception:
+            pass
 
     # Bygg visnings-DF med kanoniske kolonner + ryddige strenger
     df_show_view = analyse_viewdata.build_transactions_view_df(df_show, tx_cols=tx_cols)
