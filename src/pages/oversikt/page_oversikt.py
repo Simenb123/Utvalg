@@ -276,12 +276,12 @@ class OversiktPage(ttk.Frame):
 
         # Treeview — kolonner og bredder via ColumnSpec, sortering/kolonnemeny/persist via ManagedTreeview
         column_specs = [
-            ColumnSpec(id="klient",    heading="Klient",    width=280, minwidth=120, stretch=True),
+            ColumnSpec(id="klient",    heading="Klient",    width=320, minwidth=120),
             ColumnSpec(id="orgnr",     heading="Org.nr",    width=100, anchor="w"),
             ColumnSpec(id="knr",       heading="Knr",       width=80,  anchor="w"),
             ColumnSpec(id="ansvarlig", heading="Ansvarlig", width=90,  anchor="w"),
-            ColumnSpec(id="manager",   heading="Manager",   width=160, anchor="w"),
-            ColumnSpec(id="team",      heading="Team",      width=220, anchor="w"),
+            ColumnSpec(id="manager",   heading="Manager",   width=180, anchor="w"),
+            ColumnSpec(id="team",      heading="Team",      width=220, anchor="w", stretch=True),
         ]
         cols = [spec.id for spec in column_specs]
 
