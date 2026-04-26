@@ -122,17 +122,18 @@ def refresh_transactions_view(*, page: Any) -> None:
             ),
         )
 
-    # Hent tx_cols fra ManagedTreeview hvis tilgjengelig — den er
-    # autoritativ for hvilke kolonner brukeren har valgt synlige
-    # (inkludert opt-in via høyreklikk-velgeren). page.TX_COLS er
-    # legacy fallback og oppdateres ikke av høyreklikk-toggle.
+    # Bruk ManagedTreeview's _all_cols hvis tilgjengelig. tx_cols MÅ
+    # matche tree["columns"]-rekkefølgen siden tree.insert(values=...) er
+    # posisjonell mot tree["columns"], ikke displaycolumns. Hvis vi sender
+    # bare visible_cols (i brukerens rekkefølge), havner verdier på feil
+    # kolonne. Hidden cols beriket men ikke vist (Tk bruker displaycolumns).
     tx_cols = list(getattr(page, "TX_COLS", analyse_viewdata.DEFAULT_TX_COLS))
     managed = getattr(page, "_tx_managed", None)
     if managed is not None:
         try:
-            visible = list(managed.column_manager.visible_cols)
-            if visible:
-                tx_cols = visible
+            all_cols = list(managed.column_manager._all_cols)
+            if all_cols:
+                tx_cols = all_cols
         except Exception:
             pass
 
