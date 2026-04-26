@@ -541,6 +541,21 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
         tx_search_entry.grid(row=0, column=1, sticky="ew")
         page._tx_search_entry = tx_search_entry  # type: ignore[attr-defined]
 
+        # "Søk i: [Alle ▾]"-knapp rett til høyre for søkefeltet.
+        # Åpner popup med checkbokser for å begrense søk til spesifikke
+        # kolonner. Tom valgliste = søk i alle vanlige kolonner.
+        try:
+            from page_analyse_ui_toolbar import _open_tx_search_scope_popup
+            btn_tx_scope = ttk.Button(
+                tx_search_row,
+                text="Søk i: Alle ▾",
+                command=lambda: _open_tx_search_scope_popup(page=page, btn=btn_tx_scope),
+            )
+            btn_tx_scope.grid(row=0, column=2, sticky="e", padx=(8, 0))
+            page._btn_tx_search_scope = btn_tx_scope  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
     tx_outer.rowconfigure(2, weight=1)
     tx_outer.columnconfigure(0, weight=1)
     # Matchende minsize på header- og søkerad slik at venstre pivot og

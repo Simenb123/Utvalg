@@ -304,21 +304,8 @@ def build_toolbar(
     row1.pack(fill="x")
 
     ttk.Label(row1, text="Søk:").grid(row=0, column=0, sticky="w")
-    # Pakker Entry + scope-knapp sammen så de fremstår som ett kontroll-element.
-    search_box = ttk.Frame(row1)
-    search_box.grid(row=0, column=1, sticky="w", padx=(4, 12))
-    ent_search = ttk.Entry(search_box, width=28, textvariable=var_search)
-    ent_search.pack(side="left")
-
-    # "Søk i: [Alle ▾]" — knapp som åpner popup for å begrense søket til
-    # spesifikke kolonner. Tom liste = søk i alle default-kolonner.
-    btn_search_scope = ttk.Button(
-        search_box,
-        text="Søk i: Alle ▾",
-        command=lambda: _open_tx_search_scope_popup(page=page, btn=btn_search_scope),
-    )
-    btn_search_scope.pack(side="left", padx=(4, 0))
-    page._btn_tx_search_scope = btn_search_scope
+    ent_search = ttk.Entry(row1, width=28, textvariable=var_search)
+    ent_search.grid(row=0, column=1, sticky="w", padx=(4, 12))
 
     ttk.Label(row1, text="Retning:").grid(row=0, column=2, sticky="w")
     cmb_dir = ttk.Combobox(
