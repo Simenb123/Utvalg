@@ -13,6 +13,7 @@
 - [`architecture/src_struktur_og_vokabular.md`](architecture/src_struktur_og_vokabular.md) - organisering av kodebasen rundt `src/pages/`, `src/audit_actions/`, `src/shared/` og `src/monitoring/`. Frontend/backend-mønsteret + kolonne-vokabular.
 - [`architecture/src_migrasjon_pilot_logg.md`](architecture/src_migrasjon_pilot_logg.md) - pilot-for-pilot logg over fane-flyttingen til `src/`. Erfaringer og prinsipper.
 - [`architecture/dataset_klientoversikt_plan.md`](architecture/dataset_klientoversikt_plan.md) - status quo + ønsket retning for Dataset-fanen → Klientoversikt + Datasett-popup. Inkluderer Visena-import-flyt, regnskapssystem-håndtering og fasedelt implementering.
+- [`architecture/analyse_kolonnevisning_plan.md`](architecture/analyse_kolonnevisning_plan.md) - Analyse-fanen kolonnehåndtering: BRREG vises som default, kolonnebredder hardkodet, kolonnemeny ikke `ManagedTreeview`. Konkrete problemer + foreslått rekkefølge for fiks.
 
 ---
 
