@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 
     _HAS_CLIENT_STORE = True
 except Exception:

@@ -7,7 +7,7 @@ from queue import Empty, Queue
 from tkinter import messagebox, ttk
 from typing import Optional, Tuple
 
-import client_store_import
+import src.shared.client_store.importer as client_store_import
 
 
 def _show_import_preview(parent: tk.Widget, file_path: Path, plan: client_store_import.ImportPlan) -> Tuple[bool, bool]:

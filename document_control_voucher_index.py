@@ -48,7 +48,7 @@ from document_engine.voucher_zip import (
 )
 
 try:
-    import client_store as _cs
+    import src.shared.client_store.store as _cs
     _HAS_CLIENT_STORE = True
 except Exception:
     _cs = None  # type: ignore[assignment]

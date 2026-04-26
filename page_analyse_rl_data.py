@@ -131,7 +131,7 @@ def load_sb_for_session() -> Optional[pd.DataFrame]:
         return None
 
     try:
-        import client_store
+        import src.shared.client_store.store as client_store
         version = client_store.get_active_version(client, year=str(year), dtype="sb")
         if version is None:
             log.debug("Ingen aktiv SB-versjon for %s/%s", client, year)
@@ -274,7 +274,7 @@ def _try_repair_empty_sb(
         source = Path(source_path_str)
         # source_path peker på den midlertidige xlsx-filen, men vi trenger SAF-T-filen.
         # Sjekk om det finnes en aktiv HB-versjon med SAF-T-kilde i metadata.
-        import client_store
+        import src.shared.client_store.store as client_store
         hb_version = client_store.get_active_version(client, year=year, dtype="hb")
         saft_source = None
         if hb_version and hb_version.meta:

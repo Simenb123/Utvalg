@@ -16,7 +16,7 @@ from .pane_store_section import ClientStoreSection, DEFAULT_YEAR
 
 
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 
     _HAS_CLIENT_STORE = True
 except Exception:

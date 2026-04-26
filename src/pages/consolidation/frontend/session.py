@@ -161,7 +161,7 @@ def resolve_active_client_tb(
 
     if year:
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             from trial_balance_reader import read_trial_balance
 
             versions = client_store.list_versions(client, year=year, dtype="sb")

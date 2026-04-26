@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Mapping
 
-import client_store
+import src.shared.client_store.store as client_store
 
 
 def _handlinger_dir(client: str, year: str) -> Path:

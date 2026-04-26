@@ -295,7 +295,7 @@ def chart_fit_view(page) -> None:
 def chart_positions_path(page) -> Path | None:
     if not page._client or not page._year:
         return None
-    import client_store
+    import src.shared.client_store.store as client_store
     d = client_store.years_dir(page._client, year=page._year) / "aksjonaerregister"
     d.mkdir(parents=True, exist_ok=True)
     return d / "chart_positions.json"

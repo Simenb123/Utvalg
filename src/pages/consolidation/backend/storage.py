@@ -17,7 +17,7 @@ from typing import Optional
 
 import pandas as pd
 
-import client_store
+import src.shared.client_store.store as client_store
 from .models import (
     ConsolidationProject,
     project_from_dict,

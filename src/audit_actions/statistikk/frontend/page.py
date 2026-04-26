@@ -1436,7 +1436,7 @@ link.on("mousemove", function(event, d) {{
         default_name = f"Statistikk_{self._current_regnr}_{name_safe}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         init_dir = str(Path.home())
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             if client and year:
                 init_dir = str(client_store.exports_dir(client, year=year))
         except Exception:

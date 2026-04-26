@@ -30,7 +30,7 @@ def load_previous_year_sb(client: str, year: str | int) -> Optional[pd.DataFrame
         return None
 
     try:
-        import client_store
+        import src.shared.client_store.store as client_store
         version = client_store.get_active_version(client, year=prev_year, dtype="sb")
         if version is None:
             log.debug("Ingen aktiv SB-versjon for %s/%s (fjor)", client, prev_year)

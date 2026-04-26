@@ -1511,7 +1511,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         """Returner exports_dir for nåværende klient/år, eller None hvis ukjent."""
         try:
             if client and year:
-                import client_store as _cs
+                import src.shared.client_store.store as _cs
                 return str(_cs.exports_dir(client, year=year))
         except Exception:
             pass

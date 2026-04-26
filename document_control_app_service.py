@@ -22,7 +22,7 @@ from document_control_store import (
 )
 
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 
     _HAS_CLIENT_STORE = True
 except Exception:

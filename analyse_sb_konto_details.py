@@ -243,7 +243,7 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
         """Eksporter revisjonsunderlag: mappe med PDF + primær kildefil."""
         try:
             import account_workpaper_pdf as _awp
-            import client_store as _cs
+            import src.shared.client_store.store as _cs
         except Exception as exc:
             messagebox.showerror(
                 "Eksport",

@@ -36,7 +36,7 @@ def _load_active_client_trial_balance(
         return None
 
     try:
-        import client_store
+        import src.shared.client_store.store as client_store
 
         version = client_store.get_active_version(chosen_client, year=year, dtype="sb")
     except Exception as exc:
@@ -144,7 +144,7 @@ def import_company_from_client_list(
         return
 
     try:
-        import client_store
+        import src.shared.client_store.store as client_store
 
         clients = client_store.list_clients()
     except Exception as exc:
@@ -162,7 +162,7 @@ def import_company_from_client_list(
         return
 
     try:
-        from client_meta_index import get_index
+        from src.shared.client_store.meta_index import get_index
 
         client_meta = get_index()
     except Exception:

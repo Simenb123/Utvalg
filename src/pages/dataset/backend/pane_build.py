@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pandas as pd
 
-import client_store
+import src.shared.client_store.store as client_store
 import saft_reader
 from .build_fast import build_from_file
 from models import Columns
@@ -113,7 +113,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
 
     if req.store_client and req.store_year:
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             from . import cache_sqlite as dataset_cache_sqlite
 
             # For SAF-T-filer: inkluder saft_reader-versjon i signaturen
@@ -272,7 +272,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
     # Etter bygg: lagre sqlite-cache hvis vi har versjon-id
     if req.store_client and req.store_year and stored_version_id:
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             from . import cache_sqlite as dataset_cache_sqlite
 
             if not cache_signature:

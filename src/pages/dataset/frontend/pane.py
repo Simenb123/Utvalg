@@ -589,7 +589,7 @@ class DatasetPane(ttk.Frame):
         if not client or not year:
             return
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             existing = client_store.get_active_version(client, year=year, dtype="sb")
             if existing is None:
                 return
@@ -612,7 +612,7 @@ class DatasetPane(ttk.Frame):
         klient/år/path før jobben starter i GUI-tråden.
         """
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             from saft_trial_balance import make_trial_balance_xlsx_from_saft
 
             if not client or not year:
@@ -688,7 +688,7 @@ class DatasetPane(ttk.Frame):
             # Load the newly-created SB into session so Analyse gets fresh tb_df
             # and fjorårs-sammenligning er basert på nye tall.
             try:
-                import client_store
+                import src.shared.client_store.store as client_store
                 from trial_balance_reader import read_trial_balance
                 import session as _session
                 import bus

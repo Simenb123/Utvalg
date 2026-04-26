@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import app_paths
-import client_store
+import src.shared.client_store.store as client_store
 import preferences
 
 
@@ -1100,7 +1100,7 @@ def _get_client_orgnr_from_index(client: str) -> str:
     if not client_name:
         return ""
     try:
-        from client_meta_index import get_index
+        from src.shared.client_store.meta_index import get_index
 
         index = get_index() or {}
         meta = index.get(client_name)
@@ -1144,7 +1144,7 @@ def find_client_by_orgnr(orgnr: str) -> str:
     if not target:
         return ""
     try:
-        from client_meta_index import get_index
+        from src.shared.client_store.meta_index import get_index
 
         index = get_index() or {}
         for display_name, meta in index.items():

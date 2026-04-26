@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Iterable
 
 try:  # frivillig — utenom testmiljø har vi client_store
-    import client_store
+    import src.shared.client_store.store as client_store
 except Exception:  # pragma: no cover
     client_store = None  # type: ignore
 
