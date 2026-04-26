@@ -63,7 +63,7 @@ def main() -> None:
         "src.pages.materiality.frontend.page",
         "page_scoping",
         "page_mva",
-        "page_skatt",
+        "src.pages.skatt",
         "src.pages.a07.page_a07",
         "page_ar",
         "page_consolidation",

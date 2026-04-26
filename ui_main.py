@@ -41,7 +41,7 @@ from src.pages.ar.frontend.page import ARPage
 from src.pages.regnskap.frontend.page import RegnskapPage
 from src.pages.materiality.frontend.page import MaterialityPage
 from page_mva import MvaPage
-from page_skatt import SkattPage
+from src.pages.skatt import SkattPage
 from page_reskontro import ReskontroPage
 
 # Fagchat-fanen er midlertidig deaktivert — utviklingen er parkert.
