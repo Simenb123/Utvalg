@@ -210,47 +210,35 @@ class RevisjonshandlingerPage(ttk.Frame):
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
 
-        cols = ("opprinnelse", "regnr", "regnskapslinje", "belop", "scope", "kilde", "omraade", "type",
-                "handling", "timing", "eier", "ansvarlig", "tilordnet", "status", "frist")
-        self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings", selectmode="extended")
-
-        self._heading_labels = {
-            "opprinnelse": "Opprinnelse",
-            "regnr": "Regnr",
-            "regnskapslinje": "Regnskapslinje",
-            "belop": "Beløp",
-            "scope": "Scope",
-            "kilde": "Kilde",
-            "omraade": "Område",
-            "type": "Type",
-            "handling": "Handling",
-            "timing": "Timing",
-            "eier": "Eier (CRM)",
-            "ansvarlig": "Ansvarlig",
-            "tilordnet": "Tilordnet",
-            "status": "Status",
-            "frist": "Frist",
-        }
-        for _col, _label in self._heading_labels.items():
-            self._tree.heading(_col, text=_label,
-                               command=lambda c=_col: self._on_heading_click(c))
-        self._sort_state: tuple[str, bool] | None = None
-
-        self._tree.column("opprinnelse", width=80, minwidth=60, anchor="center")
-        self._tree.column("regnr", width=50, minwidth=40)
-        self._tree.column("regnskapslinje", width=180, minwidth=100)
-        self._tree.column("belop", width=110, minwidth=80, anchor="e")
-        self._tree.column("scope", width=55, minwidth=40, anchor="center")
-        self._tree.column("kilde", width=90, minwidth=70, anchor="center")
-        self._tree.column("omraade", width=150, minwidth=80)
-        self._tree.column("type", width=90, minwidth=60)
-        self._tree.column("handling", width=300, minwidth=150)
-        self._tree.column("timing", width=80, minwidth=50)
-        self._tree.column("eier", width=130, minwidth=80)
-        self._tree.column("ansvarlig", width=80, minwidth=60, anchor="center")
-        self._tree.column("tilordnet", width=80, minwidth=60, anchor="center")
-        self._tree.column("status", width=100, minwidth=60)
-        self._tree.column("frist", width=90, minwidth=70)
+        # Standard tabell-oppsett via ManagedTreeview (sortering, kolonne-
+        # synlighet/rekkefølge/bredde, høyreklikk-meny på header — alt
+        # persisteres mellom økter). Se doc/TREEVIEW_PLAYBOOK.md.
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        column_specs = [
+            ColumnSpec("opprinnelse",    heading="Opprinnelse",    width=80,  minwidth=60,  anchor="center"),
+            ColumnSpec("regnr",          heading="Regnr",          width=50,  minwidth=40),
+            ColumnSpec("regnskapslinje", heading="Regnskapslinje", width=180, minwidth=100),
+            ColumnSpec("belop",          heading="Beløp",          width=110, minwidth=80,  anchor="e"),
+            ColumnSpec("scope",          heading="Scope",          width=55,  minwidth=40,  anchor="center"),
+            ColumnSpec("kilde",          heading="Kilde",          width=90,  minwidth=70,  anchor="center"),
+            ColumnSpec("omraade",        heading="Område",         width=150, minwidth=80),
+            ColumnSpec("type",           heading="Type",           width=90,  minwidth=60),
+            ColumnSpec("handling",       heading="Handling",       width=300, minwidth=150, stretch=True),
+            ColumnSpec("timing",         heading="Timing",         width=80,  minwidth=50),
+            ColumnSpec("eier",           heading="Eier (CRM)",     width=130, minwidth=80),
+            ColumnSpec("ansvarlig",      heading="Ansvarlig",      width=80,  minwidth=60,  anchor="center"),
+            ColumnSpec("tilordnet",      heading="Tilordnet",      width=80,  minwidth=60,  anchor="center"),
+            ColumnSpec("status",         heading="Status",         width=100, minwidth=60),
+            ColumnSpec("frist",          heading="Frist",          width=90,  minwidth=70),
+        ]
+        col_ids = tuple(spec.id for spec in column_specs)
+        self._tree = ttk.Treeview(tree_frame, columns=col_ids, show="headings", selectmode="extended")
+        self._managed_tree = ManagedTreeview(
+            self._tree,
+            view_id="revisjonshandlinger",
+            column_specs=column_specs,
+            on_body_right_click=self._on_tree_right_click,
+        )
 
         self._tree.tag_configure("wp_confirmed", background="#E6F4EA")
         self._tree.tag_configure("wp_auto", background="#FFFFFF")
@@ -265,7 +253,6 @@ class RevisjonshandlingerPage(ttk.Frame):
 
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
         self._tree.bind("<Double-1>", self._on_double_click)
-        self._tree.bind("<Button-3>", self._on_tree_right_click)
 
         # ── Detail panel ──
         detail = ttk.LabelFrame(self, text="Detaljer", padding=6)
@@ -698,8 +685,8 @@ class RevisjonshandlingerPage(ttk.Frame):
                 f"{self._engagement.client_name} — viser {shown} av {total} handlinger{extra}"
             )
 
-        if self._sort_state is not None:
-            self._reorder_tree(*self._sort_state)
+        # ManagedTreeview re-applikerer sortering automatisk på header-
+        # klikk; den kalles etter at rader er populert via Treeview-events.
 
     def _render_crm_rows(self, type_filter, status_filter, area_filter, regnr_filter, search,
                          *, covered: set[str] | None = None) -> int:
@@ -925,8 +912,6 @@ class RevisjonshandlingerPage(ttk.Frame):
             added += 1
         return added
 
-    _NUMERIC_SORT_COLS = {"regnr", "belop"}
-
     @staticmethod
     def _local_action_id_from_iid(iid: str) -> str:
         """Pakk ut LocalAction.id fra iid på formen ``L:<id>`` eller
@@ -935,39 +920,6 @@ class RevisjonshandlingerPage(ttk.Frame):
         if not iid.startswith("L:"):
             return ""
         return iid[2:].split(":", 1)[0]
-
-    def _on_heading_click(self, col: str) -> None:
-        state = self._sort_state
-        descending = bool(state and state[0] == col and not state[1])
-        self._sort_state = (col, descending)
-        self._update_sort_arrows(col, descending)
-        self._reorder_tree(col, descending)
-
-    def _update_sort_arrows(self, sort_col: str, descending: bool) -> None:
-        arrow = " ↓" if descending else " ↑"
-        for col, label in self._heading_labels.items():
-            self._tree.heading(col, text=label + (arrow if col == sort_col else ""))
-
-    def _reorder_tree(self, col: str, descending: bool) -> None:
-        children = self._tree.get_children("")
-        regular = [iid for iid in children if not iid.startswith("RL:")]
-        gaps = [iid for iid in children if iid.startswith("RL:")]
-
-        empty_sentinel = float("-inf") if descending else float("inf")
-
-        def key(iid: str):
-            val = self._tree.set(iid, col)
-            if col in self._NUMERIC_SORT_COLS:
-                try:
-                    return float(str(val).replace(" ", "").replace(",", "."))
-                except (ValueError, AttributeError):
-                    return empty_sentinel
-            return (val or "").lower() if isinstance(val, str) else (val or "")
-
-        regular.sort(key=key, reverse=descending)
-        gaps.sort(key=key, reverse=descending)
-        for idx, iid in enumerate(regular + gaps):
-            self._tree.move(iid, "", idx)
 
     def _on_select(self, _event: tk.Event | None = None) -> None:
         sel = self._tree.selection()

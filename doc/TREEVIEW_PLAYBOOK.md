@@ -123,10 +123,13 @@ body.
 
 Ferdig migrert (bruker `ManagedTreeview` direkte):
 
-- [page_saldobalanse.py](../page_saldobalanse.py) — bruker
-  `build_column_specs(year)` fra [saldobalanse_payload.py](../saldobalanse_payload.py).
-- [page_konsolidering.py](../page_konsolidering.py) — konsoliderings-
-  tabellene (tidligere mønster, driver forventningene).
+- [src/pages/saldobalanse/frontend/page.py](../src/pages/saldobalanse/frontend/page.py) — bruker
+  `build_column_specs(year)` fra [src/pages/saldobalanse/backend/payload.py](../src/pages/saldobalanse/backend/payload.py).
+- [src/pages/consolidation/frontend/](../src/pages/consolidation/frontend/) — konsoliderings-
+  tabellene (tidligere mønster, driver forventningene). Inkluderer
+  [mapping_tab.py](../src/pages/consolidation/frontend/mapping_tab.py).
+- [page_revisjonshandlinger.py](../page_revisjonshandlinger.py) — Handlinger-
+  fanen (15 kolonner, view_id="revisjonshandlinger"). Migrert 2026-04-26.
 
 Bruker bare deler av stacken:
 
@@ -147,7 +150,6 @@ Disse har egne sort/kolonne-menyer som kan konsolideres senere:
 |-----|----------|--------------|-----------|
 | `page_analyse.py` | TX-tree + Pivot | Middels | Har egen `page_analyse_columns` med dynamiske kolonner — må flyttes til en `build_column_specs`-bygger. |
 | `reskontro_ui_build.py` | 5-6 tre-er | Høy | Flere paralelle visninger; behandles en om gangen. |
-| `page_revisjonshandlinger.py` | 1 tabell | Lav | Bør være en direkte migrering. |
 | `page_scoping.py` | 1-2 tabeller | Lav | Ingen spesiell dynamikk. |
 | `page_admin_brreg_mapping.py` | 1 tabell | Lav |  |
 | `rl_mapping_drift_dialog.py` | 1 tabell | Lav |  |
