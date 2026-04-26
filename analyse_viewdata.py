@@ -380,45 +380,35 @@ def build_transactions_view_df(
         else:
             out["MVA-kode"] = ""
 
-    # MVA-beløp
-    if "MVA-beløp" in tx_cols:
-        if "MVA-beløp" in df.columns:
-            out["MVA-beløp"] = pd.to_numeric(df["MVA-beløp"], errors="coerce")
-        elif "mva-beløp" in df.columns:
-            out["MVA-beløp"] = pd.to_numeric(df["mva-beløp"], errors="coerce")
-        else:
-            out["MVA-beløp"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+    def _first_matching_col(display_name: str) -> Optional[str]:
+        """Returner første kolonne fra alias-listen som finnes i df.
 
-    # MVA-prosent
-    if "MVA-prosent" in tx_cols:
-        if "MVA-prosent" in df.columns:
-            out["MVA-prosent"] = pd.to_numeric(df["MVA-prosent"], errors="coerce")
-        elif "mva-prosent" in df.columns:
-            out["MVA-prosent"] = pd.to_numeric(df["mva-prosent"], errors="coerce")
-        else:
-            out["MVA-prosent"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+        Bruker analyse_columns.candidate_source_columns slik at vi
+        respekterer hele alias-mappingen (f.eks. "MVA-belop" uten ø,
+        "mva_belop" med understrek osv.) — ikke bare de 1-2 hardkodede
+        navnene som tidligere lå i hver dedikert branch.
+        """
+        for alias in analyse_columns.candidate_source_columns(display_name):
+            if alias in df.columns:
+                return alias
+        return None
 
-    # Valuta
+    # MVA-beløp / MVA-prosent / Valutabeløp — numerisk via alias-lookup
+    for _num_col in ("MVA-beløp", "MVA-prosent", "Valutabeløp"):
+        if _num_col in tx_cols:
+            _src = _first_matching_col(_num_col)
+            if _src is not None:
+                out[_num_col] = pd.to_numeric(df[_src], errors="coerce")
+            else:
+                out[_num_col] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
+
+    # Valuta — tekst (upper-case) via alias-lookup
     if "Valuta" in tx_cols:
-        if "Valuta" in df.columns:
-            out["Valuta"] = _safe_str_series(df["Valuta"]).str.upper()
-        elif "valuta" in df.columns:
-            out["Valuta"] = _safe_str_series(df["valuta"]).str.upper()
+        _src = _first_matching_col("Valuta")
+        if _src is not None:
+            out["Valuta"] = _safe_str_series(df[_src]).str.upper()
         else:
             out["Valuta"] = ""
-
-    # Valutabeløp
-    if "Valutabeløp" in tx_cols:
-        if "Valutabeløp" in df.columns:
-            out["Valutabeløp"] = pd.to_numeric(df["Valutabeløp"], errors="coerce")
-        elif "valutabeløp" in df.columns:
-            out["Valutabeløp"] = pd.to_numeric(df["valutabeløp"], errors="coerce")
-        elif "Valutabelop" in df.columns:
-            out["Valutabeløp"] = pd.to_numeric(df["Valutabelop"], errors="coerce")
-        elif "valutabelop" in df.columns:
-            out["Valutabeløp"] = pd.to_numeric(df["valutabelop"], errors="coerce")
-        else:
-            out["Valutabeløp"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
 
     # Reskontro-fallback for valgfri kolonner: hvis brukeren har valgt
     # ``Kundenr``/``Kundenavn``/``Leverandørnr``/``Leverandørnavn`` som
