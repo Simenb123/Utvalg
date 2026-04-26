@@ -316,7 +316,7 @@ def save_klient_data(page: Any) -> None:
     orgnr = data["orgnr"]
     if orgnr:
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             dn = page._client
             if dn:
                 client_store.update_client_meta(dn, {"org_number": orgnr})
@@ -354,7 +354,7 @@ def load_klient_data(page: Any) -> None:
     # Auto-populate orgnr fra meta.json hvis feltet er tomt
     if not page._kl_orgnr_var.get().strip():
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             dn = page._client
             if dn:
                 meta = client_store.read_client_meta(dn)

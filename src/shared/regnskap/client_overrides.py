@@ -1208,7 +1208,7 @@ def account_attachment_dir(
 
     Struktur: ``clients/<klient>/years/<år>/attachments/regnskapslinjer/<regnr>_<slug>/konto_<konto>/``
     """
-    import client_store as _cs
+    import src.shared.client_store.store as _cs
     base = _cs.years_dir(str(client), year=str(year))
     slug = _slugify_regnskapslinje(regnskapslinje)
     path = base / "attachments" / "regnskapslinjer" / f"{int(regnr)}_{slug}" / f"konto_{str(konto).strip()}"

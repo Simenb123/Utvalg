@@ -391,7 +391,7 @@ def test_refresh_sb_view_shows_ok_and_vedlegg(monkeypatch, tmp_path):
 
 def _patch_years_dir(monkeypatch, tmp_path):
     """Erstatt client_store.years_dir slik at Utvalg-lager peker på tmp."""
-    import client_store as _cs
+    import src.shared.client_store.store as _cs
 
     def _fake_years_dir(display_name, *, year):
         p = tmp_path / "clients" / str(display_name) / "years" / str(year)

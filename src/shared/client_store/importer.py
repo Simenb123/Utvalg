@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
-import client_store
+from . import store as client_store
 
 _PROGRESS_CB = Callable[[int, int, str], None]
 

@@ -55,7 +55,7 @@ def open_client_picker(
     if show_mine_filter:
         try:
             import team_config
-            from client_store_enrich import is_my_client
+            from src.shared.client_store.enrich import is_my_client
             user = team_config.current_user()
             if user:
                 my_clients_set = set()
@@ -214,7 +214,7 @@ def open_client_picker(
             return
 
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             deleted_to = client_store.delete_client(sel)
         except Exception as e:
             messagebox.showerror("Slett klient", f"Kunne ikke slette '{sel}'.\n\n{e}", parent=win)

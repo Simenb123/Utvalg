@@ -140,7 +140,7 @@ class DocumentsPage(ttk.Frame):
     def _update_path(self) -> None:
         if self._client and self._year:
             try:
-                import client_store
+                import src.shared.client_store.store as client_store
                 self._exports_path = client_store.exports_dir(self._client, year=self._year)
                 self._path_var.set(str(self._exports_path))
             except Exception as exc:

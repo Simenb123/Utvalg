@@ -27,7 +27,7 @@ import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import client_store
+import src.shared.client_store.store as client_store
 
 _log = logging.getLogger(__name__)
 

@@ -41,7 +41,7 @@ def _make_page(project):
 
 
 def test_import_company_from_client_name_returns_company(monkeypatch, tmp_path) -> None:
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(
@@ -130,7 +130,7 @@ def test_create_or_update_associate_case_from_ar_relation_upserts_case(monkeypat
 
 def test_batch_import_daughters_multiple(monkeypatch, tmp_path) -> None:
     """Batch-import 3 companies with active SB — all should succeed."""
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(
@@ -162,7 +162,7 @@ def test_batch_import_daughters_multiple(monkeypatch, tmp_path) -> None:
 
 def test_batch_import_skips_missing_sb(monkeypatch, tmp_path) -> None:
     """Batch-import with a mix of importable and non-importable rows."""
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(

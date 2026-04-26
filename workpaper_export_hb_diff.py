@@ -33,7 +33,7 @@ def export_hb_version_diff(page) -> None:
     if filedialog is None:
         return
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     client = getattr(session, "client", None) or ""
     year = str(getattr(session, "year", None) or "")
@@ -241,7 +241,7 @@ def pick_hb_version(page, versions, active_id) -> Optional[str]:
 
 def load_hb_version_df(page, client: str, year: str, version_id: str) -> Optional[pd.DataFrame]:
     """Last en HB-versjon som DataFrame."""
-    import client_store
+    import src.shared.client_store.store as client_store
 
     v = client_store.get_version(client, year=year, dtype="hb", version_id=version_id)
     if v is None:

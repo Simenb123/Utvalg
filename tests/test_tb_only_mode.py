@@ -336,7 +336,7 @@ class TestConsolidationSessionTb:
     def test_on_use_session_tb_imports_company(self, monkeypatch, tmp_path):
         """_on_use_session_tb should create a CompanyTB with source_type='session'."""
         import session as _session
-        import client_store
+        import src.shared.client_store.store as client_store
         from src.pages.consolidation.frontend.page import ConsolidationPage
         from src.pages.consolidation.backend.models import ConsolidationProject
         from src.pages.consolidation.backend import storage
@@ -530,7 +530,7 @@ class TestNumpyBoolSerialization:
     def test_save_project_with_numpy_bool(self, monkeypatch, tmp_path):
         """Project with numpy.bool_ in has_ib should save without error."""
         import numpy as np
-        import client_store
+        import src.shared.client_store.store as client_store
         from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
         from src.pages.consolidation.backend import storage
 

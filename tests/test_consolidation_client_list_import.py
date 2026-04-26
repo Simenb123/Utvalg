@@ -38,7 +38,7 @@ def _make_page(project):
 
 
 def test_import_company_from_client_list_creates_company(monkeypatch, tmp_path) -> None:
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.consolidation.backend import storage
     from src.pages.consolidation.backend.models import ConsolidationProject
 
@@ -81,7 +81,7 @@ def test_import_company_from_client_list_creates_company(monkeypatch, tmp_path) 
 
 
 def test_import_company_from_client_list_updates_existing_company_and_preserves_mapping(monkeypatch, tmp_path) -> None:
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.consolidation.backend import storage
     from src.pages.consolidation.backend.models import CompanyTB, ConsolidationProject
 
@@ -127,7 +127,7 @@ def test_import_company_from_client_list_updates_existing_company_and_preserves_
 
 
 def test_import_company_from_client_list_shows_info_when_no_active_sb(monkeypatch) -> None:
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.consolidation.backend.models import ConsolidationProject
 
     monkeypatch.setattr(client_store, "list_clients", lambda: ["Air Cargo Logistics AS"])

@@ -31,7 +31,7 @@ def _write_registry_csv_updated(path) -> None:
 
 def _configure(monkeypatch, tmp_path) -> None:
     import src.pages.ar.backend.store as ar_store
-    import client_meta_index
+    import src.shared.client_store.meta_index as client_meta_index
 
     client_meta = {
         "Air Management AS": {"org_number": "927612011"},

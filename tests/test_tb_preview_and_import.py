@@ -222,7 +222,7 @@ class TestPreviewCancel:
 
     def test_import_with_none_result_does_nothing(self, monkeypatch, tmp_path):
         """_on_import_company with cancelled preview should not create company."""
-        import client_store
+        import src.shared.client_store.store as client_store
         from src.pages.consolidation.frontend.page import ConsolidationPage
 
         monkeypatch.setattr(
@@ -265,7 +265,7 @@ class TestPreviewCancel:
 class TestFinalizeImport:
     def test_finalize_creates_company_and_persists(self, monkeypatch, tmp_path):
         """_finalize_import should create CompanyTB, save, and update tree."""
-        import client_store
+        import src.shared.client_store.store as client_store
         from src.pages.consolidation.frontend.page import ConsolidationPage
         from src.pages.consolidation.backend import storage
 
@@ -320,7 +320,7 @@ class TestFinalizeImport:
 
     def test_finalize_shows_validation_warnings(self, monkeypatch, tmp_path):
         """_finalize_import should show warnings from validate_tb."""
-        import client_store
+        import src.shared.client_store.store as client_store
         from src.pages.consolidation.frontend.page import ConsolidationPage
 
         monkeypatch.setattr(

@@ -9,7 +9,7 @@ import pytest
 def test_create_version_accepts_period_params_and_stores_in_meta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 

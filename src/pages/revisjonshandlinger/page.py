@@ -1297,7 +1297,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         if not (self._client and self._year):
             return {}
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             exports = client_store.exports_dir(self._client, year=self._year)
         except Exception:
             return {}
@@ -1321,7 +1321,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         before: dict[str, float],
     ) -> None:
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             exports = client_store.exports_dir(self._client, year=self._year)  # type: ignore[arg-type]
         except Exception:
             return

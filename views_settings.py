@@ -10,7 +10,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import app_paths
-import client_store
+import src.shared.client_store.store as client_store
 import formatting  # for refresh_from_prefs()
 
 
@@ -417,14 +417,14 @@ def build_data_source_rows() -> list[DataSourceRow]:
         team_path = Path(__file__).resolve().parent / "config" / "team.json"
 
     try:
-        import client_meta_index
+        import src.shared.client_store.meta_index as client_meta_index
 
         client_meta_path = client_meta_index._index_path()  # type: ignore[attr-defined]
     except Exception:
         client_meta_path = data_dir / "client_meta_index.json"
 
     try:
-        import client_store as _client_store_mod
+        import src.shared.client_store.store as _client_store_mod
 
         clients_index_path = data_dir / _client_store_mod.CLIENTS_INDEX_FILE
         clients_stamp_path = data_dir / _client_store_mod.CLIENTS_INDEX_STAMP_NAME

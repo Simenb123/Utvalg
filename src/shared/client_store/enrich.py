@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
-import client_store
+from . import store as client_store
 
 # ---------------------------------------------------------------------------
 # Dataklasser
@@ -361,7 +361,7 @@ def apply_enrichment(
 
     # Oppdater lokal metadata-indeks
     try:
-        import client_meta_index
+        from . import meta_index as client_meta_index
         for m in matches:
             vr = m.visena_row
             client_meta_index.update_entry(m.display_name, {

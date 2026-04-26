@@ -60,7 +60,7 @@ def export_ib_ub_control(page) -> None:
     # Siste forsøk: last direkte fra client_store
     if sb_df is None or (isinstance(sb_df, pd.DataFrame) and sb_df.empty):
         try:
-            import client_store
+            import src.shared.client_store.store as client_store
             from trial_balance_reader import read_trial_balance
             _client = getattr(session, "client", None)
             _year = str(getattr(session, "year", None) or "")

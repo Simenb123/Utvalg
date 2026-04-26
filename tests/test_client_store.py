@@ -30,7 +30,7 @@ def test_client_store_create_list_set_active_and_delete(tmp_path: Path, monkeypa
     # Isoler testdata og unngå å skrive i repo-mappen
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 
@@ -89,7 +89,7 @@ def test_client_store_create_list_set_active_and_delete(tmp_path: Path, monkeypa
 def test_client_store_duplicate_content_raises_and_audits(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 
@@ -112,7 +112,7 @@ def test_client_store_duplicate_content_raises_and_audits(tmp_path: Path, monkey
 def test_set_dataset_cache_meta_updates_version_and_audits(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 

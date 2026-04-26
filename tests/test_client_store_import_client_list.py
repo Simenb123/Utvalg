@@ -10,8 +10,8 @@ def test_import_clients_from_csv_creates_clients(tmp_path: Path, monkeypatch: py
     # Isoler data-dir for testen
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
-    import client_store_import
+    import src.shared.client_store.store as client_store
+    import src.shared.client_store.importer as client_store_import
 
     csv_path = tmp_path / "clients.csv"
     csv_path.write_text(
@@ -31,7 +31,7 @@ def test_import_clients_from_csv_creates_clients(tmp_path: Path, monkeypatch: py
 def test_import_clients_raises_when_file_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store_import
+    import src.shared.client_store.importer as client_store_import
 
     with pytest.raises(Exception):
         client_store_import.import_clients_from_file(tmp_path / "missing.xlsx")
@@ -46,8 +46,8 @@ def test_import_clients_does_not_call_ensure_for_existing(tmp_path: Path, monkey
 
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
-    import client_store_import
+    import src.shared.client_store.store as client_store
+    import src.shared.client_store.importer as client_store_import
 
     # Sett opp en eksisterende klient
     client_store.ensure_client("Eksisterende AS")
@@ -71,7 +71,7 @@ def test_import_clients_can_be_cancelled_mid_run(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store_import
+    import src.shared.client_store.importer as client_store_import
 
     csv_path = tmp_path / "clients.csv"
     # 5 unike

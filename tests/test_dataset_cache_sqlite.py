@@ -59,7 +59,7 @@ def test_build_dataset_uses_cache_on_second_run(tmp_path: Path, monkeypatch):
     # La clients_root være default under data_dir/clients
     # (client_store.get_clients_root faller tilbake til dette)
 
-    import client_store
+    import src.shared.client_store.store as client_store
     from src.pages.dataset.backend.pane_build import BuildRequest, build_dataset
 
     # Lag en minimal hovedbok-fil
@@ -111,7 +111,7 @@ def test_build_dataset_uses_cache_on_second_run(tmp_path: Path, monkeypatch):
     def _boom(*args, **kwargs):
         raise AssertionError("build_from_file skal ikke kalles ved cache-hit")
 
-    monkeypatch.setattr("dataset_pane_build.build_from_file", _boom)
+    monkeypatch.setattr("src.pages.dataset.backend.pane_build.build_from_file", _boom)
 
     res2 = build_dataset(req)
     assert res2.loaded_from_cache is True

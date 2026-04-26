@@ -95,7 +95,7 @@ def _mock_config(monkeypatch):
 @pytest.fixture
 def _mock_storage(monkeypatch, tmp_path):
     """Redirect client_store.years_dir to tmp_path."""
-    import client_store
+    import src.shared.client_store.store as client_store
     monkeypatch.setattr(
         client_store, "years_dir",
         lambda client, year: tmp_path / client / "years" / year,

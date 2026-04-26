@@ -51,7 +51,7 @@ def rebuild_index(all_clients: list[str]) -> dict[str, dict]:
 
     Tregt over nettverk (~5-10s for 615 klienter) — kjøres i bakgrunn.
     """
-    import client_store
+    from . import store as client_store
 
     index: dict[str, dict] = {}
     for dn in all_clients:

@@ -814,7 +814,7 @@ _VERSIONS_NAMES = frozenset({
 
 def __getattr__(name: str):  # noqa: E302
     if name in _VERSIONS_NAMES:
-        import client_store_versions as _csv
+        from . import versions as _csv
         val = getattr(_csv, name)
         # Cache i modulens namespace slik at neste oppslag er direkte.
         globals()[name] = val

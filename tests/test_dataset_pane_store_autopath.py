@@ -22,7 +22,7 @@ def test_refresh_sets_file_path_to_active_version_when_current_empty(
 ) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 
@@ -70,7 +70,7 @@ def test_refresh_sets_file_path_to_active_version_when_current_empty(
 def test_refresh_does_not_override_existing_valid_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 
@@ -124,7 +124,7 @@ def test_refresh_resets_hb_var_when_year_changes(
     finnes i ny liste."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
 
-    import client_store
+    import src.shared.client_store.store as client_store
 
     importlib.reload(client_store)
 

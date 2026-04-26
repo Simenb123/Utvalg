@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-import client_store
+import src.shared.client_store.store as client_store
 
 
 SCHEMA_VERSION = 1

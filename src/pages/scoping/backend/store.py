@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import client_store
+import src.shared.client_store.store as client_store
 
 
 def _scoping_dir(client: str, year: str) -> Path:

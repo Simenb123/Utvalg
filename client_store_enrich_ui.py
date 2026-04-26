@@ -10,8 +10,8 @@ from queue import Empty, Queue
 from tkinter import filedialog, messagebox, ttk
 from typing import Optional
 
-import client_store
-import client_store_enrich as enrich
+import src.shared.client_store.store as client_store
+import src.shared.client_store.enrich as enrich
 
 
 # ---------------------------------------------------------------------------

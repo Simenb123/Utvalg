@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # sirkulær import — client_store re-eksporterer fra denne filen.
 # ---------------------------------------------------------------------------
 
-import client_store as _cs
+from . import store as _cs
 
 # ---------------------------------------------------------------------------
 # Cache for versjonsindekser per klient/år/type

@@ -5,7 +5,7 @@ from pathlib import Path
 
 def _setup(tmp_path, monkeypatch):
     import src.shared.regnskap.client_overrides as regnskap_client_overrides
-    import client_store
+    import src.shared.client_store.store as client_store
 
     monkeypatch.setattr(regnskap_client_overrides.app_paths, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(client_store.app_paths, "data_dir", lambda: tmp_path)
