@@ -14,7 +14,6 @@ import logging
 import time
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +49,13 @@ class OversiktPage(ttk.Frame):
                 pass
 
         # State
-        self._mine_only_var = tk.BooleanVar(value=False)
+        mine_only_default = False
+        if self._preferences:
+            try:
+                mine_only_default = bool(self._preferences.get_bool("oversikt.mine_only", False))
+            except Exception:
+                pass
+        self._mine_only_var = tk.BooleanVar(value=mine_only_default)
         self._search_var = tk.StringVar(value="")
         self._all_client_rows: list[tuple] = []  # (name, org, knr, ansvarlig, manager)
 
@@ -68,7 +73,8 @@ class OversiktPage(ttk.Frame):
         self._build_header()
         self._build_recent_cards()
         self._build_client_table()
-        self._build_deadlines_stub()
+        # Frister-stub er ikke aktivert — _build_deadlines_stub kalles når
+        # frister-funksjonen kommer (v2). Stubben tar bare plass uten innhold.
 
     def _build_header(self) -> None:
         hdr = ttk.Frame(self)
@@ -244,6 +250,8 @@ class OversiktPage(ttk.Frame):
             card.bind("<Leave>", lambda _e, c=card: c.configure(relief="solid"))
 
     def _build_client_table(self) -> None:
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+
         table_frame = ttk.Frame(self)
         table_frame.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 8))
         table_frame.columnconfigure(0, weight=1)
@@ -262,25 +270,24 @@ class OversiktPage(ttk.Frame):
         self._lbl_count = ttk.Label(toolbar, text="", style="Muted.TLabel")
         self._lbl_count.pack(side="right")
 
-        # Treeview
-        cols = ("Klient", "Org.nr", "Knr", "Ansvarlig", "Manager", "Team")
+        # Treeview — kolonner og bredder via ColumnSpec, sortering/kolonnemeny/persist via ManagedTreeview
+        column_specs = [
+            ColumnSpec(id="klient",    heading="Klient",    width=280, minwidth=120, stretch=True),
+            ColumnSpec(id="orgnr",     heading="Org.nr",    width=100, anchor="w"),
+            ColumnSpec(id="knr",       heading="Knr",       width=80,  anchor="w"),
+            ColumnSpec(id="ansvarlig", heading="Ansvarlig", width=90,  anchor="w"),
+            ColumnSpec(id="manager",   heading="Manager",   width=160, anchor="w"),
+            ColumnSpec(id="team",      heading="Team",      width=220, anchor="w"),
+        ]
+        cols = [spec.id for spec in column_specs]
+
         self._tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="browse")
-
-        # Kolonnebredder
-        try:
-            import analyse_treewidths as tw
-            widths = {c: tw.default_column_width(c) for c in cols}
-        except Exception:
-            widths = {"Klient": 260, "Org.nr": 90, "Knr": 80, "Ansvarlig": 70, "Manager": 70, "Team": 180}
-
-        for col in cols:
-            w = widths.get(col, 120)
-            anchor = "w"
-            self._tree.heading(col, text=col, command=lambda c=col: self._sort_by_column(c))
-            self._tree.column(col, width=w, minwidth=40, anchor=anchor)
-
-        # Klient-kolonnen far mer plass
-        self._tree.column("Klient", width=280, minwidth=120)
+        self._managed = ManagedTreeview(
+            self._tree,
+            view_id="oversikt_klienter",
+            pref_prefix="ui",
+            column_specs=column_specs,
+        )
 
         self._tree.grid(row=1, column=0, sticky="nsew")
 
@@ -291,10 +298,6 @@ class OversiktPage(ttk.Frame):
 
         # Dobbeltklikk -> navigasjon
         self._tree.bind("<Double-1>", self._on_tree_double_click)
-
-        # Sort state
-        self._sort_col: Optional[str] = None
-        self._sort_reverse = False
 
         # Fyll tabell
         self._load_client_data()
@@ -375,27 +378,15 @@ class OversiktPage(ttk.Frame):
         self._lbl_count.configure(text=f"{count} klienter")
 
     # ------------------------------------------------------------------
-    # Sorting
-    # ------------------------------------------------------------------
-
-    def _sort_by_column(self, col: str) -> None:
-        if self._sort_col == col:
-            self._sort_reverse = not self._sort_reverse
-        else:
-            self._sort_col = col
-            self._sort_reverse = False
-
-        cols = ("Klient", "Org.nr", "Knr", "Ansvarlig", "Manager", "Team")
-        col_idx = cols.index(col) if col in cols else 0
-
-        self._all_client_rows.sort(key=lambda r: (r[col_idx] or "").lower(), reverse=self._sort_reverse)
-        self._populate_client_table()
-
-    # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
 
     def _on_filter_changed(self) -> None:
+        if self._preferences:
+            try:
+                self._preferences.set("oversikt.mine_only", bool(self._mine_only_var.get()))
+            except Exception:
+                pass
         self._populate_client_table()
 
     def _on_search(self) -> None:
