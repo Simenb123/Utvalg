@@ -309,6 +309,40 @@ class TestBindings:
 
 
 # ---------------------------------------------------------------------------
+# Dynamic column updates
+# ---------------------------------------------------------------------------
+
+class TestUpdateColumns:
+    def test_update_columns_refreshes_column_manager_metadata(self):
+        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+
+        tree = _make_tree(("a", "b", "c"))
+        with patch("preferences.get", return_value=None), \
+             patch("preferences.set"):
+            mt = ManagedTreeview(
+                tree,
+                view_id="dynamic",
+                column_specs=_make_specs(),
+                auto_bind=False,
+            )
+
+        mt.column_manager._visible = ["a", "c"]
+        mt.column_manager._order = ["c", "a", "b"]
+        new_specs = [
+            ColumnSpec(id="a", heading="A2", visible_by_default=True),
+            ColumnSpec(id="d", heading="D", visible_by_default=True),
+        ]
+
+        mt.update_columns(new_specs, default_visible=["a", "d"])
+
+        assert mt.column_manager._all_cols == ["a", "d"]
+        assert mt.column_manager._default_visible == ["a", "d"]
+        assert mt.column_manager._visible == ["a", "d"]
+        assert mt.column_manager._order == ["a", "d"]
+        tree.__setitem__.assert_any_call("columns", ["a", "d"])
+
+
+# ---------------------------------------------------------------------------
 # Drag-reorder (ghost + drop indicator)
 # ---------------------------------------------------------------------------
 

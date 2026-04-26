@@ -197,7 +197,7 @@ def _prepare_gl_frames(
         or gl_cols_l.get("kontonr")
     )
     if konto_col is None:
-        raise ValueError("GL dataframe mangler konto-kolonne (Konto/Account/AccountId).")
+        raise ValueError("Saldobalansegrunnlag mangler konto-kolonne (Konto/Account/AccountId).")
     navn_col = (
         gl_cols_l.get("navn")
         or gl_cols_l.get("name")

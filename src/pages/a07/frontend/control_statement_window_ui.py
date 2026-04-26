@@ -159,7 +159,7 @@ class A07PageControlStatementWindowMixin:
                         label = str(row.get("Kontrollgruppe") or row.get("GroupId") or group_id).strip()
                         accounts_var.set(
                             f"{label} | {len(accounts_df)} kontoer | "
-                            f"GL {_format_picker_amount(row.get('GL_Belop'))} | "
+                            f"SB {_format_picker_amount(row.get('GL_Belop'))} | "
                             f"A07 {_format_picker_amount(row.get('A07'))} | "
                             f"Diff {_format_picker_amount(row.get('Diff'))}"
                         )
@@ -360,7 +360,7 @@ class A07PageControlStatementWindowMixin:
         ttk.Label(accounts_top, textvariable=accounts_var, style="Muted.TLabel").pack(side="left", fill="x", expand=True)
         ttk.Button(
             accounts_top,
-            text="Vis i GL",
+            text="Vis i saldobalanse",
             command=self._focus_selected_control_statement_window_account_in_gl,
         ).pack(side="right")
         accounts_tree = self._build_tree_tab(lower, _CONTROL_SELECTED_ACCOUNT_COLUMNS)

@@ -3,6 +3,8 @@ from __future__ import annotations
 from tkinter import ttk
 from typing import Sequence
 
+from .managed_tree import a07_column_heading, a07_column_specs
+
 
 class A07PageTreeBuilderMixin:
     def _build_tree_tab(self, parent: ttk.Frame, columns: Sequence[tuple[str, str, int, str]]) -> ttk.Treeview:
@@ -29,7 +31,7 @@ class A07PageTreeBuilderMixin:
         for column_id, heading, width, anchor in columns:
             tree.heading(
                 column_id,
-                text=heading,
+                text=a07_column_heading(column_id, heading),
                 command=lambda col=column_id: self._sort_tree_by_column(tree, col),
             )
             tree.column(column_id, width=width, anchor=anchor)
@@ -40,6 +42,11 @@ class A07PageTreeBuilderMixin:
         columns: Sequence[tuple[str, str, int, str]],
     ) -> None:
         column_ids = [column_id for column_id, *_rest in columns]
+        manager_getter = getattr(self, "_managed_tree_for", None)
+        manager = manager_getter(tree) if callable(manager_getter) else None
+        if manager is not None:
+            manager.update_columns(a07_column_specs(columns), default_visible=column_ids)
+            return
         tree.configure(columns=column_ids, displaycolumns=column_ids)
         self._configure_sortable_tree_columns(tree, columns)
         for column_id, _heading, _width, _anchor in columns:

@@ -173,7 +173,7 @@ def build_global_auto_mapping_plan(
         elif account not in gl_by_account:
             action = "invalid"
             status = "Ugyldig"
-            reason = "Kontoen finnes ikke i aktiv GL."
+            reason = "Kontoen finnes ikke i aktiv saldobalanse."
         else:
             current_code = str(planned_mapping.get(account) or "").strip()
             resolved_group = resolve_a07_rf1022_group(code)

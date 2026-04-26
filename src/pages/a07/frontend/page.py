@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import app_paths
 import pandas as pd
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 except Exception:
     client_store = None
 import session

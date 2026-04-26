@@ -54,7 +54,12 @@ class A07PageSupportLayoutMixin:
         for button in (self.btn_control_best, self.btn_control_magic, self.btn_control_batch_suggestions):
             button.state(["disabled"])
 
-        self.tree_control_suggestions = self._build_tree_tab(self.tab_suggestions, _CONTROL_SUGGESTION_COLUMNS)
+        self.tree_control_suggestions = self._build_managed_tree_tab(
+            self.tab_suggestions,
+            _CONTROL_SUGGESTION_COLUMNS,
+            view_id="suggestions",
+            height=6,
+        )
         self.tree_control_suggestions.configure(height=6)
         self._register_selection_summary_tree(
             self.tree_control_suggestions,
@@ -159,8 +164,12 @@ class A07PageSupportLayoutMixin:
             },
         )
 
-        self.tree_unmapped = self._build_tree_tab(self.tab_unmapped, _UNMAPPED_COLUMNS)
-        self.tree_unmapped.configure(height=6)
+        self.tree_unmapped = self._build_managed_tree_tab(
+            self.tab_unmapped,
+            _UNMAPPED_COLUMNS,
+            view_id="unmapped",
+            height=6,
+        )
 
     def _build_support_notebook(self, support_host: ttk.Frame) -> None:
         """Compatibility wrapper for older callers.

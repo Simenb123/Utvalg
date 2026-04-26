@@ -104,7 +104,7 @@ class A07PageSupportGuidanceMixin:
                 a07_text = self._format_value(overview_row.get("A07"), "A07")
                 diff_text = self._format_value(overview_row.get("Diff"), "Diff")
                 if gl_text:
-                    badges.append(f"GL {gl_text}")
+                    badges.append(f"SB {gl_text}")
                 if a07_text:
                     badges.append(f"A07 {a07_text}")
                 if diff_text:

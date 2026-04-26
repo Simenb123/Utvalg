@@ -141,7 +141,7 @@ class A07PageMappingAssignMixin:
         account_list = list(clean_account_ids(accounts))
         if not account_list:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre først.",
+                "Velg en eller flere saldobalansekontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
@@ -196,7 +196,7 @@ class A07PageMappingAssignMixin:
         account_list = list(clean_account_ids(accounts))
         if not account_list:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre først.",
+                "Velg en eller flere saldobalansekontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
@@ -235,7 +235,7 @@ class A07PageMappingAssignMixin:
         account = str(accounts[0] if accounts else "").strip()
         if not account:
             self._notify_inline(
-                "Velg en GL-konto til venstre først.",
+                "Velg en saldobalansekonto til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return

@@ -160,7 +160,7 @@ def build_control_suggestion_summary(code: str | None, suggestions_df: pd.DataFr
     if a07_amount:
         amount_parts.append(f"A07 {a07_amount}")
     if gl_amount:
-        amount_parts.append(f"GL forslag {gl_amount}")
+        amount_parts.append(f"SB forslag {gl_amount}")
     amount_parts.append(f"Diff {diff}")
     status = build_suggestion_status_label(row) or "Vurder"
     return f"Beste forslag for {code_s} | {count} kandidat(er) | Nå valgt: {accounts} | {status} | {' | '.join(amount_parts)}"
@@ -194,7 +194,7 @@ def build_control_suggestion_effect_summary(
     if a07_amount:
         amount_parts.append(f"A07 {a07_amount}")
     if gl_amount:
-        amount_parts.append(f"GL forslag {gl_amount}")
+        amount_parts.append(f"SB forslag {gl_amount}")
     amount_parts.append(f"Diff {diff}")
     amount_text = " | ".join(amount_parts)
     status_text = build_suggestion_status_label(selected_row) or "Vurder"

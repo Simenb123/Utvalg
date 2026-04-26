@@ -84,7 +84,7 @@ def test_run_selected_control_gl_action_guides_user_without_selected_code() -> N
     page_a07.A07Page._run_selected_control_gl_action(DummyPage())
 
     assert focused == ["a07"]
-    assert statuses == ["Velg en A07-kode til høyre før du tildeler kontoer fra GL-listen."]
+    assert statuses == ["Velg en A07-kode til høyre før du tildeler kontoer fra saldobalanselisten."]
 
 def test_run_selected_control_gl_action_assigns_to_selected_rf1022_group() -> None:
     calls: list[tuple[str, tuple[str, ...], str]] = []
@@ -131,7 +131,7 @@ def test_assign_selected_control_mapping_guides_user_without_gl_selection() -> N
 
     page_a07.A07Page._assign_selected_control_mapping(DummyPage())
 
-    assert statuses == ["Velg en eller flere GL-kontoer til venstre først."]
+    assert statuses == ["Velg en eller flere saldobalansekontoer til venstre først."]
     assert focused == ["gl"]
 
 def test_assign_selected_control_mapping_guides_user_without_selected_code() -> None:
@@ -595,7 +595,7 @@ def test_control_account_context_menu_keeps_mapping_actions_available(monkeypatc
     menu = page_a07.A07Page._show_control_accounts_context_menu(dummy, SimpleNamespace())
 
     assert [label for kind, label, _payload in menu.items if kind == "command"] == [
-        "Vis i GL",
+        "Vis i saldobalanse",
         "Fjern mapping",
     ]
     cascades = [(label, payload) for kind, label, payload in menu.items if kind == "cascade"]
@@ -631,7 +631,7 @@ def test_control_statement_account_context_menu_keeps_focus_action_available(mon
 
     menu = page_a07.A07Page._show_control_statement_accounts_context_menu(dummy, SimpleNamespace())
 
-    assert [label for kind, label, _payload in menu.items if kind == "command"] == ["Vis i GL"]
+    assert [label for kind, label, _payload in menu.items if kind == "command"] == ["Vis i saldobalanse"]
 
 def test_control_suggestions_context_menu_exposes_core_actions(monkeypatch) -> None:
     class _Menu:
@@ -668,7 +668,7 @@ def test_control_suggestions_context_menu_exposes_core_actions(monkeypatch) -> N
 
     assert [label for kind, label, _state in menu.items if kind == "command"] == [
         "Bruk forslag",
-        "Vis foreslått konto i GL",
+        "Vis foreslått konto i saldobalanse",
         "Gå til A07-kode",
         "Avansert mapping...",
     ]

@@ -297,7 +297,7 @@ def build_control_panel_state(
     legacy_next_text = f"Neste: {next_action_text}" if next_action_text else ""
     match_parts = [
         ("A07", a07_amount_text),
-        ("GL", gl_amount_text),
+        ("SB", gl_amount_text),
         ("Diff", diff_amount_text),
     ]
     match_text = " | ".join(

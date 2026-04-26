@@ -41,7 +41,7 @@ class A07PageMappingControlActionsMixin:
         plan = A07PageMappingControlActionsMixin._selected_control_gl_action_plan(self)
         if not plan.accounts:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre først.",
+                "Velg en eller flere saldobalansekontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
@@ -107,7 +107,7 @@ class A07PageMappingControlActionsMixin:
         accounts = self._selected_control_gl_accounts()
         if not accounts:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre først.",
+                "Velg en eller flere saldobalansekontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return

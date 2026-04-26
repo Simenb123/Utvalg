@@ -235,7 +235,7 @@ def build_rf1022_statement_df(
             "AgaGrunnlag": 0.0,
             "A07Aga": a07_aga_totals.get(group_id),
             "AgaDiff": a07_aga_totals.get(group_id),
-            "Status": "Mangler GL",
+            "Status": "Mangler SB",
             "AntallKontoer": 0,
             "WorkFamily": work_family_for_rf1022_group(group_id),
             "_post_sort": post_no,
@@ -365,8 +365,8 @@ def build_rf1022_statement_summary(
 
     parts = [
         f"Poster {len(rf1022_df)}",
-        f"Opplysningspliktig: GL {_sum_col('SamledeYtelser')} / A07 {_sum_col('A07')} / diff {_sum_col('Diff')}",
-        f"AGA-pliktig: GL {_sum_col('AgaGrunnlag')} / A07 {_sum_col('A07Aga')} / diff {_sum_col('AgaDiff')}",
+        f"Opplysningspliktig: SB {_sum_col('SamledeYtelser')} / A07 {_sum_col('A07')} / diff {_sum_col('Diff')}",
+        f"AGA-pliktig: SB {_sum_col('AgaGrunnlag')} / A07 {_sum_col('A07Aga')} / diff {_sum_col('AgaDiff')}",
     ]
     totals = dict(tag_totals or {})
     if totals:

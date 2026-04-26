@@ -237,7 +237,9 @@ class A07PageControlContextMenuMixin:
             state="normal",
         )
         menu.add_command(
-            label="Vis foreslått konto i GL" if len(accounts) <= 1 else "Vis første foreslåtte konto i GL",
+            label="Vis foreslått konto i saldobalanse"
+            if len(accounts) <= 1
+            else "Vis første foreslåtte konto i saldobalanse",
             command=lambda account=(accounts[0] if accounts else ""): self._focus_mapping_account(account),
             state=("normal" if accounts else "disabled"),
         )
@@ -274,7 +276,7 @@ class A07PageControlContextMenuMixin:
         multi = account_count > 1
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(
-            label="Vis første i GL" if multi else "Vis i GL",
+            label="Vis første i saldobalanse" if multi else "Vis i saldobalanse",
             command=self._focus_selected_control_account_in_gl,
             state=("normal" if accounts else "disabled"),
         )
@@ -361,7 +363,7 @@ class A07PageControlContextMenuMixin:
 
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(
-            label="Vis i GL",
+            label="Vis i saldobalanse",
             command=self._focus_selected_control_statement_account_in_gl,
             state=("normal" if accounts else "disabled"),
         )

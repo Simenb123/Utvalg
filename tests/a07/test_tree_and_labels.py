@@ -169,6 +169,20 @@ def test_control_tree_tag_maps_work_statuses_to_visual_tags() -> None:
     assert page_a07.control_tree_tag("Uløst") == "control_manual"
     assert page_a07.control_tree_tag("Annet") == "control_default"
 
+
+def test_a07_visible_column_labels_use_global_saldobalanse_vocabulary() -> None:
+    def heading(columns, column_id: str) -> str:
+        return next(label for cid, label, *_rest in columns if cid == column_id)
+
+    assert heading(a07_constants._CONTROL_GL_COLUMNS, "Navn") == "Kontonavn"
+    assert heading(a07_constants._CONTROL_SELECTED_ACCOUNT_COLUMNS, "Navn") == "Kontonavn"
+    assert heading(a07_constants._CONTROL_COLUMNS, "GL_Belop") == "SB"
+    assert heading(a07_constants._CONTROL_RF1022_COLUMNS, "GL_Belop") == "SB"
+    assert heading(a07_constants._CONTROL_SUGGESTION_COLUMNS, "GL_Sum") == "SB forslag"
+    assert heading(a07_constants._SUGGESTION_COLUMNS, "GL_Sum") == "SB forslag"
+    assert heading(a07_constants._RF1022_OVERVIEW_COLUMNS, "SamledeYtelser") == "SB opplys."
+    assert heading(a07_constants._RF1022_OVERVIEW_COLUMNS, "AgaGrunnlag") == "SB AGA"
+
 def test_control_gl_tree_tag_marks_unmapped_and_mapped_rows() -> None:
     unmapped = pd.Series({"Kode": ""})
     mapped = pd.Series({"Kode": "fastloenn"})

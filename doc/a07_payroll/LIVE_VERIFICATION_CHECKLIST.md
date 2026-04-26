@@ -18,9 +18,11 @@ konkrete konto-/kodefeil for de blir gjort til regelendringer.
 | --- | --- | --- | --- |
 | Last A07 | A07-kilde lastes uten traceback |  |  |
 | Oppdater | Aktiv saldobalanse brukes |  |  |
-| RF-1022-visning | Postene 100/111/112 viser GL, A07 og diff |  |  |
+| RF-1022-visning | Postene 100/111/112 viser SB, A07 og diff |  |  |
 | A07-visning | A07-koder er hovedlisten og ferdige koder er gronne ved diff 0 |  |  |
-| Fire arbeidsflater | GL, A07-koder, Forslag og Koblinger vises samtidig uten nederste fanestoy |  |  |
+| Fire arbeidsflater | Saldobalansekontoer, A07-koder, Forslag og Koblinger vises samtidig uten nederste fanestoy |  |  |
+| Kolonnenavn | Kontolister bruker `Kontonavn`, og saldobalansebelop vises som `SB`/`SB forslag` |  |  |
+| Kolonnevalg | ManagedTreeview-flater har header-hoyreklikk for kolonnevalg uten aa bryte body-hoyreklikk |  |  |
 | AGA-plikt | AGA-kolonne/visning viser `Ja`, `Nei` eller ukjent fra kilde/regler |  |  |
 | Global auto | `Kjor automatisk matching` kobler bare trygge kandidater |  |  |
 | Auto ved oppdatering | Klare 100-prosent-treff kobles uten at hver A07-kode maa klikkes |  |  |
@@ -34,9 +36,9 @@ konkrete konto-/kodefeil for de blir gjort til regelendringer.
 | A07-grupper | Vanlige lonnsgrupper summeres uten duplikater eller heng i GUI |  |  |
 | Gruppe-popup | A07-grupper aapnes i popup og tar ikke fast plass i hovedflaten |  |  |
 | Mistenkelig kobling | Eksisterende darlige koblinger flagges tydelig |  |  |
-| Hoyreklikk GL | Tildel/fjern/avansert mapping virker |  |  |
-| Hoyreklikk GL laering | `Laer av konto` skriver til A07-regelbok og refreshes raskt |  |  |
-| Hoyreklikk Koblinger | Vis i GL/fjern/avansert mapping virker |  |  |
+| Hoyreklikk saldobalanse | Tildel/fjern/avansert mapping virker |  |  |
+| Hoyreklikk saldobalanse laering | `Laer av konto` skriver til A07-regelbok og refreshes raskt |  |  |
+| Hoyreklikk Koblinger | Vis i saldobalanse/fjern/avansert mapping virker |  |  |
 | Hoyreklikk nederste liste | Forslag/koblinger har meny etter refresh og tab-bytte |  |  |
 | Delete | Fjerner valgt mapping nar konto ikke er last |  |  |
 | Filter | `Alle`/`Kun mappede` og kontoseriefilter virker uten trege bakgrunnsjobber |  |  |

@@ -64,7 +64,7 @@ def test_build_rf1022_statement_df_uses_a07_expected_amounts_without_gl_rows() -
     assert out["GL_Belop"].tolist() == [0.0, 0.0, 0.0, 0.0, 0.0]
     assert out["A07"].tolist() == [1300.0, -75.0, 40.0, 500.0, 13.0]
     assert out["Diff"].tolist() == [1300.0, -75.0, 40.0, 500.0, 13.0]
-    assert out["Status"].tolist() == ["Mangler GL", "Mangler GL", "Mangler GL", "Mangler GL", "Mangler GL"]
+    assert out["Status"].tolist() == ["Mangler SB", "Mangler SB", "Mangler SB", "Mangler SB", "Mangler SB"]
     unresolved = out.loc[out["GroupId"] == "uavklart_rf1022"].iloc[0]
     assert unresolved["Post"] == ""
     assert unresolved["Kontrollgruppe"] == "A07 uten RF-1022-post"
@@ -230,7 +230,7 @@ def test_build_rf1022_summary_cards_exposes_main_quality_totals() -> None:
     cards = {card["key"]: card for card in a07_control_data.build_rf1022_summary_cards(rf1022_df)}
 
     assert cards["opplysning"]["value"] == "Diff 25,00"
-    assert cards["opplysning"]["detail"] == "GL 100,00 | A07 125,00"
+    assert cards["opplysning"]["detail"] == "SB 100,00 | A07 125,00"
     assert cards["aga"]["value"] == "Diff 0,00"
     assert cards["uavklart"]["value"] == "25,00"
     assert cards["uavklart"]["status"] == "warning"

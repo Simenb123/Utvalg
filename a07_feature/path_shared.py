@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 except Exception:
     client_store = None
 

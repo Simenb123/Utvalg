@@ -327,7 +327,20 @@ class ManagedTreeview:
     def update_columns(self, column_specs: Sequence[ColumnSpec | str], *, default_visible: Sequence[str] | None = None) -> None:
         self._specs = self._normalize_specs(column_specs)
         all_cols = [spec.id for spec in self._specs]
-        self.column_manager._default_visible = list(default_visible or [spec.id for spec in self._specs if spec.visible_by_default] or all_cols)
+        visible = list(default_visible or [spec.id for spec in self._specs if spec.visible_by_default] or all_cols)
+        self.column_manager._all_cols = list(all_cols)
+        self.column_manager._default_visible = visible
+        current_visible = [col for col in self.column_manager._visible if col in all_cols]
+        for col in visible:
+            if col in all_cols and col not in current_visible:
+                current_visible.append(col)
+        self.column_manager._visible = current_visible or list(visible)
+        order = [col for col in self.column_manager._order if col in all_cols]
+        for col in all_cols:
+            if col not in order:
+                order.append(col)
+        self.column_manager._order = order
+        self.column_manager._normalize_order()
         self._apply_specs()
         self.stabilize_layout()
 

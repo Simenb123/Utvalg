@@ -262,7 +262,7 @@ def control_gl_basis_column_for_account(
     *,
     requested_basis: object = "Endring",
 ) -> str:
-    """Return the GL column A07 should use for this account row."""
+    """Return the saldobalance basis column A07 should use for this account row."""
     return _shared_control_gl_basis_column_for_account(
         account_no,
         account_name,

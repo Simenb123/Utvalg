@@ -33,7 +33,7 @@ _CONTROL_COLUMNS = (
     ("A07Post", "A07-post", 320, "w"),
     ("AgaPliktig", "AGA", 70, "center"),
     ("A07_Belop", "A07", 120, "e"),
-    ("GL_Belop", "GL", 120, "e"),
+    ("GL_Belop", "SB", 120, "e"),
     ("Diff", "Diff", 120, "e"),
 )
 
@@ -44,14 +44,14 @@ _A07_MATCHED_TAG = "a07_matched"
 _CONTROL_RF1022_COLUMNS = (
     ("Post", "Post", 70, "w"),
     ("Kontrollgruppe", "Kontrollgruppe", 260, "w"),
-    ("GL_Belop", "GL", 120, "e"),
+    ("GL_Belop", "SB", 120, "e"),
     ("A07", "A07", 120, "e"),
     ("Diff", "Diff", 120, "e"),
 )
 
 _CONTROL_GL_COLUMNS = (
     ("Konto", "Konto", 80, "w"),
-    ("Navn", "Navn", 240, "w"),
+    ("Navn", "Kontonavn", 240, "w"),
     ("Kode", "A07-kode", 155, "w"),
     ("Rf1022GroupId", "RF-1022", 135, "w"),
     ("AliasStatus", "Alias", 85, "w"),
@@ -83,7 +83,7 @@ _CONTROL_GL_DATA_COLUMNS = (
 
 _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
     ("Konto", "Konto", 90, "w"),
-    ("Navn", "Navn", 260, "w"),
+    ("Navn", "Kontonavn", 260, "w"),
     ("AliasStatus", "Alias", 85, "w"),
     ("MappingAuditStatus", "Kontroll", 110, "w"),
     ("MappingAuditReason", "Hvorfor", 320, "w"),
@@ -95,7 +95,7 @@ _CONTROL_SELECTED_ACCOUNT_COLUMNS = (
 _CONTROL_SUGGESTION_COLUMNS = (
     ("ForslagVisning", "Kontoer", 420, "w"),
     ("A07_Belop", "A07", 110, "e"),
-    ("GL_Sum", "GL forslag", 120, "e"),
+    ("GL_Sum", "SB forslag", 120, "e"),
     ("Diff", "Diff", 110, "e"),
     ("Forslagsstatus", "Status", 120, "w"),
     ("HvorforKort", "Hvorfor", 240, "w"),
@@ -103,7 +103,7 @@ _CONTROL_SUGGESTION_COLUMNS = (
 
 _RF1022_CANDIDATE_COLUMNS = (
     ("Konto", "Konto", 90, "w"),
-    ("Navn", "Navn", 260, "w"),
+    ("Navn", "Kontonavn", 260, "w"),
     ("Kode", "A07-kode", 170, "w"),
     ("BelopAktiv", "Belop", 120, "e"),
     ("Matchgrunnlag", "Matchgrunnlag", 220, "w"),
@@ -216,7 +216,7 @@ _GROUP_COLUMNS = (
     ("Navn", "Gruppe", 260, "w"),
     ("Members", "A07-koder", 360, "w"),
     ("A07_Belop", "A07", 110, "e"),
-    ("GL_Belop", "GL", 110, "e"),
+    ("GL_Belop", "SB", 110, "e"),
     ("Diff", "Diff", 110, "e"),
     ("Locked", "Låst", 60, "center"),
 )
@@ -227,7 +227,7 @@ _SUGGESTION_COLUMNS = (
     ("Basis", "Basis", 80, "w"),
     ("A07_Belop", "A07", 120, "e"),
     ("ForslagVisning", "Kontoer", 320, "w"),
-    ("GL_Sum", "GL forslag", 120, "e"),
+    ("GL_Sum", "SB forslag", 120, "e"),
     ("Diff", "Diff", 120, "e"),
     ("Forslagsstatus", "Status", 110, "w"),
     ("HvorforKort", "Hvorfor", 220, "w"),
@@ -236,8 +236,8 @@ _SUGGESTION_COLUMNS = (
 _RECONCILE_COLUMNS = (
     ("Kode", "Kode", 140, "w"),
     ("Navn", "Navn", 220, "w"),
-    ("A07_Belop", "A07_Belop", 120, "e"),
-    ("GL_Belop", "GL_Belop", 120, "e"),
+    ("A07_Belop", "A07", 120, "e"),
+    ("GL_Belop", "SB", 120, "e"),
     ("Diff", "Diff", 120, "e"),
     ("AntallKontoer", "AntallKontoer", 110, "e"),
     ("Kontoer", "Kontoer", 200, "w"),
@@ -246,7 +246,7 @@ _RECONCILE_COLUMNS = (
 
 _MAPPING_COLUMNS = (
     ("Konto", "Konto", 110, "w"),
-    ("Navn", "Navn", 240, "w"),
+    ("Navn", "Kontonavn", 240, "w"),
     ("Kode", "Kode", 180, "w"),
     ("Rf1022GroupId", "RF-1022", 140, "w"),
     ("AliasStatus", "Alias", 90, "w"),
@@ -257,8 +257,8 @@ _MAPPING_COLUMNS = (
 
 _UNMAPPED_COLUMNS = (
     ("Konto", "Konto", 110, "w"),
-    ("Navn", "Navn", 260, "w"),
-    ("GL_Belop", "GL_Belop", 120, "e"),
+    ("Navn", "Kontonavn", 260, "w"),
+    ("GL_Belop", "SB", 120, "e"),
 )
 
 _HISTORY_COLUMNS = (
@@ -287,11 +287,11 @@ _RF1022_OVERVIEW_COLUMNS = (
     ("Post", "Post", 70, "w"),
     ("Omraade", "Område", 190, "w"),
     ("Kontrollgruppe", "Kontrollgruppe", 220, "w"),
-    ("GL_Belop", "GL", 110, "e"),
-    ("SamledeYtelser", "GL opplys.", 120, "e"),
+    ("GL_Belop", "SB", 110, "e"),
+    ("SamledeYtelser", "SB opplys.", 120, "e"),
     ("A07", "A07 opplys.", 120, "e"),
     ("Diff", "Diff opplys.", 120, "e"),
-    ("AgaGrunnlag", "GL AGA", 110, "e"),
+    ("AgaGrunnlag", "SB AGA", 110, "e"),
     ("A07Aga", "A07 AGA", 110, "e"),
     ("AgaDiff", "Diff AGA", 110, "e"),
     ("Status", "Status", 100, "w"),

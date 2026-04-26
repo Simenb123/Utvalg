@@ -25,7 +25,7 @@ def control_gl_basis_column_for_account(
     *,
     requested_basis: object = "Endring",
 ) -> str:
-    """Return the GL column A07 should use for this account row."""
+    """Return the saldobalance basis column A07 should use for this account row."""
 
     account_i = account_int(account_no)
     if account_i is not None:

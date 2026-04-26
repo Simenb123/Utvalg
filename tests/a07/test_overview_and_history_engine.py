@@ -179,7 +179,7 @@ def test_build_control_suggestion_summary_includes_a07_and_gl_amounts() -> None:
     out = page_a07.build_control_suggestion_summary("feriepenger", suggestions_df, suggestions_df.iloc[0])
 
     assert "A07 862 608,92" in out
-    assert "GL forslag 862 608,92" in out
+    assert "SB forslag 862 608,92" in out
     assert "Diff 0,00" in out
 
 def test_build_control_suggestion_effect_summary_describes_new_mapping() -> None:

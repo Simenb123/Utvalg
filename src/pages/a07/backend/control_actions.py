@@ -81,7 +81,7 @@ def plan_selected_control_gl_action(
         return ControlGlActionPlan(
             action=PROMPT_RF1022_GROUP,
             accounts=account_ids,
-            message="Velg en RF-1022-post til høyre før du tildeler kontoer fra GL-listen.",
+            message="Velg en RF-1022-post til høyre før du tildeler kontoer fra saldobalanselisten.",
         )
 
     code = str(selected_code or "").strip()
@@ -95,7 +95,7 @@ def plan_selected_control_gl_action(
     return ControlGlActionPlan(
         action=PROMPT_A07_CODE,
         accounts=account_ids,
-        message="Velg en A07-kode til høyre før du tildeler kontoer fra GL-listen.",
+        message="Velg en A07-kode til høyre før du tildeler kontoer fra saldobalanselisten.",
     )
 
 

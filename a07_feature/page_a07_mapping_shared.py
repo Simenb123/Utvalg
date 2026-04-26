@@ -159,7 +159,7 @@ from formatting import format_number_no
 from trial_balance_reader import read_trial_balance
 
 try:
-    import client_store
+    import src.shared.client_store.store as client_store
 except Exception:
     client_store = None
 

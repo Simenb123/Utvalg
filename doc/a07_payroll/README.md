@@ -65,6 +65,11 @@ Struktur, testing og dokumentasjon er na i mye bedre samsvar:
 - testmonolitten er splittet til `tests/a07/`
 - modulbudsjetter og storrelsesrapport beskytter videre struktur
 - gamle importstier lever videre som compat der det fortsatt trengs
+- synlige A07-labels bruker naa `SB`/`Saldobalanse` der tallene kommer fra
+  aktiv saldobalanse, mens interne feltnavn som `GL_Belop` beholdes for
+  kompatibilitet
+- A07 har startet migrering til global `ManagedTreeview`-standard via
+  `a07_feature/ui/managed_tree.py`
 
 ## Aktiv Produktretning
 
@@ -78,6 +83,9 @@ matching, RF-1022 og koblingsflyten tryggere i praktisk revisjonsarbeid. Les
 - RF-1022 er aggregert kontroll- og visningsnivaa.
 - `Explain` er visningsfelt. Matching, RF-1022, solver og auto-plan skal bruke
   strukturerte evidence-felt.
+- A07 skal foelge globalt kolonnevokabular: `Kontonavn`, aarsspesifikke
+  `IB`/`Endring`/`UB`-labels, og `SB` i stedet for synlig `GL` naar kilden er
+  saldobalanse.
 - Nye A07-aliaser, ekskluderinger og boost-kontoer skal skrives til
   `global_full_a07_rulebook.json`.
 - `global_full_a07_rulebook.json` er eneste aktive A07-kildesannhet.

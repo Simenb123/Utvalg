@@ -126,8 +126,10 @@ def test_canonical_support_area_uses_fixed_suggestion_and_mapping_panes() -> Non
     assert 'text="Tryllestav: finn 0-diff"' in support_source
     assert 'view_id="history"' in support_source
     assert 'view_id="control_statement_accounts"' in support_source
-    assert "self.tree_control_suggestions = self._build_tree_tab" in support_source
-    assert "self.tree_unmapped = self._build_tree_tab" in support_source
+    assert 'view_id="suggestions"' in support_source
+    assert 'view_id="unmapped"' in support_source
+    assert "self.tree_control_suggestions = self._build_tree_tab" not in support_source
+    assert "self.tree_unmapped = self._build_tree_tab" not in support_source
     assert "control_support_nb.add" not in support_source
     assert "control_statement_top" not in support_source
     assert "control_accounts_top" not in support_source
@@ -160,9 +162,11 @@ def test_low_risk_a07_trees_use_managed_treeview_pilot() -> None:
     assert 'view_id="history"' in support_source
     assert 'view_id="control_accounts"' in support_source
     assert 'view_id="control_statement_accounts"' in support_source
+    assert 'view_id="suggestions"' in support_source
+    assert 'view_id="unmapped"' in support_source
     assert 'view_id="groups"' in groups_source
-    assert "self.tree_control_suggestions = self._build_tree_tab" in support_source
-    assert "self.tree_unmapped = self._build_tree_tab" in support_source
+    assert "self.tree_control_suggestions = self._build_tree_tab" not in support_source
+    assert "self.tree_unmapped = self._build_tree_tab" not in support_source
 
 def test_tools_menu_hides_legacy_rf1022_entries_and_uses_decoded_labels(monkeypatch) -> None:
     class _Menu:

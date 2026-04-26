@@ -224,7 +224,7 @@ def test_control_account_context_menu_multi_select_exposes_rule_learning(monkeyp
     menu = page_a07.A07Page._show_control_accounts_context_menu(dummy, SimpleNamespace())
 
     assert [label for kind, label, _payload in menu.items if kind == "command"] == [
-        "Vis første i GL",
+        "Vis første i saldobalanse",
         "Fjern mapping fra 2 valgte",
     ]
     cascades = [(label, payload) for kind, label, payload in menu.items if kind == "cascade"]

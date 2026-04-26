@@ -5,7 +5,7 @@ import session as _session
 from tkinter import filedialog as _filedialog, messagebox as _messagebox, simpledialog as _simpledialog
 
 try:
-    import client_store as _client_store
+    import src.shared.client_store.store as _client_store
 except Exception:
     _client_store = None
 

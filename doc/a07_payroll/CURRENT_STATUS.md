@@ -3,8 +3,8 @@
 Sist oppdatert: 2026-04-26.
 
 Dette dokumentet er den korte operative statusen for A07. Den lange historikken,
-bakgrunn og detaljer ligger fortsatt i `STATUS_AND_GOAL.md`, `MODULE_MAP.md` og
-`RF1022_CONTRACT.md`.
+bakgrunn og detaljer ligger fortsatt i `STATUS_AND_GOAL.md`, `MODULE_MAP.md`,
+`EVIDENCE_ROADMAP.md` og `RF1022_CONTRACT.md`.
 
 ## Kort Konklusjon
 
@@ -37,7 +37,7 @@ farlig.
 ### A07 Hovedflate
 
 - Den gamle `Lonn`-fanen er fjernet som egen fane.
-- A07-fanen er gjort til hovedflate for A07/A-melding mot GL.
+- A07-fanen er gjort til hovedflate for A07/A-melding mot saldobalanse.
 - Hovedflaten er forenklet rundt fire arbeidsflater:
   - `Saldobalansekontoer`
   - `A07-koder`
@@ -49,6 +49,33 @@ farlig.
   hoyreklikkflyt.
 - Det er lagt inn `Skjul null` for aa redusere stoy fra nullkontoer.
 - Drag-and-drop har faatt tydeligere visuell feedback.
+
+### Globalt Sprak, Kolonnenavn Og Treeview-Standard
+
+- Synlige A07-labels er ryddet slik at `GL` ikke brukes naar tallene kommer
+  fra aktiv saldobalanse/kontogrunnlag.
+- Interne datakolonner som `GL_Belop` og `GL_Sum` beholdes forelopig for
+  kompatibilitet, eksport og tester.
+- Brukerrettede labels bruker naa `SB` i smale kolonner og `Saldobalanse` i
+  knapper, menyer og statusmeldinger.
+- Kontolister viser `Kontonavn`, ikke bare `Navn`, for aa matche
+  saldobalanse-/analyseflatene bedre.
+- A07 har faatt en intern `ManagedTreeview`-adapter:
+  - `a07_feature/ui/managed_tree.py`
+  - globalt kolonnevokabular via `src.shared.columns_vocabulary.heading(...)`
+  - stabile view IDs under `ui.a07.*`
+- Lavrisiko-traer som er migrert til ManagedTreeview:
+  - `Koblinger`
+  - `Forslag`
+  - `Umappede`
+  - `Historikk`
+  - `Grupper`
+  - kontrolloppstillingens konto-detaljtre i hovedflaten
+- Hovedtraerne `Saldobalansekontoer` og `A07-koder` er bevisst ikke migrert
+  ennaa. De har mapping-drag/drop, multiselect, dynamiske visninger og
+  totalrader, og skal tas i egen kontrollert runde.
+- `ui_managed_treeview.ManagedTreeview.update_columns(...)` er fikset slik at
+  dynamiske kolonnebytter ogsaa oppdaterer intern kolonnemetadata.
 
 ### Automatching Og Guardrails
 
@@ -82,6 +109,16 @@ farlig.
   auditstatus beholdes for review/solver.
 - RF-1022 popup/legacy-duplikat er ryddet ut av hovedmenyen.
 
+### Evidence-Kontrakt
+
+- Det er etablert en sentral evidence-helper i kontroll-/motorlaget.
+- Beslutningslogikk skal bruke strukturerte felt som `UsedRulebook`,
+  `UsedUsage`, `UsedSpecialAdd`, `AmountEvidence`, `HitTokens`,
+  `AnchorSignals` og `SuggestionGuardrail`.
+- `Explain` og `HvorforKort` skal behandles som menneskelig visningstekst.
+- Legacy-parsing av gamle `Explain`-tokens skal bare skje i evidence-helperen,
+  ikke spres videre i RF-1022, guardrails, forslagstags eller solver.
+
 ### Gammel Rot Som Nylig Er Ryddet
 
 - Skjulte compat-traer er fjernet fra runtime:
@@ -104,13 +141,14 @@ farlig.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/a07 --no-cov -q
-.\.venv\Scripts\python.exe -m pytest tests/test_a07_backend_no_tk.py tests/test_a07_namespace_smoke.py tests/test_a07_ui_canonical_namespace_smoke.py tests/test_page_a07_payroll.py --no-cov -q
-.\.venv\Scripts\python.exe -m pytest tests/test_a07_module_budgets.py --no-cov -q
+.\.venv\Scripts\python.exe -m pytest tests/test_a07_backend_no_tk.py tests/test_a07_module_budgets.py tests/test_a07_ui_canonical_namespace_smoke.py --no-cov -q
+.\.venv\Scripts\python.exe -m pytest tests/test_ui_managed_treeview.py tests/test_treeview_column_manager.py tests/test_ui_treeview_sort.py tests/test_columns_vocabulary.py --no-cov -q
+.\.venv\Scripts\python.exe -m compileall -q page_a07.py a07_feature src\pages\a07 tests\a07 ui_managed_treeview.py
 ```
 
-- `tests/test_page_saldobalanse.py` har per siste sjekk en separat feil i
-  `test_load_owned_company_name_map_filters_invalid_rows`. Den ser ut til aa
-  ligge i AR/eierskap/saldobalanse-testoppsettet, ikke i A07-oppryddingen.
+- Modulbudsjettene er gronne. `scripts/report_a07_module_sizes.py` viser at
+  A07-modulene er innenfor gjeldende budsjettgrenser.
+- Global ManagedTreeview-testpakke er gronn etter A07-adapterendringene.
 
 ### Produktmessig
 
@@ -121,8 +159,10 @@ A07 er fortsatt ikke godt nok som sluttbrukerflyt. De viktigste problemtypene er
 - Solver/tryllestav, grupper og forslag maa oppleves som en samlet arbeidsflyt,
   ikke som separate tekniske funksjoner.
 - Hoyreklikkmenyer og verktoymeny maa holdes korte og praktiske.
-- Kontrolloppstilling/RF-1022 maa vise revisjonsnyttige summer uten aa bli en
-  duplikat-GUI.
+- Kontrolloppstilling/RF-1022 er bedre, men maa fortsatt verifiseres visuelt
+  mot faktisk klientdata og standard RF-1022-forventning.
+- Kolonne-/sorteringsopplevelsen maa bli globalt lik i hovedtraerne, men dette
+  maa tas forsiktig pga. drag/drop.
 - Gamle compat-lag finnes fortsatt flere steder og maa fjernes gradvis naar det
   er bevist at de ikke brukes.
 - Frontend/backend-skillet er bedre, men ikke profesjonelt fullfort.
@@ -198,14 +238,32 @@ et omraade:
   resultater
 - behold compat til en egen oppryddingsrunde
 
+### 6. Fullfor Global Treeview-Standard Gradvis
+
+Neste UI-retning er aa fortsette ManagedTreeview-migreringen, men i riktig
+risikorekkefolge:
+
+1. Kontrolloppstilling/RF-1022 popup: migrer hovedtabell og detaljtre, behold
+   summeringskort og `SUM`-rad nederst.
+2. Verifiser at header-hoyreklikk gir kolonnevelger og body-hoyreklikk fortsatt
+   gir A07-kontekstmeny.
+3. Ta `Saldobalansekontoer` og `A07-koder` sist, en flate av gangen.
+4. Behold A07 mapping-drag/drop-logikken, men la ManagedTreeview eie
+   kolonnerekkefolge, breddepersistens, header-drag og normal sortering.
+5. Totalrader og RF-1022-SUM-rader skal alltid holdes nederst ved sortering.
+
 ## Neste Mest Hensiktsmessige Runde
 
 Hvis vi fortsetter med A07 naa, anbefalt neste runde er:
 
-1. Lage en A07 audit-liste over konkret rot/forvirring med filreferanser.
-2. Fjerne neste lille, bevisbart doede legacy-slice.
-3. Deretter velge en brukerflyt aa forbedre: sannsynligvis grupper/tryllestav
-   eller hoyreklikk-/verktoymeny.
+1. Committe dagens gronne A07-slice, inkludert nye/untracked filer som
+   `a07_feature/ui/managed_tree.py` og `tests/a07/test_managed_tree_adapter.py`.
+2. Kjore manuell A07-smoke mot faktisk klientdata og sjekke at synlig tekst
+   sier `SB`/`Saldobalanse`, ikke `GL`, der tallene kommer fra saldobalanse.
+3. Migrere kontrolloppstilling/RF-1022-popup til ManagedTreeview som neste
+   lav-/medium-risiko UI-slice.
+4. Deretter vurdere hovedtraerne `Saldobalansekontoer` og `A07-koder`, men kun
+   etter at drag/drop, body-hoyreklikk og totalrad-sortering er testet eksplisitt.
 
 Dette holder oss unna "oppgaver for oppgavenes skyld" og retter arbeidet mot
 det som faktisk gjor A07 bedre.

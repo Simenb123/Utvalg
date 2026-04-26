@@ -126,7 +126,7 @@ def test_build_global_auto_mapping_plan_blocks_stale_and_thin_candidates() -> No
     assert by_account.loc["5000", "Action"] == "review"
     assert "ikke godkjent" in by_account.loc["5000", "Reason"]
     assert by_account.loc["5999", "Action"] == "invalid"
-    assert "aktiv GL" in by_account.loc["5999", "Reason"]
+    assert "aktiv saldobalanse" in by_account.loc["5999", "Reason"]
 
 
 def test_build_global_auto_mapping_plan_skips_codes_that_are_already_zero_diff() -> None:

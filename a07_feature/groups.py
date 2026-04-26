@@ -151,7 +151,7 @@ def build_smart_a07_groups(
     mapping: dict[str, str] | None = None,
     tolerance: float = 0.01,
 ) -> dict[str, A07Group]:
-    """Add conservative virtual payroll groups when A07 codes sum exactly to GL.
+    """Add conservative virtual payroll groups when A07 codes sum exactly to saldobalance basis.
 
     The solver only considers common salary components and requires an exact
     single-account amount match in the payroll account area. It returns a new
