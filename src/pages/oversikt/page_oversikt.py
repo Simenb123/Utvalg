@@ -127,9 +127,13 @@ class OversiktPage(ttk.Frame):
 
     def _show_search_placeholder(self) -> None:
         if not self._search_var.get():
+            # _search_placeholder må settes FØR insert(): insert skriver til
+            # _search_var som trigger trace → _on_search. Hvis flagget ikke er
+            # satt enda, behandler _on_search "Sok klient..."-teksten som ekte
+            # søk og filtrerer bort alle klienter.
+            self._search_placeholder = True
             self._entry_search.insert(0, "Sok klient...")
             self._entry_search.config(foreground="gray")
-            self._search_placeholder = True
 
     def _load_aarvaaken_for_header(self, *, target_height: int = 56):
         """Last AarVaaken.png skalert til ønsket høyde for header-bruk.
