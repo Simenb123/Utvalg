@@ -544,24 +544,52 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
 
         # "Søk i: [Alle ▾]" — rullgardin (Combobox) matcher entry-høyden
         # eksakt så TX-treet ikke skyves. Single-select: enten "Alle" (søk
-        # i hele default-settet) eller én spesifikk kolonne.
+        # i hele default-settet) eller én spesifikk kolonne. Innhold byttes
+        # når brukeren skifter mellom Transaksjoner og Saldobalanse.
         try:
             ttk.Label(tx_search_row, text="i:").grid(row=0, column=2, sticky="w", padx=(8, 2))
-
-            # Hent kolonneliste fra ManagedTreeview hvis mulig.
-            scope_cols = ["Alle"]
-            scope_cols.extend(getattr(page, "TX_COLS_DEFAULT", ()))
 
             page._var_tx_search_scope = tk.StringVar(master=page, value="Alle")  # type: ignore[attr-defined]
             cmb_scope = ttk.Combobox(
                 tx_search_row,
                 textvariable=page._var_tx_search_scope,
-                values=scope_cols,
                 state="readonly",
                 width=18,
             )
             cmb_scope.grid(row=0, column=3, sticky="w")
             page._cmb_tx_search_scope = cmb_scope  # type: ignore[attr-defined]
+
+            def _refresh_scope_values() -> None:
+                """Oppdater valgmuligheter ut fra aktiv visning (TX vs SB).
+
+                For TX-visning: alle TX-kolonnene (det brukeren ser).
+                For SB-visning: kun kolonner som faktisk eksisterer på
+                  raw transaksjoner (Konto, Kontonavn, Regnr, Regnskapslinje
+                  + et fåtall til). Aggregat-kolonner som UB/IB finnes ikke
+                  på raw, så søk på dem ville aldri treffe.
+                """
+                try:
+                    var_mode = getattr(page, "_var_tx_view_mode", None)
+                    mode = var_mode.get() if var_mode is not None else "Transaksjoner"
+                except Exception:
+                    mode = "Transaksjoner"
+
+                if mode == "Saldobalansekontoer":
+                    cols = ["Alle", "Konto", "Kontonavn", "Regnr", "Regnskapslinje"]
+                else:
+                    cols = ["Alle"] + list(getattr(page, "TX_COLS_DEFAULT", ()))
+
+                cmb_scope["values"] = cols
+                # Hvis nåværende valg ikke finnes i nye verdier → reset
+                cur = page._var_tx_search_scope.get()
+                if cur not in cols:
+                    page._var_tx_search_scope.set("Alle")
+                    sel = getattr(page, "_tx_search_cols", None)
+                    if sel is not None:
+                        sel.clear()
+
+            page._refresh_tx_search_scope_values = _refresh_scope_values  # type: ignore[attr-defined]
+            _refresh_scope_values()  # Initialiser
 
             def _on_scope_changed(_evt=None):
                 val = page._var_tx_search_scope.get()

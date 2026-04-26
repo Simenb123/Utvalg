@@ -1290,6 +1290,14 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     def _on_tx_view_mode_changed(self, _event=None) -> None:
         """Bruker bytter mellom Saldobalanse og Hovedbok."""
         try:
+            # Oppdater "Søk i:"-rullgardinen så den viser kolonner som
+            # faktisk er aktuelle for ny visning.
+            refresh_scope = getattr(self, "_refresh_tx_search_scope_values", None)
+            if callable(refresh_scope):
+                try:
+                    refresh_scope()
+                except Exception:
+                    pass
             self._refresh_transactions_view()
         except Exception as exc:
             import logging
