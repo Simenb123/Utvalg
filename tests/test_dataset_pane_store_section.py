@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-import dataset_pane_store_section as dpss
+import src.pages.dataset.frontend.pane_store_section as dpss
 
 
 class _FakeSection:

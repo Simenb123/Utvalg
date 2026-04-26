@@ -90,7 +90,8 @@ def test_canonical_a07_account_lists_use_extended_multiselect() -> None:
     )
 
     assert 'self.tree_control_gl.configure(selectmode="extended")' in control_source
-    assert 'self.tree_control_accounts.configure(height=6, selectmode="extended")' in support_source
+    assert 'view_id="control_accounts"' in support_source
+    assert 'selectmode="extended"' in support_source
     assert 'self.tree_control_accounts.bind("<<TreeviewSelect>>", lambda _event: self._update_a07_action_button_state())' in bindings_source
     assert 'text="Koble ->"' not in control_source
     assert 'text="<- Fjern"' not in control_source
@@ -123,6 +124,10 @@ def test_canonical_support_area_uses_fixed_suggestion_and_mapping_panes() -> Non
     assert "self.control_suggestions_actions = suggestions_actions" in support_source
     assert 'suggestions_actions.pack(fill="x", pady=(0, 4))' in support_source
     assert 'text="Tryllestav: finn 0-diff"' in support_source
+    assert 'view_id="history"' in support_source
+    assert 'view_id="control_statement_accounts"' in support_source
+    assert "self.tree_control_suggestions = self._build_tree_tab" in support_source
+    assert "self.tree_unmapped = self._build_tree_tab" in support_source
     assert "control_support_nb.add" not in support_source
     assert "control_statement_top" not in support_source
     assert "control_accounts_top" not in support_source
@@ -142,6 +147,22 @@ def test_canonical_support_area_uses_fixed_suggestion_and_mapping_panes() -> Non
     assert "_build_hidden_compat_surfaces" not in canonical_source
     assert 'text="Konti i kontrolloppstilling"' not in support_source
     assert 'text="Neste problem"' not in support_source
+
+
+def test_low_risk_a07_trees_use_managed_treeview_pilot() -> None:
+    support_source = (Path(__file__).resolve().parents[2] / "a07_feature" / "ui" / "support_layout.py").read_text(
+        encoding="utf-8"
+    )
+    groups_source = (Path(__file__).resolve().parents[2] / "a07_feature" / "ui" / "groups_popup.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'view_id="history"' in support_source
+    assert 'view_id="control_accounts"' in support_source
+    assert 'view_id="control_statement_accounts"' in support_source
+    assert 'view_id="groups"' in groups_source
+    assert "self.tree_control_suggestions = self._build_tree_tab" in support_source
+    assert "self.tree_unmapped = self._build_tree_tab" in support_source
 
 def test_tools_menu_hides_legacy_rf1022_entries_and_uses_decoded_labels(monkeypatch) -> None:
     class _Menu:
@@ -179,7 +200,7 @@ def test_tools_menu_hides_legacy_rf1022_entries_and_uses_decoded_labels(monkeypa
     assert "Kontrolloppstilling..." in labels
     assert "Kontrollvisning" not in labels
     assert "Lønns- og kontrolloppstilling..." not in labels
-    assert not any("Ã" in label for label in labels)
+    assert not any("Ã" in label or "Ă" in label or "Ĺ" in label or "ř" in label for label in labels)
 
 def test_control_statement_window_hides_rf1022_popup_and_legacy_view_choice() -> None:
     from a07_feature.control import statement_window_ui
@@ -218,33 +239,8 @@ def test_primary_a07_toolbar_labels_are_decoded() -> None:
     assert "VerktÃ" not in canonical_source
     assert "SÃ" not in control_source
 
-def test_tools_control_statement_view_menu_routes_to_view_state(monkeypatch) -> None:
-    class _Menu:
-        def __init__(self, *_args, **_kwargs) -> None:
-            self.items: list[tuple[str, str, object | None]] = []
-
-        def add_radiobutton(self, *, label, variable=None, value=None, command=None) -> None:
-            self.items.append(("radio", label, (value, command)))
-
-        def add_cascade(self, *, label, menu) -> None:
-            self.items.append(("cascade", label, menu))
-
-    monkeypatch.setattr(a07_control_layout.tk, "Menu", _Menu)
-    calls: list[str] = []
-    tools_menu = _Menu()
-    dummy = SimpleNamespace(
-        control_statement_view_var=object(),
-        _set_control_statement_view_from_menu=lambda view: calls.append(view),
-    )
-
-    view_menu = page_a07.A07Page._add_control_statement_view_menu(dummy, tools_menu)
-    legacy_item = next(payload for kind, label, payload in view_menu.items if kind == "radio" and label == "Legacy analyse")
-    legacy_value, legacy_command = legacy_item
-    legacy_command()
-
-    assert ("cascade", "Kontrollvisning", view_menu) in tools_menu.items
-    assert legacy_value == page_a07.CONTROL_STATEMENT_VIEW_LEGACY
-    assert calls == [page_a07.CONTROL_STATEMENT_VIEW_LEGACY]
+def test_tools_control_statement_view_menu_is_removed_from_page_surface() -> None:
+    assert not hasattr(page_a07.A07Page, "_add_control_statement_view_menu")
 
 def test_set_control_statement_view_from_menu_updates_vars_and_refreshes() -> None:
     class _Var:

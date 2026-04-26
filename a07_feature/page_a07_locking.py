@@ -102,7 +102,7 @@ class A07PageLockingMixin:
         if len(codes) > 3:
             preview += ", ..."
         self._notify_inline(
-            f"Endringen berorer laaste koder: {preview}. Laas opp for du endrer mapping.",
+            f"Endringen berører låste koder: {preview}. Lås opp før du endrer mapping.",
             focus_widget=focus_widget,
         )
         return True

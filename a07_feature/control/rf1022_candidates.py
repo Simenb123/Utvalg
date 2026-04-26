@@ -4,6 +4,7 @@ from typing import Sequence
 
 import pandas as pd
 
+from .evidence import candidate_bool, candidate_text, candidate_tokens, normalize_candidate_evidence
 from .rf1022_bridge import (
     RF1022_A07_BRIDGE as _RF1022_A07_BRIDGE,
     resolve_a07_rf1022_group,
@@ -42,58 +43,27 @@ def _safe_float(value: object) -> float | None:
 
 
 def _suggestion_account_tokens(raw: object) -> list[str]:
-    if isinstance(raw, (list, tuple, set)):
-        values = [str(value).strip() for value in raw if str(value).strip()]
-    else:
-        values = [part.strip() for part in str(raw or "").replace(";", ",").split(",") if part.strip()]
-    out: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        out.append(value)
-    return out
+    return list(candidate_tokens(raw))
 
 
 def _suggestion_flag(row: pd.Series, column: str) -> bool:
-    try:
-        value = row.get(column, False)
-    except Exception:
-        return False
-    try:
-        if pd.isna(value):
-            return False
-    except Exception:
-        pass
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "ja", "yes"}
-    return bool(value)
+    return candidate_bool(row, column)
 
 
 def _suggestion_text(row: pd.Series, column: str) -> str:
-    try:
-        value = row.get(column)
-    except Exception:
-        return ""
-    try:
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-    return str(value or "").strip()
+    return candidate_text(row, column)
 
 
 def _suggestion_has_rf1022_anchor(row: pd.Series) -> tuple[bool, str]:
-    explain = _suggestion_text(row, "Explain").lower()
-    anchor_signals = _suggestion_text(row, "AnchorSignals").lower()
-    hit_tokens = _suggestion_text(row, "HitTokens")
+    evidence = normalize_candidate_evidence(row)
+    anchor_signals = evidence.anchor_signals.casefold()
+    hit_tokens = evidence.hit_tokens
     parts: list[str] = []
-    if _suggestion_flag(row, "UsedRulebook") or "regel=" in explain:
+    if evidence.used_rulebook:
         parts.append("Regelbok/alias")
-    if hit_tokens or "navnetreff" in anchor_signals or "navn=" in explain:
+    if hit_tokens or "navnetreff" in anchor_signals:
         parts.append(f"Navn/alias: {hit_tokens}" if hit_tokens else "Navn/alias")
-    if _suggestion_flag(row, "UsedSpecialAdd") or "special_add" in explain:
+    if evidence.used_special_add:
         parts.append("Tilleggsregel")
     cleaned = [part for idx, part in enumerate(parts) if part and part not in parts[:idx]]
     return bool(cleaned), ", ".join(cleaned)
@@ -133,9 +103,7 @@ def _candidate_account_amount(gl_row: pd.Series, value_col: str) -> float:
 
 def _is_special_add_account(row: pd.Series, account: str) -> bool:
     code = _suggestion_text(row, "Kode")
-    return account in _RF1022_SPECIAL_ADD_ACCOUNTS.get(code, set()) and (
-        _suggestion_flag(row, "UsedSpecialAdd") or "special_add" in _suggestion_text(row, "Explain").lower()
-    )
+    return account in _RF1022_SPECIAL_ADD_ACCOUNTS.get(code, set()) and normalize_candidate_evidence(row).used_special_add
 
 
 def _refund_account_has_specific_support(row: pd.Series, account: str, account_name: object) -> bool:
@@ -145,7 +113,8 @@ def _refund_account_has_specific_support(row: pd.Series, account: str, account_n
         return True
     if str(account).strip() == "5800":
         return True
-    text = f"{account_name or ''} {_suggestion_text(row, 'HitTokens')} {_suggestion_text(row, 'Explain')}".casefold()
+    evidence = normalize_candidate_evidence(row)
+    text = f"{account_name or ''} {evidence.hit_tokens} {evidence.anchor_signals} {evidence.match_basis}".casefold()
     return any(token in text for token in ("nav", "sykepenger", "sykepenge", "foreldrepenger", "foreldrepenge"))
 
 
@@ -163,6 +132,7 @@ def _candidate_account_anchor(
         return True, "Historikk"
     if _is_special_add_account(row, account):
         return True, "Tilleggsregel"
+    evidence = normalize_candidate_evidence(row)
 
     hit_tokens = _suggestion_account_tokens(_suggestion_text(row, "HitTokens").replace(" ", ","))
     account_text = f"{account} {gl_row.get('Navn') or ''}".casefold()
@@ -170,9 +140,9 @@ def _candidate_account_anchor(
     if account_hits:
         return True, f"Navn/alias: {', '.join(account_hits)}"
 
-    if account_count == 1 and _suggestion_flag(row, "UsedRulebook"):
+    if account_count == 1 and evidence.used_rulebook:
         return True, "Regelbok/alias"
-    if account_count == 1 and _suggestion_flag(row, "UsedUsage"):
+    if account_count == 1 and evidence.used_usage:
         return True, "Kontobruk"
     return False, ""
 
@@ -264,7 +234,7 @@ def build_rf1022_candidate_df(
         status = (
             "Trygt forslag"
             if _suggestion_text(row, "SuggestionGuardrail").lower() == "accepted"
-            else "Maa vurderes"
+            else "Må vurderes"
         )
         for account in accounts:
             gl_row = gl_by_account.get(account)

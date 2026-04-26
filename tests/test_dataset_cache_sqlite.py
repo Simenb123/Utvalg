@@ -6,7 +6,7 @@ import pandas as pd
 
 
 def test_dataset_cache_sqlite_roundtrip_preserves_datetime(tmp_path: Path):
-    import dataset_cache_sqlite
+    import src.pages.dataset.backend.cache_sqlite as dataset_cache_sqlite
 
     df = pd.DataFrame(
         {
@@ -39,7 +39,7 @@ def test_dataset_cache_sqlite_store_cache_handles_large_multi_insert_limits(tmp_
     problemet i mange miljøer dersom vi bruker `method="multi"` med stor chunksize.
     """
 
-    import dataset_cache_sqlite
+    import src.pages.dataset.backend.cache_sqlite as dataset_cache_sqlite
 
     rows = 10_000
     cols = 30
@@ -60,7 +60,7 @@ def test_build_dataset_uses_cache_on_second_run(tmp_path: Path, monkeypatch):
     # (client_store.get_clients_root faller tilbake til dette)
 
     import client_store
-    from dataset_pane_build import BuildRequest, build_dataset
+    from src.pages.dataset.backend.pane_build import BuildRequest, build_dataset
 
     # Lag en minimal hovedbok-fil
     df_in = pd.DataFrame(
@@ -121,7 +121,7 @@ def test_build_dataset_uses_cache_on_second_run(tmp_path: Path, monkeypatch):
 
 
 def test_fill_down_bilag_inplace_fills_missing_and_syncs_alias() -> None:
-    import dataset_cache_sqlite
+    import src.pages.dataset.backend.cache_sqlite as dataset_cache_sqlite
 
     df = pd.DataFrame(
         {

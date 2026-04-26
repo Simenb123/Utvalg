@@ -91,9 +91,9 @@ def build_control_accounts_summary(
 ) -> str:
     code_s = str(code or "").strip()
     if not code_s:
-        return "Velg A07-kode til hoyre for aa se hva som er koblet na."
+        return "Velg A07-kode til høyre for å se hva som er koblet nå."
     if accounts_df is None or accounts_df.empty:
-        return f"Ingen kontoer er koblet til {code_s} ennÃ¥. Velg kontoer til venstre og trykk ->."
+        return f"Ingen kontoer er koblet til {code_s} ennå. Velg kontoer til venstre og trykk ->."
 
     count = int(len(accounts_df))
     value_column = str(basis_col or "Endring").strip()
@@ -124,7 +124,7 @@ def build_mapping_history_details(
 ) -> str:
     code_s = str(code or "").strip()
     if not code_s:
-        return "Velg en kode for aa se historikk."
+        return "Velg en kode for å se historikk."
 
     current_accounts = accounts_for_code(mapping_current, code_s)
     previous_accounts = accounts_for_code(mapping_previous, code_s)
@@ -138,8 +138,8 @@ def build_mapping_history_details(
     elif previous_accounts:
         relation = "Historikk finnes, men ikke mapping i aar."
     else:
-        relation = "Ingen mapping ennÃ¥."
+        relation = "Ingen mapping ennå."
 
     history_label = previous_year or "tidligere aar"
-    return f"{code_s} | I aar: {current_text} | {history_label}: {previous_text} | {relation}"
+    return f"{code_s} | I år: {current_text} | {history_label}: {previous_text} | {relation}"
 

@@ -141,13 +141,13 @@ class A07PageMappingAssignMixin:
         account_list = list(clean_account_ids(accounts))
         if not account_list:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre forst.",
+                "Velg en eller flere GL-kontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
         group_s = str(group_id or "").strip()
         if not group_s:
-            self._notify_inline("Velg en RF-1022-post til hoyre forst.", focus_widget=self.tree_a07)
+            self._notify_inline("Velg en RF-1022-post til høyre først.", focus_widget=self.tree_a07)
             return
         target_code = self._resolve_rf1022_target_code(group_s, account_list)
         if not target_code:
@@ -196,13 +196,13 @@ class A07PageMappingAssignMixin:
         account_list = list(clean_account_ids(accounts))
         if not account_list:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre forst.",
+                "Velg en eller flere GL-kontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
         code_s = str(code or "").strip()
         if not code_s:
-            self._notify_inline("Velg en A07-kode forst.", focus_widget=self.tree_a07)
+            self._notify_inline("Velg en A07-kode først.", focus_widget=self.tree_a07)
             return
         conflicts = _locked_mapping_conflicts_for(self, account_list, target_code=code_s)
         if _notify_locked_conflicts_for(self, conflicts, focus_widget=self.tree_a07):
@@ -235,7 +235,7 @@ class A07PageMappingAssignMixin:
         account = str(accounts[0] if accounts else "").strip()
         if not account:
             self._notify_inline(
-                "Velg en GL-konto til venstre forst.",
+                "Velg en GL-konto til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return

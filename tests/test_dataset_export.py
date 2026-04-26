@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 
-from dataset_export import build_hovedbok_excel_sheets, export_hovedbok_to_excel
+from src.pages.dataset.backend.export import build_hovedbok_excel_sheets, export_hovedbok_to_excel
 
 
 def test_build_hovedbok_excel_sheets_happy_path_no_split() -> None:

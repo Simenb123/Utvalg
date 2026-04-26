@@ -27,8 +27,8 @@ from tkinter import filedialog, messagebox, ttk
 import pandas as pd
 
 import session
-from dataset_export import export_hovedbok_to_excel
-from dataset_pane import DatasetPane
+from ..backend.export import export_hovedbok_to_excel
+from .pane import DatasetPane
 
 logger = logging.getLogger(__name__)
 

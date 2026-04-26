@@ -111,7 +111,7 @@ class A07PageMappingLearningAccountsMixin:
         accounts = [str(account or "").strip() for account in accounts if str(account or "").strip()]
         if not accounts:
             self._notify_inline(
-                "Velg en eller flere mappede kontoer nederst forst.",
+                "Velg en eller flere mappede kontoer nederst først.",
                 focus_widget=getattr(self, "tree_control_accounts", None),
             )
             return

@@ -1530,7 +1530,7 @@ class SettingsView:
         if not fn:
             return
         try:
-            from dataset_pane_store_import_ui import import_client_list_with_progress
+            from src.pages.dataset.frontend.pane_store_import_ui import import_client_list_with_progress
             import_client_list_with_progress(self.win, Path(fn))
         except Exception as exc:
             messagebox.showerror("Importer", f"Import feilet: {exc}", parent=self.win)

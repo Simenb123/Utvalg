@@ -71,8 +71,8 @@ def build_gl_selection_status_message(
 
     if len(selected) == 1:
         if code_s:
-            return f"Konto {account_s} er koblet til {code_s}. Bruk hoyreklikk for aa vise koden eller endre kobling."
-        return f"Konto {account_s} er ikke koblet ennå. Velg A07-kode til hoyre og bruk ->."
+            return f"Konto {account_s} er koblet til {code_s}. Bruk høyreklikk for å vise koden eller endre kobling."
+        return f"Konto {account_s} er ikke koblet ennå. Velg A07-kode til høyre og bruk ->."
 
     mapped_codes: set[str] = set()
     for selected_account in selected:
@@ -86,7 +86,7 @@ def build_gl_selection_status_message(
             mapped_codes.add(selected_code)
 
     if not mapped_codes:
-        return f"{len(selected)} kontoer er valgt uten kobling. Velg A07-kode til hoyre og bruk ->."
+        return f"{len(selected)} kontoer er valgt uten kobling. Velg A07-kode til høyre og bruk ->."
     if len(mapped_codes) == 1:
         return f"{len(selected)} kontoer er valgt og er koblet til {next(iter(mapped_codes))}."
     return f"{len(selected)} kontoer er valgt med {len(mapped_codes)} ulike A07-koder."
@@ -210,8 +210,8 @@ def build_control_panel_state(
     if not code_s:
         return A07ControlPanelState(
             code="",
-            summary_text="1. Velg konto eller A07-post  2. Forsta status  3. Jobb videre nederst",
-            reason_text="Start med en kode i hoyre liste eller en konto i venstre liste.",
+            summary_text="1. Velg konto eller A07-post  2. Forstå status  3. Jobb videre nederst",
+            reason_text="Start med en kode i høyre liste eller en konto i venstre liste.",
             linked_accounts_summary=build_control_accounts_summary(
                 linked_accounts_df if isinstance(linked_accounts_df, pd.DataFrame) else pd.DataFrame(),
                 "",
@@ -221,7 +221,7 @@ def build_control_panel_state(
 
     display_name = str(navn or "").strip() or code_s
     legacy_status_text = str(work_label or status or "").strip()
-    status_text = str(guided_status or "").strip() or legacy_status_text or "Maa avklares"
+    status_text = str(guided_status or "").strip() or legacy_status_text or "Må avklares"
     next_text = str(guided_next or "").strip() or "Kontroller kobling"
     next_action_text = str(next_action or "").strip()
     reason_text = str(current_mapping_suspicious_reason or why_text or next_action or "").strip()
@@ -243,7 +243,7 @@ def build_control_panel_state(
         action_target = "suggestions"
     elif next_text == "Se historikk":
         action_target = "history"
-    elif next_text == "Apne lonnsklassifisering":
+    elif next_text in {"Apne lonnsklassifisering", "Åpne lønnsklassifisering"}:
         action_target = "saldobalanse"
     elif next_text == "Kontroller kobling":
         action_target = "mapping"
@@ -251,11 +251,11 @@ def build_control_panel_state(
     if current_mapping_suspicious and suggestion_count > 0:
         action_label = "Se forslag"
         action_target = "suggestions"
-    elif best_suggestion is not None and status_text in {"Kontroller kobling", "Maa avklares"}:
+    elif best_suggestion is not None and status_text in {"Kontroller kobling", "Maa avklares", "Må avklares"}:
         action_label = "Se forslag"
         action_target = "suggestions"
-    elif status_text == "Lonnskontroll":
-        action_label = "Apne lonnsklassifisering"
+    elif status_text in {"Lonnskontroll", "Lønnskontroll"}:
+        action_label = "Åpne lønnsklassifisering"
         action_target = "saldobalanse"
     elif status_text == "Har historikk":
         action_label = "Se historikk"
@@ -263,7 +263,7 @@ def build_control_panel_state(
     elif status_text == "Har forslag":
         action_label = "Se forslag"
         action_target = "suggestions"
-    elif status_text in {"Kontroller kobling", "Maa avklares"}:
+    elif status_text in {"Kontroller kobling", "Maa avklares", "Må avklares"}:
         action_label = "Kontroller kobling"
         action_target = "mapping"
     elif status_text == "Ferdig":
@@ -273,18 +273,18 @@ def build_control_panel_state(
     if not reason_text:
         if current_mapping_suspicious:
             reason_text = "Dagens kobling ser mistenkelig ut."
-        elif best_suggestion is not None and status_text in {"Kontroller kobling", "Maa avklares"}:
+        elif best_suggestion is not None and status_text in {"Kontroller kobling", "Maa avklares", "Må avklares"}:
             reason_text = "Det finnes et konkret forslag som kan vurderes."
         elif status_text == "Har forslag":
             reason_text = "Det finnes forslag som kan vurderes."
         elif status_text == "Har historikk":
             reason_text = "Det finnes tidligere bruk som kan sammenlignes."
-        elif status_text == "Lonnskontroll":
-            reason_text = "Denne posten krever oppfolging i lonnsklassifiseringen."
+        elif status_text in {"Lonnskontroll", "Lønnskontroll"}:
+            reason_text = "Denne posten krever oppfølging i lønnsklassifiseringen."
         elif status_text == "Kontroller kobling":
-            reason_text = "Eksisterende kobling bor kontrolleres."
-        elif status_text == "Maa avklares":
-            reason_text = "Det finnes ingen trygg standardlosning ennå."
+            reason_text = "Eksisterende kobling bør kontrolleres."
+        elif status_text in {"Maa avklares", "Må avklares"}:
+            reason_text = "Det finnes ingen trygg standardløsning ennå."
 
     linked_accounts_summary = build_control_accounts_summary(
         linked_accounts_df if isinstance(linked_accounts_df, pd.DataFrame) else pd.DataFrame(),

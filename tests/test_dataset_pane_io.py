@@ -5,7 +5,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-import dataset_pane_io as dio
+import src.pages.dataset.backend.pane_io as dio
 
 
 def _write_xlsx_with_header_not_first(path: Path) -> None:

@@ -282,7 +282,7 @@ def _notify_locked_conflicts_for(
     notify_inline = getattr(page, "_notify_inline", None)
     if callable(notify_inline):
         notify_inline(
-            f"Endringen berorer laaste koder: {preview}. Laas opp for du endrer mapping.",
+            f"Endringen berører låste koder: {preview}. Lås opp før du endrer mapping.",
             focus_widget=focus_widget,
         )
         return True

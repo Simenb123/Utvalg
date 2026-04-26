@@ -4,7 +4,7 @@ from __future__ import annotations
 def test_dataset_pane_exposes_main_filetypes() -> None:
     """MAIN_FILETYPES skal være tilgjengelig og inneholde relevante filtre."""
 
-    from dataset_pane import MAIN_FILETYPES
+    from src.pages.dataset.frontend.pane import MAIN_FILETYPES
 
     assert isinstance(MAIN_FILETYPES, list)
     assert len(MAIN_FILETYPES) >= 1

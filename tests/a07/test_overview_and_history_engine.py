@@ -65,7 +65,7 @@ def test_build_mapping_history_details_compares_current_and_previous_accounts() 
     )
 
     assert "fastloenn |" in out
-    assert "I aar: 5000" in out
+    assert "I år: 5000" in out
     assert "2024: 5000, 5001" in out
     assert "Avviker fra historikk." in out
 
@@ -188,7 +188,7 @@ def test_build_control_suggestion_effect_summary_describes_new_mapping() -> None
     out = page_a07.build_control_suggestion_effect_summary("bonus", [], row)
     diff_text = page_a07._format_picker_amount(Decimal("12.50"))
 
-    assert out == f"Vil mappe 5000,5001 til bonus | Maa vurderes | Diff {diff_text}"
+    assert out == f"Vil mappe 5000,5001 til bonus | Må vurderes | Diff {diff_text}"
 
 def test_control_next_action_label_prioritizes_history_then_safe_suggestion() -> None:
     best_row = pd.Series({"WithinTolerance": True})
@@ -208,7 +208,7 @@ def test_control_next_action_label_prioritizes_history_then_safe_suggestion() ->
     )
     assert (
         page_a07.control_next_action_label("OK", has_history=True, best_suggestion=best_row)
-        == "Ingen handling nodvendig."
+        == "Ingen handling nødvendig."
     )
 
 def test_build_control_queue_df_summarizes_mapping_history_and_best_suggestion() -> None:
@@ -238,7 +238,7 @@ def test_build_control_queue_df_summarizes_mapping_history_and_best_suggestion()
 
     assert out.loc[out["Kode"] == "fastloenn", "A07Post"].iloc[0] == "Fastloenn"
     assert out.loc[out["Kode"] == "fastloenn", "Anbefalt"].iloc[0] == "Se historikk"
-    assert out.loc[out["Kode"] == "fastloenn", "NesteHandling"].iloc[0] == "Aapne historikk for valgt kode."
+    assert out.loc[out["Kode"] == "fastloenn", "NesteHandling"].iloc[0] == "Åpne historikk for valgt kode."
     assert out.loc[out["Kode"] == "fastloenn", "Status"].iloc[0] == "Har historikk"
     assert out.loc[out["Kode"] == "fastloenn", "GuidetStatus"].iloc[0] == "Har historikk"
     assert out.loc[out["Kode"] == "telefon", "Anbefalt"].iloc[0] == "Se forslag"
@@ -329,7 +329,7 @@ def test_build_control_suggestion_effect_summary_describes_replacement() -> None
     out = page_a07.build_control_suggestion_effect_summary("bonus", ["5090"], row)
     diff_text = page_a07._format_picker_amount(Decimal("100.00"))
 
-    assert out == f"Vil erstatte 5090 med 5000,5001 | Maa vurderes | Diff {diff_text}"
+    assert out == f"Vil erstatte 5090 med 5000,5001 | Må vurderes | Diff {diff_text}"
 
 def test_build_control_suggestion_effect_summary_handles_matching_current_mapping() -> None:
     row = pd.Series({"ForslagKontoer": "5001,5000", "Diff": Decimal("0"), "WithinTolerance": True})
@@ -337,16 +337,16 @@ def test_build_control_suggestion_effect_summary_handles_matching_current_mappin
     out = page_a07.build_control_suggestion_effect_summary("bonus", ["5000", "5001"], row)
     diff_text = page_a07._format_picker_amount(Decimal("0"))
 
-    assert out == f"Matcher dagens mapping: 5001,5000 | Maa vurderes | Diff {diff_text}"
+    assert out == f"Matcher dagens mapping: 5001,5000 | Må vurderes | Diff {diff_text}"
 
 def test_build_control_accounts_summary_handles_empty_state() -> None:
     assert (
         page_a07.build_control_accounts_summary(pd.DataFrame(), "fastloenn")
-        == "Ingen kontoer er koblet til fastloenn ennÃ¥. Velg kontoer til venstre og trykk ->."
+            == "Ingen kontoer er koblet til fastloenn ennå. Velg kontoer til venstre og trykk ->."
     )
     assert (
         page_a07.build_control_accounts_summary(pd.DataFrame(), None)
-        == "Velg A07-kode til hoyre for aa se hva som er koblet na."
+            == "Velg A07-kode til høyre for å se hva som er koblet nå."
     )
 
 def test_sync_control_alternative_view_updates_history_mode_and_summary_without_widget_routing() -> None:

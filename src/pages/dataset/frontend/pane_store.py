@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from dataset_pane_store_section import ClientStoreSection, DEFAULT_YEAR
+from .pane_store_section import ClientStoreSection, DEFAULT_YEAR
 
 
 try:

@@ -79,7 +79,7 @@ def test_open_saldobalanse_for_selected_code_classification_uses_selected_code_a
         (
             ["5000", "5001"],
             classification_workspace.QUEUE_REVIEW,
-            "Tildel RF-1022-post i Saldobalanse. A07 viser behovet, men klassifiseringen gjores i Saldobalanse.",
+                "Tildel RF-1022-post i Saldobalanse. A07 viser behovet, men klassifiseringen gjøres i Saldobalanse.",
         )
     ]
 
@@ -452,7 +452,7 @@ def test_on_control_gl_selection_changed_keeps_selected_work_code() -> None:
 
     assert calls == ["sync:5000", "buttons"]
     assert focus_calls == []
-    assert status_calls == ["Konto 5000 er koblet til fastloenn. Bruk hoyreklikk for aa vise koden eller endre kobling."]
+    assert status_calls == ["Konto 5000 er koblet til fastloenn. Bruk høyreklikk for å vise koden eller endre kobling."]
 
 def test_on_control_gl_selection_changed_keeps_work_code_for_multi_select() -> None:
     calls: list[str] = []

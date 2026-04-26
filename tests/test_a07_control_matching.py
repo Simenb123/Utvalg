@@ -135,7 +135,7 @@ def test_decorate_suggestions_uses_structured_fields_over_explain() -> None:
 
     out = decorate_suggestions_for_display(suggestions, pd.DataFrame(columns=["Konto", "Navn"]))
     row = out.iloc[0]
-    assert row["Forslagsstatus"] == "Maa vurderes"
+    assert row["Forslagsstatus"] == "Må vurderes"
     assert row["HvorforKort"] == "Treff paa kontobruk"
     assert row["SuggestionGuardrail"] == "review"
 

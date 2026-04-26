@@ -33,8 +33,8 @@ def test_apply_build_result_updates_ml_map_and_store_section(monkeypatch, tmp_pa
     # Legg ml_map-filen i temp for å unngå å skrive i repo-roten.
     monkeypatch.chdir(tmp_path)
 
-    import dataset_pane
-    from dataset_pane_build import BuildResult
+    import src.pages.dataset.frontend.pane as dataset_pane
+    from src.pages.dataset.backend.pane_build import BuildResult
     from models import Columns
 
     # Lag en DatasetPane uten å init'e tkinter.
@@ -72,8 +72,8 @@ def test_apply_build_result_updates_ml_map_and_store_section(monkeypatch, tmp_pa
 
 def test_apply_build_result_defers_saft_auto_sb(monkeypatch):
     """Regression: SAF-T -> SB må planlegges i bakgrunn, ikke kjøres direkte i GUI-tråden."""
-    import dataset_pane
-    from dataset_pane_build import BuildResult
+    import src.pages.dataset.frontend.pane as dataset_pane
+    from src.pages.dataset.backend.pane_build import BuildResult
     from models import Columns
 
     pane = dataset_pane.DatasetPane.__new__(dataset_pane.DatasetPane)

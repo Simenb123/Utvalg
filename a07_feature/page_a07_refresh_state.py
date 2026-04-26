@@ -334,18 +334,18 @@ class A07PageRefreshStateMixin:
         self.previous_mapping = {}
         self.previous_mapping_path = None
         self.previous_mapping_year = None
-        self.history_details_var.set("Velg en kode for aa se historikk.")
-        self.control_summary_var.set("Velg A07-kode til hoyre.")
+        self.history_details_var.set("Velg en kode for å se historikk.")
+        self.control_summary_var.set("Velg A07-kode til høyre.")
         self.control_intro_var.set("")
         self.control_meta_var.set("")
         self.control_match_var.set("")
         self.control_mapping_var.set("")
         self.control_history_var.set("")
         self.control_best_var.set("")
-        self.control_suggestion_summary_var.set("Velg A07-kode til hoyre for aa se beste forslag.")
-        self.control_suggestion_effect_var.set("Velg et forslag for aa se hva som blir koblet.")
+        self.control_suggestion_summary_var.set("Velg A07-kode til høyre for å se beste forslag.")
+        self.control_suggestion_effect_var.set("Velg et forslag for å se hva som blir koblet.")
         self.control_statement_summary_var.set("Ingen kontrollgrupper er klassifisert enn\u00e5.")
-        self.control_statement_accounts_summary_var.set("Velg gruppe i kontrolloppstillingen for aa se kontoene bak raden.")
+        self.control_statement_accounts_summary_var.set("Velg gruppe i kontrolloppstillingen for å se kontoene bak raden.")
         self.control_next_var.set("")
         self.control_drag_var.set("")
         sync_control_panel_visibility = getattr(self, "_sync_control_panel_visibility", None)

@@ -56,7 +56,7 @@ class FakeFrame:
 
 def _make_section(monkeypatch, tmp_path) -> "dataset_pane_store.ClientStoreSection":
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path / "data"))
-    import dataset_pane_store
+    import src.pages.dataset.frontend.pane_store as dataset_pane_store
     importlib.reload(dataset_pane_store)
 
     sec = dataset_pane_store.ClientStoreSection(
@@ -150,7 +150,7 @@ def test_render_brreg_labels_fills_orgform_naering_mva_address(monkeypatch, tmp_
 def test_render_brreg_labels_homepage_link_opens_browser(monkeypatch, tmp_path):
     sec = _make_section(monkeypatch, tmp_path)
 
-    import dataset_pane_store_section as section
+    import src.pages.dataset.frontend.pane_store_section as section
 
     opened: list[str] = []
     monkeypatch.setattr(section.webbrowser, "open_new_tab", lambda url: opened.append(url))

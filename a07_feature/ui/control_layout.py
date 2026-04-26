@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tkinter as tk
 from tkinter import ttk
 
 from ..page_a07_constants import (
@@ -10,7 +9,6 @@ from ..page_a07_constants import (
     _CONTROL_COLUMNS,
     _CONTROL_GL_COLUMNS,
     _CONTROL_GL_MAPPING_LABELS,
-    _CONTROL_STATEMENT_VIEW_LABELS,
     _CONTROL_WORK_LEVEL_LABELS,
 )
 
@@ -233,18 +231,5 @@ class A07PageControlLayoutMixin:
             command=self._run_selected_control_action,
         )
         self.btn_control_smart.state(["disabled"])
-
-    def _add_control_statement_view_menu(self, tools_menu: tk.Menu) -> tk.Menu:
-        view_menu = tk.Menu(tools_menu, tearoff=0)
-        for view_key, label in _CONTROL_STATEMENT_VIEW_LABELS.items():
-            view_menu.add_radiobutton(
-                label=label,
-                variable=self.control_statement_view_var,
-                value=view_key,
-                command=lambda view_key=view_key: self._set_control_statement_view_from_menu(view_key),
-            )
-        tools_menu.add_cascade(label="Kontrollvisning", menu=view_menu)
-        return view_menu
-
 
 __all__ = ["A07PageControlLayoutMixin"]

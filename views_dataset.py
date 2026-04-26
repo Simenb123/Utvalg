@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from dataset_pane import DatasetPane
+from src.pages.dataset.frontend.pane import DatasetPane
 from session import set_dataset
 
 def open_dataset_window(parent: tk.Tk | tk.Toplevel):

@@ -166,7 +166,7 @@ def test_control_tree_tag_maps_work_statuses_to_visual_tags() -> None:
     assert page_a07.control_tree_tag("Har historikk") == "control_review"
     assert page_a07.control_tree_tag("Manuell") == "control_manual"
     assert page_a07.control_tree_tag("Kontroller kobling") == "control_manual"
-    assert page_a07.control_tree_tag("UlÃ¸st") == "control_manual"
+    assert page_a07.control_tree_tag("Uløst") == "control_manual"
     assert page_a07.control_tree_tag("Annet") == "control_default"
 
 def test_control_gl_tree_tag_marks_unmapped_and_mapped_rows() -> None:
@@ -248,7 +248,7 @@ def test_control_action_style_maps_work_labels() -> None:
     assert page_a07.control_action_style("Forslag") == "Warning.TLabel"
     assert page_a07.control_action_style("Historikk") == "Warning.TLabel"
     assert page_a07.control_action_style("Manuell") == "Warning.TLabel"
-    assert page_a07.control_action_style("UlÃ¸st") == "Warning.TLabel"
+    assert page_a07.control_action_style("Uløst") == "Warning.TLabel"
     assert page_a07.control_action_style("Annet") == "Muted.TLabel"
 
 def test_control_intro_text_guides_user_toward_best_next_step() -> None:
@@ -256,22 +256,22 @@ def test_control_intro_text_guides_user_toward_best_next_step() -> None:
 
     assert (
         page_a07.control_intro_text("Ferdig", has_history=False, best_suggestion=None)
-        == "Ser ferdig ut. Kontroller kort og gaa videre hvis du er enig."
+        == "Ser ferdig ut. Kontroller kort og gå videre hvis du er enig."
     )
     assert (
         page_a07.control_intro_text("Historikk", has_history=True, best_suggestion=None)
-        == "Historikk finnes for posten. Sammenlign kort for du godkjenner."
+        == "Historikk finnes for posten. Sammenlign kort før du godkjenner."
     )
     assert (
         page_a07.control_intro_text("Forslag", has_history=False, best_suggestion=safe_best)
-        == "Det finnes et forslag som bor vurderes."
+        == "Det finnes et forslag som bør vurderes."
     )
     assert (
         page_a07.control_intro_text("Manuell", has_history=False, best_suggestion=None)
-        == "Posten er koblet, men bor kontrolleres."
+        == "Posten er koblet, men bør kontrolleres."
     )
     assert (
-        page_a07.control_intro_text("UlÃ¸st", has_history=False, best_suggestion=None)
+        page_a07.control_intro_text("Uløst", has_history=False, best_suggestion=None)
         == "Velg koblinger eller jobb videre i forslagene nederst."
     )
 

@@ -491,7 +491,7 @@ class TestDatasetPaneSbMode:
 
     def test_sb_mode_required_fields_are_relaxed(self):
         """In SB mode, required fields should only be Konto (not Bilag/Beloep)."""
-        from dataset_pane import _REQUIRED_HB, _REQUIRED_SB
+        from src.pages.dataset.frontend.pane import _REQUIRED_HB, _REQUIRED_SB
 
         assert "Konto" in _REQUIRED_HB
         assert "Bilag" in _REQUIRED_HB

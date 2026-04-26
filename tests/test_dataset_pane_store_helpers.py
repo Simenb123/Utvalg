@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import dataset_pane_store
+import src.pages.dataset.frontend.pane_store as dataset_pane_store
 
 
 def test_get_active_version_path_returns_none_when_store_missing(monkeypatch: pytest.MonkeyPatch) -> None:

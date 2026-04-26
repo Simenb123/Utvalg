@@ -49,7 +49,7 @@ def open_mapping_overview(page, mapping_columns) -> None:
     def _selected_account_or_notify() -> str | None:
         account = _selected_account()
         if not account:
-            messagebox.showinfo("A07", "Velg en mappingrad forst.", parent=win)
+            messagebox.showinfo("A07", "Velg en mappingrad først.", parent=win)
             return None
         return account
 

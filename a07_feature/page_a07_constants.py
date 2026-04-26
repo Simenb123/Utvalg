@@ -184,6 +184,8 @@ _CONTROL_HIDDEN_CODES = {
     "aga",
     "forskuddstrekk",
     "finansskattloenn",
+    "finansskattlønn",
+    # Legacy/mojibake alias accepted as input, but never shown.
     "finansskattlÃ¸nn",
 }
 
@@ -262,7 +264,7 @@ _UNMAPPED_COLUMNS = (
 _HISTORY_COLUMNS = (
     ("Kode", "Kode", 140, "w"),
     ("Navn", "Navn", 220, "w"),
-    ("AarKontoer", "I aar", 180, "w"),
+    ("AarKontoer", "I år", 180, "w"),
     ("HistorikkKontoer", "Historikk", 180, "w"),
     ("Status", "Status", 160, "w"),
     ("KanBrukes", "Kan brukes", 90, "center"),
@@ -346,7 +348,7 @@ _RF1022_POST_RULES = (
 
 _A07_FILTER_LABELS = {
     "alle": "Alle",
-    "uloste": "Uloste",
+    "uloste": "Uløste",
     "avvik": "Avvik",
     "ikke_mappet": "Ikke mappet",
     "ok": "OK",
@@ -368,20 +370,9 @@ _CONTROL_VIEW_LABELS = {
     "alle": "Alle",
 }
 
-_CONTROL_VIEW_LABELS = {
-    "neste": "Arbeidsko",
-    "mistenkelig": "Mistenkelige",
-    "ulost": "Maa avklares",
-    "forslag": "Har forslag",
-    "historikk": "Historikk",
-    "manuell": "Kontroller kobling",
-    "ferdig": "Ferdige",
-    "alle": "Alle",
-}
-
 _SUGGESTION_SCOPE_LABELS = {
     "valgt_kode": "Valgt kode",
-    "uloste": "Uloste koder",
+    "uloste": "Uløste koder",
     "alle": "Alle forslag",
 }
 

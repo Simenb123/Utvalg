@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import threading
+import traceback
 
 import pandas as pd
 
@@ -131,6 +132,7 @@ class A07PageBackgroundMixin:
                 )
             except Exception as exc:
                 result_box["error"] = exc
+                result_box["traceback"] = traceback.format_exc()
 
         thread = threading.Thread(target=_worker, name=f"A07ContextRestore-{token}", daemon=True)
         self._restore_thread = thread
@@ -154,6 +156,9 @@ class A07PageBackgroundMixin:
         error = result.get("error")
         if error is not None:
             self._diag(f"context_restore error token={token}: {error}")
+            trace = str(result.get("traceback") or "").strip()
+            if trace:
+                self._diag(f"context_restore traceback token={token}:\n{trace}")
             self._refresh_in_progress = False
             self._cancel_refresh_watchdog()
             self.status_var.set("A07-kontekst kunne ikke lastes.")
@@ -220,6 +225,7 @@ class A07PageBackgroundMixin:
                 )
             except Exception as exc:
                 result_box["error"] = exc
+                result_box["traceback"] = traceback.format_exc()
 
         thread = threading.Thread(target=_worker, name=f"A07CoreRefresh-{token}", daemon=True)
         self._core_refresh_thread = thread
@@ -243,6 +249,9 @@ class A07PageBackgroundMixin:
         error = result.get("error")
         if error is not None:
             self._diag(f"core_refresh error token={token}: {error}")
+            trace = str(result.get("traceback") or "").strip()
+            if trace:
+                self._diag(f"core_refresh traceback token={token}:\n{trace}")
             self._refresh_in_progress = False
             self._cancel_refresh_watchdog()
             self.status_var.set("A07-oppdatering feilet.")
@@ -279,6 +288,7 @@ class A07PageBackgroundMixin:
                 )
             except Exception as exc:
                 result_box["error"] = exc
+                result_box["traceback"] = traceback.format_exc()
 
         thread = threading.Thread(target=_worker, name=f"A07SupportRefresh-{token}", daemon=True)
         self._support_refresh_thread = thread
@@ -304,6 +314,9 @@ class A07PageBackgroundMixin:
         error = result.get("error")
         if error is not None:
             diag(f"support_refresh error token={token}: {error}")
+            trace = str(result.get("traceback") or "").strip()
+            if trace:
+                diag(f"support_refresh traceback token={token}:\n{trace}")
             self._support_views_ready = False
             self.status_var.set("A07-stottevisninger feilet.")
             self.details_var.set(str(error))

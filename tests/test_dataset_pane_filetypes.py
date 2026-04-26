@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataset_pane import MAIN_FILETYPES
+from src.pages.dataset.frontend.pane import MAIN_FILETYPES
 
 
 def test_dataset_file_dialog_default_filter_is_all_files_first():

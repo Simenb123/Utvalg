@@ -28,6 +28,18 @@ Merk:
 
 ## Viktige Delsett
 
+## Debuglogg Ved Bakgrunnsfeil
+
+A07 skriver intern diagnostikk til `%TEMP%\utvalg_a07_debug.log` når
+`_A07_DIAGNOSTICS_ENABLED` er aktiv. GUI-et skal fortsatt vise korte
+feilmeldinger, men bakgrunnsjobbene for kontekst, kjerne-refresh og
+støttevisninger logger nå full traceback i debugloggen. Bruk denne loggen når
+fanen blinker/refresh stopper, eller når GUI-et bare viser en kort
+`A07-oppdatering feilet`-melding.
+
+Loggen skal brukes til feilsøking, ikke som brukerflate. Nye background-feil bør
+derfor legge detaljer i debuglogg og holde `status_var`/`details_var` korte.
+
 ### Offentlig Fasade Og Compat
 
 - `tests/test_page_a07.py`

@@ -108,7 +108,7 @@ class A07PageCanonicalUiMixin(
         tools_menu.add_command(label="Eksporter", command=self._export_clicked)
         tools_menu.add_command(
             label="Åpne saldobalanse",
-            command=lambda: self._open_saldobalanse_workspace(status_text="Apnet Saldobalanse."),
+            command=lambda: self._open_saldobalanse_workspace(status_text="Åpnet Saldobalanse."),
         )
         tools_menu.add_command(label="Kilder...", command=self._open_source_overview)
         tools_menu.add_command(label="Kontrolloppstilling...", command=self._open_control_statement_window)

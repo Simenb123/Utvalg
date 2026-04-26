@@ -5,6 +5,7 @@ from typing import Sequence
 import pandas as pd
 
 from .data import RF1022_UNKNOWN_GROUP, work_family_for_a07_code, work_family_for_rf1022_group
+from .evidence import normalize_candidate_evidence
 from .rf1022_report import RF1022_TOTAL_ROW_ID
 
 
@@ -199,9 +200,12 @@ def control_queue_tree_tag(row: pd.Series) -> str:
     if status_s in {
         "Mistenkelig kobling",
         "Maa avklares",
+        "Må avklares",
         "Lonnskontroll",
+        "Lønnskontroll",
         "Kontroller kobling",
         "Ulost",
+        "Uløst",
         "UlÃ¸st",
         "UlÃ¸st",
         "Manuell",
@@ -228,11 +232,10 @@ def suggestion_tree_tag(row: pd.Series) -> str:
     if guardrail in {"review", "blocked"}:
         return "suggestion_review"
     try:
-        explain = str(row.get("Explain", "") or "").lower()
-        has_history = bool(str(row.get("HistoryAccounts", "") or "").strip())
+        evidence = normalize_candidate_evidence(row)
         score = float(row.get("Score") or 0.0)
         visual_strict_auto = bool(row.get("WithinTolerance", False)) and (
-            has_history or ("regel=" in explain and score >= 0.9)
+            evidence.used_history or (evidence.used_rulebook and score >= 0.9)
         )
     except Exception:
         visual_strict_auto = False

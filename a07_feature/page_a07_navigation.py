@@ -54,14 +54,14 @@ class A07PageNavigationMixin:
         accounts = self._selected_control_gl_accounts()
         if not accounts:
             self._notify_inline(
-                "Velg en eller flere kontoer til venstre forst.",
+                "Velg en eller flere kontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
         label = (
-            f"Apnet Saldobalanse for klassifisering av konto {accounts[0]}."
+            f"Åpnet Saldobalanse for klassifisering av konto {accounts[0]}."
             if len(accounts) == 1
-            else f"Apnet Saldobalanse for klassifisering av {len(accounts)} kontoer."
+            else f"Åpnet Saldobalanse for klassifisering av {len(accounts)} kontoer."
         )
         if not self._open_saldobalanse_workspace(accounts=accounts, status_text=label):
             self._notify_inline("Fant ikke Saldobalanse-fanen i denne visningen.", focus_widget=self.tree_control_gl)
@@ -69,19 +69,19 @@ class A07PageNavigationMixin:
     def _open_saldobalanse_for_selected_code_classification(self) -> None:
         code = str(self._selected_control_code() or "").strip()
         if not code:
-            self._notify_inline("Velg en A07-kode til hoyre forst.", focus_widget=self.tree_a07)
+            self._notify_inline("Velg en A07-kode til høyre først.", focus_widget=self.tree_a07)
             return
         accounts = self._selected_code_accounts(code)
         row = self._selected_control_row()
         next_action = str((row.get("NesteHandling") if row is not None else "") or "").strip()
         if a07_control_status.is_saldobalanse_follow_up_action(next_action):
-            label = f"{next_action} A07 viser behovet, men klassifiseringen gjores i Saldobalanse."
+            label = f"{next_action} A07 viser behovet, men klassifiseringen gjøres i Saldobalanse."
             payroll_scope = a07_control_status.saldobalanse_queue_for_control_action(next_action)
         elif accounts:
-            label = f"Apnet Saldobalanse for klassifisering av kontoene bak {code}."
+            label = f"Åpnet Saldobalanse for klassifisering av kontoene bak {code}."
             payroll_scope = classification_workspace.QUEUE_ALL
         else:
-            label = f"Apnet Saldobalanse for klassifisering av {code}."
+            label = f"Åpnet Saldobalanse for klassifisering av {code}."
             payroll_scope = classification_workspace.QUEUE_ALL
         try:
             opened = self._open_saldobalanse_workspace(
@@ -97,7 +97,7 @@ class A07PageNavigationMixin:
     def _open_saldobalanse_for_selected_group_classification(self) -> None:
         group_id = str(self._selected_group_id() or "").strip()
         if not group_id:
-            self._notify_inline("Velg en gruppe forst.", focus_widget=self.tree_groups)
+            self._notify_inline("Velg en gruppe først.", focus_widget=self.tree_groups)
             return
         indexes = getattr(self, "_a07_refresh_indexes", {})
         current_lookup = indexes.get("current_accounts_by_code") if isinstance(indexes, dict) else None
@@ -106,9 +106,9 @@ class A07PageNavigationMixin:
         else:
             accounts = accounts_for_code(self._effective_mapping(), group_id)
         label = (
-            f"Apnet Saldobalanse for klassifisering av kontoene bak gruppen {group_id}."
+            f"Åpnet Saldobalanse for klassifisering av kontoene bak gruppen {group_id}."
             if accounts
-            else f"Apnet Saldobalanse fra gruppen {group_id}."
+            else f"Åpnet Saldobalanse fra gruppen {group_id}."
         )
         if not self._open_saldobalanse_workspace(accounts=accounts, status_text=label):
             self._notify_inline("Fant ikke Saldobalanse-fanen i denne visningen.", focus_widget=self.tree_groups)

@@ -41,7 +41,7 @@ class A07PageMappingControlActionsMixin:
         plan = A07PageMappingControlActionsMixin._selected_control_gl_action_plan(self)
         if not plan.accounts:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre forst.",
+                "Velg en eller flere GL-kontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
@@ -49,7 +49,7 @@ class A07PageMappingControlActionsMixin:
             self._assign_accounts_to_rf1022_group(plan.accounts, plan.target_group, source_label=plan.source_label)
             return
         if plan.action == PROMPT_A07_CODE:
-            self._notify_inline("Velg en A07-kode til hoyre forst.", focus_widget=self.tree_a07)
+            self._notify_inline("Velg en A07-kode til høyre først.", focus_widget=self.tree_a07)
             return
         code = plan.target_code
         conflicts = _locked_mapping_conflicts_for(self, plan.accounts, target_code=code)
@@ -107,7 +107,7 @@ class A07PageMappingControlActionsMixin:
         accounts = self._selected_control_gl_accounts()
         if not accounts:
             self._notify_inline(
-                "Velg en eller flere GL-kontoer til venstre forst.",
+                "Velg en eller flere GL-kontoer til venstre først.",
                 focus_widget=self.tree_control_gl,
             )
             return
@@ -226,7 +226,7 @@ class A07PageMappingControlActionsMixin:
     def _apply_history_for_selected_code(self) -> None:
         code = self._selected_control_code()
         if not code:
-            self._notify_inline("Velg en A07-kode til hoyre forst.", focus_widget=self.tree_a07)
+            self._notify_inline("Velg en A07-kode til høyre først.", focus_widget=self.tree_a07)
             return
         if code in _locked_codes_for(self):
             self._notify_inline("Valgt kode er låst. Lås opp før du bruker historikk.", focus_widget=self.tree_a07)

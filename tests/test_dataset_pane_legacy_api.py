@@ -1,6 +1,6 @@
 import inspect
 
-from dataset_pane import DatasetPane
+from src.pages.dataset.frontend.pane import DatasetPane
 
 
 def test_dataset_pane_exposes_legacy_api():

@@ -356,7 +356,7 @@ class A07PageControlStatementWindowMixin:
             configure_total_tag(overview_tree)
         accounts_top = ttk.Frame(lower, padding=(0, 0, 0, 6))
         accounts_top.pack(fill="x")
-        accounts_var = tk.StringVar(value="Velg RF-1022-post for aa se kontoene bak raden.")
+        accounts_var = tk.StringVar(value="Velg RF-1022-post for å se kontoene bak raden.")
         ttk.Label(accounts_top, textvariable=accounts_var, style="Muted.TLabel").pack(side="left", fill="x", expand=True)
         ttk.Button(
             accounts_top,

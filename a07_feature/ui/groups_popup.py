@@ -24,7 +24,7 @@ class A07PageGroupsPopupMixin:
         self.btn_rename_group.pack(side="left", padx=(6, 0))
         self.btn_remove_group = ttk.Button(
             groups_actions,
-            text="OpplÃ¸s",
+            text="Oppløs",
             command=self._remove_selected_group,
         )
         self.btn_remove_group.pack(side="left", padx=(6, 0))
@@ -34,8 +34,12 @@ class A07PageGroupsPopupMixin:
             command=self._focus_selected_group_code,
         )
         self.btn_focus_group.pack(side="left", padx=(6, 0))
-        self.tree_groups = self._build_tree_tab(groups_side, _GROUP_COLUMNS)
-        self.tree_groups.configure(height=6)
+        self.tree_groups = self._build_managed_tree_tab(
+            groups_side,
+            _GROUP_COLUMNS,
+            view_id="groups",
+            height=6,
+        )
 
     def _open_groups_popup(self, group_id: str | None = None) -> None:
         popup = getattr(self, "_groups_popup", None)
@@ -75,8 +79,13 @@ class A07PageGroupsPopupMixin:
         self.btn_focus_group = ttk.Button(actions, text="Fokuser", command=self._focus_selected_group_code)
         self.btn_focus_group.pack(side="left", padx=(6, 0))
 
-        self.tree_groups = self._build_tree_tab(body, _GROUP_COLUMNS)
-        self.tree_groups.configure(height=10, selectmode="browse")
+        self.tree_groups = self._build_managed_tree_tab(
+            body,
+            _GROUP_COLUMNS,
+            view_id="groups",
+            height=10,
+            selectmode="browse",
+        )
         self._bind_groups_tree_events()
         self._refresh_groups_tree(force=True)
         self._select_group_in_popup(group_id)

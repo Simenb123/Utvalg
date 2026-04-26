@@ -4,7 +4,7 @@ from pathlib import Path
 
 import openpyxl
 
-from dataset_pane_io import read_csv_rows, read_excel_rows
+from src.pages.dataset.backend.pane_io import read_csv_rows, read_excel_rows
 
 
 def test_read_csv_rows_accepts_max_rows_and_start_row(tmp_path: Path) -> None:

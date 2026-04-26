@@ -113,8 +113,8 @@ def test_build_control_queue_df_surfaces_rf1022_follow_up() -> None:
     )
 
     row = out.iloc[0]
-    assert row["Status"] == "Lonnskontroll"
-    assert row["Anbefalt"] == "Apne lonnsklassifisering"
+    assert row["Status"] == "Lønnskontroll"
+    assert row["Anbefalt"] == "Åpne lønnsklassifisering"
     assert row["NesteHandling"] == "Tildel RF-1022-post i Saldobalanse."
 
 

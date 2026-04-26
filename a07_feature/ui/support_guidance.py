@@ -50,7 +50,7 @@ class A07PageSupportGuidanceMixin:
         if work_level == "rf1022":
             group_id = self._selected_rf1022_group()
             if not group_id:
-                self.control_summary_var.set("Velg RF-1022-post til hoyre.")
+                self.control_summary_var.set("Velg RF-1022-post til høyre.")
                 self.control_intro_var.set("")
                 self.control_meta_var.set("")
                 self.control_match_var.set("")
@@ -154,7 +154,7 @@ class A07PageSupportGuidanceMixin:
 
         code = self._selected_code_from_tree(self.tree_a07)
         if not code:
-            self.control_summary_var.set("Velg A07-kode til hoyre.")
+            self.control_summary_var.set("Velg A07-kode til høyre.")
             self.control_intro_var.set("")
             self.control_meta_var.set("")
             self.control_match_var.set("")
@@ -164,7 +164,7 @@ class A07PageSupportGuidanceMixin:
             self.control_next_var.set("")
             if callable(restore_drag_hint):
                 restore_drag_hint()
-            self.control_suggestion_effect_var.set("Velg et forslag for aa se hva som blir koblet.")
+            self.control_suggestion_effect_var.set("Velg et forslag for å se hva som blir koblet.")
             try:
                 best_button = getattr(self, "btn_control_best", None)
                 history_button = getattr(self, "btn_control_history", None)

@@ -53,6 +53,8 @@ De viktigste kanoniske modulomraadene naa er:
 - `LIVE_VERIFICATION_CHECKLIST.md`: sjekkliste for test mot faktisk klientdata
 - `MODULE_MAP.md`: dagens kanoniske filer, wrappers og compat-lag
 - `TESTING.md`: hvilke tester som beskytter dette sporet
+- `EVIDENCE_ROADMAP.md`: beslutningene rundt structured evidence, `Explain`
+  som visningsfelt og solver v2-retning
 
 ## Status naa
 
@@ -74,6 +76,8 @@ matching, RF-1022 og koblingsflyten tryggere i praktisk revisjonsarbeid. Les
 
 - A07-koder er canonical matchingnivaa.
 - RF-1022 er aggregert kontroll- og visningsnivaa.
+- `Explain` er visningsfelt. Matching, RF-1022, solver og auto-plan skal bruke
+  strukturerte evidence-felt.
 - Nye A07-aliaser, ekskluderinger og boost-kontoer skal skrives til
   `global_full_a07_rulebook.json`.
 - `global_full_a07_rulebook.json` er eneste aktive A07-kildesannhet.

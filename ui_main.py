@@ -22,7 +22,7 @@ _ADMIN_PASSWORD = "123"
 _ADMIN_PASSWORD_TITLE = "Admin"
 
 # Pages / views
-from page_dataset import DatasetPage
+from src.pages.dataset.frontend.page import DatasetPage
 from page_analyse import AnalysePage
 from src.pages.saldobalanse.frontend.page import SaldobalansePage
 from page_admin import AdminPage

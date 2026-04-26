@@ -218,14 +218,14 @@ class A07PageSelectionControlsMixin:
             except Exception:
                 summary_text = ""
             if not summary_text:
-                summary_text = "Velg en kode for aa se historikk."
+                summary_text = "Velg en kode for å se historikk."
         else:
             try:
                 summary_text = str(suggestion_var.get() or "").strip()
             except Exception:
                 summary_text = ""
             if not summary_text:
-                summary_text = "Velg A07-kode til hoyre for aa se beste forslag."
+                summary_text = "Velg A07-kode til høyre for å se beste forslag."
         try:
             self.control_alternative_summary_var.set(summary_text)
         except Exception:
@@ -249,7 +249,7 @@ class A07PageSelectionControlsMixin:
         guided_status = str((row.get("GuidetStatus") if row is not None else "") or "").strip()
         if guided_status in {"Mistenkelig kobling", "Har forslag"}:
             return "suggestions"
-        if guided_status == "Lonnskontroll":
+        if guided_status in {"Lonnskontroll", "Lønnskontroll"}:
             return "mapping"
         return "mapping"
 

@@ -9,10 +9,10 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import bus
-import dataset_export
+from ..backend import export as dataset_export
 import session
-from dataset_pane_build import BuildRequest, BuildResult, build_dataset, is_saft_path
-from dataset_pane_io import (
+from ..backend.pane_build import BuildRequest, BuildResult, build_dataset, is_saft_path
+from ..backend.pane_io import (
     auto_detect_header_and_headers,
     is_csv_path,
     is_excel_path,
@@ -22,8 +22,8 @@ from dataset_pane_io import (
     read_excel_header,
     read_excel_rows,
 )
-from dataset_pane_xls import list_xls_sheets, read_xls_header, read_xls_sample
-from dataset_pane_ui import build_ui
+from ..backend.pane_xls import list_xls_sheets, read_xls_header, read_xls_sample
+from .pane_ui import build_ui
 from ml_map_utils import canonical_fields, load_ml_map, suggest_mapping, update_ml_map
 from models import Columns
 from ui_loading import LoadingOverlay
@@ -481,7 +481,7 @@ class DatasetPane(ttk.Frame):
 
     def _try_mount_store_section(self):
         try:
-            from dataset_pane_store import ClientStoreSection
+            from .pane_store import ClientStoreSection
         except Exception:
             return None
 

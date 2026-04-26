@@ -6,8 +6,8 @@ import pandas as pd
 
 
 def test_build_dataset_clicked_suppresses_ready_popup(monkeypatch) -> None:
-    import dataset_pane
-    from dataset_pane_build import BuildResult
+    import src.pages.dataset.frontend.pane as dataset_pane
+    from src.pages.dataset.backend.pane_build import BuildResult
     from models import Columns
 
     pane = dataset_pane.DatasetPane.__new__(dataset_pane.DatasetPane)

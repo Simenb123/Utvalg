@@ -19,6 +19,7 @@ def _normalize_work_label(value: object) -> str:
         "Uløst": "Ulost",
         "UlÃ¸st": "Ulost",
         "UlÃƒÂ¸st": "Ulost",
+        "UlÃƒÆ’Ã‚Â¸st": "Ulost",
         "Forslag": "Forslag",
         "Historikk": "Historikk",
         "Manuell": "Manuell",
@@ -35,17 +36,26 @@ def _normalize_guided_status(value: object, *, row: pd.Series | None = None) -> 
         pass
     status = str(value or "").strip()
     mapping = {
-        "Ulost": "Maa avklares",
+        "Ulost": "Må avklares",
         "Forslag": "Har forslag",
         "Historikk": "Har historikk",
         "Manuell": "Kontroller kobling",
         "Ferdig": "Ferdig",
     }
+    aliases = {
+        "Maa avklares": "Må avklares",
+        "MÃ¥ avklares": "Må avklares",
+        "MÃƒÂ¥ avklares": "Må avklares",
+        "Lonnskontroll": "Lønnskontroll",
+        "Apne lonnsklassifisering": "Åpne lønnsklassifisering",
+    }
     if status:
         normalized = mapping.get(_normalize_work_label(status), status)
-        return str(normalized or "").strip()
+        return aliases.get(str(normalized or "").strip(), str(normalized or "").strip())
     raw = _normalize_work_label(row.get("Arbeidsstatus") if row is not None else "")
-    return mapping.get(raw, str(row.get("Status") if row is not None else "") or "").strip()
+    fallback = str(row.get("Status") if row is not None else "") or ""
+    normalized = mapping.get(raw, fallback).strip()
+    return aliases.get(normalized, normalized)
 
 
 def build_control_statement_summary(
@@ -56,7 +66,7 @@ def build_control_statement_summary(
     amount_formatter: Callable[[object], str | None] | None = None,
 ) -> str:
     if row is None:
-        return "Velg gruppe i kontrolloppstillingen for aa se kontoene bak raden."
+        return "Velg gruppe i kontrolloppstillingen for å se kontoene bak raden."
 
     group_label = str(row.get("Navn") or row.get("Gruppe") or "").strip() or "valgt gruppe"
     if accounts_df is None or accounts_df.empty:
@@ -125,11 +135,11 @@ def control_next_action_label(
 ) -> str:
     status_s = str(status or "").strip()
     if status_s in {"OK", "Ekskludert"}:
-        return "Ingen handling nodvendig."
+        return "Ingen handling nødvendig."
     if best_suggestion is not None:
         return "Se forslag for valgt kode."
     if has_history:
-        return "Aapne historikk for valgt kode."
+        return "Åpne historikk for valgt kode."
     return "Kontroller dagens kobling."
 
 
@@ -143,12 +153,12 @@ def is_saldobalanse_follow_up_action(next_action: object) -> bool:
 def control_follow_up_guidance(next_action: object) -> str:
     action_s = str(next_action or "").strip()
     if action_s == "Tildel RF-1022-post i Saldobalanse.":
-        return "Kontoene er mappet, men mangler RF-1022-post. Fullfor klassifiseringen i Saldobalanse."
-    if action_s == "Fullfor lonnsflagg i Saldobalanse.":
-        return "Kontoene er mappet, men mangler lonnsflagg. Fullfor klassifiseringen i Saldobalanse."
+        return "Kontoene er mappet, men mangler RF-1022-post. Fullfør klassifiseringen i Saldobalanse."
+    if action_s in {"Fullfor lonnsflagg i Saldobalanse.", "Fullfør lønnsflagg i Saldobalanse."}:
+        return "Kontoene er mappet, men mangler lønnsflagg. Fullfør klassifiseringen i Saldobalanse."
     if action_s == "Rydd RF-1022-post for mappede kontoer.":
         return "Kontoprofilene peker mot en annen RF-1022-post enn A07-koden tilsier."
-    return "A07 viser kontrollbehovet, men klassifiseringen gjores i Saldobalanse."
+    return "A07 viser kontrollbehovet, men klassifiseringen gjøres i Saldobalanse."
 
 
 def saldobalanse_queue_for_control_action(next_action: object) -> str:
@@ -158,6 +168,7 @@ def saldobalanse_queue_for_control_action(next_action: object) -> str:
     if action_s in {
         "Tildel RF-1022-post i Saldobalanse.",
         "Fullfor lonnsflagg i Saldobalanse.",
+        "Fullfør lønnsflagg i Saldobalanse.",
     }:
         return classification_workspace.QUEUE_REVIEW
     if is_saldobalanse_follow_up_action(action_s):
@@ -170,13 +181,16 @@ def compact_control_next_action(next_action: object) -> str:
     mapping = {
         "Se historikk": "Historikk",
         "Aapne historikk for valgt kode.": "Historikk",
+        "Åpne historikk for valgt kode.": "Historikk",
         "Se forslag": "Forslag",
         "Se forslag for valgt kode.": "Forslag",
         "Kontroller kobling": "Kobling",
         "Kontroller dagens kobling.": "Kobling",
         "Apne lonnsklassifisering": "Kontroll",
+        "Åpne lønnsklassifisering": "Kontroll",
         "Ingen handling": "Ingen",
         "Ingen handling nodvendig.": "Ingen",
+        "Ingen handling nødvendig.": "Ingen",
     }
     return mapping.get(action_s, action_s or "-")
 
@@ -189,21 +203,21 @@ def control_intro_text(
 ) -> str:
     work_s = _normalize_guided_status(work_label)
     if work_s == "Ferdig":
-        return "Ser ferdig ut. Kontroller kort og gaa videre hvis du er enig."
+        return "Ser ferdig ut. Kontroller kort og gå videre hvis du er enig."
     if work_s == "Har historikk":
-        return "Historikk finnes for posten. Sammenlign kort for du godkjenner."
+        return "Historikk finnes for posten. Sammenlign kort før du godkjenner."
     if work_s == "Har forslag":
-        return "Det finnes et forslag som bor vurderes."
+        return "Det finnes et forslag som bør vurderes."
     if work_s == "Mistenkelig kobling":
-        return "Dagens kobling ser mistenkelig ut og bor kontrolleres."
-    if work_s == "Lonnskontroll":
-        return "Denne posten krever oppfolging i lonnsklassifiseringen."
+        return "Dagens kobling ser mistenkelig ut og bør kontrolleres."
+    if work_s == "Lønnskontroll":
+        return "Denne posten krever oppfølging i lønnsklassifiseringen."
     if work_s == "Kontroller kobling":
-        return "Posten er koblet, men bor kontrolleres."
+        return "Posten er koblet, men bør kontrolleres."
     if has_history:
-        return "Historikk finnes for posten. Sammenlign kort for du godkjenner."
+        return "Historikk finnes for posten. Sammenlign kort før du godkjenner."
     if best_suggestion is not None:
-        return "Det finnes et forslag som bor vurderes."
+        return "Det finnes et forslag som bør vurderes."
     return "Velg koblinger eller jobb videre i forslagene nederst."
 
 
@@ -227,13 +241,13 @@ def filter_control_queue_df(control_df: pd.DataFrame, view_key: str | None) -> p
     elif view_s == "alle":
         mask = pd.Series(True, index=control_df.index)
     elif view_s == "ulost":
-        mask = statuses.isin({"Maa avklares", "Mistenkelig kobling"})
+        mask = statuses.isin({"Må avklares", "Mistenkelig kobling"})
     elif view_s == "forslag":
         mask = statuses == "Har forslag"
     elif view_s == "historikk":
         mask = statuses == "Har historikk"
     elif view_s == "manuell":
-        mask = statuses.isin({"Kontroller kobling", "Lonnskontroll"})
+        mask = statuses.isin({"Kontroller kobling", "Lønnskontroll"})
     else:
         mask = pd.Series(True, index=control_df.index)
     return control_df.loc[mask].reset_index(drop=True)
@@ -266,7 +280,7 @@ def control_tree_tag(work_label: object) -> str:
         return "control_done"
     if label_s in {"Har forslag", "Har historikk"}:
         return "control_review"
-    if label_s in {"Mistenkelig kobling", "Maa avklares", "Lonnskontroll", "Kontroller kobling"}:
+    if label_s in {"Mistenkelig kobling", "Må avklares", "Lønnskontroll", "Kontroller kobling"}:
         return "control_manual"
     return "control_default"
 
@@ -279,8 +293,8 @@ def control_action_style(work_label: object) -> str:
         "Har forslag",
         "Har historikk",
         "Mistenkelig kobling",
-        "Maa avklares",
-        "Lonnskontroll",
+        "Må avklares",
+        "Lønnskontroll",
         "Kontroller kobling",
     }:
         return "Warning.TLabel"

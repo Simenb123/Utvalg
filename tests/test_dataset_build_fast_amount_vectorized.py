@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-from dataset_build_fast import _coerce_amount_series
+from src.pages.dataset.backend.build_fast import _coerce_amount_series
 
 
 def test_coerce_amount_series_vectorized_parses_common_formats() -> None:

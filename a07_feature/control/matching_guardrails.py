@@ -4,6 +4,7 @@ from typing import Mapping, Sequence
 
 import pandas as pd
 
+from .evidence import backfill_candidate_evidence_fields, normalize_candidate_evidence
 from .matching_shared import (
     _family_label,
     _normalize_semantic_text,
@@ -19,10 +20,12 @@ def _refund_has_specific_support(row: pd.Series) -> bool:
     account_tokens = set(_parse_konto_tokens(row.get("ForslagKontoer")))
     if "5800" in account_tokens:
         return True
+    evidence = normalize_candidate_evidence(row)
     text_parts = (
         row.get("ForslagVisning"),
         row.get("HitTokens"),
-        row.get("Explain"),
+        row.get("AnchorSignals"),
+        evidence.match_basis,
     )
     text = _normalize_semantic_text(" ".join(str(part or "") for part in text_parts))
     specific_tokens = (
@@ -53,18 +56,12 @@ def _is_generic_refund_suggestion(row: pd.Series) -> bool:
 
 
 def _row_has_name_anchor(row: pd.Series) -> bool:
-    return bool(str(row.get("HitTokens") or "").strip()) or "navnetreff" in str(row.get("AnchorSignals") or "").lower()
+    return normalize_candidate_evidence(row).has_name_anchor
 
 
 def _row_has_anchor(row: pd.Series) -> bool:
-    return any(
-        (
-            bool(row.get("UsedHistory", False)),
-            bool(row.get("UsedRulebook", False)),
-            bool(row.get("UsedUsage", False)),
-            _row_has_name_anchor(row),
-        )
-    )
+    evidence = normalize_candidate_evidence(row)
+    return any((evidence.used_history, evidence.used_rulebook, evidence.used_usage, evidence.has_name_anchor))
 
 
 def _row_candidate_family(row: pd.Series) -> str:
@@ -72,24 +69,25 @@ def _row_candidate_family(row: pd.Series) -> str:
         str(row.get("ForslagVisning") or "").strip(),
         str(row.get("HistoryAccountsVisning") or "").strip(),
         str(row.get("HitTokens") or "").strip(),
-        str(row.get("Explain") or "").strip(),
+        str(row.get("AnchorSignals") or "").strip(),
+        normalize_candidate_evidence(row).match_basis,
     ]
     text = " ".join(part for part in text_parts if part)
     return infer_semantic_family(text)
 
 
 def _row_flag(row: pd.Series, name: str, *, explain_token: str | None = None) -> bool:
-    try:
-        if name in row.index:
-            raw = row.get(name)
-            if raw is not None and not (isinstance(raw, float) and pd.isna(raw)):
-                return bool(raw)
-    except Exception:
-        pass
-    if explain_token:
-        explain = str(row.get("Explain", "") or "").lower()
-        return explain_token in explain
-    return False
+    _ = explain_token
+    evidence = normalize_candidate_evidence(row)
+    lookup = {
+        "UsedHistory": evidence.used_history,
+        "UsedRulebook": evidence.used_rulebook,
+        "UsedUsage": evidence.used_usage,
+        "UsedSpecialAdd": evidence.used_special_add,
+        "UsedResidual": evidence.used_residual,
+        "WithinTolerance": evidence.within_tolerance,
+    }
+    return bool(lookup.get(name, False))
 
 
 def classify_suggestion_guardrail(row: pd.Series | None) -> tuple[str, str]:
@@ -108,8 +106,9 @@ def classify_suggestion_guardrail(row: pd.Series | None) -> tuple[str, str]:
     )
     candidate_family = _row_candidate_family(row)
     has_anchor = _row_has_anchor(row)
-    amount_evidence = str(row.get("AmountEvidence") or "").strip().lower()
-    within_tolerance = bool(row.get("WithinTolerance", False))
+    evidence = normalize_candidate_evidence(row)
+    amount_evidence = evidence.amount_evidence
+    within_tolerance = evidence.within_tolerance
     family_conflict = bool(expected_family and candidate_family and expected_family != candidate_family)
     suggestion_text = _normalize_semantic_text(row.get("ForslagVisning"))
     has_descriptive_name = any(char.isalpha() for char in suggestion_text)
@@ -122,11 +121,11 @@ def classify_suggestion_guardrail(row: pd.Series | None) -> tuple[str, str]:
     if within_tolerance and _is_generic_refund_suggestion(row):
         return "review", "Generisk refusjon uten NAV/sykepenger/foreldrepenger"
     if within_tolerance and has_anchor:
-        if bool(row.get("UsedHistory", False)):
+        if evidence.used_history:
             return "accepted", "Treff paa historikk"
-        if bool(row.get("UsedRulebook", False)):
+        if evidence.used_rulebook:
             return "accepted", "Treff paa regelbok"
-        if bool(row.get("UsedUsage", False)):
+        if evidence.used_usage:
             return "accepted", "Treff paa kontobruk"
         if _row_has_name_anchor(row):
             return "accepted", "Treff paa navn"
@@ -135,15 +134,15 @@ def classify_suggestion_guardrail(row: pd.Series | None) -> tuple[str, str]:
         return "review", f"Vurder familiekonflikt ({_family_label(candidate_family)})"
     if not has_anchor and amount_evidence in {"exact", "within_tolerance", "near"}:
         return "review", "Belop uten stotte"
-    if bool(row.get("UsedHistory", False)):
+    if evidence.used_history:
         return "review", "Treff paa historikk"
-    if bool(row.get("UsedRulebook", False)):
+    if evidence.used_rulebook:
         return "review", "Treff paa regelbok"
-    if bool(row.get("UsedUsage", False)):
+    if evidence.used_usage:
         return "review", "Treff paa kontobruk"
     if _row_has_name_anchor(row):
         return "review", "Treff paa navn"
-    return "review", "Maa vurderes"
+    return "review", "Må vurderes"
 
 
 def evaluate_current_mapping_suspicion(
@@ -195,39 +194,11 @@ def _backfill_evidence_fields(work: pd.DataFrame) -> None:
             return work[name].fillna("").astype(str)
         return pd.Series([""] * len(work), index=work.index)
 
-    def _bool_col(name: str) -> pd.Series:
-        if name in work.columns:
-            return work[name].fillna(False).astype(bool)
-        return pd.Series([False] * len(work), index=work.index)
-
-    explain_lower = _str_col("Explain").str.lower()
     history_nonempty = _str_col("HistoryAccounts").str.strip().ne("")
     hits_nonempty = _str_col("HitTokens").str.strip().ne("")
+    had_amount_evidence = "AmountEvidence" in work.columns
 
-    if "UsedHistory" not in work.columns:
-        work["UsedHistory"] = history_nonempty
-    else:
-        work["UsedHistory"] = work["UsedHistory"].fillna(False).astype(bool)
-
-    if "UsedRulebook" not in work.columns:
-        work["UsedRulebook"] = explain_lower.str.contains("regel=", regex=False)
-    else:
-        work["UsedRulebook"] = work["UsedRulebook"].fillna(False).astype(bool)
-
-    if "UsedUsage" not in work.columns:
-        work["UsedUsage"] = explain_lower.str.contains("bruk=", regex=False)
-    else:
-        work["UsedUsage"] = work["UsedUsage"].fillna(False).astype(bool)
-
-    if "UsedSpecialAdd" not in work.columns:
-        work["UsedSpecialAdd"] = explain_lower.str.contains("special_add", regex=False)
-    else:
-        work["UsedSpecialAdd"] = work["UsedSpecialAdd"].fillna(False).astype(bool)
-
-    if "UsedResidual" not in work.columns:
-        work["UsedResidual"] = False
-    else:
-        work["UsedResidual"] = work["UsedResidual"].fillna(False).astype(bool)
+    backfill_candidate_evidence_fields(work)
 
     if "AmountDiffAbs" not in work.columns:
         if "Diff" in work.columns:
@@ -237,7 +208,7 @@ def _backfill_evidence_fields(work: pd.DataFrame) -> None:
     else:
         work["AmountDiffAbs"] = work["AmountDiffAbs"].apply(_safe_float)
 
-    if "AmountEvidence" not in work.columns:
+    if not had_amount_evidence:
         def _derive_evidence(row: pd.Series) -> str:
             diff_abs = _safe_float(row.get("AmountDiffAbs"))
             if diff_abs <= 0.01 and bool(row.get("WithinTolerance", False)):

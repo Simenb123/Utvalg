@@ -239,12 +239,12 @@ def apply_core_state(page: object, payload: dict[str, object]) -> dict[str, obje
 
     page.history_compare_df = _empty_history_df()
     page.control_statement_accounts_df = _empty_selected_accounts_df()
-    page.control_suggestion_summary_var.set("Velg A07-kode til hoyre for aa se beste forslag.")
-    page.control_suggestion_effect_var.set("Velg et forslag for aa se hva som blir koblet.")
-    page.control_accounts_summary_var.set("Velg A07-kode til hoyre for aa se hva som er koblet na.")
+    page.control_suggestion_summary_var.set("Velg A07-kode til høyre for å se beste forslag.")
+    page.control_suggestion_effect_var.set("Velg et forslag for å se hva som blir koblet.")
+    page.control_accounts_summary_var.set("Velg A07-kode til høyre for å se hva som er koblet nå.")
     statement_accounts_var = getattr(page, "control_statement_accounts_summary_var", None)
     if statement_accounts_var is not None:
-        statement_accounts_var.set("Velg gruppe i kontrolloppstillingen for aa se kontoene bak raden.")
+        statement_accounts_var.set("Velg gruppe i kontrolloppstillingen for å se kontoene bak raden.")
     summary_var = getattr(page, "control_statement_summary_var", None)
     if summary_var is not None:
         try:
@@ -396,7 +396,7 @@ def finalize_core_refresh_ui(
                 page._pending_auto_mapping_summary = ""
             else:
                 page.status_var.set("A07 oppdatert.")
-                page.details_var.set("Velg konto og kode for aa jobbe videre. Historikk lastes ved behov.")
+                page.details_var.set("Velg konto og kode for å jobbe videre. Historikk lastes ved behov.")
         try:
             page._set_control_details_visible(True)
             page._support_requested = True

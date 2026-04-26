@@ -5,6 +5,7 @@ from typing import Mapping
 import pandas as pd
 
 from .basis import control_gl_basis_column_for_account as _shared_control_gl_basis_column_for_account
+from .evidence import candidate_text, candidate_value, normalize_candidate_evidence
 from .rf1022_bridge import RF1022_UNKNOWN_GROUP, resolve_a07_rf1022_group, rf1022_group_a07_codes
 
 
@@ -26,68 +27,19 @@ def _global_auto_empty_plan() -> pd.DataFrame:
 
 
 def _global_auto_row_text(row: pd.Series | Mapping[str, object], column: str) -> str:
-    getter = getattr(row, "get", None)
-    if not callable(getter):
-        return ""
-    try:
-        value = getter(column)
-    except Exception:
-        return ""
-    try:
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-    return str(value or "").strip()
+    return candidate_text(row, column)
 
 
 def _global_auto_row_value(row: pd.Series | Mapping[str, object], column: str) -> object:
-    getter = getattr(row, "get", None)
-    if not callable(getter):
-        return ""
-    try:
-        return getter(column)
-    except Exception:
-        return ""
+    return candidate_value(row, column)
 
 
 def _global_auto_candidate_has_semantic_support(row: pd.Series | Mapping[str, object]) -> bool:
-    if _global_auto_row_text(row, "Matchgrunnlag"):
-        return True
-    if _global_auto_row_text(row, "HitTokens"):
-        return True
-    if _global_auto_row_text(row, "AnchorSignals"):
-        return True
-    for column in ("UsedRulebook", "UsedUsage", "UsedSpecialAdd"):
-        value = _global_auto_row_value(row, column)
-        try:
-            if pd.isna(value):
-                continue
-        except Exception:
-            pass
-        if isinstance(value, str):
-            if value.strip().casefold() in {"1", "true", "ja", "yes"}:
-                return True
-        elif bool(value):
-            return True
-    return False
+    return normalize_candidate_evidence(row).has_semantic_support
 
 
 def _global_auto_candidate_has_amount_support(row: pd.Series | Mapping[str, object]) -> bool:
-    if _global_auto_row_text(row, "Belopsgrunnlag"):
-        return True
-    amount_evidence = _global_auto_row_text(row, "AmountEvidence").casefold()
-    if amount_evidence in {"exact", "within_tolerance"}:
-        return True
-    value = _global_auto_row_value(row, "WithinTolerance")
-    try:
-        if pd.isna(value):
-            return False
-    except Exception:
-        pass
-    if isinstance(value, str):
-        return value.strip().casefold() in {"1", "true", "ja", "yes"}
-    return bool(value)
+    return normalize_candidate_evidence(row).has_amount_support
 
 
 def _global_auto_candidate_is_strict(row: pd.Series | Mapping[str, object]) -> bool:
@@ -203,7 +155,7 @@ def build_global_auto_mapping_plan(
         name = _global_auto_row_text(row, "Navn")
         strict = _global_auto_candidate_is_strict(row)
         action = "review"
-        status = "Maa vurderes"
+        status = "Må vurderes"
         reason = "Kandidaten er ikke strict-auto."
         kol = str(_global_auto_row_value(row, "Kol") or "").strip()
         belop = _global_auto_row_value(row, "Belop")
@@ -216,7 +168,7 @@ def build_global_auto_mapping_plan(
             reason = "Kandidaten mangler konto eller A07-kode."
         elif not strict:
             action = "review"
-            status = "Maa vurderes"
+            status = "Må vurderes"
             reason = "Kandidaten er ikke godkjent som trygt forslag."
         elif account not in gl_by_account:
             action = "invalid"
@@ -293,7 +245,7 @@ def build_global_auto_mapping_plan(
                         planned_mapping[account] = code
                     else:
                         action = "review" if audit_status in {"Mistenkelig", "Uavklart"} else "blocked"
-                        status = audit_status or "Maa vurderes"
+                        status = audit_status or "Må vurderes"
                         reason = audit_reason or "Simulert mapping er ikke trygg."
 
         rows.append(

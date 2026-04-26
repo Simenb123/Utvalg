@@ -33,7 +33,7 @@ def test_apply_selected_rf1022_candidate_requires_auto_plan_apply() -> None:
                     "Rf1022GroupId": "100_loenn_ol",
                     "Matchgrunnlag": "Regelbok/alias",
                     "Belopsgrunnlag": "",
-                    "Forslagsstatus": "Maa vurderes",
+                    "Forslagsstatus": "Må vurderes",
                 }
             ]
         )
@@ -51,7 +51,7 @@ def test_apply_selected_rf1022_candidate_requires_auto_plan_apply() -> None:
                         "Konto": "5000",
                         "Kode": "fastloenn",
                         "Action": "review",
-                        "Status": "Maa vurderes",
+                        "Status": "Må vurderes",
                         "Reason": "Mangler belopsstotte.",
                     }
                 ]
@@ -66,7 +66,7 @@ def test_apply_selected_rf1022_candidate_requires_auto_plan_apply() -> None:
     page_a07.A07Page._apply_selected_rf1022_candidate(DummyPage())
 
     assert assigned == []
-    assert statuses == ["Kandidaten kan ikke brukes automatisk (Maa vurderes): Mangler belopsstotte."]
+    assert statuses == ["Kandidaten kan ikke brukes automatisk (Må vurderes): Mangler belopsstotte."]
 
 def test_auto_apply_strict_a07_suggestions_applies_exact_accepted_rows() -> None:
     saves: list[tuple[str, float]] = []
@@ -198,7 +198,7 @@ def test_apply_batch_suggestions_clicked_uses_rf1022_candidates_in_rf_mode() -> 
                 "BelopAktiv": 1000.0,
                 "Matchgrunnlag": "Regelbok/alias",
                 "Belopsgrunnlag": "",
-                "Forslagsstatus": "Maa vurderes",
+                "Forslagsstatus": "Må vurderes",
             },
         ]
     )

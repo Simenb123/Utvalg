@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from openpyxl import Workbook
 
-from dataset_build_fast import build_from_file
+from src.pages.dataset.backend.build_fast import build_from_file
 from excel_importer import infer_excel_sheet_and_headers
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from page_dataset import DatasetPage
+from src.pages.dataset.frontend.page import DatasetPage
 from page_analyse import AnalysePage
 from session import has_dataset
 

@@ -179,19 +179,19 @@ def build_control_queue_df(
             "Bruk historikk.",
             "Bruk beste forslag.",
             "Sammenlign med historikk.",
-            "Vurder foreslÃ¥tt mapping.",
-            "Aapne historikk for valgt kode.",
+            "Vurder foreslått mapping.",
+            "Åpne historikk for valgt kode.",
             "Se forslag for valgt kode.",
         }:
             work_status = "Forslag"
         else:
-            work_status = "UlÃ¸st"
+            work_status = "Uløst"
         if work_status == "Ferdig":
             display_status = "Ferdig"
         elif has_control_conflict or needs_control_group:
             display_status = "Krever RF-1022"
         elif needs_control_tags:
-            display_status = "Krever lÃ¸nnsflagg"
+            display_status = "Krever lønnsflagg"
         elif work_status == "Historikk":
             display_status = "Historikk brukt"
         elif work_status == "Forslag" and bool(history_accounts) and best_row is None:
@@ -201,7 +201,7 @@ def build_control_queue_df(
         elif work_status == "Manuell":
             display_status = "Kontroller mapping"
         else:
-            display_status = "MÃ¥ avklares"
+            display_status = "Må avklares"
 
         recommended = a07_control_status.control_recommendation_label(
             has_history=bool(history_accounts),
@@ -224,14 +224,14 @@ def build_control_queue_df(
             next_action = "Kontroller dagens mapping."
         elif display_status == "Ferdig":
             recommended = "Ferdig"
-            next_action = "Ingen handling nÃ¸dvendig."
+            next_action = "Ingen handling nødvendig."
 
         if locked_flag:
             guided_status = "Ferdig"
             display_status = "Ferdig"
             recommended = "Ferdig"
             guided_next = "Ingen handling"
-            next_action = "Ingen handling nodvendig."
+            next_action = "Ingen handling nødvendig."
         elif current_mapping_suspicious:
             guided_status = "Mistenkelig kobling"
             display_status = "Mistenkelig kobling"
@@ -253,18 +253,18 @@ def build_control_queue_df(
             display_status = "Har historikk"
             recommended = "Se historikk"
             guided_next = "Se historikk"
-            next_action = "Aapne historikk for valgt kode."
+            next_action = "Åpne historikk for valgt kode."
         elif has_control_conflict or needs_control_group or needs_control_tags:
-            guided_status = "Lonnskontroll"
-            display_status = "Lonnskontroll"
-            recommended = "Apne lonnsklassifisering"
-            guided_next = "Apne lonnsklassifisering"
+            guided_status = "Lønnskontroll"
+            display_status = "Lønnskontroll"
+            recommended = "Åpne lønnsklassifisering"
+            guided_next = "Åpne lønnsklassifisering"
             if has_control_conflict:
                 next_action = "Rydd RF-1022-post for mappede kontoer."
             elif needs_control_group:
                 next_action = "Tildel RF-1022-post i Saldobalanse."
             else:
-                next_action = "Fullfor lonnsflagg i Saldobalanse."
+                next_action = "Fullfør lønnsflagg i Saldobalanse."
         elif has_explicit_mapping and best_row is not None and reconcile_status != "OK":
             guided_status = "Har forslag"
             display_status = "Har forslag"
@@ -278,8 +278,8 @@ def build_control_queue_df(
             guided_next = "Kontroller kobling"
             next_action = "Kontroller dagens kobling."
         else:
-            guided_status = "Maa avklares"
-            display_status = "Maa avklares"
+            guided_status = "Må avklares"
+            display_status = "Må avklares"
             recommended = "Kontroller kobling"
             guided_next = "Kontroller kobling"
             next_action = "Velg koblinger eller vurder forslag."
@@ -326,8 +326,8 @@ def build_control_queue_df(
         "Mistenkelig kobling": 0,
         "Har forslag": 1,
         "Har historikk": 2,
-        "Maa avklares": 3,
-        "Lonnskontroll": 4,
+        "Må avklares": 3,
+        "Lønnskontroll": 4,
         "Kontroller kobling": 5,
         "Ferdig": 6,
     }

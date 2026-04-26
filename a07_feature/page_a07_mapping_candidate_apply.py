@@ -9,7 +9,7 @@ class A07PageMappingCandidateApplyMixin:
     def _apply_selected_rf1022_candidate(self) -> None:
         row = self._selected_rf1022_candidate_row()
         if row is None:
-            self._notify_inline("Velg en RF-1022-kandidat forst.", focus_widget=self.tree_control_suggestions)
+            self._notify_inline("Velg en RF-1022-kandidat først.", focus_widget=self.tree_control_suggestions)
             return
         account = str(row.get("Konto") or "").strip()
         code = str(row.get("Kode") or "").strip()
@@ -29,7 +29,7 @@ class A07PageMappingCandidateApplyMixin:
         plan_row = plan.iloc[0]
         action = str(plan_row.get("Action") or "").strip()
         if action != "apply":
-            status = str(plan_row.get("Status") or "Maa vurderes").strip()
+            status = str(plan_row.get("Status") or "Må vurderes").strip()
             reason = str(plan_row.get("Reason") or "").strip()
             suffix = f": {reason}" if reason else "."
             self._notify_inline(

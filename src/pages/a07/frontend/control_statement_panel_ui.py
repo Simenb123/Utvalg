@@ -43,7 +43,7 @@ class A07PageControlStatementPanelMixin:
                 )
             )
         except Exception:
-            self.control_statement_summary_var.set("Ingen kontrollgrupper er klassifisert ennÃ¥.")
+            self.control_statement_summary_var.set("Ingen kontrollgrupper er klassifisert ennå.")
 
     def _on_control_statement_filter_changed(self) -> None:
         if bool(getattr(self, "_refresh_in_progress", False)):

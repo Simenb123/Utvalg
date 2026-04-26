@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import dataset_pane_io as dio
+import src.pages.dataset.backend.pane_io as dio
 
 
 def test_read_data_sample_excel(tmp_path: Path):

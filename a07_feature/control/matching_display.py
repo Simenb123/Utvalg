@@ -79,8 +79,8 @@ def build_suggestion_status_label(row: pd.Series | None) -> str:
         return "Blokkert"
     score = _safe_float(row.get("Score"))
     if score >= 0.8 or bool(row.get("WithinTolerance", False)):
-        return "Maa vurderes"
-    return "Maa vurderes"
+        return "Må vurderes"
+    return "Må vurderes"
 
 
 def build_suggestion_reason_label(row: pd.Series | None) -> str:
@@ -90,16 +90,16 @@ def build_suggestion_reason_label(row: pd.Series | None) -> str:
     if guardrail_reason:
         return guardrail_reason
     if _row_flag(row, "UsedHistory") or bool(str(row.get("HistoryAccountsVisning") or row.get("HistoryAccounts") or "").strip()):
-        return "Treff paa historikk"
-    if _row_flag(row, "UsedRulebook", explain_token="regel="):
-        return "Treff paa regelbok"
-    if _row_flag(row, "UsedUsage", explain_token="bruk="):
-        return "Treff paa kontobruk"
+        return "Treff på historikk"
+    if _row_flag(row, "UsedRulebook"):
+        return "Treff på regelbok"
+    if _row_flag(row, "UsedUsage"):
+        return "Treff på kontobruk"
     if _row_has_name_anchor(row):
-        return "Treff paa navn"
+        return "Treff på navn"
     if str(row.get("AmountEvidence") or "").strip().lower() in {"exact", "within_tolerance", "near"}:
-        return "Belop uten stotte"
-    return "Maa vurderes"
+        return "Beløp uten støtte"
+    return "Må vurderes"
 
 
 def best_suggestion_row_for_code(
@@ -146,9 +146,9 @@ def best_suggestion_row_for_code(
 def build_control_suggestion_summary(code: str | None, suggestions_df: pd.DataFrame, selected_row: pd.Series | None) -> str:
     code_s = str(code or "").strip()
     if not code_s:
-        return "Velg A07-kode til hoyre for aa se beste forslag."
+        return "Velg A07-kode til høyre for å se beste forslag."
     if suggestions_df is None or suggestions_df.empty:
-        return f"Ingen forslag funnet for {code_s} akkurat naa."
+        return f"Ingen forslag funnet for {code_s} akkurat nå."
 
     count = int(len(suggestions_df))
     row = selected_row if selected_row is not None else suggestions_df.iloc[0]
@@ -163,7 +163,7 @@ def build_control_suggestion_summary(code: str | None, suggestions_df: pd.DataFr
         amount_parts.append(f"GL forslag {gl_amount}")
     amount_parts.append(f"Diff {diff}")
     status = build_suggestion_status_label(row) or "Vurder"
-    return f"Beste forslag for {code_s} | {count} kandidat(er) | Naa valgt: {accounts} | {status} | {' | '.join(amount_parts)}"
+    return f"Beste forslag for {code_s} | {count} kandidat(er) | Nå valgt: {accounts} | {status} | {' | '.join(amount_parts)}"
 
 
 def build_control_suggestion_effect_summary(
@@ -173,9 +173,9 @@ def build_control_suggestion_effect_summary(
 ) -> str:
     code_s = str(code or "").strip()
     if not code_s:
-        return "Velg A07-kode til hoyre for aa se hva valgt forslag vil gjore."
+        return "Velg A07-kode til høyre for å se hva valgt forslag vil gjøre."
     if selected_row is None:
-        return f"Velg et forslag for aa se hva som vil bli mappet til {code_s}."
+        return f"Velg et forslag for å se hva som vil bli mappet til {code_s}."
 
     suggested_accounts = _parse_konto_tokens(selected_row.get("ForslagKontoer"))
     if not suggested_accounts:
@@ -249,7 +249,7 @@ def build_smartmapping_fallback(
             return SmartmappingFallback(
                 message=(
                     f"Ingen trygg automatikk for {code_s}. Beste kandidat er {accounts_text} | Diff {diff} | "
-                    f"Score {score}. Historikk finnes ogsa ({', '.join(history)})."
+                    f"Score {score}. Historikk finnes også ({', '.join(history)})."
                 ),
                 preferred_tab="suggestions",
             )

@@ -27,9 +27,9 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import app_paths
 from formatting import format_int_no
 
-from dataset_pane_store_import_ui import import_client_list_with_progress
-from dataset_pane_store_ui import build_client_store_widgets
-from dataset_pane_store_logic import (
+from .pane_store_import_ui import import_client_list_with_progress
+from .pane_store_ui import build_client_store_widgets
+from .pane_store_logic import (
     apply_active_version_to_path_if_needed as _apply_active_version_to_path_if_needed,
     auto_store_hb_from_path as _auto_store_hb_from_path,
 )

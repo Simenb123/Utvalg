@@ -309,6 +309,40 @@ def test_apply_core_refresh_payload_shows_warning_status() -> None:
     assert "rulebook" in dummy.details_var.value
     assert "boom" in dummy.details_var.value
 
+
+def test_background_poll_logs_traceback_but_keeps_gui_error_short() -> None:
+    diag_messages: list[str] = []
+
+    class _Var:
+        def __init__(self) -> None:
+            self.value = None
+
+        def set(self, value) -> None:
+            self.value = value
+
+    dummy = SimpleNamespace(
+        _refresh_generation=7,
+        _restore_thread=None,
+        _restore_result={
+            "token": 7,
+            "error": RuntimeError("boom"),
+            "traceback": "Traceback (most recent call last):\nRuntimeError: boom",
+        },
+        _diag=lambda message: diag_messages.append(message),
+        _refresh_in_progress=True,
+        _cancel_refresh_watchdog=lambda: diag_messages.append("watchdog"),
+        status_var=_Var(),
+        details_var=_Var(),
+        _pending_session_refresh=False,
+    )
+
+    page_a07.A07Page._poll_context_restore(dummy, 7)
+
+    assert dummy.status_var.value == "A07-kontekst kunne ikke lastes."
+    assert dummy.details_var.value == "boom"
+    assert any("context_restore traceback token=7" in message for message in diag_messages)
+    assert any("RuntimeError: boom" in message for message in diag_messages)
+
 def test_apply_core_refresh_payload_tolerates_missing_optional_support_trees() -> None:
     scheduled: list[str] = []
 

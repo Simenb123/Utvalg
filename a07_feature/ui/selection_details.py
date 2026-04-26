@@ -7,7 +7,7 @@ class A07PageSelectionDetailsMixin:
     def _update_selected_suggestion_details(self) -> None:
         row = self._selected_suggestion_row()
         if row is None:
-            self.suggestion_details_var.set("Velg et forslag for aa se hvorfor det passer og hva som blir koblet.")
+            self.suggestion_details_var.set("Velg et forslag for å se hvorfor det passer og hva som blir koblet.")
             return
 
         suggested_accounts = str(row.get("ForslagVisning") or row.get("ForslagKontoer") or "").strip()

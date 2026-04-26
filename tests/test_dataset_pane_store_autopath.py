@@ -39,7 +39,7 @@ def test_refresh_sets_file_path_to_active_version_when_current_empty(
         make_active=True,
     )
 
-    import dataset_pane_store
+    import src.pages.dataset.frontend.pane_store as dataset_pane_store
 
     importlib.reload(dataset_pane_store)
 
@@ -87,7 +87,7 @@ def test_refresh_does_not_override_existing_valid_path(tmp_path: Path, monkeypat
         make_active=True,
     )
 
-    import dataset_pane_store
+    import src.pages.dataset.frontend.pane_store as dataset_pane_store
 
     importlib.reload(dataset_pane_store)
 
@@ -142,7 +142,7 @@ def test_refresh_resets_hb_var_when_year_changes(
     )
     assert v2024.id != v2025.id  # sanity
 
-    import dataset_pane_store
+    import src.pages.dataset.frontend.pane_store as dataset_pane_store
 
     importlib.reload(dataset_pane_store)
 

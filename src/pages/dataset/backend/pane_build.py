@@ -10,7 +10,7 @@ import pandas as pd
 
 import client_store
 import saft_reader
-from dataset_build_fast import build_from_file
+from .build_fast import build_from_file
 from models import Columns
 
 logger = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
     if req.store_client and req.store_year:
         try:
             import client_store
-            import dataset_cache_sqlite
+            from . import cache_sqlite as dataset_cache_sqlite
 
             # For SAF-T-filer: inkluder saft_reader-versjon i signaturen
             # slik at nye felter i readeren invaliderer cachen automatisk.
@@ -260,7 +260,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
     # Normaliser bilagsnummer: mange eksporter har bilag bare på første linje i en bilagsbunt.
     # Forward-fill gjør at alle linjer får bilagsnummer og at "Antall bilag" og motpost fungerer.
     try:
-        import dataset_cache_sqlite
+        from . import cache_sqlite as dataset_cache_sqlite
 
         dataset_cache_sqlite.fill_down_bilag_inplace(df)
     except Exception:
@@ -273,7 +273,7 @@ def build_dataset(req: BuildRequest) -> BuildResult:
     if req.store_client and req.store_year and stored_version_id:
         try:
             import client_store
-            import dataset_cache_sqlite
+            from . import cache_sqlite as dataset_cache_sqlite
 
             if not cache_signature:
                 cache_signature = dataset_cache_sqlite.build_signature(

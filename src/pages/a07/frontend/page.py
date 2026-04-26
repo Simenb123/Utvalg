@@ -479,7 +479,7 @@ class A07Page(A07PageMethodsMixin, ttk.Frame):
         self._control_advanced_visible = False
         self._selected_rf1022_group_id: str | None = None
 
-        self.summary_var = tk.StringVar(value="Ingen A07-data lastet ennÃ¥.")
+        self.summary_var = tk.StringVar(value="Ingen A07-data lastet ennå.")
         self.status_var = tk.StringVar(value="Last A07 JSON for å starte.")
         self.details_var = tk.StringVar(value="Bruk Kilder... for filoversikt.")
         self.a07_path_var = tk.StringVar(value="A07: ikke valgt")

@@ -382,7 +382,7 @@ class A07PageRefreshMixin(A07PageRefreshStateMixin):
 
         if self.workspace.a07_df.empty or self.workspace.gl_df.empty:
             self._notify_inline(
-                "Last A07 og bruk aktiv saldobalanse for valgt klient/aar for du oppdaterer.",
+                "Last A07 og bruk aktiv saldobalanse for valgt klient/år før du oppdaterer.",
                 focus_widget=self,
             )
             return

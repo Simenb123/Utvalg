@@ -84,7 +84,7 @@ def test_run_selected_control_gl_action_guides_user_without_selected_code() -> N
     page_a07.A07Page._run_selected_control_gl_action(DummyPage())
 
     assert focused == ["a07"]
-    assert statuses == ["Velg en A07-kode til hoyre for du tildeler kontoer fra GL-listen."]
+    assert statuses == ["Velg en A07-kode til høyre før du tildeler kontoer fra GL-listen."]
 
 def test_run_selected_control_gl_action_assigns_to_selected_rf1022_group() -> None:
     calls: list[tuple[str, tuple[str, ...], str]] = []
@@ -131,7 +131,7 @@ def test_assign_selected_control_mapping_guides_user_without_gl_selection() -> N
 
     page_a07.A07Page._assign_selected_control_mapping(DummyPage())
 
-    assert statuses == ["Velg en eller flere GL-kontoer til venstre forst."]
+    assert statuses == ["Velg en eller flere GL-kontoer til venstre først."]
     assert focused == ["gl"]
 
 def test_assign_selected_control_mapping_guides_user_without_selected_code() -> None:
@@ -159,7 +159,7 @@ def test_assign_selected_control_mapping_guides_user_without_selected_code() -> 
 
     page_a07.A07Page._assign_selected_control_mapping(DummyPage())
 
-    assert statuses == ["Velg en A07-kode til hoyre forst."]
+    assert statuses == ["Velg en A07-kode til høyre først."]
     assert focused == ["a07"]
 
 def test_assign_selected_control_mapping_uses_selected_rf1022_group_when_in_rf_mode() -> None:
@@ -760,7 +760,7 @@ def test_assign_selected_control_mapping_blocks_when_target_code_is_locked() -> 
 
     page_a07.A07Page._assign_selected_control_mapping(DummyPage())
 
-    assert statuses == ["Endringen berorer laaste koder: fastloenn. Laas opp for du endrer mapping."]
+    assert statuses == ["Endringen berører låste koder: fastloenn. Lås opp før du endrer mapping."]
     assert focused == ["a07"]
 
 def test_remove_selected_group_blocks_when_group_is_still_used_in_mapping() -> None:

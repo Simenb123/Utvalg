@@ -3,7 +3,7 @@ from __future__ import annotations
 import openpyxl
 import pytest
 
-from dataset_build_fast import build_from_file
+from src.pages.dataset.backend.build_fast import build_from_file
 
 
 def test_build_from_file_excel_allows_mapping_blank_header_column(tmp_path):

@@ -251,7 +251,7 @@ def load_hb_version_df(page, client: str, year: str, version_id: str) -> Optiona
     try:
         dc = (v.meta or {}).get("dataset_cache", {})
         if isinstance(dc, dict) and dc.get("file"):
-            import dataset_cache_sqlite
+            import src.pages.dataset.backend.cache_sqlite as dataset_cache_sqlite
             ds_dir = client_store.datasets_dir(client, year=year, dtype="hb")
             db_path = ds_dir / str(dc["file"])
             if db_path.exists():
@@ -263,7 +263,7 @@ def load_hb_version_df(page, client: str, year: str, version_id: str) -> Optiona
 
     # Fallback: bygg fra fil med lagret mapping
     try:
-        from dataset_build_fast import build_from_file
+        from src.pages.dataset.backend.build_fast import build_from_file
 
         build_info = ((v.meta or {}).get("dataset_cache") or {}).get("build") or {}
         mapping = build_info.get("mapping")

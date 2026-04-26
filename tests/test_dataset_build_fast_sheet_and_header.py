@@ -4,7 +4,7 @@ import datetime as dt
 
 import openpyxl
 
-from dataset_build_fast import build_from_file
+from src.pages.dataset.backend.build_fast import build_from_file
 
 
 def test_build_from_file_respects_sheet_name_and_header_row_excel(tmp_path):

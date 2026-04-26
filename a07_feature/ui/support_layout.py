@@ -35,7 +35,7 @@ class A07PageSupportLayoutMixin:
         suggestions_actions.pack(fill="x", pady=(0, 4))
         self.btn_control_batch_suggestions = ttk.Button(
             suggestions_actions,
-            text="KjÃ¸r trygg auto-matching",
+            text="Kjør trygg auto-matching",
             command=self._apply_batch_suggestions_clicked,
         )
         self.btn_control_batch_suggestions.pack(side="right", padx=(6, 0))
@@ -85,8 +85,12 @@ class A07PageSupportLayoutMixin:
         )
         self.btn_control_history.pack(side="right")
         self.btn_control_history.state(["disabled"])
-        self.tree_history = self._build_tree_tab(self.tab_history, _HISTORY_COLUMNS)
-        self.tree_history.configure(height=6)
+        self.tree_history = self._build_managed_tree_tab(
+            self.tab_history,
+            _HISTORY_COLUMNS,
+            view_id="history",
+            height=6,
+        )
 
         control_accounts_panel = self.tab_mapping
         self.control_accounts_panel = control_accounts_panel
@@ -99,8 +103,13 @@ class A07PageSupportLayoutMixin:
             self.mapping_filter_label_var.set(_MAPPING_FILTER_LABELS["alle"])
         except Exception:
             pass
-        self.tree_control_accounts = self._build_tree_tab(control_accounts_panel, _CONTROL_SELECTED_ACCOUNT_COLUMNS)
-        self.tree_control_accounts.configure(height=6, selectmode="extended")
+        self.tree_control_accounts = self._build_managed_tree_tab(
+            control_accounts_panel,
+            _CONTROL_SELECTED_ACCOUNT_COLUMNS,
+            view_id="control_accounts",
+            height=6,
+            selectmode="extended",
+        )
         self._register_selection_summary_tree(
             self.tree_control_accounts,
             columns=("IB", "Endring", "UB"),
@@ -127,11 +136,12 @@ class A07PageSupportLayoutMixin:
         )
         control_statement_accounts_panel.pack(fill="both", expand=True)
         self.control_statement_accounts_panel = control_statement_accounts_panel
-        self.tree_control_statement_accounts = self._build_tree_tab(
+        self.tree_control_statement_accounts = self._build_managed_tree_tab(
             control_statement_accounts_panel,
             _CONTROL_SELECTED_ACCOUNT_COLUMNS,
+            view_id="control_statement_accounts",
+            height=5,
         )
-        self.tree_control_statement_accounts.configure(height=5)
         self._register_selection_summary_tree(
             self.tree_control_statement_accounts,
             columns=("IB", "Endring", "UB"),

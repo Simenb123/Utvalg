@@ -135,7 +135,7 @@ def build_rf1022_summary_cards(rf1022_df: pd.DataFrame | None) -> list[dict[str,
             "status",
             "Status",
             f"{done_rows}/{len(data_df.index)} avstemt",
-            f"{open_rows} poster maa vurderes" if open_rows else "Alle poster gaar i null",
+            f"{open_rows} poster må vurderes" if open_rows else "Alle poster går i null",
             "ok" if open_rows == 0 else "review",
         ),
     ]

@@ -5,7 +5,7 @@ from tkinter import ttk, messagebox
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
-from dataset_pane import DatasetPane  # gjenbruk av ditt panel  :contentReference[oaicite:4]{index=4}
+from src.pages.dataset.frontend.pane import DatasetPane  # gjenbruk av ditt panel  :contentReference[oaicite:4]{index=4}
 from models import Columns, ABAnalysisConfig  # konfig/kolonner  :contentReference[oaicite:5]{index=5}
 from ab_analysis import run_all, ABResult
 from formatting import fmt_amount, fmt_date, parse_amount, parse_date, fmt_int

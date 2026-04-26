@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from dataset_pane import DatasetPane
+from src.pages.dataset.frontend.pane import DatasetPane
 from models import Columns
 from controller_scope import ScopeController
 from scope import ScopeRule

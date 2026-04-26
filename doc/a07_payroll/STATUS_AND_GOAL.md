@@ -327,6 +327,10 @@ Kontoklassifisering:
   bare fordi belopet kan forklare differansen.
 - A07-koder med AGA-plikt skal synliggjore dette i kontrollflaten, slik at
   bruker kan skille arbeidsgiveravgiftspliktige og ikke-pliktige poster.
+- `Explain` og `HvorforKort` er visningsfelt. Beslutningslogikk skal bruke
+  strukturerte evidence-felt som `UsedRulebook`, `UsedUsage`,
+  `UsedSpecialAdd`, `AmountEvidence`, `HitTokens`, `AnchorSignals` og
+  `SuggestionGuardrail`.
 
 ## Dagens Arbeidsflyt
 

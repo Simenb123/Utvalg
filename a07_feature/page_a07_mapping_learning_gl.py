@@ -97,13 +97,13 @@ class A07PageMappingLearningGlMixin:
         ]
         if not accounts:
             self._notify_inline(
-                "Velg en eller flere kontoer til venstre forst.",
+                "Velg en eller flere kontoer til venstre først.",
                 focus_widget=getattr(self, "tree_control_gl", None),
             )
             return
         if not pairs:
             self._notify_inline(
-                "Velg en A07-kode til hoyre, eller velg kontoer som allerede er koblet.",
+                "Velg en A07-kode til høyre, eller velg kontoer som allerede er koblet.",
                 focus_widget=getattr(self, "tree_a07", None),
             )
             return

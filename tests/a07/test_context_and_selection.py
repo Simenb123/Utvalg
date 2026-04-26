@@ -14,7 +14,7 @@ def test_build_control_suggestion_summary_describes_selected_row() -> None:
     out = page_a07.build_control_suggestion_summary("bonus", suggestions_df, suggestions_df.iloc[1])
     diff_text = page_a07._format_picker_amount(Decimal("100.00"))
 
-    assert out == f"Beste forslag for bonus | 2 kandidat(er) | Naa valgt: 5090 | Maa vurderes | Diff {diff_text}"
+    assert out == f"Beste forslag for bonus | 2 kandidat(er) | Nå valgt: 5090 | Må vurderes | Diff {diff_text}"
 
 def test_build_rf1022_statement_df_sorts_rows_by_post_and_uses_selected_basis() -> None:
     control_statement_df = pd.DataFrame(
@@ -418,7 +418,7 @@ def test_on_rf1022_suggestion_selected_enables_candidate_button_only_for_apply_p
             {
                 "Konto": "5000",
                 "Kode": "fastloenn",
-                "Forslagsstatus": "Maa vurderes",
+                "Forslagsstatus": "Må vurderes",
             }
         ),
         _build_global_auto_mapping_plan=lambda _df: pd.DataFrame(
