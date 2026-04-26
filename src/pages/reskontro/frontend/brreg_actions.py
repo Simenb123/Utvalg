@@ -41,7 +41,7 @@ def open_subsequent_period(page) -> None:
 
     def _load() -> None:
         try:
-            import saft_reader as _sr
+            import src.shared.saft.reader as _sr
             df2 = _sr.read_saft_ledger(path)
             import os
             label = os.path.basename(path)

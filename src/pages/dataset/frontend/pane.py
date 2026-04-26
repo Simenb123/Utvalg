@@ -613,7 +613,7 @@ class DatasetPane(ttk.Frame):
         """
         try:
             import src.shared.client_store.store as client_store
-            from saft_trial_balance import make_trial_balance_xlsx_from_saft
+            from src.shared.saft.trial_balance import make_trial_balance_xlsx_from_saft
 
             if not client or not year:
                 return False

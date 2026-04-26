@@ -5,7 +5,7 @@ import zipfile
 
 import pandas as pd
 
-import saft_reader
+import src.shared.saft.reader as saft_reader
 
 
 _MINIMAL_SAFT_XML = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>

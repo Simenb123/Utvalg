@@ -133,7 +133,7 @@ def import_company_tb(
     warnings: list[str] = []
 
     if source_type == "saft":
-        from saft_trial_balance import extract_trial_balance_df_from_saft
+        from src.shared.saft.trial_balance import extract_trial_balance_df_from_saft
         df = extract_trial_balance_df_from_saft(path)
     else:
         from trial_balance_reader import read_trial_balance

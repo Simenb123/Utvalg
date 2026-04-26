@@ -663,9 +663,9 @@ class _VersionsDialog:
         """
 
         try:
-            from saft_trial_balance import make_trial_balance_xlsx_from_saft
+            from src.shared.saft.trial_balance import make_trial_balance_xlsx_from_saft
         except Exception:
-            _log.exception("saft_trial_balance module missing")
+            _log.exception("src.shared.saft.trial_balance module missing")
             messagebox.showerror("Versjoner", "Mangler modul for SAF-T saldobalanse.", parent=self.top)
             return None
 

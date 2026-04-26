@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
 import src.shared.client_store.store as client_store
-import saft_reader
+import src.shared.saft.reader as saft_reader
 from .build_fast import build_from_file
 from models import Columns
 

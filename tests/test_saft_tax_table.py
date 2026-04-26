@@ -5,7 +5,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-import saft_tax_table
+import src.shared.saft.tax_table as saft_tax_table
 
 
 _SAMPLE_XML_WITH_STD = """\

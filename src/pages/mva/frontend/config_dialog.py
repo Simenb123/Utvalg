@@ -245,10 +245,10 @@ def open_mva_config(
 
     def _import_saft():
         try:
-            import saft_tax_table
+            import src.shared.saft.tax_table as saft_tax_table
         except ImportError:
             if messagebox is not None:
-                messagebox.showerror("MVA-oppsett", "saft_tax_table-modulen er ikke tilgjengelig.")
+                messagebox.showerror("MVA-oppsett", "saft.tax_table-modulen er ikke tilgjengelig.")
             return
 
         path = filedialog.askopenfilename(

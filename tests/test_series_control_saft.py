@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import saft_reader
+import src.shared.saft.reader as saft_reader
 
 
 _SAFT_WITH_REFERENCE = """<?xml version="1.0" encoding="UTF-8"?>

@@ -298,7 +298,7 @@ def _try_repair_empty_sb(
             log.debug("Kan ikke reparere tom SB: ingen SAF-T-kilde funnet")
             return None
 
-        from saft_trial_balance import extract_trial_balance_df_from_saft
+        from src.shared.saft.trial_balance import extract_trial_balance_df_from_saft
         df = extract_trial_balance_df_from_saft(saft_source)
         if df is None or df.empty:
             return None
