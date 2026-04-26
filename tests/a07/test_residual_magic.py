@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .shared import *  # noqa: F401,F403
 from a07_feature.suggest.residual_display import residual_analysis_to_suggestions_df
+from a07_feature.suggest.residual_models import REVIEW_EXACT, ResidualAnalysis, ResidualGroupScenario
 from a07_feature.suggest.residual_solver import analyze_a07_residuals
 
 
@@ -317,6 +318,55 @@ def test_magic_match_clicked_renders_residual_review_rows_in_suggestions_tree() 
     assert filled
     assert "Mistenkelig rest" in set(filled[0]["Forslagsstatus"])
     assert any(call == ("summary", "Ingen trygg 0-diff-løsning. Mistenkelig konto: 5310.") for call in calls)
+    assert ("suggestion_details", "Tryllestav-resultat: velg rad for manuell vurdering.") in calls
+
+
+def test_magic_wand_group_review_details_point_to_group_action() -> None:
+    calls: list[object] = []
+    filled: list[pd.DataFrame] = []
+
+    class _Tree:
+        def get_children(self):
+            return ()
+
+    analysis = ResidualAnalysis(
+        status=REVIEW_EXACT,
+        auto_safe=False,
+        changes=(),
+        total_diff_before_cents=15_000,
+        total_diff_after_cents=0,
+        affected_codes=(),
+        explanation="",
+        code_results=(),
+        group_scenarios=(
+            ResidualGroupScenario(
+                codes=("bonus", "telefon"),
+                diff_cents=15_000,
+                accounts=("5990",),
+                amount_cents=15_000,
+                diff_after_cents=0,
+                reason="Åpne koder kan vurderes samlet som gruppe.",
+            ),
+        ),
+    )
+    dummy = SimpleNamespace(
+        workspace=SimpleNamespace(suggestions=pd.DataFrame()),
+        tree_control_suggestions=_Tree(),
+        suggestion_details_var=SimpleNamespace(set=lambda value: calls.append(("suggestion_details", value))),
+        control_suggestion_summary_var=SimpleNamespace(set=lambda value: calls.append(("summary", value))),
+        control_alternative_summary_var=None,
+        control_suggestion_effect_var=None,
+        btn_control_best=None,
+        _fill_tree=lambda _tree, df, _columns, **_kwargs: filled.append(df.copy()),
+        _reconfigure_tree_columns=lambda *_args, **_kwargs: None,
+        _update_a07_action_button_state=lambda: None,
+    )
+
+    page_a07.A07Page._show_magic_wand_residual_review(dummy, analysis)
+
+    assert filled
+    assert ("suggestion_details", "Tryllestav-resultat: velg gruppeforslag og trykk Opprett gruppeforslag.") in calls
+    assert ("summary", "Ingen trygg 0-diff-løsning. 1 gruppeforslag må vurderes.") in calls
 
 
 def test_apply_selected_residual_group_review_creates_group_without_mapping_autosave() -> None:

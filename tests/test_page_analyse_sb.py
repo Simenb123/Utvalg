@@ -265,7 +265,7 @@ def test_refresh_sb_view_blank_ub_fjor_when_konto_missing(monkeypatch):
 # =====================================================================
 
 def test_account_review_set_ok_persists(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     client, year = "Test Klient AS", "2024"
@@ -280,7 +280,7 @@ def test_account_review_set_ok_persists(tmp_path, monkeypatch):
 
 
 def test_account_review_bulk_set_ok(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     _rco.set_accounts_ok("Klient AS", "2024", ["1920", "1930", "1940"], True)
@@ -292,7 +292,7 @@ def test_account_review_bulk_set_ok(tmp_path, monkeypatch):
 
 
 def test_account_review_add_attachments_dedup(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     f1 = tmp_path / "bilag.pdf"
@@ -309,7 +309,7 @@ def test_account_review_add_attachments_dedup(tmp_path, monkeypatch):
 
 
 def test_account_review_same_file_multiple_kontoer(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     f1 = tmp_path / "arsoppgave.pdf"
@@ -321,7 +321,7 @@ def test_account_review_same_file_multiple_kontoer(tmp_path, monkeypatch):
 
 
 def test_account_review_remove_attachment(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     f1 = tmp_path / "a.pdf"
@@ -336,7 +336,7 @@ def test_account_review_remove_attachment(tmp_path, monkeypatch):
 
 
 def test_account_review_ok_and_attachment_coexist(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     f1 = tmp_path / "dok.pdf"
@@ -354,7 +354,7 @@ def test_account_review_ok_and_attachment_coexist(tmp_path, monkeypatch):
 
 def test_refresh_sb_view_shows_ok_and_vedlegg(monkeypatch, tmp_path):
     import page_analyse_sb
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     monkeypatch.setattr(page_analyse_sb, "_session_client_year", lambda: ("KUnde", "2024"))
@@ -402,7 +402,7 @@ def _patch_years_dir(monkeypatch, tmp_path):
 
 
 def test_add_attachments_managed_copies_file(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()
@@ -436,7 +436,7 @@ def test_add_attachments_managed_copies_file(tmp_path, monkeypatch):
 
 
 def test_add_attachments_managed_collision_suffix(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()
@@ -468,7 +468,7 @@ def test_add_attachments_managed_collision_suffix(tmp_path, monkeypatch):
 
 def test_add_attachments_external_fallback_when_no_regnr(tmp_path, monkeypatch):
     """Uten regnr_by_konto → ekstern referanse (back-compat)."""
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     f1 = tmp_path / "x.pdf"
@@ -482,7 +482,7 @@ def test_add_attachments_external_fallback_when_no_regnr(tmp_path, monkeypatch):
 
 
 def test_add_attachments_explicit_external(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()
@@ -503,7 +503,7 @@ def test_add_attachments_explicit_external(tmp_path, monkeypatch):
 
 def test_add_attachments_managed_dedup(tmp_path, monkeypatch):
     """Samme kilde to ganger skal deduplisere, ikke lage kopi_2."""
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()
@@ -522,7 +522,7 @@ def test_add_attachments_managed_dedup(tmp_path, monkeypatch):
 
 def test_load_account_review_backcompat_missing_storage(tmp_path, monkeypatch):
     """Gammelt payload uten 'storage'-felt → tolkes som 'external'."""
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     import json
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
@@ -551,7 +551,7 @@ def test_load_account_review_backcompat_missing_storage(tmp_path, monkeypatch):
 
 
 def test_migrate_attachment_to_managed(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()
@@ -590,7 +590,7 @@ def test_migrate_attachment_to_managed(tmp_path, monkeypatch):
 
 
 def test_migrate_attachment_noop_when_already_managed(tmp_path, monkeypatch):
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()
@@ -624,7 +624,7 @@ def test_resolve_regnr_by_konto_uses_intervals_and_overrides(tmp_path, monkeypat
     fake_session = types.SimpleNamespace(client="K", year="2024")
     monkeypatch.setitem(sys.modules, "session", fake_session)
 
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     monkeypatch.setattr(_rco, "overrides_dir", lambda: tmp_path)
     _rco.set_account_override("K", "1500", 715)  # override: 1500 → 715 (EK)
 
@@ -674,7 +674,7 @@ def test_collect_konto_details_reads_from_sb_tree(monkeypatch):
     import types
     monkeypatch.setitem(sys.modules, "session",
                         types.SimpleNamespace(client="K", year="2024"))
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     monkeypatch.setattr(_rco, "load_account_overrides", lambda *a, **k: {})
 
     d = page_analyse_sb._collect_konto_details(page=page, konto="1920")
@@ -709,7 +709,7 @@ def test_collect_konto_details_falls_back_to_sb_df(monkeypatch):
     import types
     monkeypatch.setitem(sys.modules, "session",
                         types.SimpleNamespace(client="K", year="2024"))
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     monkeypatch.setattr(_rco, "load_account_overrides", lambda *a, **k: {})
 
     d = page_analyse_sb._collect_konto_details(page=page, konto="5000")

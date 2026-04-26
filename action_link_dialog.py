@@ -80,7 +80,7 @@ def open_action_link_dialog(
         return
 
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
     except Exception as exc:
         messagebox.showerror("Handlinger", f"Kan ikke åpne lagring: {exc}", parent=parent)
         return

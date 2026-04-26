@@ -10,6 +10,7 @@ from a07_feature import (
     build_grouped_a07_df,
     build_smart_a07_groups,
 )
+from a07_feature.groups import a07_code_aliases
 
 
 def test_build_grouped_a07_df_creates_group_rows_and_membership():
@@ -97,6 +98,13 @@ def test_build_grouped_a07_df_supports_trekk_loenn_ferie_aliases():
 
     assert membership["trekkILoennForFerie"] == group_id
     assert row["Belop"] == Decimal("100")
+
+
+def test_a07_code_aliases_supports_yrkebil_tjenstlig_spelling_variants():
+    aliases = set(a07_code_aliases("yrkebilTjenstligbehovListepris"))
+
+    assert "yrkebilTjenestligbehovListepris" in aliases
+    assert "yrkebilTjenesteligbehovListepris" in aliases
 
 
 def test_build_smart_a07_groups_creates_exact_payroll_group_for_single_account():

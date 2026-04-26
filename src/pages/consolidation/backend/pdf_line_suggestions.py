@@ -88,7 +88,7 @@ def suggest_line_basis_from_pdf(
 ) -> pd.DataFrame:
     """Bygg forslag til regnskapslinje-import fra PDF."""
     from document_engine.engine import extract_text_from_file
-    from regnskap_mapping import normalize_regnskapslinjer
+    from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
     src = Path(path).expanduser().resolve()
     extracted = extract_text_from_file(src)

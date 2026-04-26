@@ -770,8 +770,8 @@ class _MotkontoCombinationsPopup(tk.Toplevel):
             _add(label)
 
         try:
-            import regnskap_config
-            from regnskap_mapping import normalize_regnskapslinjer
+            import src.shared.regnskap.config as regnskap_config
+            from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
             regn = normalize_regnskapslinjer(regnskap_config.load_regnskapslinjer())
             for row in regn[["regnr", "regnskapslinje"]].itertuples(index=False):

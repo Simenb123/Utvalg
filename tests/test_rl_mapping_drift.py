@@ -197,7 +197,7 @@ def test_accepted_drift_does_not_filter_if_pair_changes() -> None:
 
 def test_apply_use_prior_mapping_writes_current_override(tmp_path, monkeypatch) -> None:
     import app_paths as _ap
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     monkeypatch.setattr(_ap, "data_dir", lambda: tmp_path)
 
     drifts = [drift.MappingDrift(
@@ -214,7 +214,7 @@ def test_apply_use_prior_mapping_writes_current_override(tmp_path, monkeypatch) 
 
 def test_apply_use_current_mapping_writes_prior_override(tmp_path, monkeypatch) -> None:
     import app_paths as _ap
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     monkeypatch.setattr(_ap, "data_dir", lambda: tmp_path)
 
     drifts = [drift.MappingDrift(
@@ -231,7 +231,7 @@ def test_apply_use_current_mapping_writes_prior_override(tmp_path, monkeypatch) 
 
 def test_apply_accept_drift_persists_pair(tmp_path, monkeypatch) -> None:
     import app_paths as _ap
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     monkeypatch.setattr(_ap, "data_dir", lambda: tmp_path)
 
     drifts = [drift.MappingDrift(

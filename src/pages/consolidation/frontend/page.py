@@ -366,7 +366,7 @@ class ConsolidationPage(ttk.Frame):  # type: ignore[misc]
         _view_ctx.build_company_result(self, company_id)
 
     def _build_regnskap_from_agg(self, agg: dict[int, float], col_name: str) -> pd.DataFrame | None:
-        from regnskap_mapping import compute_sumlinjer
+        from src.shared.regnskap.mapping import compute_sumlinjer
         if self._regnskapslinjer is None:
             return None
         skeleton = self._regnskapslinjer[["regnr", "regnskapslinje", "sumpost", "formel"]].copy()

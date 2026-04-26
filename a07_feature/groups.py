@@ -63,6 +63,15 @@ def a07_code_aliases(code: object) -> tuple[str, ...]:
         aliases.add(text.replace("godtgjoerelse", "godtjoerelse"))
     if "godtjoerelse" in text:
         aliases.add(text.replace("godtjoerelse", "godtgjoerelse"))
+    if "Tjenstlig" in text:
+        aliases.add(text.replace("Tjenstlig", "Tjenestlig"))
+        aliases.add(text.replace("Tjenstlig", "Tjenestelig"))
+    if "Tjenestlig" in text:
+        aliases.add(text.replace("Tjenestlig", "Tjenstlig"))
+        aliases.add(text.replace("Tjenestlig", "Tjenestelig"))
+    if "Tjenestelig" in text:
+        aliases.add(text.replace("Tjenestelig", "Tjenstlig"))
+        aliases.add(text.replace("Tjenestelig", "Tjenestlig"))
     if folded in {value.casefold() for value in TREKK_LOENN_FOR_FERIE_CODES}:
         aliases.update(TREKK_LOENN_FOR_FERIE_CODES)
     return tuple(sorted(aliases, key=lambda value: (value.casefold(), value)))

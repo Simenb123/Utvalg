@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 def test_mapping_review_state_roundtrip(tmp_path, monkeypatch) -> None:
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     monkeypatch.setattr(regnskap_client_overrides.app_paths, "data_dir", lambda: tmp_path)
 
@@ -22,7 +22,7 @@ def test_mapping_review_state_roundtrip(tmp_path, monkeypatch) -> None:
 
 
 def test_expected_flow_preset_roundtrip(tmp_path, monkeypatch) -> None:
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     monkeypatch.setattr(regnskap_client_overrides.app_paths, "data_dir", lambda: tmp_path)
 

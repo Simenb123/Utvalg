@@ -127,13 +127,13 @@ def detect_mapping_drift(
 
     if current_overrides is None:
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
             current_overrides = _rco.load_account_overrides(client, year=year_s) if client else {}
         except Exception:
             current_overrides = {}
     if prior_overrides is None:
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
             prior_overrides = _rco.load_prior_year_overrides(client, year_s) if client else {}
         except Exception:
             prior_overrides = {}
@@ -144,7 +144,7 @@ def detect_mapping_drift(
         prev_year_int = ""
     if accepted_drift is None:
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
             if client and year_s and prev_year_int:
                 accepted_drift = _rco.load_accepted_mapping_drift(
                     client, year_s, prev_year_int,
@@ -274,7 +274,7 @@ def apply_use_prior_mapping(
     Returnerer antall kontoer som ble oppdatert.
     Kontoer uten regnr_fjor (umappet i fjor) hoppes over.
     """
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     year_s = str(year)
     current = _rco.load_account_overrides(client, year=year_s)
@@ -296,7 +296,7 @@ def apply_use_current_mapping(
     drifts: Iterable[MappingDrift],
 ) -> int:
     """Sett fjorårets override[konto] = regnr_aar for valgte drift-rader."""
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     try:
         prev_year = str(int(year) - 1)
@@ -321,7 +321,7 @@ def apply_accept_drift(
     drifts: Iterable[MappingDrift],
 ) -> int:
     """Marker valgte drift-rader som aksepterte. Returnerer antall lagret."""
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
 
     try:
         prev_year = str(int(year) - 1)

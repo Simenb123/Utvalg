@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover
 
 from ..backend import codes as mva_codes
 from ..backend import system_defaults as mva_system_defaults
-import regnskap_client_overrides
+import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
 
 @dataclass

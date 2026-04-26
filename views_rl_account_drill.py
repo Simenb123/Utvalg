@@ -20,7 +20,7 @@ def build_leaf_regnskapslinje_choices(regnskapslinjer: Optional[pd.DataFrame]) -
         return []
 
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
     except Exception:
         return []
@@ -131,7 +131,7 @@ def open_account_mapping_dialog(
         return
 
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         import session as _session
         _year = getattr(_session, "year", None) or ""
@@ -193,7 +193,7 @@ def open_account_mapping_dialog(
             messagebox.showerror("Endre mapping", "Velg en gyldig regnskapslinje.", parent=win)
             return
         try:
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
             import session as _session
             _yr = getattr(_session, "year", None) or ""
@@ -211,7 +211,7 @@ def open_account_mapping_dialog(
 
     def _remove() -> None:
         try:
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
             import session as _session
             _yr = getattr(_session, "year", None) or ""
@@ -387,7 +387,7 @@ class RLAccountDrillDialog(tk.Toplevel):
         if not self.client:
             return {}
         try:
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
             import session as _session
             _year = getattr(_session, "year", None) or ""
             return regnskap_client_overrides.load_account_overrides(
@@ -465,7 +465,7 @@ class RLAccountDrillDialog(tk.Toplevel):
 
         konto = str(selected.get("Konto", "") or "").strip()
         try:
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
             import session as _session
             _yr = getattr(_session, "year", None) or ""
             regnskap_client_overrides.remove_account_override(

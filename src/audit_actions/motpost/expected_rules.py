@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-import regnskap_client_overrides
+import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
 
 AccountMode = Literal["all", "selected"]

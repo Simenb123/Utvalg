@@ -35,7 +35,7 @@ def open_mva_avstemming(parent: tk.Misc, page: Any) -> None:
     """Åpne MVA-avstemmingsdialog."""
     import pandas as pd
     from ..backend import avstemming as mva_avstemming
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
     from page_analyse_mva import build_mva_pivot
 
     # Hent filtrert data

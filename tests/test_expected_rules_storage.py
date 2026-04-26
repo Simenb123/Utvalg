@@ -101,7 +101,7 @@ def test_remove_rule_set_drops_preset(tmp_path, monkeypatch) -> None:
 def test_invalid_rule_entries_are_skipped(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
     from src.audit_actions.motpost.expected_rules import load_rule_set
 
     regnskap_client_overrides.save_expected_motpost_rules(
@@ -159,7 +159,7 @@ def test_account_overrides_and_motpost_rules_preserve_each_other(
 ) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
     from src.audit_actions.motpost.expected_rules import (
         ExpectedRule,
         ExpectedRuleSet,
@@ -215,7 +215,7 @@ def test_legacy_requires_netting_field_is_ignored(tmp_path, monkeypatch) -> None
     """Gamle lagrede regler med requires_netting skal laste uten feil."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
     from src.audit_actions.motpost.expected_rules import ExpectedRule, load_rule_set
 
     regnskap_client_overrides.save_expected_motpost_rules(

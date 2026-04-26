@@ -360,7 +360,7 @@ def refresh_sb_konto_pivot(*, page: Any) -> None:
     account_comments: dict[str, str] = {}
     account_review: dict[str, dict] = {}
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         import session as _sess
         _cl = getattr(_sess, "client", None) or ""
         _yr = getattr(_sess, "year", None)
@@ -644,7 +644,7 @@ def refresh_hb_konto_pivot(*, page: Any) -> None:
     account_comments: dict[str, str] = {}
     account_review: dict[str, dict] = {}
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         import session as _sess
         _cl = getattr(_sess, "client", None) or ""
         _yr = getattr(_sess, "year", None)

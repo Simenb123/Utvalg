@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-import regnskap_config
+import src.shared.regnskap.config as regnskap_config
 import regnskapslinje_suggest
 
 try:

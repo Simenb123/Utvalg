@@ -116,7 +116,7 @@ def _project_3_companies(with_elim=False) -> ConsolidationProject:
 
 @pytest.fixture
 def _mock_config(monkeypatch):
-    import regnskap_config
+    import src.shared.regnskap.config as regnskap_config
     monkeypatch.setattr(regnskap_config, "load_kontoplan_mapping", lambda **kw: _intervals())
     monkeypatch.setattr(regnskap_config, "load_regnskapslinjer", lambda **kw: _regnskapslinjer())
 

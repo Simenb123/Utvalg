@@ -317,7 +317,7 @@ def open_dialog(parent: Any, *, client: str, year: str,
         return
 
     import formatting
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     entries = regnskap_client_overrides.load_supplementary_entries(client, year)
 

@@ -572,7 +572,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         if not self._client or not self._year:
             return
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
         except Exception:
             return
         try:
@@ -610,7 +610,7 @@ class RevisjonshandlingerPage(ttk.Frame):
                 RegnskapslinjeInfo,
                 match_actions_to_regnskapslinjer,
             )
-            from regnskap_config import load_regnskapslinjer
+            from src.shared.regnskap.config import load_regnskapslinjer
 
             df = load_regnskapslinjer()
             rl_list = []

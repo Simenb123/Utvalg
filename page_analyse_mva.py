@@ -36,7 +36,7 @@ def _resolve_code_mapping(client: str | None) -> dict[str, str]:
     if not client:
         return {}
     try:
-        import regnskap_client_overrides as rco
+        import src.shared.regnskap.client_overrides as rco
         mapping = rco.load_mva_code_mapping(client)
         if mapping:
             return dict(mapping)

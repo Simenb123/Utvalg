@@ -51,7 +51,7 @@ def _auto_detect_saft_system(client: str, saft_path: Path) -> None:
     har et regnskapssystem satt.
     """
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         existing_system = regnskap_client_overrides.load_accounting_system(client)
         if existing_system:

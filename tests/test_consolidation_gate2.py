@@ -81,7 +81,7 @@ def _datter_tb() -> pd.DataFrame:
 
 @pytest.fixture
 def _mock_config(monkeypatch):
-    import regnskap_config
+    import src.shared.regnskap.config as regnskap_config
     monkeypatch.setattr(
         regnskap_config, "load_kontoplan_mapping",
         lambda **kw: _intervals_df(),

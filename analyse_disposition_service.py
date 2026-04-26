@@ -13,7 +13,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from regnskap_mapping import (
+from src.shared.regnskap.mapping import (
     aggregate_by_regnskapslinje,
     apply_account_overrides,
     apply_interval_mapping,

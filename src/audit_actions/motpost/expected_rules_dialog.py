@@ -69,7 +69,7 @@ def load_all_rl_options(
     """
     if loader is None:
         try:
-            import regnskap_config
+            import src.shared.regnskap.config as regnskap_config
 
             loader = regnskap_config.load_regnskapslinjer
         except Exception:
@@ -81,7 +81,7 @@ def load_all_rl_options(
     if df is None:
         return []
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
         regn = normalize_regnskapslinjer(df)
     except Exception:

@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-import regnskap_client_overrides
+import src.shared.regnskap.client_overrides as regnskap_client_overrides
 import session
 from .readiness import ReadinessIssue, ReadinessReport
 from .readiness_digest import BALANCE_TOLERANCE, _normalize_entity_name, _safe_float, compute_input_digest
@@ -129,7 +129,7 @@ def _build_sumline_warnings(page: Any) -> list[ReadinessIssue]:
     if project is None or regnskapslinjer is None or getattr(regnskapslinjer, "empty", True):
         return issues
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
         regn = normalize_regnskapslinjer(regnskapslinjer)
         sumlines = {

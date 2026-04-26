@@ -54,7 +54,7 @@ def get_konto_ranges(
         hasattr(regnskapslinjer, "empty") and regnskapslinjer.empty
     ):
         try:
-            from regnskap_mapping import (
+            from src.shared.regnskap.mapping import (
                 expand_regnskapslinje_selection,
                 normalize_regnskapslinjer,
             )

@@ -26,7 +26,7 @@ def build_company_result(page: "ConsolidationPage", company_id: str) -> None:
         return
 
     try:
-        from regnskap_mapping import compute_sumlinjer
+        from src.shared.regnskap.mapping import compute_sumlinjer
 
         rl = page._regnskapslinjer
         skeleton = rl[["regnr", "regnskapslinje", "sumpost", "formel"]].copy()
@@ -168,7 +168,7 @@ def ensure_consolidated_fx_cols(
         return df
 
     try:
-        from regnskap_mapping import compute_sumlinjer
+        from src.shared.regnskap.mapping import compute_sumlinjer
 
         ad = run.account_details.copy()
         ad_valid = ad.dropna(subset=["regnr"]).copy()

@@ -165,7 +165,7 @@ def main():
         args.repeats,
     ))
 
-    from regnskap_mapping import compute_sumlinjer, normalize_regnskapslinjer
+    from src.shared.regnskap.mapping import compute_sumlinjer, normalize_regnskapslinjer
     regn_norm = normalize_regnskapslinjer(regnskapslinjer)
     prev_agg = _aggregate_sb_to_regnr(df_sb_prev, intervals)
     base_values = {int(r): float(v) for r, v in zip(prev_agg["regnr"], prev_agg["UB"])}

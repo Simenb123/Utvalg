@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def test_analyze_account_rows_can_suggest_sales_from_behavior_outside_3xxx() -> None:
-    import regnskap_intelligence
+    import src.shared.regnskap.intelligence as regnskap_intelligence
 
     accounts_df = pd.DataFrame(
         {
@@ -49,7 +49,7 @@ def test_analyze_account_rows_can_suggest_sales_from_behavior_outside_3xxx() -> 
 
 
 def test_build_account_behavior_profile_flags_credit_like_inventory() -> None:
-    import regnskap_intelligence
+    import src.shared.regnskap.intelligence as regnskap_intelligence
 
     row = {
         "Nr": 605,

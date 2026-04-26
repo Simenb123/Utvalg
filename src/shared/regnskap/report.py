@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from regnskap_data import (
+from .data import (
     RS_STRUCTURE,
     BS_STRUCTURE,
     BS_EIENDELER,

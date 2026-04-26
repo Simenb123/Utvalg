@@ -345,7 +345,7 @@ def _remap_multiple_sb_accounts(*, page: Any,
 
     # Bygg liste av regnskapslinjer (kun ikke-sumposter)
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
         rl_rows = regn.loc[~regn["sumpost"], ["regnr", "regnskapslinje"]].copy()
     except Exception:
@@ -751,7 +751,7 @@ def _execute_drag_remap(*, page: Any, kontoer: list[str],
     """
     try:
         import session as _session
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         client = getattr(_session, "client", None) or ""
         year = getattr(_session, "year", None) or ""

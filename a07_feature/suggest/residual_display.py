@@ -258,6 +258,13 @@ def residual_review_summary(analysis: ResidualAnalysis | None, row_count: int) -
         first = suspicious[0]
         account = str(getattr(first, "account", "") or "").strip()
         return f"Ingen trygg 0-diff-løsning. Mistenkelig konto: {account}."
+    group_count = len(tuple(getattr(analysis, "group_scenarios", ()) or ()))
+    if group_count:
+        other_count = max(int(row_count or 0) - group_count, 0)
+        group_word = "gruppeforslag" if group_count == 1 else "gruppeforslag"
+        if other_count:
+            return f"Ingen trygg 0-diff-løsning. {group_count} {group_word} og {other_count} øvrige funn må vurderes."
+        return f"Ingen trygg 0-diff-løsning. {group_count} {group_word} må vurderes."
     if row_count:
         return f"Ingen trygg 0-diff-løsning. {row_count} funn må vurderes."
     explanation = str(getattr(analysis, "explanation", "") or "").strip()

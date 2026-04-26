@@ -28,6 +28,9 @@ class ResidualAccountCandidate:
     current_code: str
     audit_status: str
     source: str
+    evidence_codes: tuple[str, ...] = ()
+    evidence_score: int = 0
+    evidence_summary: str = ""
 
 
 @dataclass(frozen=True)

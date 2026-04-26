@@ -507,7 +507,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
     _enriched_cached = _RL_ENRICHED_CACHE.get(enriched_cache_key)
 
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
         sumline_regnr = {int(v) for v in regn.loc[regn["sumpost"], "regnr"].astype(int).tolist()}
         # Klassifiser sumposter etter nivå: høyt sumnivå = hovedsum
@@ -593,7 +593,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
         if has_prev:
             try:
                 import previous_year_comparison
-                import regnskap_client_overrides as _rco
+                import src.shared.regnskap.client_overrides as _rco
                 import session as _sess
                 _cl = getattr(_sess, "client", None) or ""
                 _yr = getattr(_sess, "year", None) or ""
@@ -709,7 +709,7 @@ def refresh_rl_pivot(*, page: Any) -> None:
     _rl_comments: dict[str, str] = {}
     _rl_action_counts: dict[str, int] = {}
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         import session as _sess
         _cl = getattr(_sess, "client", None) or ""
         _yr = getattr(_sess, "year", None) or ""

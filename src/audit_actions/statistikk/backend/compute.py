@@ -92,7 +92,7 @@ def get_konto_ranges(
     leaf_set: set[int] = {regnr}
     if regnskapslinjer is not None and not (hasattr(regnskapslinjer, "empty") and regnskapslinjer.empty):
         try:
-            from regnskap_mapping import expand_regnskapslinje_selection, normalize_regnskapslinjer
+            from src.shared.regnskap.mapping import expand_regnskapslinje_selection, normalize_regnskapslinjer
             regn = normalize_regnskapslinjer(regnskapslinjer)
             if bool(regn.loc[regn["regnr"].astype(int) == regnr, "sumpost"].any()):
                 expanded = expand_regnskapslinje_selection(
@@ -163,7 +163,7 @@ def get_konto_set_for_regnr(
 
     leaf_set: set[int] = {int(regnr)}
     try:
-        from regnskap_mapping import expand_regnskapslinje_selection, normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import expand_regnskapslinje_selection, normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
         if bool(regn.loc[regn["regnr"].astype(int) == int(regnr), "sumpost"].any()):
             expanded = expand_regnskapslinje_selection(

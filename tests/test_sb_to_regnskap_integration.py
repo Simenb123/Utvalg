@@ -66,7 +66,7 @@ def _make_regnskapslinjer_xlsx(path: Path) -> None:
 def test_full_flow_sb_to_regnskapslinje(tmp_path: Path) -> None:
     """End-to-end: Excel SB → reader → intervall-mapping → aggregering."""
     from trial_balance_reader import read_trial_balance
-    from regnskap_mapping import apply_interval_mapping, aggregate_by_regnskapslinje
+    from src.shared.regnskap.mapping import apply_interval_mapping, aggregate_by_regnskapslinje
 
     sb_path = tmp_path / "saldobalanse.xlsx"
     iv_path = tmp_path / "intervaller.xlsx"
@@ -159,7 +159,7 @@ def test_reader_debet_kredit_columns(tmp_path: Path) -> None:
 def test_unmapped_kontos_are_tracked(tmp_path: Path) -> None:
     """Kontoer uten treff i intervall-mapping rapporteres korrekt."""
     from trial_balance_reader import read_trial_balance
-    from regnskap_mapping import apply_interval_mapping
+    from src.shared.regnskap.mapping import apply_interval_mapping
 
     tb = pd.DataFrame(
         {
@@ -181,7 +181,7 @@ def test_unmapped_kontos_are_tracked(tmp_path: Path) -> None:
 
 def test_aggregate_empty_regnr_gives_zero(tmp_path: Path) -> None:
     """Regnskapslinjer uten treff i SB får beløp = 0."""
-    from regnskap_mapping import apply_interval_mapping, aggregate_by_regnskapslinje
+    from src.shared.regnskap.mapping import apply_interval_mapping, aggregate_by_regnskapslinje
 
     tb = pd.DataFrame({"konto": ["1000"], "ub": [500.0]})
     iv = pd.DataFrame({"fra": [1000], "til": [1999], "regnr": [10]})

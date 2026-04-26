@@ -324,7 +324,7 @@ def build_data_source_rows() -> list[DataSourceRow]:
         clients_root = data_dir / "clients"
 
     try:
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         regnskap_status = regnskap_config.get_status()
         regn_json = regnskap_status.regnskapslinjer_json_path
@@ -1563,7 +1563,7 @@ class SettingsView:
         if not hasattr(self, "lbl_regn"):
             return
         try:
-            import regnskap_config
+            import src.shared.regnskap.config as regnskap_config
             st = regnskap_config.get_status()
             self.lbl_regn.configure(text=_fmt_cfg_meta(st.regnskapslinjer_meta))
             self.lbl_map.configure(text=_fmt_cfg_meta(st.kontoplan_mapping_meta))
@@ -1581,7 +1581,7 @@ class SettingsView:
 
     def _open_global_admin_config(self) -> None:
         try:
-            import regnskap_config
+            import src.shared.regnskap.config as regnskap_config
             target = str(regnskap_config.config_dir())
         except Exception as exc:
             messagebox.showerror("Felles mapping", f"Kunne ikke finne mappingmappe: {exc}", parent=self.win)

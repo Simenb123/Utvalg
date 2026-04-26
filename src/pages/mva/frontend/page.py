@@ -528,7 +528,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         melding = {t: None for t in range(1, 7)}
         mld_count = 0
         try:
-            import regnskap_client_overrides as rco
+            import src.shared.regnskap.client_overrides as rco
             if client and year:
                 bucket = rco.load_mva_melding(client, year, termin=None) or {}
                 for termin_str, data in bucket.items():
@@ -552,7 +552,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         skatt = {t: None for t in range(1, 7)}
         skatt_count = 0
         try:
-            import regnskap_client_overrides as rco
+            import src.shared.regnskap.client_overrides as rco
             from ..backend.avstemming import SkatteetatenData
             if client and year:
                 data = rco.load_skatteetaten_data(client, year)
@@ -735,7 +735,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         client, year = self._get_session_client_year()
         skatt = None
         try:
-            import regnskap_client_overrides as rco
+            import src.shared.regnskap.client_overrides as rco
             from ..backend.avstemming import SkatteetatenData
             if client and year:
                 raw = rco.load_skatteetaten_data(client, year)
@@ -927,7 +927,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         skatt_bev = {t: None for t in range(1, 7)}
         skatt_count = 0
         try:
-            import regnskap_client_overrides as rco
+            import src.shared.regnskap.client_overrides as rco
             from ..backend.avstemming import SkatteetatenData
             if client and year:
                 raw = rco.load_skatteetaten_data(client, year)
@@ -1060,7 +1060,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
             return
 
         try:
-            import regnskap_client_overrides as rco
+            import src.shared.regnskap.client_overrides as rco
             rco.save_skatteetaten_data(client, year, data.to_dict())
         except Exception as exc:
             log.exception("Kunne ikke lagre Skatteetaten-data")
@@ -1125,7 +1125,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
             return
 
         try:
-            import regnskap_client_overrides as rco
+            import src.shared.regnskap.client_overrides as rco
             rco.save_mva_melding(client, save_year, melding.termin, melding.to_dict())
         except Exception as exc:
             log.exception("Kunne ikke lagre MVA-melding")

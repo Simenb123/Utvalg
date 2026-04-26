@@ -159,7 +159,7 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
     if not client or not year:
         return
 
-    import regnskap_client_overrides as _rco
+    import src.shared.regnskap.client_overrides as _rco
     from pathlib import Path as _Path
 
     konto = str(konto).strip()

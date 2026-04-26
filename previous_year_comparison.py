@@ -100,7 +100,7 @@ def add_previous_year_columns(
 
     # Beregn sumposter for fjorårsdata
     try:
-        from regnskap_mapping import compute_sumlinjer, normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import compute_sumlinjer, normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
         if regn["sumpost"].any():
             base_values = {int(r): float(v) for r, v in zip(prev_ub["regnr"], prev_ub["UB_fjor"])}

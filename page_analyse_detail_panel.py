@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 
 import formatting
-import regnskap_intelligence
+import src.shared.regnskap.intelligence as regnskap_intelligence
 
 
 def _show_message(messagebox: Any, fn_name: str, title: str, message: str, *, parent: Any = None) -> None:
@@ -43,7 +43,7 @@ def _load_review_state(client: str) -> dict[str, dict[str, object]]:
     if not client:
         return {}
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         return regnskap_client_overrides.load_mapping_review_state(client)
     except Exception:
@@ -54,7 +54,7 @@ def _save_review_state(client: str, konto: str, *, status: str, suggested_regnr:
     if not client or not konto:
         return
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         regnskap_client_overrides.set_mapping_review_state(
             client,
@@ -91,7 +91,7 @@ def _load_current_overrides(client: str) -> dict[str, int]:
     if not client:
         return {}
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
         import session as _session
         year = getattr(_session, "year", None) or ""
         return regnskap_client_overrides.load_account_overrides(
@@ -107,7 +107,7 @@ def _merge_mapping_labels(mapped: pd.DataFrame, regnskapslinjer: pd.DataFrame | 
         return out
 
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
         regn = normalize_regnskapslinjer(regnskapslinjer)
     except Exception:
@@ -172,7 +172,7 @@ def _build_account_mode_context(page: Any) -> dict[str, Any]:
     regnskapslinjer = getattr(page, "_rl_regnskapslinjer", None)
     if intervals is not None:
         try:
-            from regnskap_mapping import apply_account_overrides, apply_interval_mapping
+            from src.shared.regnskap.mapping import apply_account_overrides, apply_interval_mapping
 
             probe = pd.DataFrame({"konto": grouped["Konto"].astype(str).tolist()})
             mapped = apply_interval_mapping(probe, intervals, konto_col="konto").mapped
@@ -500,7 +500,7 @@ def remove_override_for_selected_account(page: Any, *, messagebox: Any) -> None:
         return
 
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         import session as _session
         year = getattr(_session, "year", None) or ""
@@ -545,7 +545,7 @@ def apply_suggestion_for_selected_account(page: Any, *, messagebox: Any) -> None
         return
 
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         import session as _session
         year = getattr(_session, "year", None) or ""

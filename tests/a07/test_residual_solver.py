@@ -134,6 +134,112 @@ def test_residual_solver_suggests_group_scenario_without_auto_apply() -> None:
     assert scenario.diff_after_cents == 0
 
 
+def test_residual_solver_uses_structured_suggestion_evidence_with_human_explain() -> None:
+    overview = pd.DataFrame([{"Kode": "bonus", "Diff": 100.0}])
+    control_gl = pd.DataFrame(
+        [{"Konto": "5000", "Navn": "Bonus", "Endring": 100.0, "Kode": "", "MappingAuditStatus": ""}]
+    )
+    suggestions = pd.DataFrame(
+        [
+            {
+                "Kode": "bonus",
+                "ForslagKontoer": "5000",
+                "WithinTolerance": True,
+                "AmountEvidence": "exact",
+                "SuggestionGuardrail": "accepted",
+                "UsedRulebook": True,
+                "HitTokens": "bonus",
+                "AnchorSignals": "navnetreff,konto-intervall",
+                "Explain": "Regelbok og kontonavn peker mot bonus.",
+            }
+        ]
+    )
+
+    analysis = analyze_a07_residuals(overview, control_gl, {}, basis_col="Endring", suggestions_df=suggestions)
+
+    assert analysis.status == SAFE_EXACT
+    assert analysis.auto_safe is True
+    assert [(change.account, change.to_code) for change in analysis.changes] == [("5000", "bonus")]
+
+
+def test_residual_solver_keeps_amount_only_exact_as_review_when_evidence_exists_elsewhere() -> None:
+    overview = pd.DataFrame([{"Kode": "bonus", "Diff": 100.0}])
+    control_gl = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Uforklart kostnad", "Endring": 100.0, "Kode": "", "MappingAuditStatus": ""},
+            {"Konto": "5090", "Navn": "Bonus", "Endring": 90.0, "Kode": "", "MappingAuditStatus": ""},
+        ]
+    )
+    suggestions = pd.DataFrame(
+        [
+            {
+                "Kode": "bonus",
+                "ForslagKontoer": "5090",
+                "WithinTolerance": False,
+                "AmountEvidence": "near",
+                "SuggestionGuardrail": "review",
+                "UsedRulebook": True,
+                "HitTokens": "bonus",
+                "AnchorSignals": "navnetreff",
+                "Explain": "Bonusnavn, men beløpet må vurderes.",
+            }
+        ]
+    )
+
+    analysis = analyze_a07_residuals(overview, control_gl, {}, basis_col="Endring", suggestions_df=suggestions)
+
+    assert analysis.auto_safe is False
+    assert analysis.changes == ()
+    assert analysis.code_results[0].exact_accounts == ("5000",)
+    assert analysis.code_results[0].review_required is True
+
+
+def test_residual_solver_component_group_prefers_evidence_backed_account() -> None:
+    overview = pd.DataFrame(
+        [
+            {"Kode": "fastloenn", "Diff": 70.0},
+            {"Kode": "timeloenn", "Diff": 30.0},
+        ]
+    )
+    control_gl = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Lonn ansatte", "Endring": 100.0, "Kode": "", "MappingAuditStatus": ""},
+            {"Konto": "5999", "Navn": "Annen personalkost", "Endring": 100.0, "Kode": "", "MappingAuditStatus": ""},
+        ]
+    )
+    suggestions = pd.DataFrame(
+        [
+            {
+                "Kode": "fastloenn",
+                "ForslagKontoer": "5000",
+                "WithinTolerance": False,
+                "AmountEvidence": "near",
+                "UsedRulebook": True,
+                "HitTokens": "lonn",
+                "AnchorSignals": "navnetreff",
+            },
+            {
+                "Kode": "timeloenn",
+                "ForslagKontoer": "5000",
+                "WithinTolerance": False,
+                "AmountEvidence": "near",
+                "UsedRulebook": True,
+                "HitTokens": "lonn",
+                "AnchorSignals": "navnetreff",
+            },
+        ]
+    )
+
+    analysis = analyze_a07_residuals(overview, control_gl, {}, basis_col="Endring", suggestions_df=suggestions)
+
+    assert analysis.auto_safe is False
+    assert analysis.group_scenarios
+    scenario = analysis.group_scenarios[0]
+    assert scenario.codes == ("fastloenn", "timeloenn")
+    assert scenario.accounts == ("5000",)
+    assert "Strukturert evidens" in scenario.reason
+
+
 def test_residual_solver_marks_5310_case_as_suspicious_without_forcing_zero() -> None:
     overview = pd.DataFrame(
         [

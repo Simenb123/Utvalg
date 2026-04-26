@@ -6,7 +6,7 @@ import pandas as pd
 
 
 def test_apply_interval_mapping_and_aggregate_leaf_and_sum() -> None:
-    from regnskap_mapping import apply_interval_mapping, aggregate_by_regnskapslinje
+    from src.shared.regnskap.mapping import apply_interval_mapping, aggregate_by_regnskapslinje
 
     intervals = pd.DataFrame(
         {
@@ -47,7 +47,7 @@ def test_apply_interval_mapping_and_aggregate_leaf_and_sum() -> None:
 
 
 def test_apply_interval_mapping_marks_unmapped() -> None:
-    from regnskap_mapping import apply_interval_mapping
+    from src.shared.regnskap.mapping import apply_interval_mapping
 
     intervals = pd.DataFrame({"fra": [1000], "til": [1999], "regnr": [10]})
     tb = pd.DataFrame({"konto": ["9999"], "ub": [1.0]})
@@ -56,7 +56,7 @@ def test_apply_interval_mapping_marks_unmapped() -> None:
 
 
 def test_apply_account_overrides_overrides_regnr() -> None:
-    from regnskap_mapping import apply_account_overrides
+    from src.shared.regnskap.mapping import apply_account_overrides
 
     mapped = pd.DataFrame(
         {
@@ -72,7 +72,7 @@ def test_apply_account_overrides_overrides_regnr() -> None:
 
 
 def test_expand_regnskapslinje_selection_expands_sumlinjer() -> None:
-    from regnskap_mapping import expand_regnskapslinje_selection
+    from src.shared.regnskap.mapping import expand_regnskapslinje_selection
 
     regn = pd.DataFrame(
         {
@@ -88,7 +88,7 @@ def test_expand_regnskapslinje_selection_expands_sumlinjer() -> None:
 
 
 def test_aggregate_and_expand_sumlinjer_support_hierarchy_columns_without_formula() -> None:
-    from regnskap_mapping import apply_interval_mapping, aggregate_by_regnskapslinje, expand_regnskapslinje_selection
+    from src.shared.regnskap.mapping import apply_interval_mapping, aggregate_by_regnskapslinje, expand_regnskapslinje_selection
 
     intervals = pd.DataFrame(
         {

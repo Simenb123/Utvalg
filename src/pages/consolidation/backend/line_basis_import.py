@@ -124,7 +124,7 @@ def validate_company_line_basis(
     regnskapslinjer: pd.DataFrame,
 ) -> tuple[pd.DataFrame, list[str]]:
     """Valider og kanoniser regnskapslinje-grunnlag."""
-    from regnskap_mapping import normalize_regnskapslinjer
+    from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
     work = normalize_company_line_basis(df)
     if work.empty:
@@ -211,7 +211,7 @@ def export_line_basis_template(
     regnskapslinjer: pd.DataFrame,
 ) -> str:
     """Eksporter standardmal for regnskapslinje-grunnlag."""
-    from regnskap_mapping import normalize_regnskapslinjer
+    from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
     target = Path(path)
     if target.suffix.lower() != ".xlsx":

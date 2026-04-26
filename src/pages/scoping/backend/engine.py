@@ -138,8 +138,8 @@ def build_scoping(
     type_map: dict[str, str] = {}
     summary_set: set[str] = set()
     try:
-        from regnskap_config import load_regnskapslinjer
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.config import load_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
         rl_cfg = load_regnskapslinjer()
         for _, row in rl_cfg.iterrows():

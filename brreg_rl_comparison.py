@@ -446,7 +446,7 @@ def build_brreg_by_regnr(
         return {}
 
     try:
-        from regnskap_mapping import (
+        from src.shared.regnskap.mapping import (
             normalize_regnskapslinjer,
             compute_sumlinjer,
             expand_regnskapslinje_selection,

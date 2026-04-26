@@ -297,7 +297,7 @@ import pytest as _pytest
 def _reset_module_caches():
     """Tøm modul-nivå cacher som kan lekke mellom tester."""
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         _rco.invalidate_client_cache()
         if hasattr(_rco, "_overrides_dir_cached"):
             _rco._overrides_dir_cached.cache_clear()

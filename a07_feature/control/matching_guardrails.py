@@ -24,7 +24,6 @@ def _refund_has_specific_support(row: pd.Series) -> bool:
     text_parts = (
         row.get("ForslagVisning"),
         row.get("HitTokens"),
-        row.get("AnchorSignals"),
         evidence.match_basis,
     )
     text = _normalize_semantic_text(" ".join(str(part or "") for part in text_parts))

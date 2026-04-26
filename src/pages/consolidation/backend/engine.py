@@ -27,7 +27,7 @@ def run_consolidation(
     effective_overrides: dict[str, dict[str, int]] | None = None,
 ) -> tuple[pd.DataFrame, RunResult]:
     """Kjor en fullstendig konsolideringsrun."""
-    from regnskap_mapping import compute_sumlinjer
+    from src.shared.regnskap.mapping import compute_sumlinjer
 
     warnings: list[str] = []
 

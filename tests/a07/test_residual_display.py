@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from a07_feature.suggest.residual_display import residual_analysis_to_suggestions_df
+from a07_feature.suggest.residual_display import residual_analysis_to_suggestions_df, residual_review_summary
 from a07_feature.suggest.residual_models import (
     REVIEW_EXACT,
     ResidualAnalysis,
@@ -68,3 +68,20 @@ def test_residual_display_renders_group_scenario_as_review_only() -> None:
     assert row["Forslagsstatus"] == "Krever gruppe"
     assert row["SuggestionGuardrail"] == "review"
     assert row["ResidualAction"] == "group_review"
+
+
+def test_residual_review_summary_mentions_group_scenarios_without_text_wall() -> None:
+    analysis = _analysis(
+        group_scenarios=(
+            ResidualGroupScenario(
+                codes=("bonus", "telefon"),
+                diff_cents=15_000,
+                accounts=("5990",),
+                amount_cents=15_000,
+                diff_after_cents=0,
+                reason="Åpne koder kan vurderes samlet som gruppe.",
+            ),
+        ),
+    )
+
+    assert residual_review_summary(analysis, row_count=1) == "Ingen trygg 0-diff-løsning. 1 gruppeforslag må vurderes."

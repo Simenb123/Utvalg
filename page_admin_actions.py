@@ -24,7 +24,7 @@ _AUTOSAVE_DELAY_MS = 400
 def _load_rl_options() -> list[tuple[str, str, str]]:
     """Returner [(regnr, navn, "PL"|"BS"), …] uten sumposter."""
     try:
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         df = regnskap_config.load_regnskapslinjer_json()
     except Exception:

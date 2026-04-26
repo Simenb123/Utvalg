@@ -568,7 +568,7 @@ class DatasetPane(ttk.Frame):
             client = (self._store_section.client_var.get() or "").strip()
             if not client:
                 return {}
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
             return regnskap_client_overrides.load_column_mapping(client)
         except Exception:
             return {}
@@ -867,7 +867,7 @@ class DatasetPane(ttk.Frame):
                 if self._store_section is not None:
                     client = (self._store_section.client_var.get() or "").strip() or None
                 if client and mapping:
-                    import regnskap_client_overrides
+                    import src.shared.regnskap.client_overrides as regnskap_client_overrides
                     regnskap_client_overrides.save_column_mapping(client, mapping)
             except Exception:
                 logger.debug("Kunne ikke lagre kolonne-mapping per klient", exc_info=True)

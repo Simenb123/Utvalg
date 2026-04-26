@@ -13,11 +13,11 @@ from typing import Any
 import pandas as pd
 
 import preferences
-import regnskap_export
-import regnskap_klient
-import regnskap_noter
+from . import export as regnskap_export
+from . import klient as regnskap_klient
+from . import noter as regnskap_noter
 
-from regnskap_data import (
+from src.shared.regnskap.data import (
     RS_STRUCTURE,
     BS_STRUCTURE,
     NOTE_SPECS,

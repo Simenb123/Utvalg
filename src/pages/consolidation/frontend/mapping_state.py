@@ -84,7 +84,7 @@ def load_analyse_parent_overrides(page: "ConsolidationPage") -> dict[str, int]:
     if page._project is None:
         return {}
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         return regnskap_client_overrides.load_account_overrides(
             page._project.client,
@@ -144,7 +144,7 @@ def get_effective_company_tb(page: "ConsolidationPage", company_id: str) -> pd.D
         return tb
 
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
         import tilleggsposteringer
 
         ao_entries = regnskap_client_overrides.load_supplementary_entries(

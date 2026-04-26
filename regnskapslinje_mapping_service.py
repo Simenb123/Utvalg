@@ -33,7 +33,7 @@ import pandas as pd
 
 import regnskapslinje_suggest
 from a07_feature import AccountUsageFeatures, build_account_usage_features
-from regnskap_mapping import (
+from src.shared.regnskap.mapping import (
     apply_account_overrides,
     apply_interval_mapping,
     normalize_intervals,
@@ -171,7 +171,7 @@ def load_rl_config_dataframes() -> tuple[pd.DataFrame | None, pd.DataFrame | Non
 
 def _safe_load_intervals() -> pd.DataFrame | None:
     try:
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         return regnskap_config.load_kontoplan_mapping()
     except Exception as exc:
@@ -181,7 +181,7 @@ def _safe_load_intervals() -> pd.DataFrame | None:
 
 def _safe_load_regnskapslinjer() -> pd.DataFrame | None:
     try:
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         return regnskap_config.load_regnskapslinjer()
     except Exception as exc:
@@ -193,7 +193,7 @@ def _safe_load_account_overrides(client: str | None, year: str | None) -> dict[s
     if not client:
         return {}
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         return regnskap_client_overrides.load_account_overrides(client, year=year)
     except Exception as exc:
@@ -613,7 +613,7 @@ def set_account_override(
     slik at Admin og andre konsumenter kun har Ã©n service-inngang for
     RL-mutasjoner.
     """
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     return regnskap_client_overrides.set_account_override(
         str(client), str(konto), int(regnr), year=year
@@ -630,7 +630,7 @@ def clear_account_override(
 
     Tynn wrapper over ``regnskap_client_overrides.remove_account_override``.
     """
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     return regnskap_client_overrides.remove_account_override(
         str(client), str(konto), year=year
@@ -790,7 +790,7 @@ def _history_overrides_by_account(client: str | None, year: int | None) -> dict[
     if not client or not year:
         return {}
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
         return regnskap_client_overrides.load_prior_year_overrides(client, str(year))
     except Exception:

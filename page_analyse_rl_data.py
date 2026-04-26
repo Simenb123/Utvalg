@@ -31,7 +31,7 @@ def _load_current_client_account_overrides() -> dict[str, int]:
         return {}
 
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
         return regnskap_client_overrides.load_account_overrides(
             str(client), year=str(year) if year else None)
     except Exception as exc:
@@ -216,7 +216,7 @@ def _resolve_analysis_sb_views(*, page: Any) -> tuple[Optional[pd.DataFrame], Op
 
     try:
         import session as _session
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         import tilleggsposteringer as _tillegg
 
         client = getattr(_session, "client", None) or ""

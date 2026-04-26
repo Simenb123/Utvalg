@@ -13,6 +13,14 @@ from .page_a07_constants import _CONTROL_SUGGESTION_COLUMNS, _SUGGESTION_COLUMNS
 from src.pages.a07.backend.mapping_apply import apply_residual_changes_to_mapping
 
 
+def _residual_review_detail_text(review_rows: pd.DataFrame | None) -> str:
+    if isinstance(review_rows, pd.DataFrame) and not review_rows.empty and "ResidualAction" in review_rows.columns:
+        actions = {str(value or "").strip() for value in review_rows["ResidualAction"].tolist()}
+        if actions and actions <= {"group_review"}:
+            return "Tryllestav-resultat: velg gruppeforslag og trykk Opprett gruppeforslag."
+    return "Tryllestav-resultat: velg rad for manuell vurdering."
+
+
 class A07PageMappingResidualMixin:
     def _residual_group_codes_from_row(self, row: pd.Series | dict[str, object] | None) -> list[str]:
         if row is None:
@@ -67,6 +75,7 @@ class A07PageMappingResidualMixin:
             effective_mapping,
             locked_codes=_locked_codes_for(self),
             basis_col=getattr(getattr(self, "workspace", None), "basis_col", "Endring"),
+            suggestions_df=getattr(getattr(self, "workspace", None), "suggestions", None),
         )
 
     def _apply_magic_wand_residual_changes(self, analysis) -> tuple[int, int, str]:
@@ -137,7 +146,7 @@ class A07PageMappingResidualMixin:
         details_var = getattr(self, "suggestion_details_var", None)
         if details_var is not None:
             try:
-                details_var.set("Tryllestav-resultat: bruk avansert mapping for rader som må vurderes.")
+                details_var.set(_residual_review_detail_text(review_rows))
             except Exception:
                 pass
         effect_var = getattr(self, "control_suggestion_effect_var", None)

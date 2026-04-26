@@ -103,7 +103,7 @@ def build_rl_reconciliation(
     Returnerer DataFrame med kolonner:
         regnr, regnskapslinje, sb_ib, sb_ub, sb_netto, hb_sum, differanse, har_avvik
     """
-    from regnskap_mapping import (
+    from src.shared.regnskap.mapping import (
         apply_account_overrides,
         apply_interval_mapping,
         normalize_regnskapslinjer,

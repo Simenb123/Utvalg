@@ -8,7 +8,7 @@ import pandas as pd
 import classification_config
 from a07_feature import AccountUsageFeatures
 from a07_feature.suggest.helpers import _konto_in_ranges, _norm_token, _tokenize
-from regnskap_mapping import normalize_regnskapslinjer
+from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
 
 NORMAL_BALANCE_AUTO = "auto"

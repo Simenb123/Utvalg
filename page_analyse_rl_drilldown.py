@@ -35,7 +35,7 @@ def _expand_selected_regnskapslinjer(
         return regnr_values
 
     try:
-        from regnskap_mapping import expand_regnskapslinje_selection
+        from src.shared.regnskap.mapping import expand_regnskapslinje_selection
         return expand_regnskapslinje_selection(
             regnskapslinjer=regnskapslinjer,
             selected_regnr=regnr_values,
@@ -88,7 +88,7 @@ def build_rl_account_drilldown(
     account_overrides: Optional[dict[str, int]] = None,
 ) -> pd.DataFrame:
     """Bygg kontooversikt under valgt(e) regnskapslinjer."""
-    from regnskap_mapping import normalize_regnskapslinjer
+    from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
     if df_hb is None or df_hb.empty or "Konto" not in df_hb.columns:
         return pd.DataFrame(columns=["Nr", "Regnskapslinje", "Konto", "Kontonavn", "IB", "Endring", "UB", "Antall"])

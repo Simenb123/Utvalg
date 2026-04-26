@@ -56,7 +56,7 @@ def on_export_excel(page: Any) -> None:
         return
 
     try:
-        import regnskap_report
+        from src.shared.regnskap import report as regnskap_report
         sigs = page._get_signatories() if page._inkl_signatur_var.get() else None
         regnskap_report.save_report_excel(
             path, rl_df,
@@ -103,7 +103,7 @@ def on_export_html(page: Any) -> None:
         return
 
     try:
-        import regnskap_report
+        from src.shared.regnskap import report as regnskap_report
         sigs = page._get_signatories() if page._inkl_signatur_var.get() else None
         regnskap_report.save_report_html(
             path, rl_df,
@@ -157,7 +157,7 @@ def on_export_pdf(page: Any) -> None:
         pass
 
     try:
-        import regnskap_report
+        from src.shared.regnskap import report as regnskap_report
         sigs = page._get_signatories() if page._inkl_signatur_var.get() else None
         regnskap_report.save_report_pdf(
             path, rl_df,

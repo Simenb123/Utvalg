@@ -7,7 +7,7 @@ import pytest
 
 
 def _configure_paths(tmp_path: Path, monkeypatch):
-    import regnskap_config
+    import src.shared.regnskap.config as regnskap_config
 
     shared_root = tmp_path / "shared"
     monkeypatch.setattr(regnskap_config.app_paths, "data_dir", lambda: shared_root)

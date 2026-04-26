@@ -31,7 +31,7 @@ import pandas as pd
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import session
-import regnskap_client_overrides
+import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
 from src.audit_actions.motpost.expected_rules import (
     ExpectedRuleSet,

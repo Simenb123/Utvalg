@@ -35,7 +35,7 @@ def _set_accounts_ok(*, page: Any, kontoer: list[str], ok: bool) -> None:
     if not client or not year or not kontoer:
         return
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         _rco.set_accounts_ok(client, year, kontoer, ok)
     except Exception:
         return
@@ -48,7 +48,7 @@ def _action_link_menu_label(*, kind: str, entity_key: str, base: str) -> str:
     if not client or not year or not entity_key:
         return base
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         if kind == "account":
             links_map = _rco.load_account_action_links(client, year)
         else:
@@ -133,7 +133,7 @@ def _add_attachments_to_kontoer(*, page: Any, kontoer: list[str]) -> None:
     regnr_by_konto = _resolve_regnr_by_konto(page=page, kontoer=kontoer)
 
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         _rco.add_account_attachments(
             client, year, kontoer, list(paths),
             regnr_by_konto=regnr_by_konto,
@@ -171,7 +171,7 @@ def _show_attachments_dialog(*, page: Any, konto: str, kontonavn: str) -> None:
 
     def _load_rows() -> list[dict]:
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
             return _rco.list_account_attachments(client, year, konto)
         except Exception:
             return []
@@ -266,7 +266,7 @@ def _show_attachments_dialog(*, page: Any, konto: str, kontonavn: str) -> None:
         if not messagebox.askyesno("Fjern kobling", f"Fjerne koblingen til:\n{p}?", parent=dlg):
             return
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
             _rco.remove_account_attachment(client, year, konto, p)
         except Exception:
             return
@@ -296,7 +296,7 @@ def _show_attachments_dialog(*, page: Any, konto: str, kontonavn: str) -> None:
                                 parent=dlg)
             return
         try:
-            import regnskap_client_overrides as _rco
+            import src.shared.regnskap.client_overrides as _rco
             _rco.migrate_attachment_to_managed(
                 client, year, konto, src,
                 regnr=rl_info[0], regnskapslinje=rl_info[1],
@@ -355,7 +355,7 @@ def _edit_comment(*, page: Any, kind: str, key: str, label: str) -> None:
 
     try:
         import session as _session
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
         client = getattr(_session, "client", None) or ""
     except Exception:
         return

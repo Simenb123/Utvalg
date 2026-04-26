@@ -43,7 +43,7 @@ def build_konto_to_rl(page) -> dict | None:
         return {}
 
     try:
-        from regnskap_mapping import apply_interval_mapping, normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import apply_interval_mapping, normalize_regnskapslinjer
 
         rl_name_map: dict[int, str] = {}
         if isinstance(regnskapslinjer, pd.DataFrame) and not regnskapslinjer.empty:

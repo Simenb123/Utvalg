@@ -4,7 +4,7 @@ from __future__ import annotations
 def test_save_and_load_account_overrides(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_account_overrides("Nbs Regnskap AS", {"1500": 610, "3000": 10})
     loaded = regnskap_client_overrides.load_account_overrides("Nbs Regnskap AS")
@@ -15,7 +15,7 @@ def test_save_and_load_account_overrides(tmp_path, monkeypatch) -> None:
 def test_set_and_remove_account_override(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.set_account_override("Testklient", "9999", 42)
     assert regnskap_client_overrides.load_account_overrides("Testklient") == {"9999": 42}
@@ -27,7 +27,7 @@ def test_set_and_remove_account_override(tmp_path, monkeypatch) -> None:
 def test_save_and_load_expected_regnskapslinjer_presets(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_expected_regnskapslinjer(
         "Nbs Regnskap AS",
@@ -47,7 +47,7 @@ def test_save_and_load_expected_regnskapslinjer_presets(tmp_path, monkeypatch) -
 def test_account_overrides_and_expected_presets_preserve_each_other(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_account_overrides("Testklient", {"9999": 42})
     regnskap_client_overrides.save_expected_regnskapslinjer(
@@ -68,7 +68,7 @@ def test_account_overrides_and_expected_presets_preserve_each_other(tmp_path, mo
 def test_save_and_load_expected_regnskapslinje_rule_presets(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_expected_regnskapslinje_rule(
         "Nbs Regnskap AS",
@@ -90,7 +90,7 @@ def test_save_and_load_expected_regnskapslinje_rule_presets(tmp_path, monkeypatc
 def test_save_and_load_column_mapping(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     mapping = {"Bilag": "Voucher No", "Konto": "Account", "Beløp": "Amount"}
     regnskap_client_overrides.save_column_mapping("Testklient", mapping)
@@ -102,7 +102,7 @@ def test_save_and_load_column_mapping(tmp_path, monkeypatch) -> None:
 def test_column_mapping_preserves_other_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_account_overrides("Testklient", {"1500": 610})
     regnskap_client_overrides.save_column_mapping("Testklient", {"Bilag": "Doc No"})
@@ -114,7 +114,7 @@ def test_column_mapping_preserves_other_data(tmp_path, monkeypatch) -> None:
 def test_load_column_mapping_empty_client(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     assert regnskap_client_overrides.load_column_mapping(None) == {}
     assert regnskap_client_overrides.load_column_mapping("") == {}
@@ -126,7 +126,7 @@ def test_load_column_mapping_empty_client(tmp_path, monkeypatch) -> None:
 def test_save_and_load_accounting_system(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_accounting_system("Testklient", "Tripletex")
     loaded = regnskap_client_overrides.load_accounting_system("Testklient")
@@ -137,7 +137,7 @@ def test_save_and_load_accounting_system(tmp_path, monkeypatch) -> None:
 def test_load_accounting_system_empty_client(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     assert regnskap_client_overrides.load_accounting_system(None) == ""
     assert regnskap_client_overrides.load_accounting_system("") == ""
@@ -146,7 +146,7 @@ def test_load_accounting_system_empty_client(tmp_path, monkeypatch) -> None:
 def test_save_and_load_mva_code_mapping(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     mapping = {"1": "1", "3": "3", "99": "8"}
     regnskap_client_overrides.save_mva_code_mapping("Testklient", mapping)
@@ -158,7 +158,7 @@ def test_save_and_load_mva_code_mapping(tmp_path, monkeypatch) -> None:
 def test_load_mva_code_mapping_empty_client(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     assert regnskap_client_overrides.load_mva_code_mapping(None) == {}
     assert regnskap_client_overrides.load_mva_code_mapping("") == {}
@@ -167,7 +167,7 @@ def test_load_mva_code_mapping_empty_client(tmp_path, monkeypatch) -> None:
 def test_mva_fields_preserve_other_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_account_overrides("Testklient", {"1500": 610})
     regnskap_client_overrides.save_accounting_system("Testklient", "PowerOffice GO")
@@ -182,7 +182,7 @@ def test_year_specific_overrides(tmp_path, monkeypatch) -> None:
     """Year-specific overrides take priority; fallback to year-agnostic."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     # Save year-agnostic (legacy)
     regnskap_client_overrides.save_account_overrides("Testklient", {"1500": 610})
@@ -216,7 +216,7 @@ def test_prior_year_overrides(tmp_path, monkeypatch) -> None:
     """load_prior_year_overrides returns previous year's overrides."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     # Save overrides for 2023
     regnskap_client_overrides.save_account_overrides(
@@ -236,7 +236,7 @@ def test_prior_year_overrides_fallback_to_current_year(tmp_path, monkeypatch) ->
     """Kontoer uten eksplisitt fjor-override skal arve årets override."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides as rco
+    import src.shared.regnskap.client_overrides as rco
 
     # Fjoråret (2024) har sine egne overrides for 1500, men ikke for 1300
     rco.save_account_overrides("K", {"1500": 610}, year="2024")
@@ -253,7 +253,7 @@ def test_prior_year_overrides_explicit_prev_wins_over_current(tmp_path, monkeypa
     """Hvis fjoråret har en eksplisitt annen verdi, vinner den over årets fallback."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides as rco
+    import src.shared.regnskap.client_overrides as rco
 
     rco.save_account_overrides("K", {"1300": 585}, year="2024")   # fjor: aksjer
     rco.save_account_overrides("K", {"1300": 560}, year="2025")   # år: datter
@@ -265,7 +265,7 @@ def test_prior_year_overrides_explicit_prev_wins_over_current(tmp_path, monkeypa
 def test_mva_code_mapping_cleans_input(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     regnskap_client_overrides.save_mva_code_mapping("Testklient", {
         " 1 ": " 1 ",
@@ -280,7 +280,7 @@ def test_mva_code_mapping_cleans_input(tmp_path, monkeypatch) -> None:
 def test_save_and_load_skatteetaten_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides as rco
+    import src.shared.regnskap.client_overrides as rco
 
     payload = {
         "org_nr": "123456789",
@@ -302,7 +302,7 @@ def test_save_and_load_skatteetaten_data(tmp_path, monkeypatch) -> None:
 def test_skatteetaten_data_per_year_isolation(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides as rco
+    import src.shared.regnskap.client_overrides as rco
 
     rco.save_skatteetaten_data("K", 2024, {"mva_per_termin": {"1": 1.0}})
     rco.save_skatteetaten_data("K", 2025, {"mva_per_termin": {"1": 2.0}})
@@ -314,7 +314,7 @@ def test_skatteetaten_data_per_year_isolation(tmp_path, monkeypatch) -> None:
 def test_save_and_load_mva_melding(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides as rco
+    import src.shared.regnskap.client_overrides as rco
 
     rco.save_mva_melding("K", 2025, 1, {"post1_avgift_25": 250000.0})
     rco.save_mva_melding("K", 2025, 2, {"post1_avgift_25": 125000.0})
@@ -338,7 +338,7 @@ def test_mva_persistence_preserves_other_data(tmp_path, monkeypatch) -> None:
     """Skatteetaten/MVA-melding skal ikke overskrive andre klient-overrides."""
     monkeypatch.setenv("UTVALG_DATA_DIR", str(tmp_path))
 
-    import regnskap_client_overrides as rco
+    import src.shared.regnskap.client_overrides as rco
 
     rco.save_mva_code_mapping("K", {"1": "1", "3": "3"})
     rco.save_skatteetaten_data("K", 2025, {"mva_per_termin": {"1": 10.0}})

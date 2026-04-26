@@ -30,8 +30,8 @@ def load_shared_config() -> tuple[pd.DataFrame, pd.DataFrame]:
     Raises:
         ConfigNotLoadedError: Hvis config-filer mangler.
     """
-    from regnskap_config import load_kontoplan_mapping, load_regnskapslinjer
-    from regnskap_mapping import normalize_intervals, normalize_regnskapslinjer
+    from src.shared.regnskap.config import load_kontoplan_mapping, load_regnskapslinjer
+    from src.shared.regnskap.mapping import normalize_intervals, normalize_regnskapslinjer
 
     try:
         raw_intervals = load_kontoplan_mapping()
@@ -74,7 +74,7 @@ def map_company_tb(
         mapped_df: TB med ekstra 'regnr' kolonne (Int64).
         unmapped_accounts: Sortert liste med kontoer uten mapping.
     """
-    from regnskap_mapping import apply_account_overrides, apply_interval_mapping
+    from src.shared.regnskap.mapping import apply_account_overrides, apply_interval_mapping
 
     if intervals is None or regnskapslinjer is None:
         intervals, regnskapslinjer = load_shared_config()

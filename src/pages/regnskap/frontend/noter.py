@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 import preferences
-from regnskap_data import (
+from src.shared.regnskap.data import (
     PRINSIPP_DEFAULT,
     PRINSIPP_DEFAULTS,
     fmt_amount,

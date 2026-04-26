@@ -52,7 +52,7 @@ def populate_grunnlag(
     leaf_regnrs: list[int] = [regnr]
     if is_sumpost and page._regnskapslinjer is not None:
         try:
-            from regnskap_mapping import expand_regnskapslinje_selection
+            from src.shared.regnskap.mapping import expand_regnskapslinje_selection
 
             expanded = expand_regnskapslinje_selection(
                 regnskapslinjer=page._regnskapslinjer,

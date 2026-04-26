@@ -14,11 +14,11 @@ import classification_config
 import classification_workspace
 import konto_klassifisering
 import payroll_classification
-import regnskap_config
+import src.shared.regnskap.config as regnskap_config
 import regnskapslinje_suggest
 import session
 from account_profile import AccountProfileDocument
-from regnskap_mapping import normalize_regnskapslinjer
+from src.shared.regnskap.mapping import normalize_regnskapslinjer
 from src.pages.saldobalanse.frontend.page import _resolve_sb_views
 
 try:

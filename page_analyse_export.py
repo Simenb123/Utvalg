@@ -199,7 +199,7 @@ def prepare_regnskapsoppstilling_export_data(*, page: Any) -> dict[str, Any]:
 
     prior_year_overrides = None
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         client_name = getattr(session, "client", None) if session is not None else None
         active_year = getattr(session, "year", None) if session is not None else None
         if client_name and active_year is not None:

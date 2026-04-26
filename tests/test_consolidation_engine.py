@@ -104,7 +104,7 @@ def _sample_project(with_elimination: bool = True) -> ConsolidationProject:
 @pytest.fixture
 def _mock_config(monkeypatch):
     """Monkeypatch regnskap_config for aa unngaa filsystem-avhengighet."""
-    import regnskap_config
+    import src.shared.regnskap.config as regnskap_config
 
     monkeypatch.setattr(
         regnskap_config, "load_kontoplan_mapping",
@@ -267,7 +267,7 @@ class TestRunConsolidation:
             run_consolidation(proj, tbs)
 
     def test_config_not_loaded_raises(self, monkeypatch):
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         monkeypatch.setattr(
             regnskap_config, "load_kontoplan_mapping",
@@ -541,7 +541,7 @@ class TestCurrencyInEngine:
 
     def test_balance_lines_use_closing_rate(self, _mock_config, monkeypatch):
         """Balance lines (regnr >= 500) should use closing_rate."""
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         # Use intervals where one regnr is >= 500
         monkeypatch.setattr(regnskap_config, "load_kontoplan_mapping", lambda **kw: pd.DataFrame({
@@ -850,7 +850,7 @@ class TestValutakontroll:
 
     def test_balance_line_uses_sluttkurs(self, _mock_config, monkeypatch):
         """Balance lines (regnr >= 500) should show Sluttkurs in control data."""
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
 
         monkeypatch.setattr(regnskap_config, "load_kontoplan_mapping", lambda **kw: pd.DataFrame({
             "fra": [1000, 3000],
@@ -1058,7 +1058,7 @@ class TestSaldobalanseAlle:
 
     def test_balance_account_uses_sluttkurs(self, _mock_config, monkeypatch):
         """Accounts mapped to regnr >= 500 should show Sluttkurs."""
-        import regnskap_config
+        import src.shared.regnskap.config as regnskap_config
         from src.pages.consolidation.backend.export import build_consolidation_workbook
 
         # Use intervals where konto 1000-1999 maps to regnr 500 (balance)

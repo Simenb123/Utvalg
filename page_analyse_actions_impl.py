@@ -130,7 +130,7 @@ def _build_rl_scope_context(
                 and regnskapslinjer is not None
                 and "Konto" in df_src.columns
             ):
-                from regnskap_mapping import apply_account_overrides, apply_interval_mapping, normalize_regnskapslinjer
+                from src.shared.regnskap.mapping import apply_account_overrides, apply_interval_mapping, normalize_regnskapslinjer
 
                 konto_values = df_src["Konto"].dropna().map(konto_to_str)
                 konto_values = [k for k in pd.unique(konto_values) if k]

@@ -857,7 +857,7 @@ def _sumline_regnr(regnskapslinjer: Optional[pd.DataFrame]) -> set[int]:
     if regnskapslinjer is None or regnskapslinjer.empty:
         return set()
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
         regn = normalize_regnskapslinjer(regnskapslinjer)
         return {int(v) for v in regn.loc[regn["sumpost"], "regnr"].astype(int).tolist()}
     except Exception:

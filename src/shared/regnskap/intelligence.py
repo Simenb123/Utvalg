@@ -345,7 +345,7 @@ def _pick_regnskapslinje(rule: _Rule, regnskapslinjer: pd.DataFrame | None) -> t
         return None, ""
 
     try:
-        from regnskap_mapping import normalize_regnskapslinjer
+        from .mapping import normalize_regnskapslinjer
 
         regn = normalize_regnskapslinjer(regnskapslinjer)
     except Exception:

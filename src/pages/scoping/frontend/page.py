@@ -321,7 +321,7 @@ class ScopingPage(ttk.Frame):
 
         import src.pages.materiality.backend.store as materiality_store
         import previous_year_comparison
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         from ..backend.engine import build_scoping
 
         # Regnskapslinjer og mapping

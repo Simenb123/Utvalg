@@ -8,7 +8,7 @@ import pandas as pd
 
 import analyse_disposition_service
 import formatting
-import regnskap_client_overrides
+import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
 
 def open_dialog(

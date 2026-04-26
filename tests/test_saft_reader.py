@@ -197,7 +197,7 @@ def test_detect_accounting_system_uni_micro_alias() -> None:
 def test_build_dataset_auto_detects_system_and_mva(tmp_path: Path, monkeypatch) -> None:
     """Integrasjonstest: build_dataset auto-setter system + MVA-mapping."""
     import src.pages.dataset.backend.pane_build as dataset_pane_build
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     # Pek overrides-dir til tmp slik at vi ikke forurenser ekte data
     monkeypatch.setattr(regnskap_client_overrides, "overrides_dir", lambda: tmp_path / "overrides")
@@ -237,7 +237,7 @@ def test_build_dataset_auto_detects_system_and_mva(tmp_path: Path, monkeypatch) 
 def test_build_dataset_does_not_overwrite_existing_system(tmp_path: Path, monkeypatch) -> None:
     """Skal ikke overskrive manuelt valgt regnskapssystem."""
     import src.pages.dataset.backend.pane_build as dataset_pane_build
-    import regnskap_client_overrides
+    import src.shared.regnskap.client_overrides as regnskap_client_overrides
 
     monkeypatch.setattr(regnskap_client_overrides, "overrides_dir", lambda: tmp_path / "overrides")
     (tmp_path / "overrides").mkdir()

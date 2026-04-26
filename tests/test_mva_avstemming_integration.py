@@ -60,7 +60,7 @@ class TestClientPersistence:
 
     def test_save_and_load_skatteetaten(self, tmp_path, monkeypatch):
         self._setup_overrides_path(tmp_path, monkeypatch)
-        import regnskap_client_overrides as rco
+        import src.shared.regnskap.client_overrides as rco
 
         sd = SkatteetatenData(mva_per_termin={1: 100.0, 2: 200.0})
         rco.save_skatteetaten_data("DemoAS", 2025, sd.to_dict())
@@ -73,14 +73,14 @@ class TestClientPersistence:
 
     def test_load_skatteetaten_missing_year(self, tmp_path, monkeypatch):
         self._setup_overrides_path(tmp_path, monkeypatch)
-        import regnskap_client_overrides as rco
+        import src.shared.regnskap.client_overrides as rco
 
         rco.save_skatteetaten_data("DemoAS", 2025, {"mva_per_termin": {"1": 10.0}})
         assert rco.load_skatteetaten_data("DemoAS", 2024) is None
 
     def test_save_and_load_mva_melding_per_termin(self, tmp_path, monkeypatch):
         self._setup_overrides_path(tmp_path, monkeypatch)
-        import regnskap_client_overrides as rco
+        import src.shared.regnskap.client_overrides as rco
 
         md1 = MvaMeldingData(år=2025, termin=1, post1_avgift_25=100.0)
         md2 = MvaMeldingData(år=2025, termin=2, post1_avgift_25=200.0)

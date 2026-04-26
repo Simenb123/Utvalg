@@ -45,7 +45,7 @@ def build_rl_pivot(
         Med SB:   vis RL der |UB| > 1e-9 ELLER Antall > 0
         Uten SB:  vis kun RL der Antall > 0
     """
-    from regnskap_mapping import (
+    from src.shared.regnskap.mapping import (
         compute_sumlinjer,
         normalize_regnskapslinjer,
     )

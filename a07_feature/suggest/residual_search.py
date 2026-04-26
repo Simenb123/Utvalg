@@ -82,6 +82,7 @@ def rank_for_target(
         sorted(
             candidates,
             key=lambda candidate: (
+                -int(getattr(candidate, "evidence_score", 0) or 0),
                 abs(abs(candidate.amount_cents) - abs(target_cents)),
                 candidate.source != "unmapped",
                 candidate.account,

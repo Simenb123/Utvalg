@@ -84,7 +84,7 @@ def compute_preview(page: "ConsolidationPage", draft_lines: list[EliminationLine
 
     try:
         from ..backend.mapping import load_shared_config
-        from regnskap_mapping import compute_sumlinjer
+        from src.shared.regnskap.mapping import compute_sumlinjer
 
         _, regnskapslinjer = load_shared_config()
         for col in ("preview_elim", "konsolidert"):

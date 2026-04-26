@@ -54,7 +54,7 @@ _TAG_INFO   = "info"
 def _ub_for_regnr(rl_df: Any, regnr: int) -> float:
     """Hent UB for ett regnr fra rl_df. Respekterer credit-inversjon."""
     try:
-        from regnskap_data import ub_lookup
+        from src.shared.regnskap.data import ub_lookup
         lkp = ub_lookup(rl_df, "ub")
         return float(lkp.get(regnr, 0.0))
     except Exception:

@@ -951,7 +951,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             return sb_df
         try:
             import session as _session
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
             import tilleggsposteringer
 
             client = getattr(_session, "client", None) or ""
@@ -1010,7 +1010,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
             from tkinter import messagebox
 
             import analyse_disponering_dialog
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
             import tilleggsposteringer
 
             client = getattr(_session, "client", None) or ""
@@ -1215,7 +1215,7 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         if lbl is None:
             return
         try:
-            import regnskap_client_overrides
+            import src.shared.regnskap.client_overrides as regnskap_client_overrides
             client = getattr(session, "client", None) or ""
             year = str(getattr(session, "year", "") or "")
             if client and year:

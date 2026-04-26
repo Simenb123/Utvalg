@@ -428,7 +428,7 @@ def test_build_admin_rl_rows_falls_back_to_baseline_when_override_removed() -> N
 
 def test_set_account_override_via_service_persists_through_loader(tmp_path, monkeypatch) -> None:
     import app_paths
-    import regnskap_client_overrides as overrides_module
+    import src.shared.regnskap.client_overrides as overrides_module
 
     monkeypatch.setattr(app_paths, "data_dir", lambda: tmp_path)
 
@@ -440,7 +440,7 @@ def test_set_account_override_via_service_persists_through_loader(tmp_path, monk
 
 def test_clear_account_override_via_service_removes_entry(tmp_path, monkeypatch) -> None:
     import app_paths
-    import regnskap_client_overrides as overrides_module
+    import src.shared.regnskap.client_overrides as overrides_module
 
     monkeypatch.setattr(app_paths, "data_dir", lambda: tmp_path)
     overrides_module.set_account_override("Klient AS", "1500", 165, year="2026")

@@ -1163,7 +1163,7 @@ def test_build_rl_baseline_rows_returns_json_baseline_rows_with_kontointervall()
         }
     )
 
-    import regnskap_config
+    import src.shared.regnskap.config as regnskap_config
 
     original_rl = regnskap_config.load_regnskapslinjer
     original_km = regnskap_config.load_kontoplan_mapping
@@ -1893,7 +1893,7 @@ def _make_rl_editor_fake(
 ) -> SimpleNamespace:
     """Bygg en minimal fake-editor for tester som ikke krever ekte Tk."""
 
-    from regnskap_config import RLBaselineDocument, RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineDocument, RLBaselineLine
 
     baseline_lines = list(lines) if lines is not None else []
     baseline_doc = RLBaselineDocument(lines=baseline_lines, intervals=[])
@@ -1953,7 +1953,7 @@ def test_regnskapslinje_editor_init_exposes_selection_guard_attribute() -> None:
 def test_select_tree_item_guards_selection_events() -> None:
     """_select_tree_item må holde guard-flagget True mens selection_set kjører."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[RLBaselineLine(regnr="10", regnskapslinje="Salg", sumpost=False)],
@@ -2003,7 +2003,7 @@ def test_handle_tree_select_ignores_event_when_guard_active() -> None:
 def test_handle_tree_select_without_row_changes_skips_refresh_tree() -> None:
     """Radbytte uten strukturelle endringer skal bare bytte form — ikke rebuild."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[
@@ -2034,7 +2034,7 @@ def test_handle_tree_select_without_row_changes_skips_refresh_tree() -> None:
 def test_handle_tree_select_with_row_changes_refreshes_with_next_key() -> None:
     """Commit som endrer raden skal trigge _refresh_tree(preserve_selection=Y)."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[
@@ -2064,7 +2064,7 @@ def test_handle_tree_select_with_row_changes_refreshes_with_next_key() -> None:
 def test_handle_tree_select_reverts_when_commit_fails() -> None:
     """Mislykket commit skal reselektere forrige rad uten å laste ny form."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[
@@ -2093,7 +2093,7 @@ def test_handle_tree_select_reverts_when_commit_fails() -> None:
 def test_refresh_tree_preserve_selection_overrides_current_selected_regnr() -> None:
     """preserve_selection skal vinne over self._selected_regnr ved rebuild."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[
@@ -2113,7 +2113,7 @@ def test_refresh_tree_preserve_selection_overrides_current_selected_regnr() -> N
 def test_refresh_tree_default_target_is_current_selected_regnr() -> None:
     """Uten preserve_selection skal _refresh_tree gjenopprette valgt rad."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[
@@ -2132,7 +2132,7 @@ def test_refresh_tree_default_target_is_current_selected_regnr() -> None:
 def test_refresh_tree_sets_guard_during_bulk_delete_and_insert() -> None:
     """Bulk-rebuild skal undertrykke selection-events for å unngå churn."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[RLBaselineLine(regnr="10", regnskapslinje="Salg", sumpost=False)],
@@ -2158,7 +2158,7 @@ def test_refresh_tree_sets_guard_during_bulk_delete_and_insert() -> None:
 def test_commit_form_marks_row_unchanged_when_values_equal() -> None:
     """Commit uten endring skal sette _last_commit_changed_row til False."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     line = RLBaselineLine(regnr="10", regnskapslinje="Salg", sumpost=False)
     editor = _make_rl_editor_fake(lines=[line], selected="10")
@@ -2203,7 +2203,7 @@ def test_commit_form_marks_row_unchanged_when_values_equal() -> None:
 def test_commit_form_marks_row_changed_on_regnr_migration() -> None:
     """Regnr-migrasjon skal alltid sette _last_commit_changed_row til True."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     line = RLBaselineLine(regnr="10", regnskapslinje="Salg", sumpost=False)
     editor = _make_rl_editor_fake(lines=[line], selected="10")
@@ -2250,7 +2250,7 @@ def test_commit_form_marks_row_changed_on_regnr_migration() -> None:
 def test_handle_tree_select_keeps_tree_and_form_consistent_after_rowswap() -> None:
     """End-to-end: når bruker bytter rad, skal tree-selection og _selected_regnr matche."""
 
-    from regnskap_config import RLBaselineLine
+    from src.shared.regnskap.config import RLBaselineLine
 
     editor = _make_rl_editor_fake(
         lines=[

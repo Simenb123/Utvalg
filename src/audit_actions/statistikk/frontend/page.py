@@ -488,7 +488,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
                 pass
             return
         try:
-            from regnskap_mapping import normalize_regnskapslinjer
+            from src.shared.regnskap.mapping import normalize_regnskapslinjer
             regn = normalize_regnskapslinjer(regnskapslinjer)
             self._rl_options = [
                 (int(r["regnr"]), str(r.get("regnskapslinje", "") or ""))

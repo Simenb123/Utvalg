@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-import regnskap_config
+import src.shared.regnskap.config as regnskap_config
 
 from page_admin_helpers import (
     _clean_text,
@@ -179,7 +179,7 @@ def build_rl_baseline_rows(
 
     intervals_by_regnr: dict[str, list[tuple[int, int]]] = {}
     try:
-        from regnskap_mapping import normalize_intervals
+        from src.shared.regnskap.mapping import normalize_intervals
 
         df_km = regnskap_config.load_kontoplan_mapping()
         df_km_norm = normalize_intervals(df_km)

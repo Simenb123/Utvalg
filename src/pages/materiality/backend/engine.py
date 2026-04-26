@@ -7,7 +7,7 @@ import pandas as pd
 
 import session
 from page_analyse_rl import build_rl_pivot, load_rl_config, load_sb_for_session
-from regnskap_data import ub_lookup
+from src.shared.regnskap.data import ub_lookup
 
 try:
     from page_analyse_rl import _load_current_client_account_overrides

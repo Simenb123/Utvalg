@@ -464,8 +464,8 @@ def _load_rl_meta() -> RLMeta:
     """
     meta = RLMeta()
     try:
-        from regnskap_config import load_regnskapslinjer
-        from regnskap_mapping import normalize_regnskapslinjer
+        from src.shared.regnskap.config import load_regnskapslinjer
+        from src.shared.regnskap.mapping import normalize_regnskapslinjer
 
         rl_cfg = load_regnskapslinjer()
 

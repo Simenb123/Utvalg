@@ -389,7 +389,7 @@ def _get_regnr_maps_cached(
         except Exception:
             pass
         try:
-            from regnskap_mapping import normalize_regnskapslinjer
+            from src.shared.regnskap.mapping import normalize_regnskapslinjer
             regn = normalize_regnskapslinjer(regnskapslinjer)
             for _, r in regn.iterrows():
                 try:
@@ -605,7 +605,7 @@ def refresh_sb_view(*, page: Any) -> None:
     # Last kommentarer
     account_comments: dict[str, str] = {}
     try:
-        import regnskap_client_overrides
+        import src.shared.regnskap.client_overrides as regnskap_client_overrides
         import session as _session
         client = getattr(_session, "client", None) or ""
         if client:
@@ -618,7 +618,7 @@ def refresh_sb_view(*, page: Any) -> None:
     # Last kontogjennomgang (OK + vedlegg) per år
     account_review: dict[str, dict] = {}
     try:
-        import regnskap_client_overrides as _rco
+        import src.shared.regnskap.client_overrides as _rco
         import session as _session  # type: ignore[import]
         _client = getattr(_session, "client", None) or ""
         _year = getattr(_session, "year", None) or ""
