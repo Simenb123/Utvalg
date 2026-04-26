@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import mva_codes
+import src.pages.mva.backend.codes as mva_codes
 
 
 def test_standard_codes_not_empty():

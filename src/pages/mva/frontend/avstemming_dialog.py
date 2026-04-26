@@ -34,7 +34,7 @@ _DRILL_COLS = ("Bilag", "Konto", "Kontonavn", "Dato", "Tekst", "Beløp", "MVA-ko
 def open_mva_avstemming(parent: tk.Misc, page: Any) -> None:
     """Åpne MVA-avstemmingsdialog."""
     import pandas as pd
-    import mva_avstemming
+    from ..backend import avstemming as mva_avstemming
     import regnskap_client_overrides
     from page_analyse_mva import build_mva_pivot
 
@@ -545,7 +545,7 @@ def open_mva_avstemming(parent: tk.Misc, page: Any) -> None:
             return
 
         try:
-            import mva_avstemming_excel
+            from ..backend import avstemming_excel as mva_avstemming_excel
             mva_avstemming_excel.write_mva_avstemming_excel(
                 export_path,
                 mva_pivot=mva_pivot,

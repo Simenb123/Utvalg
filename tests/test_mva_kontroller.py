@@ -4,8 +4,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from mva_avstemming import SkatteetatenData
-from mva_kontroller import (
+from src.pages.mva.backend.avstemming import SkatteetatenData
+from src.pages.mva.backend.kontroller import (
     KontrollResult,
     run_all_controls,
     run_k4_korreksjoner,

@@ -17,7 +17,7 @@ Eksplisitte mappinger for enkeltklienter legges i
 
 from __future__ import annotations
 
-import mva_codes
+from . import codes as mva_codes
 
 # ---- Standard-koder som er vanlige på tvers av systemer ----
 

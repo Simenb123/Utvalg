@@ -40,7 +40,7 @@ from src.pages.consolidation.frontend.page import ConsolidationPage
 from src.pages.ar.frontend.page import ARPage
 from src.pages.regnskap.frontend.page import RegnskapPage
 from src.pages.materiality.frontend.page import MaterialityPage
-from page_mva import MvaPage
+from src.pages.mva.frontend.page import MvaPage
 from src.pages.skatt import SkattPage
 from page_reskontro import ReskontroPage
 

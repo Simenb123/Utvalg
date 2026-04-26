@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from mva_melding_parser import (
+from src.pages.mva.backend.melding_parser import (
     MvaMeldingData,
     parse_mva_melding,
     parse_mva_melding_dict,

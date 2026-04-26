@@ -21,7 +21,7 @@ from typing import Any, List
 import pandas as pd
 
 import formatting
-import mva_codes
+import src.pages.mva.backend.codes as mva_codes
 
 log = logging.getLogger("app")
 
@@ -42,7 +42,7 @@ def _resolve_code_mapping(client: str | None) -> dict[str, str]:
             return dict(mapping)
         system = rco.load_accounting_system(client)
         if system:
-            import mva_system_defaults
+            import src.pages.mva.backend.system_defaults as mva_system_defaults
             return mva_system_defaults.get_default_mapping(system)
     except Exception:
         log.debug("Kunne ikke laste MVA-kode-mapping for klient %s", client, exc_info=True)

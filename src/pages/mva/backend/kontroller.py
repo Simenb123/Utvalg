@@ -17,8 +17,8 @@ from typing import Optional
 
 import pandas as pd
 
-import mva_codes
-from mva_avstemming import build_mva_kontroller, SkatteetatenData
+from . import codes as mva_codes
+from .avstemming import build_mva_kontroller, SkatteetatenData
 
 log = logging.getLogger(__name__)
 

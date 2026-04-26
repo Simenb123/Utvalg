@@ -179,7 +179,7 @@ class TestBuildMvaPivot:
 
 class TestMvaAvstemmingMonthToTermin:
     def test_all_months(self):
-        from mva_avstemming import month_to_termin
+        from src.pages.mva.backend.avstemming import month_to_termin
         for m in range(1, 13):
             t = month_to_termin(m)
             assert 1 <= t <= 6
@@ -191,7 +191,7 @@ class TestMvaAvstemmingMonthToTermin:
 
 class TestBuildReconciliation:
     def test_basic_reconciliation(self):
-        from mva_avstemming import SkatteetatenData, build_reconciliation
+        from src.pages.mva.backend.avstemming import SkatteetatenData, build_reconciliation
 
         # MVA-pivot med utgående (negativ i HB = kredit) og inngående (positiv = debet)
         mva_pivot = pd.DataFrame([
@@ -219,7 +219,7 @@ class TestBuildReconciliation:
         assert t1["Differanse"] == 0.0
 
     def test_sum_row(self):
-        from mva_avstemming import SkatteetatenData, build_reconciliation
+        from src.pages.mva.backend.avstemming import SkatteetatenData, build_reconciliation
 
         mva_pivot = pd.DataFrame([
             {"MVA-kode": "1", "direction": "utgående", "T1": -100.0, "T2": -200.0,
@@ -235,7 +235,7 @@ class TestBuildReconciliation:
         assert sum_row["Differanse"] == 0.0
 
     def test_empty_pivot(self):
-        from mva_avstemming import SkatteetatenData, build_reconciliation
+        from src.pages.mva.backend.avstemming import SkatteetatenData, build_reconciliation
 
         result = build_reconciliation(pd.DataFrame(), SkatteetatenData())
         assert len(result) == 7
@@ -275,7 +275,7 @@ class TestParseSkatteetaten:
         path = tmp_path / "kontoutskrift_test.xlsx"
         wb.save(path)
 
-        from mva_avstemming import parse_skatteetaten_kontoutskrift
+        from src.pages.mva.backend.avstemming import parse_skatteetaten_kontoutskrift
 
         result = parse_skatteetaten_kontoutskrift(path, year=2025)
 
@@ -304,7 +304,7 @@ class TestParseSkatteetaten:
         path = tmp_path / "kontoutskrift_all.xlsx"
         wb.save(path)
 
-        from mva_avstemming import parse_skatteetaten_kontoutskrift
+        from src.pages.mva.backend.avstemming import parse_skatteetaten_kontoutskrift
         result = parse_skatteetaten_kontoutskrift(path)  # Ingen årsfilter
 
         assert result.mva_per_termin.get(6, 0) == 10000.0
@@ -332,7 +332,7 @@ class TestParseSkatteetaten:
         path = tmp_path / "kontoutskrift_trans.xlsx"
         wb.save(path)
 
-        from mva_avstemming import parse_skatteetaten_kontoutskrift
+        from src.pages.mva.backend.avstemming import parse_skatteetaten_kontoutskrift
         result = parse_skatteetaten_kontoutskrift(path, year=2025)
 
         assert result.raw_transaksjoner is not None
@@ -346,7 +346,7 @@ class TestParseSkatteetaten:
 
 class TestSkatteetatenDataSerialize:
     def test_roundtrip_basic_fields(self):
-        from mva_avstemming import SkatteetatenData
+        from src.pages.mva.backend.avstemming import SkatteetatenData
 
         sd = SkatteetatenData(
             org_nr="123456789",
@@ -369,7 +369,7 @@ class TestSkatteetatenDataSerialize:
         assert restored.forskuddstrekk_per_termin == {1: 80000.0}
 
     def test_roundtrip_preserves_raw_frames(self):
-        from mva_avstemming import SkatteetatenData
+        from src.pages.mva.backend.avstemming import SkatteetatenData
 
         krav = pd.DataFrame([
             {"Kravgruppe": "Merverdiavgift", "Periode": 1, "Opprinnelig beløp": 10000.0},
@@ -390,7 +390,7 @@ class TestSkatteetatenDataSerialize:
         assert restored.raw_transaksjoner.iloc[0]["Tekst"] == "MVA T1"
 
     def test_from_dict_handles_missing_and_invalid(self):
-        from mva_avstemming import SkatteetatenData
+        from src.pages.mva.backend.avstemming import SkatteetatenData
 
         # Tom dict → default-objekt
         empty = SkatteetatenData.from_dict({})
@@ -442,7 +442,7 @@ class TestBuildMvaKontroller:
         return pd.DataFrame(rows, columns=["Konto", "Kontonavn", "Dato", "Beløp", "MVA-kode"])
 
     def test_empty_df(self):
-        from mva_avstemming import build_mva_kontroller
+        from src.pages.mva.backend.avstemming import build_mva_kontroller
         result = build_mva_kontroller(pd.DataFrame())
         assert result.salg_vs_grunnlag.empty
         assert result.salg_uten_mva.empty
@@ -450,7 +450,7 @@ class TestBuildMvaKontroller:
 
     def test_salg_vs_grunnlag_match(self):
         """Salgskontoer med MVA-kode 1 — grunnlag bør matche salgsinntekter."""
-        from mva_avstemming import build_mva_kontroller
+        from src.pages.mva.backend.avstemming import build_mva_kontroller
         df = self._make_df([
             ["3000", "Salgsinntekter", "2025-01-15", -1000.0, "1"],
             ["3000", "Salgsinntekter", "2025-01-20", -2000.0, "1"],
@@ -463,7 +463,7 @@ class TestBuildMvaKontroller:
 
     def test_salg_uten_mva(self):
         """Transaksjoner på 3xxx uten MVA-kode flagges."""
-        from mva_avstemming import build_mva_kontroller
+        from src.pages.mva.backend.avstemming import build_mva_kontroller
         df = self._make_df([
             ["3000", "Salgsinntekter", "2025-01-15", -1000.0, "1"],
             ["3100", "Andre salg", "2025-02-10", -500.0, ""],
@@ -474,7 +474,7 @@ class TestBuildMvaKontroller:
 
     def test_andre_med_utg_mva(self):
         """Transaksjoner utenfor 3xxx med utgående MVA-kode flagges."""
-        from mva_avstemming import build_mva_kontroller
+        from src.pages.mva.backend.avstemming import build_mva_kontroller
         df = self._make_df([
             ["3000", "Salgsinntekter", "2025-01-15", -1000.0, "1"],
             ["6700", "Tap på fordringer", "2025-03-10", -200.0, "1"],
@@ -485,7 +485,7 @@ class TestBuildMvaKontroller:
 
     def test_summary_ok(self):
         """Alle kontroller OK når alt matcher."""
-        from mva_avstemming import build_mva_kontroller
+        from src.pages.mva.backend.avstemming import build_mva_kontroller
         df = self._make_df([
             ["3000", "Salgsinntekter", "2025-01-15", -1000.0, "1"],
         ])

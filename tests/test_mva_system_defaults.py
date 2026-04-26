@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import mva_codes
-import mva_system_defaults
+import src.pages.mva.backend.codes as mva_codes
+import src.pages.mva.backend.system_defaults as mva_system_defaults
 
 
 def test_get_default_mapping_returns_dict():

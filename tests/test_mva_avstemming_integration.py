@@ -12,8 +12,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from mva_avstemming import SkatteetatenData, build_reconciliation
-from mva_melding_parser import MvaMeldingData
+from src.pages.mva.backend.avstemming import SkatteetatenData, build_reconciliation
+from src.pages.mva.backend.melding_parser import MvaMeldingData
 from page_analyse_mva import build_mva_pivot
 
 

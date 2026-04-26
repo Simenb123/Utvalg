@@ -21,8 +21,8 @@ except Exception:  # pragma: no cover
     messagebox = None  # type: ignore
     filedialog = None  # type: ignore
 
-import mva_codes
-import mva_system_defaults
+from ..backend import codes as mva_codes
+from ..backend import system_defaults as mva_system_defaults
 import regnskap_client_overrides
 
 

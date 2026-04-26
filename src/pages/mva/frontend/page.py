@@ -539,7 +539,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
                     if termin_int not in melding:
                         continue
                     try:
-                        from mva_melding_parser import MvaMeldingData
+                        from ..backend.melding_parser import MvaMeldingData
                         md = MvaMeldingData.from_dict(data)
                         melding[termin_int] = md.sum_utgaaende() - md.sum_inngaaende()
                         mld_count += 1
@@ -553,7 +553,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         skatt_count = 0
         try:
             import regnskap_client_overrides as rco
-            from mva_avstemming import SkatteetatenData
+            from ..backend.avstemming import SkatteetatenData
             if client and year:
                 data = rco.load_skatteetaten_data(client, year)
                 if data:
@@ -736,7 +736,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         skatt = None
         try:
             import regnskap_client_overrides as rco
-            from mva_avstemming import SkatteetatenData
+            from ..backend.avstemming import SkatteetatenData
             if client and year:
                 raw = rco.load_skatteetaten_data(client, year)
                 if raw:
@@ -745,7 +745,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
             log.debug("Kunne ikke laste Skatteetaten for K5", exc_info=True)
 
         try:
-            from mva_kontroller import run_all_controls
+            from ..backend.kontroller import run_all_controls
             result = run_all_controls(
                 df_filtered,
                 skatteetaten=skatt,
@@ -928,7 +928,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         skatt_count = 0
         try:
             import regnskap_client_overrides as rco
-            from mva_avstemming import SkatteetatenData
+            from ..backend.avstemming import SkatteetatenData
             if client and year:
                 raw = rco.load_skatteetaten_data(client, year)
                 if raw:
@@ -1009,7 +1009,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
         """Åpne MVA-oppsett-dialogen (flyttet fra Analyse-fanen i steg 7)."""
         try:
             import session as _session
-            import mva_config_dialog
+            from . import config_dialog as mva_config_dialog
             client = str(getattr(_session, "client", None) or "").strip()
             if not client:
                 from tkinter import messagebox
@@ -1049,7 +1049,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
             return
 
         try:
-            from mva_avstemming import parse_skatteetaten_kontoutskrift
+            from ..backend.avstemming import parse_skatteetaten_kontoutskrift
             data = parse_skatteetaten_kontoutskrift(path, year=year)
         except Exception as exc:
             log.exception("Feil ved parsing av Skatteetaten-fil")
@@ -1106,7 +1106,7 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
             return
 
         try:
-            from mva_melding_parser import parse_mva_melding
+            from ..backend.melding_parser import parse_mva_melding
             melding = parse_mva_melding(path)
         except Exception as exc:
             log.exception("Feil ved parsing av MVA-melding")
