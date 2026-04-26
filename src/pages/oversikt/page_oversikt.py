@@ -37,8 +37,8 @@ class OversiktPage(ttk.Frame):
 
         # Lazy imports
         self._team_config = _safe_import("team_config")
-        self._client_meta_index = _safe_import("client_meta_index")
-        self._client_store_enrich = _safe_import("client_store_enrich")
+        self._client_meta_index = _safe_import("src.shared.client_store.meta_index")
+        self._client_store_enrich = _safe_import("src.shared.client_store.enrich")
         self._preferences = _safe_import("preferences")
 
         # Brukerinfo
