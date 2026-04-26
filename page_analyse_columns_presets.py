@@ -161,7 +161,11 @@ def build_tx_column_specs(
                 width=analyse_treewidths.default_column_width(col),
                 minwidth=analyse_treewidths.column_minwidth(col),
                 anchor=analyse_treewidths.column_anchor(col),
-                stretch=col in {"Tekst", "Kontonavn"},
+                # Bare Tekst skal absorbere ekstra plass. Tidligere stretchet
+                # også Kontonavn, som gjorde at brukerens manuelle resize ble
+                # overstyrt av neste layout-runde (samme bug som Oversikt's
+                # Klient-kolonne).
+                stretch=col == "Tekst",
                 visible_by_default=col not in optional_set,
                 pinned=col in pinned_set,
                 sortable=True,
