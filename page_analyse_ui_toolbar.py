@@ -14,6 +14,132 @@ from typing import Any, Sequence
 from page_analyse_ui_helpers import _build_period_range_picker
 
 
+def _refresh_search_scope_label(page: Any) -> None:
+    """Oppdater 'Søk i:'-knappens etikett basert på valgte kolonner."""
+    btn = getattr(page, "_btn_tx_search_scope", None)
+    if btn is None:
+        return
+    sel = getattr(page, "_tx_search_cols", None) or set()
+    if not sel:
+        text = "Søk i: Alle ▾"
+    elif len(sel) == 1:
+        text = f"Søk i: {next(iter(sel))} ▾"
+    else:
+        text = f"Søk i: {len(sel)} kolonner ▾"
+    try:
+        btn.configure(text=text)
+    except Exception:
+        pass
+
+
+def _open_tx_search_scope_popup(*, page: Any, btn: Any) -> None:
+    """Åpne en sticky popup-dialog for å velge søke-kolonner.
+
+    Tom valgliste = søk i hele default-settet (vanlig oppførsel).
+    En eller flere markert = søk KUN i de.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except Exception:
+        return
+    from ui_dialog import make_dialog
+
+    # Hent ALLE tilgjengelige kolonner fra ManagedTreeview hvis mulig.
+    # Fallback til TX_COLS_DEFAULT.
+    managed = getattr(page, "_tx_managed", None)
+    all_cols: list[str] = []
+    headings: dict[str, str] = {}
+    if managed is not None:
+        try:
+            for spec in managed._specs:
+                all_cols.append(spec.id)
+                headings[spec.id] = spec.heading or spec.id
+        except Exception:
+            pass
+    if not all_cols:
+        all_cols = list(getattr(page, "TX_COLS_DEFAULT", ()))
+        headings = {c: c for c in all_cols}
+
+    if not all_cols:
+        return
+
+    sel = getattr(page, "_tx_search_cols", None)
+    if sel is None:
+        sel = set()
+        page._tx_search_cols = sel  # type: ignore[attr-defined]
+
+    dlg = make_dialog(
+        page,
+        title="Velg kolonner å søke i",
+        width=320,
+        height=min(560, 110 + 24 * len(all_cols)),
+        modal=False,
+        resizable=True,
+    )
+
+    body = ttk.Frame(dlg, padding=12)
+    body.pack(fill="both", expand=True)
+    ttk.Label(
+        body,
+        text="Tom = søk i alle vanlige kolonner.\nVelg én eller flere for å begrense søket.",
+        foreground="#666",
+    ).pack(anchor="w", pady=(0, 8))
+
+    # Scroll-bar container hvis mange kolonner
+    canvas = tk.Canvas(body, highlightthickness=0)
+    canvas.pack(side="left", fill="both", expand=True)
+    sb = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+    sb.pack(side="right", fill="y")
+    canvas.configure(yscrollcommand=sb.set)
+    inner = ttk.Frame(canvas)
+    canvas.create_window((0, 0), window=inner, anchor="nw")
+
+    vars_by_col: dict[str, tk.BooleanVar] = {}
+
+    def _on_toggle(col: str) -> None:
+        if vars_by_col[col].get():
+            sel.add(col)
+        else:
+            sel.discard(col)
+        _refresh_search_scope_label(page)
+        try:
+            page._apply_filters_and_refresh()
+        except Exception:
+            pass
+
+    for col in all_cols:
+        var = tk.BooleanVar(value=col in sel)
+        vars_by_col[col] = var
+        cb = ttk.Checkbutton(
+            inner,
+            text=headings.get(col, col),
+            variable=var,
+            command=lambda c=col: _on_toggle(c),
+        )
+        cb.pack(anchor="w", pady=1)
+
+    inner.update_idletasks()
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+    # Bunnknapper
+    btn_row = ttk.Frame(dlg, padding=(12, 0, 12, 12))
+    btn_row.pack(fill="x")
+
+    def _clear_all() -> None:
+        sel.clear()
+        for c, v in vars_by_col.items():
+            v.set(False)
+        _refresh_search_scope_label(page)
+        try:
+            page._apply_filters_and_refresh()
+        except Exception:
+            pass
+
+    ttk.Button(btn_row, text="Velg ingen (alle vanlige)", command=_clear_all).pack(side="left")
+    ttk.Button(btn_row, text="Lukk", command=dlg.destroy).pack(side="right")
+
+
 def build_toolbar(
     page: Any,
     *,
@@ -178,8 +304,21 @@ def build_toolbar(
     row1.pack(fill="x")
 
     ttk.Label(row1, text="Søk:").grid(row=0, column=0, sticky="w")
-    ent_search = ttk.Entry(row1, width=28, textvariable=var_search)
-    ent_search.grid(row=0, column=1, sticky="w", padx=(4, 12))
+    # Pakker Entry + scope-knapp sammen så de fremstår som ett kontroll-element.
+    search_box = ttk.Frame(row1)
+    search_box.grid(row=0, column=1, sticky="w", padx=(4, 12))
+    ent_search = ttk.Entry(search_box, width=28, textvariable=var_search)
+    ent_search.pack(side="left")
+
+    # "Søk i: [Alle ▾]" — knapp som åpner popup for å begrense søket til
+    # spesifikke kolonner. Tom liste = søk i alle default-kolonner.
+    btn_search_scope = ttk.Button(
+        search_box,
+        text="Søk i: Alle ▾",
+        command=lambda: _open_tx_search_scope_popup(page=page, btn=btn_search_scope),
+    )
+    btn_search_scope.pack(side="left", padx=(4, 0))
+    page._btn_tx_search_scope = btn_search_scope
 
     ttk.Label(row1, text="Retning:").grid(row=0, column=2, sticky="w")
     cmb_dir = ttk.Combobox(

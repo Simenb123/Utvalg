@@ -603,72 +603,11 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     except Exception:
         pass
 
-    # Ctrl+venstreklikk på kolonneoverskrift: toggle kolonnen som
-    # søkemål for det generelle søkefeltet. Multi-select (samme mønster
-    # som rader). Markeres med "● "-prefix på heading-teksten.
+    # _tx_search_cols brukes av "Søk i:"-popup-knappen i toolbaren for å
+    # begrense fritekst-søk til spesifikke kolonner. Tom set = søk i hele
+    # default-listen (vanlig oppførsel).
     if not hasattr(page, "_tx_search_cols"):
         page._tx_search_cols = set()  # type: ignore[attr-defined]
-
-    def _refresh_tx_search_indicators() -> None:
-        managed = getattr(page, "_tx_managed", None)
-        if managed is None:
-            return
-        try:
-            specs = managed._specs
-        except Exception:
-            return
-        sel = getattr(page, "_tx_search_cols", None) or set()
-        for spec in specs:
-            try:
-                base = spec.heading or spec.id
-                marker = "● " if spec.id in sel else ""
-                tx_tree.heading(spec.id, text=marker + base)
-            except Exception:
-                pass
-
-    page._refresh_tx_search_indicators = _refresh_tx_search_indicators  # type: ignore[attr-defined]
-
-    def _on_tx_header_ctrl_click(event):
-        try:
-            region = tx_tree.identify_region(event.x, event.y)
-        except Exception:
-            return None
-        if region != "heading":
-            return None
-        # identify_column gir "#1", "#2"... mot displaycolumns. Bruk
-        # samme logikk som ManagedTreeview's _column_id_from_event for å
-        # få faktisk kolonne-id.
-        try:
-            from ui_managed_treeview import _column_id_from_event
-            col_id = _column_id_from_event(tx_tree, event)
-        except Exception:
-            col_id = ""
-        if not col_id:
-            return None
-        sel = getattr(page, "_tx_search_cols", None)
-        if sel is None:
-            sel = set()
-            page._tx_search_cols = sel  # type: ignore[attr-defined]
-        if col_id in sel:
-            sel.discard(col_id)
-        else:
-            sel.add(col_id)
-        _refresh_tx_search_indicators()
-        # Trigg re-filtrering hvis det er aktiv søketekst
-        try:
-            page._apply_filters_and_refresh()
-        except Exception:
-            pass
-        return "break"  # ikke trigger sortering på samme klikk
-
-    try:
-        tx_tree.bind("<Control-Button-1>", _on_tx_header_ctrl_click, add="+")
-    except Exception:
-        # DummyWidget i headless tester støtter ikke add-kwarg.
-        try:
-            tx_tree.bind("<Control-Button-1>", _on_tx_header_ctrl_click)
-        except Exception:
-            pass
 
     tx_scroll = ttk.Scrollbar(tx_frame, orient="vertical", command=tx_tree.yview)
     tx_scroll.grid(row=0, column=1, sticky="ns")
