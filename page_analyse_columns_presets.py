@@ -121,7 +121,10 @@ def build_sb_column_specs(
                 width=int(col_widths.get(col, 100)),
                 minwidth=40,
                 anchor=anchor,
-                stretch=(col == "Kontonavn"),
+                # Ingen kolonne stretches — samme regel som TX-treet:
+                # stretch=True overstyrer brukerens manuelle resize ved
+                # neste layout-runde og lar kolonnen "sprette tilbake".
+                stretch=False,
                 visible_by_default=col in default_visible,
                 pinned=col in pinned_set,
                 sortable=True,
