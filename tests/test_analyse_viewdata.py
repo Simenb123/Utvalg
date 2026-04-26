@@ -145,3 +145,111 @@ def test_merge_sheet_maps_suffixes_duplicates() -> None:
     )
 
     assert list(out.keys()) == ["Ark", "Ark (2)", "Ark (3)"]
+
+
+# -----------------------------------------------------------------------------
+# Reskontro-berikelse: motpart propageres til alle linjer i samme bilag
+# -----------------------------------------------------------------------------
+
+
+def test_enrich_reskontro_propagates_customer_to_sales_line() -> None:
+    """Bilag 100: 1500 har kunde, 3000 (salg) og 2700 (mva) skal arve."""
+    df = pd.DataFrame(
+        {
+            "Bilag": ["100", "100", "100"],
+            "Konto": ["1500", "3000", "2700"],
+            "Beløp": [1250.0, -1000.0, -250.0],
+            "Kundenr": ["K1", "", ""],
+            "Kundenavn": ["Kunde AS", "", ""],
+        }
+    )
+
+    df_all, df_show = analyse_viewdata.compute_selected_transactions(df, ["3000"])
+    view = analyse_viewdata.build_transactions_view_df(df_show)
+
+    assert len(view) == 1
+    assert view.loc[0, "Konto"] == "3000"
+    assert view.loc[0, "Kunder"] == "Kunde AS"
+
+
+def test_enrich_reskontro_propagates_customer_to_bank_line() -> None:
+    """Betalingsbilag: 1500 har kunde, banklinjen (1920) skal arve."""
+    df = pd.DataFrame(
+        {
+            "Bilag": ["200", "200"],
+            "Konto": ["1500", "1920"],
+            "Beløp": [-1250.0, 1250.0],
+            "Kundenr": ["K1", ""],
+            "Kundenavn": ["Kunde AS", ""],
+        }
+    )
+
+    df_all, df_show = analyse_viewdata.compute_selected_transactions(df, ["1920"])
+    view = analyse_viewdata.build_transactions_view_df(df_show)
+
+    assert len(view) == 1
+    assert view.loc[0, "Kunder"] == "Kunde AS"
+
+
+def test_enrich_reskontro_propagates_supplier_to_cost_line() -> None:
+    """Leverandørbilag: 2400 har leverandør, kostnadskonto skal arve."""
+    df = pd.DataFrame(
+        {
+            "Bilag": ["300", "300", "300"],
+            "Konto": ["2400", "6320", "2710"],
+            "Beløp": [-1250.0, 1000.0, 250.0],
+            "Leverandørnr": ["L1", "", ""],
+            "Leverandørnavn": ["Leverandør AS", "", ""],
+        }
+    )
+
+    df_all, df_show = analyse_viewdata.compute_selected_transactions(df, ["6320"])
+    view = analyse_viewdata.build_transactions_view_df(df_show)
+
+    assert len(view) == 1
+    assert view.loc[0, "Konto"] == "6320"
+    assert view.loc[0, "Kunder"] == "Leverandør AS"
+
+
+def test_enrich_reskontro_optional_columns_use_derived_when_direct_missing() -> None:
+    """Når Kundenr/Kundenavn vises som valgfri kolonner, skal motpostlinjen
+    arve fra reskontrolinjen — men direkte rad-verdier vinner fortsatt."""
+    df = pd.DataFrame(
+        {
+            "Bilag": ["100", "100"],
+            "Konto": ["1500", "3000"],
+            "Beløp": [1250.0, -1000.0],
+            "Tekst": ["Faktura 1", "Faktura 1"],
+            "Dato": ["01.01.2025", "01.01.2025"],
+            "Kundenr": ["K1", ""],
+            "Kundenavn": ["Kunde AS", ""],
+        }
+    )
+
+    df_all, df_show = analyse_viewdata.compute_selected_transactions(df, ["3000"])
+    tx_cols = list(analyse_viewdata.DEFAULT_TX_COLS) + ["Kundenr", "Kundenavn"]
+    view = analyse_viewdata.build_transactions_view_df(df_show, tx_cols=tx_cols)
+
+    # 3000-linjen skal arve K1/Kunde AS via _AnalyseKundenr/_AnalyseKundenavn
+    assert view.loc[0, "Kundenr"] == "K1"
+    assert view.loc[0, "Kundenavn"] == "Kunde AS"
+
+
+def test_enrich_reskontro_skips_when_bilag_has_multiple_customers() -> None:
+    """Hvis et bilag uventet har to ulike kunder, skal blanke motpostlinjer
+    IKKE fylles — appen skal ikke gjette ved ambiguous bilagsstruktur."""
+    df = pd.DataFrame(
+        {
+            "Bilag": ["100", "100", "100"],
+            "Konto": ["1500", "1500", "3000"],
+            "Beløp": [500.0, 750.0, -1250.0],
+            "Kundenr": ["K1", "K2", ""],
+            "Kundenavn": ["Kunde A", "Kunde B", ""],
+        }
+    )
+
+    df_all, df_show = analyse_viewdata.compute_selected_transactions(df, ["3000"])
+    view = analyse_viewdata.build_transactions_view_df(df_show)
+
+    # 3000-linjen skal IKKE arve — Kunder er tom
+    assert view.loc[0, "Kunder"] == ""

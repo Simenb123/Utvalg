@@ -68,7 +68,7 @@ def _auto_detect_saft_system(client: str, saft_path: Path) -> None:
         # Auto-sett MVA-mapping hvis klienten ikke har en fra før
         existing_mva = regnskap_client_overrides.load_mva_code_mapping(client)
         if not existing_mva:
-            import mva_system_defaults
+            from src.pages.mva.backend import system_defaults as mva_system_defaults
 
             default_mapping = mva_system_defaults.get_default_mapping(detected)
             if default_mapping:

@@ -256,7 +256,7 @@ def detect_accounting_system(header: SaftHeader) -> str:
     Returnerer systemnavnet fra ACCOUNTING_SYSTEMS-listen, eller tom streng
     dersom ingen match.
     """
-    from mva_codes import ACCOUNTING_SYSTEMS
+    from src.pages.mva.backend.codes import ACCOUNTING_SYSTEMS
 
     # Bygg en søkestreng fra header-feltene
     search = f"{header.software_company} {header.software_id}".lower()

@@ -48,7 +48,13 @@ DEFAULT_TX_COLS: tuple[str, ...] = (
     "Dato",
 )
 
-# Kandidatkolonner for "kunde/motpart" (varierer mellom datasett)
+# Kandidatkolonner for "kunde/motpart" (varierer mellom datasett).
+# Direkte verdier (Kundenavn, Motpart osv.) vinner — vi sjekker
+# rad-spesifikke felter først. ``_AnalyseKunder`` til slutt er
+# fall-back: utledet fra reskontrolinjen i samme bilag via
+# ``enrich_reskontro_counterparty_for_view``. Det betyr at en
+# salgsinntekts- eller mva-linje uten egen kunde-info vil arve
+# kunden fra 1500/2400-linjen i samme bilag.
 DEFAULT_CUSTOMER_COLS: tuple[str, ...] = (
     "Kunder",
     "Kundenavn",
@@ -58,7 +64,17 @@ DEFAULT_CUSTOMER_COLS: tuple[str, ...] = (
     "Leverandørnavn",
     "Customer",
     "CustomerName",
+    "_AnalyseKunder",
 )
+
+# Skjulte kolonner som ``enrich_reskontro_counterparty_for_view`` setter.
+# Brukes også av ``build_transactions_view_df`` for valgfri kolonne-
+# fallback (Kundenr/Kundenavn/Leverandørnr/Leverandørnavn).
+_ENRICHED_CUSTOMER_NUMBER_COL = "_AnalyseKundenr"
+_ENRICHED_CUSTOMER_NAME_COL = "_AnalyseKundenavn"
+_ENRICHED_SUPPLIER_NUMBER_COL = "_AnalyseLeverandørnr"
+_ENRICHED_SUPPLIER_NAME_COL = "_AnalyseLeverandørnavn"
+_ENRICHED_KUNDER_COL = "_AnalyseKunder"
 
 SHEET_PIVOT: str = "Pivot pr konto"
 SHEET_TX: str = "Transaksjoner"
@@ -201,6 +217,79 @@ def first_nonempty_series(
         return first.fillna("").astype(str)
 
 
+def enrich_reskontro_counterparty_for_view(df: pd.DataFrame) -> pd.DataFrame:
+    """Berik en transaksjons-DataFrame med utledet motpart per bilag.
+
+    Når en SAF-T-import gir kunde/leverandør kun på 1500/2400-linjen
+    i et reskontrobilag, vil motpostlinjene (3000-salg, 2700-mva, osv.)
+    mangle motpart i Analyse. Denne helperen grupperer på ``Bilag`` og
+    fyller skjulte kolonner ``_AnalyseKunder``, ``_AnalyseKundenr``,
+    ``_AnalyseKundenavn``, ``_AnalyseLeverandørnr``,
+    ``_AnalyseLeverandørnavn`` for alle linjer som tilhører bilag der
+    motparten er entydig.
+
+    Regler:
+    - Direkte rad-verdier vinner — eksisterende ``Kundenavn`` osv.
+      overskrives ikke (denne helperen ser kun på berikelses-feltene).
+    - Hvis et bilag har flere ulike kunder eller flere ulike
+      leverandører, fylles INGEN motpostlinjer. Det unngår at appen
+      gjetter ved aggregert eller dårlig bilagsstruktur.
+    - Berikelse kun for visning og eksport — rå dataset, cache og
+      klientmapper er ikke berørt.
+
+    Returnerer samme DataFrame med nye skjulte kolonner satt
+    (mutasjon — same convention som ``compute_selected_transactions``
+    sin ``_KONTO_NORM``-cache).
+    """
+    if df is None or df.empty or "Bilag" not in df.columns:
+        return df
+
+    # Skip hvis berikelse allerede er gjort (idempotent + ytelse)
+    if _ENRICHED_KUNDER_COL in df.columns:
+        return df
+
+    has_customer_cols = ("Kundenr" in df.columns) or ("Kundenavn" in df.columns)
+    has_supplier_cols = ("Leverandørnr" in df.columns) or ("Leverandørnavn" in df.columns)
+    if not has_customer_cols and not has_supplier_cols:
+        return df
+
+    # Hjelpefunksjon: returner unik ikke-tom verdi per bilag, eller "" hvis flere
+    def _unique_per_bilag(col: str) -> "pd.Series[str]":
+        if col not in df.columns:
+            return pd.Series("", index=df.index, dtype="object")
+        s = df[col].astype("string").str.strip().fillna("")
+        # Maskér tomme verdier slik at unique-sjekk ignorerer dem
+        masked = s.where(s != "", other=pd.NA)
+
+        def _pick(group: "pd.Series") -> str:
+            vals = group.dropna().unique()
+            if len(vals) == 1:
+                return str(vals[0])
+            return ""
+
+        # transform returnerer Series med samme index som original
+        return masked.groupby(df["Bilag"]).transform(_pick).fillna("").astype("object")
+
+    # Beregn utledede verdier per bilag
+    cust_nr_per_bilag = _unique_per_bilag("Kundenr") if has_customer_cols else pd.Series("", index=df.index)
+    cust_name_per_bilag = _unique_per_bilag("Kundenavn") if has_customer_cols else pd.Series("", index=df.index)
+    supp_nr_per_bilag = _unique_per_bilag("Leverandørnr") if has_supplier_cols else pd.Series("", index=df.index)
+    supp_name_per_bilag = _unique_per_bilag("Leverandørnavn") if has_supplier_cols else pd.Series("", index=df.index)
+
+    df[_ENRICHED_CUSTOMER_NUMBER_COL] = cust_nr_per_bilag
+    df[_ENRICHED_CUSTOMER_NAME_COL] = cust_name_per_bilag
+    df[_ENRICHED_SUPPLIER_NUMBER_COL] = supp_nr_per_bilag
+    df[_ENRICHED_SUPPLIER_NAME_COL] = supp_name_per_bilag
+
+    # Bygg samlet "_AnalyseKunder" (kundenavn først, ellers leverandørnavn).
+    # Direkte verdier (eksisterende Kundenavn/Leverandørnavn på raden) vinner
+    # via build_transactions_view_df som sjekker dem først.
+    combined = cust_name_per_bilag.where(cust_name_per_bilag != "", supp_name_per_bilag)
+    df[_ENRICHED_KUNDER_COL] = combined
+
+    return df
+
+
 def build_transactions_view_df(
     df: pd.DataFrame,
     *,
@@ -315,6 +404,18 @@ def build_transactions_view_df(
         else:
             out["Valutabeløp"] = pd.Series([pd.NA] * len(df), index=df.index, dtype="Float64")
 
+    # Reskontro-fallback for valgfri kolonner: hvis brukeren har valgt
+    # ``Kundenr``/``Kundenavn``/``Leverandørnr``/``Leverandørnavn`` som
+    # synlige kolonner, og rad-verdien er tom, bruk ``_Analyse*``-feltet
+    # fra ``enrich_reskontro_counterparty_for_view``. Direkte rad-verdier
+    # vinner.
+    _RESKONTRO_FALLBACK = {
+        "Kundenr": _ENRICHED_CUSTOMER_NUMBER_COL,
+        "Kundenavn": _ENRICHED_CUSTOMER_NAME_COL,
+        "Leverandørnr": _ENRICHED_SUPPLIER_NUMBER_COL,
+        "Leverandørnavn": _ENRICHED_SUPPLIER_NAME_COL,
+    }
+
     # Sikre kolonner i riktig rekkefølge.
     #
     # Merk: tx_cols kan inneholde *flere* kolonner enn de som er
@@ -324,12 +425,26 @@ def build_transactions_view_df(
     for c in tx_cols:
         if c in out.columns:
             continue
-        source_col = next((src for src in analyse_columns.candidate_source_columns(c) if src in df.columns), None)
-        if source_col is not None:
-            out[c] = _safe_str_series(df[source_col])
-            continue
+        # Direkte rad-verdi vinner. Sjekk først kolonnen selv, så aliaser.
         if c in df.columns:
-            out[c] = _safe_str_series(df[c])
+            base = _safe_str_series(df[c])
+        else:
+            source_col = next((src for src in analyse_columns.candidate_source_columns(c) if src in df.columns), None)
+            base = _safe_str_series(df[source_col]) if source_col is not None else None
+
+        # Reskontro-fallback: hvis verdien er tom på rad-nivå, bruk
+        # utledet motpart fra ``enrich_reskontro_counterparty_for_view``.
+        fallback_col = _RESKONTRO_FALLBACK.get(c)
+        if fallback_col is not None and fallback_col in df.columns:
+            fallback = _safe_str_series(df[fallback_col])
+            if base is None:
+                out[c] = fallback
+            else:
+                out[c] = base.where(base != "", fallback)
+            continue
+
+        if base is not None:
+            out[c] = base
             continue
         out[c] = ""
 
@@ -420,6 +535,15 @@ def compute_selected_transactions(
         except Exception:
             # Fallback (tregere, men robust)
             df_filtered[norm_col] = df_filtered["Konto"].map(konto_to_str)
+
+    # Reskontro-berikelse: motpart fra 1500/2400-linjen propageres til
+    # andre linjer i samme bilag (mva, salgsinntekt osv.) før
+    # kontofilteret slår inn — ellers ville reskontrolinjen ofte være
+    # filtrert bort før vi kunne hente kunden derfra. Idempotent.
+    try:
+        enrich_reskontro_counterparty_for_view(df_filtered)
+    except Exception as exc:
+        log.debug("Reskontro-berikelse feilet (ignorerer): %s", exc)
 
     wanted_set = set(wanted)
 
