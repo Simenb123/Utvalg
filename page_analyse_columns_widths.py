@@ -815,6 +815,7 @@ def configure_tx_tree_columns(*, page: Any) -> None:
                 build_tx_column_specs(
                     tx_cols_default=all_cols,
                     pinned_cols=getattr(page, "PINNED_TX_COLS", ("Konto", "Kontonavn")),
+                    optional_cols=getattr(page, "OPTIONAL_TX_COLS", ()),
                 )
             )
         except Exception:

@@ -578,6 +578,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
             column_specs=build_tx_column_specs(
                 tx_cols_default=getattr(page, "TX_COLS_DEFAULT", tx_cols),
                 pinned_cols=getattr(page, "PINNED_TX_COLS", ("Konto", "Kontonavn")),
+                optional_cols=getattr(page, "OPTIONAL_TX_COLS", ()),
             ),
             pref_prefix="ui",
             legacy_pref_keys={

@@ -134,6 +134,7 @@ def build_tx_column_specs(
     *,
     tx_cols_default: Sequence[str],
     pinned_cols: Sequence[str] = ("Konto", "Kontonavn"),
+    optional_cols: Sequence[str] = (),
 ):
     """Returner ColumnSpec-liste for TX-treet.
 
@@ -142,11 +143,15 @@ def build_tx_column_specs(
     ankre kommer fra analyse_treewidths-heuristikken, som er samme kilde
     som den tidligere manuelle oppsett-løkken i configure_tx_tree_columns
     brukte.
+
+    Kolonner i ``optional_cols`` får ``visible_by_default=False`` slik at
+    de er tilgjengelige i kolonnevelgeren men ikke synlige automatisk.
     """
     from ui_managed_treeview import ColumnSpec
     import analyse_treewidths
 
     pinned_set = set(pinned_cols)
+    optional_set = set(optional_cols)
     specs = []
     for col in tx_cols_default:
         specs.append(
@@ -157,7 +162,7 @@ def build_tx_column_specs(
                 minwidth=analyse_treewidths.column_minwidth(col),
                 anchor=analyse_treewidths.column_anchor(col),
                 stretch=col in {"Tekst", "Kontonavn"},
-                visible_by_default=True,
+                visible_by_default=col not in optional_set,
                 pinned=col in pinned_set,
                 sortable=True,
             )

@@ -432,6 +432,29 @@ def build_transactions_view_df(
         "Leverandørnavn": _ENRICHED_SUPPLIER_NAME_COL,
     }
 
+    # Regnr/Regnskapslinje — joines fra konto via RL-mapping-servicen
+    # hvis brukeren har valgt dem som synlige kolonner. Lazy import for å
+    # unngå sirkularitet og for at viewdata kan brukes uten RL-config
+    # (f.eks. i tester). Tom verdi hvis konto ikke matcher noe RL-intervall.
+    if ("Regnr" in tx_cols or "Regnskapslinje" in tx_cols) and "Konto" in out.columns:
+        try:
+            import regnskapslinje_mapping_service as _rl_svc
+            _rl_ctx = _rl_svc.load_rl_mapping_context()
+            unique_kontoer = [k for k in out["Konto"].unique() if k]
+            _rl_resolved = _rl_svc.resolve_accounts_to_rl(unique_kontoer, context=_rl_ctx)
+            if not _rl_resolved.empty:
+                _rl_lookup = _rl_resolved.set_index("konto")
+                if "Regnr" in tx_cols:
+                    regnr_map = _rl_lookup["regnr"].to_dict()
+                    out["Regnr"] = out["Konto"].map(regnr_map).astype("Int64")
+                if "Regnskapslinje" in tx_cols and "regnskapslinje" in _rl_lookup.columns:
+                    rl_map = _rl_lookup["regnskapslinje"].to_dict()
+                    out["Regnskapslinje"] = out["Konto"].map(rl_map).fillna("")
+        except Exception:
+            # RL-config mangler eller noe annet feilet — la fallback-løkken
+            # under fylle med tom streng.
+            pass
+
     # Sikre kolonner i riktig rekkefølge.
     #
     # Merk: tx_cols kan inneholde *flere* kolonner enn de som er

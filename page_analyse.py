@@ -145,6 +145,8 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
     )
 
     # Standard kolonner i transaksjonslisten.
+    # OPTIONAL_TX_COLS er tilgjengelige i kolonnevelgeren men ikke synlige
+    # som default — brukeren kan vise dem fra høyreklikk-menyen.
     TX_COLS_DEFAULT = (
         "Konto",
         "Kontonavn",
@@ -159,7 +161,13 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         "MVA-prosent",
         "Valuta",
         "Valutabeløp",
+        "Regnr",
+        "Regnskapslinje",
     )
+
+    # Kolonner som ikke skal vises som default. Joines fra konto via
+    # RL-mapping i build_transactions_view_df når brukeren aktiverer dem.
+    OPTIONAL_TX_COLS = ("Regnr", "Regnskapslinje")
 
     # "Pinned" kolonner vi alltid ønsker helt til venstre
     PINNED_TX_COLS = ("Konto", "Kontonavn")
