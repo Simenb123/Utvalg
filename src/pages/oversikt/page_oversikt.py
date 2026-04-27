@@ -38,6 +38,7 @@ class OversiktPage(ttk.Frame):
         self._team_config = _safe_import("team_config")
         self._client_meta_index = _safe_import("src.shared.client_store.meta_index")
         self._client_store_enrich = _safe_import("src.shared.client_store.enrich")
+        self._client_store_groups = _safe_import("src.shared.client_store.groups")
         self._preferences = _safe_import("preferences")
 
         # Brukerinfo
@@ -58,9 +59,17 @@ class OversiktPage(ttk.Frame):
         self._mine_only_var = tk.BooleanVar(value=mine_only_default)
         self._search_var = tk.StringVar(value="")
         self._all_client_rows: list[tuple] = []  # (name, org, knr, ansvarlig, manager)
+        self._initial_load_done = False
 
         # Build UI
         self._build_ui()
+
+        # Klient-data leses asynkront etter at vinduet er rendret. På
+        # Windows-disker med mange klienter tar load_accounting_system per
+        # klient + meta-indeks ~9 sekunder synkront — det blokkerer hele
+        # oppstart. Ved å scheduler det via after() får brukeren se
+        # Oversikt-skallet umiddelbart, og listen fyller seg etterpå.
+        self.after(50, self._deferred_initial_load)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -108,9 +117,11 @@ class OversiktPage(ttk.Frame):
         self._btn_goto_active.grid(row=0, column=3, sticky="e", padx=(6, 0))
         self._btn_goto_active.grid_remove()  # skjult til vi har aktiv klient
 
-        # Sokefelt
+        # Sokefelt — plassert UNDER "Sist brukte klienter" (row=2) slik at
+        # de mest brukte klientene ligger nærmest hilsen-overskriften og
+        # søk er rett over selve klient-tabellen.
         search_frame = ttk.Frame(self)
-        search_frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(8, 4))
+        search_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(8, 4))
         search_frame.columnconfigure(0, weight=1)
 
         self._entry_search = ttk.Entry(search_frame, textvariable=self._search_var)
@@ -189,10 +200,16 @@ class OversiktPage(ttk.Frame):
 
     def _build_recent_cards(self) -> None:
         self._recent_frame = ttk.LabelFrame(self, text="Sist brukte klienter", padding=8)
-        self._recent_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(4, 8))
+        self._recent_frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(4, 8))
         self._recent_cards_inner = ttk.Frame(self._recent_frame)
         self._recent_cards_inner.pack(fill="x")
-        self._populate_recent_cards()
+        # Placeholder — fylles via _deferred_initial_load. Synkron lesing
+        # av meta_index er treg på oppstart.
+        ttk.Label(
+            self._recent_cards_inner,
+            text="Laster klienter…",
+            style="Muted.TLabel",
+        ).pack(padx=8, pady=8)
 
     def _populate_recent_cards(self) -> None:
         # Rydd opp
@@ -282,11 +299,14 @@ class OversiktPage(ttk.Frame):
             ColumnSpec(id="ansvarlig", heading="Ansvarlig", width=90,  anchor="w"),
             ColumnSpec(id="manager",   heading="Manager",   width=180, anchor="w"),
             ColumnSpec(id="regnskapssystem", heading="Regnskapssystem", width=140, anchor="w"),
-            ColumnSpec(id="team",      heading="Team",      width=220, anchor="w", stretch=True),
+            ColumnSpec(id="team",      heading="Team",      width=220, anchor="w"),
+            ColumnSpec(id="gruppe",    heading="Gruppe",    width=160, anchor="w", stretch=True),
         ]
         cols = [spec.id for spec in column_specs]
 
-        self._tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="browse")
+        # selectmode="extended" gir multi-select (Ctrl/Shift) — nødvendig for
+        # å sette gruppe på flere klienter samtidig via høyreklikk.
+        self._tree = ttk.Treeview(table_frame, columns=cols, show="headings", selectmode="extended")
         self._managed = ManagedTreeview(
             self._tree,
             view_id="oversikt_klienter",
@@ -303,10 +323,12 @@ class OversiktPage(ttk.Frame):
 
         # Dobbeltklikk -> navigasjon
         self._tree.bind("<Double-1>", self._on_tree_double_click)
+        # Høyreklikk -> kontekst-meny (sett/fjern gruppe)
+        self._tree.bind("<Button-3>", self._on_tree_right_click)
 
-        # Fyll tabell
-        self._load_client_data()
-        self._populate_client_table()
+        # Tabell fylles via _deferred_initial_load etter at vinduet er
+        # rendret. _load_client_data() kaller load_accounting_system per
+        # klient (disk-IO) og er hovedårsaken til ~9 s oppstartsforsinkelse.
 
     def _build_deadlines_stub(self) -> None:
         stub = ttk.LabelFrame(self, text="Frister (kommer)", padding=8)
@@ -316,6 +338,23 @@ class OversiktPage(ttk.Frame):
     # ------------------------------------------------------------------
     # Data loading
     # ------------------------------------------------------------------
+
+    def _deferred_initial_load(self) -> None:
+        """Fyll klient-tabellen og recent-cards etter at vinduet er rendret.
+
+        Kalles via ``self.after(50, …)`` fra ``__init__``. Idempotent — hvis
+        andre kodeveier har trigget en lasting allerede (f.eks. via
+        ``refresh()``), skjer ingenting.
+        """
+        if self._initial_load_done:
+            return
+        self._initial_load_done = True
+        try:
+            self._load_client_data()
+            self._populate_client_table()
+            self._populate_recent_cards()
+        except Exception:
+            log.exception("Oversikt: deferred initial load feilet")
 
     def _load_client_data(self) -> None:
         """Les metadata-indeks og bygg _all_client_rows."""
@@ -335,6 +374,15 @@ class OversiktPage(ttk.Frame):
         except Exception:
             load_accounting_system = lambda _c: ""  # type: ignore[assignment]
 
+        # Klient-grupper (manuelt satt via høyreklikk). Tom dict hvis
+        # ingen klienter har gruppe-tilordning.
+        client_groups: dict[str, str] = {}
+        if self._client_store_groups:
+            try:
+                client_groups = self._client_store_groups.load_groups()
+            except Exception:
+                client_groups = {}
+
         rows = []
         for name, meta in sorted(meta_index.items()):
             org = meta.get("org_number", "")
@@ -350,7 +398,8 @@ class OversiktPage(ttk.Frame):
                 regnskapssystem = load_accounting_system(name)
             except Exception:
                 regnskapssystem = ""
-            rows.append((name, org, knr, ansvarlig, manager, regnskapssystem, team))
+            gruppe = client_groups.get(name, "")
+            rows.append((name, org, knr, ansvarlig, manager, regnskapssystem, team, gruppe))
 
         self._all_client_rows = rows
 
@@ -371,7 +420,7 @@ class OversiktPage(ttk.Frame):
             my_name = self._user.full_name or ""
 
         count = 0
-        for name, org, knr, ansvarlig, manager, regnskapssystem, team in self._all_client_rows:
+        for name, org, knr, ansvarlig, manager, regnskapssystem, team, gruppe in self._all_client_rows:
             # Mine-filter
             if mine_only:
                 if not self._client_store_enrich:
@@ -384,13 +433,18 @@ class OversiktPage(ttk.Frame):
                 if not self._client_store_enrich.is_my_client(meta, my_initials, my_name):
                     continue
 
-            # Sok-filter
+            # Sok-filter — gruppe inngår også slik at man kan filtrere på
+            # gruppe-navn direkte i søkefeltet.
             if search_text:
-                haystack = f"{name} {org} {knr} {ansvarlig} {manager} {regnskapssystem} {team}".lower()
+                haystack = f"{name} {org} {knr} {ansvarlig} {manager} {regnskapssystem} {team} {gruppe}".lower()
                 if search_text not in haystack:
                     continue
 
-            self._tree.insert("", "end", values=(name, org, knr, ansvarlig, manager, regnskapssystem, team))
+            # Bruker klient-navn som iid → enklere oppslag i høyreklikk-handler.
+            self._tree.insert(
+                "", "end", iid=name,
+                values=(name, org, knr, ansvarlig, manager, regnskapssystem, team, gruppe),
+            )
             count += 1
 
         self._lbl_count.configure(text=f"{count} klienter")
@@ -419,6 +473,132 @@ class OversiktPage(ttk.Frame):
         values = self._tree.item(sel[0], "values")
         if values:
             self._navigate_to_client(values[0])
+
+    def _on_tree_right_click(self, event) -> None:
+        """Vis kontekst-meny for å sette/fjerne gruppe på valgte klienter.
+
+        Hvis raden under cursoren ikke er i utvalget, byttes utvalget til
+        bare den raden — slik at høyreklikk virker som man forventer
+        (uten å måtte venstreklikke først).
+        """
+        row_iid = self._tree.identify_row(event.y)
+        sel = list(self._tree.selection())
+        if row_iid and row_iid not in sel:
+            self._tree.selection_set(row_iid)
+            sel = [row_iid]
+
+        if not sel:
+            return
+
+        menu = tk.Menu(self._tree, tearoff=0)
+        n = len(sel)
+        label_set = "Sett gruppe…" if n == 1 else f"Sett gruppe på {n} valgte…"
+        label_clear = "Fjern gruppe" if n == 1 else f"Fjern gruppe på {n} valgte"
+        menu.add_command(label=label_set, command=self._open_set_group_dialog)
+        menu.add_separator()
+        menu.add_command(label=label_clear, command=self._clear_group_for_selection)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _selected_client_names(self) -> list[str]:
+        return [iid for iid in self._tree.selection() if iid]
+
+    def _open_set_group_dialog(self) -> None:
+        """Modal dialog for å sette gruppe-navn på valgte klienter.
+
+        Combobox lister eksisterende grupper (man kan velge eller skrive
+        ny). Hvis alle valgte klientene allerede har samme gruppe, brukes
+        denne som default i feltet.
+        """
+        names = self._selected_client_names()
+        if not names or self._client_store_groups is None:
+            return
+
+        try:
+            from src.shared.ui.dialog import make_dialog
+        except Exception:
+            return
+
+        existing = self._client_store_groups.list_groups()
+        current_groups = {n: dict(self._all_row_lookup()).get(n, "") for n in names}
+        # Default-tekst: felles gruppe hvis alle har samme, ellers tomt.
+        common = {g for g in current_groups.values() if g}
+        default_value = current_groups[names[0]] if len(common) == 1 else ""
+
+        dlg = make_dialog(
+            self.winfo_toplevel(),
+            title="Sett gruppe",
+            width=420,
+            height=200,
+            modal=True,
+        )
+
+        body = ttk.Frame(dlg, padding=14)
+        body.pack(fill="both", expand=True)
+
+        if len(names) == 1:
+            ttk.Label(body, text=f"Klient: {names[0]}").pack(anchor="w", pady=(0, 8))
+        else:
+            ttk.Label(body, text=f"{len(names)} klienter valgt").pack(anchor="w", pady=(0, 8))
+
+        ttk.Label(body, text="Gruppe:").pack(anchor="w")
+        var_group = tk.StringVar(value=default_value)
+        combo = ttk.Combobox(body, textvariable=var_group, values=existing, width=40)
+        combo.pack(fill="x", pady=(2, 0))
+        combo.focus_set()
+
+        ttk.Label(
+            body,
+            text="Velg eksisterende eller skriv inn ny gruppe. Tom verdi fjerner gruppen.",
+            foreground="#888",
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(6, 0))
+
+        btn_row = ttk.Frame(dlg, padding=(14, 0, 14, 14))
+        btn_row.pack(fill="x")
+
+        def _save() -> None:
+            new_group = var_group.get().strip()
+            try:
+                self._client_store_groups.set_groups_bulk(
+                    {n: new_group for n in names}
+                )
+            except Exception as exc:
+                log.warning("Kunne ikke lagre gruppe: %s", exc)
+                return
+            dlg.destroy()
+            self._load_client_data()
+            self._populate_client_table()
+            for n in names:
+                if self._tree.exists(n):
+                    self._tree.selection_add(n)
+
+        ttk.Button(btn_row, text="Avbryt", command=dlg.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(btn_row, text="Lagre", command=_save).pack(side="right")
+        combo.bind("<Return>", lambda _e: _save())
+
+    def _clear_group_for_selection(self) -> None:
+        names = self._selected_client_names()
+        if not names or self._client_store_groups is None:
+            return
+        try:
+            self._client_store_groups.set_groups_bulk({n: "" for n in names})
+        except Exception as exc:
+            log.warning("Kunne ikke fjerne gruppe: %s", exc)
+            return
+        self._load_client_data()
+        self._populate_client_table()
+        for n in names:
+            if self._tree.exists(n):
+                self._tree.selection_add(n)
+
+    def _all_row_lookup(self):
+        """Returner iterable av (klient-navn, gruppe) for raskt oppslag."""
+        for row in self._all_client_rows:
+            # Tuple-orden: (name, org, knr, ansvarlig, manager, regnskapssystem, team, gruppe)
+            yield row[0], row[7] if len(row) >= 8 else ""
 
     def _goto_active_client(self) -> None:
         """Naviger til aktiv klient (vist i headeren)."""
