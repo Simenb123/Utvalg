@@ -898,7 +898,7 @@ class ScopingPage(ttk.Frame):
             return
 
         try:
-            from scoping_export import export_scoping
+            from src.pages.scoping.backend.export import export_scoping
             export_scoping(
                 self._result, path,
                 client_name=client, year=year,
