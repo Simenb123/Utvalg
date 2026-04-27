@@ -10,7 +10,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
 
-import vaak_tokens as vt
+import src.shared.ui.tokens as vt
 
 _H = vt.hex_gui
 

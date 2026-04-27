@@ -41,7 +41,7 @@ from .combo_workflow import (
     compute_selected_net_sum_by_combo,
 )
 from .utils import _bilag_str, _clean_name, _konto_str, _safe_float
-from ui_treeview_sort import enable_treeview_sorting
+from src.shared.ui.treeview_sort import enable_treeview_sorting
 
 logger = logging.getLogger(__name__)
 

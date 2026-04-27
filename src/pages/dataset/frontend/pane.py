@@ -26,7 +26,7 @@ from ..backend.pane_xls import list_xls_sheets, read_xls_header, read_xls_sample
 from .pane_ui import build_ui
 from ml_map_utils import canonical_fields, load_ml_map, suggest_mapping, update_ml_map
 from models import Columns
-from ui_loading import LoadingOverlay
+from src.shared.ui.loading import LoadingOverlay
 from views_preview import show_preview
 
 logger = logging.getLogger(__name__)

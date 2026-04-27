@@ -227,7 +227,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # fortsatt av _show_pivot_column_menu via add="+".
     page._pivot_managed = None
     try:
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         from page_analyse_columns_presets import build_pivot_column_specs
 
         year = None
@@ -637,7 +637,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # den håndlagde implementasjonen auto-migreres første gang siden
     # lastes.
     try:
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         from page_analyse_columns_presets import build_tx_column_specs
 
         page._tx_managed = ManagedTreeview(
@@ -708,7 +708,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     page._sb_managed = None
     if getattr(page, "_sb_tree", None) is not None:
         try:
-            from ui_managed_treeview import ManagedTreeview
+            from src.shared.ui.managed_treeview import ManagedTreeview
             from page_analyse_columns_presets import build_sb_column_specs
 
             year = None
@@ -940,7 +940,7 @@ def build_panels(page: Any, *, tk: Any, ttk: Any, refs: SimpleNamespace) -> None
     # leser aktiv aggregeringsmodus slik at footer-teksten alltid speiler
     # den synlige konteksten.
     try:
-        import ui_selection_summary as _uiss
+        import src.shared.ui.selection_summary as _uiss
 
         def _pivot_priority_resolver(_tree: Any) -> tuple[str, ...]:
             try:

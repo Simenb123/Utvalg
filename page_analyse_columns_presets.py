@@ -31,7 +31,7 @@ def build_pivot_column_specs(
     inkluderes, men ``visible_by_default`` styres av gjeldende
     aggregeringsmodus (Regnskapslinje/SB-konto/HB-konto).
     """
-    from ui_managed_treeview import ColumnSpec
+    from src.shared.ui.managed_treeview import ColumnSpec
     import analyse_treewidths
 
     try:
@@ -85,7 +85,7 @@ def build_sb_column_specs(
     vokabular, årsavhengig), bredder fra analyse_sb_tree._SB_COL_WIDTHS.
     Pinned = Konto + Kontonavn, matcher tidligere SB_PINNED_COLS.
     """
-    from ui_managed_treeview import ColumnSpec
+    from src.shared.ui.managed_treeview import ColumnSpec
 
     try:
         import page_analyse_sb as _sb
@@ -152,7 +152,7 @@ def build_tx_column_specs(
     Kolonner i ``optional_cols`` får ``visible_by_default=False`` slik at
     de er tilgjengelige i kolonnevelgeren men ikke synlige automatisk.
     """
-    from ui_managed_treeview import ColumnSpec
+    from src.shared.ui.managed_treeview import ColumnSpec
     import analyse_treewidths
 
     pinned_set = set(pinned_cols)

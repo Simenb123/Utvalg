@@ -42,8 +42,7 @@ import pandas as pd
 
 import formatting
 import preferences
-import ui_hotkeys
-
+import src.shared.ui.hotkeys as ui_hotkeys
 import session
 
 import page_analyse_actions_impl
@@ -63,7 +62,7 @@ import analyse_workpaper_export
 log = logging.getLogger(__name__)
 
 try:
-    from ui_treeview_sort import enable_treeview_sorting as _enable_treeview_sorting
+    from src.shared.ui.treeview_sort import enable_treeview_sorting as _enable_treeview_sorting
 except Exception:  # pragma: no cover
     _enable_treeview_sorting = None  # type: ignore
 

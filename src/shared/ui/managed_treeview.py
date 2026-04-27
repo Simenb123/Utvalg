@@ -29,7 +29,7 @@ import preferences
 from treeview_column_manager import TreeviewColumnManager
 
 try:
-    from ui_treeview_sort import enable_treeview_sorting
+    from .treeview_sort import enable_treeview_sorting
 except Exception:  # pragma: no cover
     enable_treeview_sorting = None  # type: ignore
 

@@ -7,8 +7,8 @@ import tkinter as tk
 import pytest
 from openpyxl import Workbook
 
-import vaak_excel_theme as vxt
-import vaak_tokens as vt
+import src.shared.ui.excel_theme as vxt
+import src.shared.ui.tokens as vt
 from theme import apply_theme, style_treeview_tags, tree_tag
 
 

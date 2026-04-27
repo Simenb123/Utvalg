@@ -8,7 +8,7 @@ from formatting import fmt_amount, fmt_date
 
 # Optional: enable sorting if module exists (introduced in later patches)
 try:
-    from ui_treeview_sort import enable_treeview_sorting  # type: ignore
+    from src.shared.ui.treeview_sort import enable_treeview_sorting  # type: ignore
 except Exception:  # pragma: no cover
     enable_treeview_sorting = None  # type: ignore
 

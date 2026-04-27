@@ -33,7 +33,7 @@ from .associate_state import (
     on_toggle_associate_mapping,
     refresh_associate_case_actions,
 )
-from ui_managed_treeview import ColumnSpec, ManagedTreeview
+from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

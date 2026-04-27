@@ -119,7 +119,7 @@ class MonitoringDashboardMixin:
                 return
             # Toplevel: hent bakgrunn fra vaak_tokens via theme-modulen
             try:
-                import vaak_tokens as _vt
+                import src.shared.ui.tokens as _vt
                 bg = _vt.BG_NEUTRAL
                 if isinstance(bg, str) and not bg.startswith("#"):
                     bg = "#" + bg.lstrip("#")

@@ -271,7 +271,7 @@ class App(tk.Tk):
         # holde "Bygger Analyse..." synlig fra dataset er ferdig lastet og
         # til Analyse-fanen faktisk er klar (jf. _on_data_ready).
         try:
-            from ui_loading import LoadingOverlay
+            from src.shared.ui.loading import LoadingOverlay
             self._app_loading_overlay = LoadingOverlay(self)
         except Exception:
             self._app_loading_overlay = None
@@ -467,7 +467,7 @@ class App(tk.Tk):
 
         # Theme-farger fra vaak_tokens (faller tilbake hvis import feiler)
         try:
-            import vaak_tokens as _vt
+            import src.shared.ui.tokens as _vt
             bg_color = "#" + _vt.BG_SAND_SOFT
             border_color = "#" + _vt.SAGE_DARK
             text_color = "#" + _vt.FOREST
@@ -1596,8 +1596,7 @@ def install_runtime_ui_behaviors(app: "App") -> None:
     som skriver til app-footeren).
     """
     try:
-        import ui_hotkeys
-
+        import src.shared.ui.hotkeys as ui_hotkeys
         setter = getattr(app, "set_selection_summary", None)
         ui_hotkeys.install_global_hotkeys(
             app,

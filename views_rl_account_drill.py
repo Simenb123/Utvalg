@@ -10,7 +10,7 @@ import analyse_treewidths
 import formatting
 
 try:
-    from ui_treeview_sort import enable_treeview_sorting  # type: ignore
+    from src.shared.ui.treeview_sort import enable_treeview_sorting  # type: ignore
 except Exception:  # pragma: no cover
     enable_treeview_sorting = None  # type: ignore
 

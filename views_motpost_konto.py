@@ -86,7 +86,7 @@ from src.audit_actions.motpost.konto_core import (
     _konto_str,
 )
 
-from ui_treeview_sort import enable_treeview_sorting
+from src.shared.ui.treeview_sort import enable_treeview_sorting
 
 
 _REGNSKAPSLINJE_REGNR_RE = re.compile(r"^\s*(\d+)")

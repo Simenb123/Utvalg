@@ -242,7 +242,7 @@ class AdminPage(ttk.Frame):  # type: ignore[misc]
     def _build_admin_landing(self) -> None:
         """Lag og vis landing-overlay over admin-innholdet."""
         try:
-            import vaak_tokens as _vt
+            import src.shared.ui.tokens as _vt
             bg_color = "#" + _vt.BG_SAND_SOFT
             text_color = "#" + _vt.FOREST
             font_family = _vt.FONT_FAMILY_BODY

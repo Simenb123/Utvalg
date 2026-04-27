@@ -324,7 +324,7 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
         # bytte går via ``self._managed_tree.column_manager.set_visible_columns``.
         # Gammel Saldobalanse-preference-nøkler auto-migreres til
         # ``ui.saldobalanse.*`` første gang siden lastes.
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         from saldobalanse_payload import build_column_specs
         self._managed_tree = ManagedTreeview(
             self._tree,

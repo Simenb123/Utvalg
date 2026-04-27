@@ -51,8 +51,7 @@ def run() -> None:
             install(inst)
         else:
             # Bakoverkompatibel fallback for eldre ui_main.py
-            import ui_hotkeys
-
+            import src.shared.ui.hotkeys as ui_hotkeys
             ui_hotkeys.install_global_hotkeys(inst)
             ui_hotkeys.install_autofit_all(inst)
     except Exception:

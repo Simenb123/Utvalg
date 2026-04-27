@@ -19,7 +19,7 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
 
 try:
-    from ui_treeview_sort import enable_treeview_sorting as _enable_sort
+    from src.shared.ui.treeview_sort import enable_treeview_sorting as _enable_sort
 except Exception:
     _enable_sort = None  # type: ignore
 

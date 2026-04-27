@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ui_selection_summary import build_selection_summary_text
+from src.shared.ui.selection_summary import build_selection_summary_text
 
 from .data import build_control_accounts_summary
 

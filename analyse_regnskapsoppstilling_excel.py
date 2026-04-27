@@ -18,8 +18,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-import vaak_excel_theme as vxt
-import vaak_tokens as vt
+import src.shared.ui.excel_theme as vxt
+import src.shared.ui.tokens as vt
 from src.shared.workpapers.forside import build_forside_sheet
 
 

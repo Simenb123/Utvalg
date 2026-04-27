@@ -181,7 +181,7 @@ class ScopingPage(ttk.Frame):
         # Standard tabell-oppsett via ManagedTreeview (sortering, kolonne-
         # synlighet/rekkefølge/bredde, høyreklikk-meny på header — alt
         # persisteres mellom økter). Se doc/TREEVIEW_PLAYBOOK.md.
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         column_specs = [
             ColumnSpec("regnr",          heading="Regnr",             width=50,  minwidth=40,  anchor="e", pinned=True),
             ColumnSpec("regnskapslinje", heading="Regnskapslinje",    width=200, minwidth=120, stretch=True),
@@ -224,7 +224,7 @@ class ScopingPage(ttk.Frame):
 
         # Sortering via kolonneheader
         try:
-            from ui_treeview_sort import enable_treeview_sorting
+            from src.shared.ui.treeview_sort import enable_treeview_sorting
             enable_treeview_sorting(self._tree)
         except Exception:
             pass
@@ -241,7 +241,7 @@ class ScopingPage(ttk.Frame):
         # til venstre). Gjør at brukeren ser sumtall for valgt rad(er) i
         # samme UI-element som på Analyse/Saldobalanse/TX.
         try:
-            import ui_selection_summary as _uiss
+            import src.shared.ui.selection_summary as _uiss
             _uiss.register_treeview_selection_summary(
                 self._tree,
                 columns=("ub", "ub_fjor", "endring"),

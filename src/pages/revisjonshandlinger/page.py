@@ -213,7 +213,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         # Standard tabell-oppsett via ManagedTreeview (sortering, kolonne-
         # synlighet/rekkefølge/bredde, høyreklikk-meny på header — alt
         # persisteres mellom økter). Se doc/TREEVIEW_PLAYBOOK.md.
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         column_specs = [
             ColumnSpec("opprinnelse",    heading="Opprinnelse",    width=80,  minwidth=60,  anchor="center"),
             ColumnSpec("regnr",          heading="Regnr",          width=50,  minwidth=40),

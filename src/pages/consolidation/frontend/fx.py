@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover
 
 from ..backend import storage
 from .common import reset_sort_state
-from ui_managed_treeview import ColumnSpec, ManagedTreeview
+from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

@@ -254,7 +254,7 @@ class OversiktPage(ttk.Frame):
             card.bind("<Leave>", lambda _e, c=card: c.configure(relief="solid"))
 
     def _build_client_table(self) -> None:
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
         table_frame = ttk.Frame(self)
         table_frame.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 8))

@@ -8,7 +8,7 @@ visual identity with the Tkinter GUI. All color values come from
 Typical use::
 
     from openpyxl import Workbook
-    from vaak_excel_theme import (
+    from src.shared.ui.excel_theme import (
         FILL_TITLE, FONT_TITLE, register_vaak_styles,
     )
 
@@ -25,7 +25,7 @@ from __future__ import annotations
 from openpyxl.styles import Alignment, Border, Font, NamedStyle, PatternFill, Side
 from openpyxl.workbook import Workbook
 
-import vaak_tokens as vt
+from . import tokens as vt
 
 # ---------------------------------------------------------------------------
 # Fills

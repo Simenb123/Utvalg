@@ -43,7 +43,7 @@ def _open_tx_search_scope_popup(*, page: Any, btn: Any) -> None:
         from tkinter import ttk
     except Exception:
         return
-    from ui_dialog import make_dialog
+    from src.shared.ui.dialog import make_dialog
 
     # Hent ALLE tilgjengelige kolonner fra ManagedTreeview hvis mulig.
     # Fallback til TX_COLS_DEFAULT.

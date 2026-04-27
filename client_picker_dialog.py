@@ -125,7 +125,7 @@ def open_client_picker(
 
     # Sortering
     try:
-        from ui_treeview_sort import enable_treeview_sorting
+        from src.shared.ui.treeview_sort import enable_treeview_sorting
         enable_treeview_sorting(tree)
     except Exception:
         pass

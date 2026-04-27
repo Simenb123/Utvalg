@@ -14,9 +14,7 @@ from __future__ import annotations
 import types
 from typing import Any, Optional
 
-import ui_selection_summary
-
-
+import src.shared.ui.selection_summary as ui_selection_summary
 class DummyTree:
     def __init__(
         self,
@@ -376,7 +374,7 @@ def test_page_analyse_ui_registers_profiles_with_correct_row_nouns() -> None:
         page = page_analyse.AnalysePage(root)
 
         # Hent tre registreringsprofiler via selection-summary config-attribut
-        from ui_selection_summary import _SelectionSummaryConfig, _REGISTRATION_ATTR
+        from src.shared.ui.selection_summary import _SelectionSummaryConfig, _REGISTRATION_ATTR
 
         pivot_cfg = getattr(page._pivot_tree, _REGISTRATION_ATTR, None)
         tx_cfg = getattr(page._tx_tree, _REGISTRATION_ATTR, None)

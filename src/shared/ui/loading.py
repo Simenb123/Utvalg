@@ -105,7 +105,7 @@ class LoadingOverlay:
         if win is None:
             # Theme-farger fra vaak_tokens (samme som splash-skjermen)
             try:
-                import vaak_tokens as _vt
+                from . import tokens as _vt
                 bg_color = "#" + _vt.BG_SAND_SOFT
                 border_color = "#" + _vt.SAGE_DARK
                 text_color = "#" + _vt.FOREST

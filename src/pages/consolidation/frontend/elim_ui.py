@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
-from ui_managed_treeview import ColumnSpec, ManagedTreeview
+from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

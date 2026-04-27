@@ -4,7 +4,7 @@ from tkinter import ttk
 from typing import Sequence
 
 from src.shared.columns_vocabulary import active_year_from_session, heading as global_column_heading
-from ui_managed_treeview import ColumnSpec, ManagedTreeview
+from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
 
 _A07_TREE_PREF_PREFIX = "ui"

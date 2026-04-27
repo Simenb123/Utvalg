@@ -7,7 +7,7 @@ import pandas as pd
 
 from models import Columns
 from formatting import fmt_amount, fmt_date
-from ui_utils import enable_treeview_sort
+from src.shared.ui.utils import enable_treeview_sort
 
 def open_drilldown(parent: tk.Tk | tk.Toplevel, df: pd.DataFrame, cols: Columns,
                    konto: int, kontonavn: str = ""):

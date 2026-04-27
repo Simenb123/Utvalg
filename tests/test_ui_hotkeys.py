@@ -3,10 +3,8 @@ from __future__ import annotations
 import types
 from typing import Any
 
-import ui_hotkeys
-import ui_selection_summary
-
-
+import src.shared.ui.hotkeys as ui_hotkeys
+import src.shared.ui.selection_summary as ui_selection_summary
 class DummyTree:
     def __init__(self, columns: list[str], values: dict[str, dict[str, Any]],
                  displaycolumns: list[str] | str | None = None):

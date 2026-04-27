@@ -178,7 +178,7 @@ class MaterialityPage(ttk.Frame):
         self.var_selected_om.trace_add("write", lambda *_: self._on_selected_om_changed())
 
     def _configure_styles(self) -> None:
-        import vaak_tokens as vt
+        import src.shared.ui.tokens as vt
 
         style = ttk.Style(self)
         primary = vt.hex_gui(vt.TEXT_PRIMARY)

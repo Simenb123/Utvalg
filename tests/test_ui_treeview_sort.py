@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ui_treeview_sort import enable_treeview_sorting
+from src.shared.ui.treeview_sort import enable_treeview_sorting
 
 
 class DummyTree:

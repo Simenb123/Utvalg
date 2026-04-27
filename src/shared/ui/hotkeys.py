@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import math
 from typing import Any, Callable, Optional
 
-import ui_selection_summary
+from . import selection_summary as ui_selection_summary
 
 
 # --------------------------------------------------------------------------------------

@@ -38,7 +38,7 @@ def _make_tree(columns=("a", "b", "c")):
 
 
 def _make_specs():
-    from ui_managed_treeview import ColumnSpec
+    from src.shared.ui.managed_treeview import ColumnSpec
     return [
         ColumnSpec(id="a", heading="A", width=100, visible_by_default=True),
         ColumnSpec(id="b", heading="B", width=120, visible_by_default=True),
@@ -52,7 +52,7 @@ def _make_specs():
 
 class TestConstruction:
     def test_minimal_construction(self):
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         with patch("preferences.get", return_value=None), \
              patch("preferences.set"):
@@ -65,7 +65,7 @@ class TestConstruction:
         assert mt._width_pref_key == "testui.test.column_widths"
 
     def test_column_manager_uses_same_prefix_and_view_id(self):
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         tree = _make_tree()
         with patch("preferences.get", return_value=None), \
              patch("preferences.set"):
@@ -77,7 +77,7 @@ class TestConstruction:
         assert mt.column_manager._order_key == "myapp.myview.column_order"
 
     def test_str_specs_are_normalized_to_columnspec(self):
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         tree = _make_tree(("x", "y"))
         with patch("preferences.get", return_value=None), \
              patch("preferences.set"):
@@ -91,7 +91,7 @@ class TestConstruction:
         assert all(s.visible_by_default for s in mt._specs)
 
     def test_pinned_cols_propagate_to_manager(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [
             ColumnSpec(id="a", pinned=True),
@@ -114,7 +114,7 @@ class TestConstruction:
 
 class TestWidthHelpers:
     def test_load_widths_strips_bad_values(self):
-        from ui_managed_treeview import _load_widths
+        from src.shared.ui.managed_treeview import _load_widths
         fake_store = {"mykey": {"a": 100, "b": "bad", "c": 5, "d": 2000, "e": 80}}
         with patch("preferences.get", side_effect=lambda k, d=None: fake_store.get(k, d)):
             got = _load_widths("mykey")
@@ -122,7 +122,7 @@ class TestWidthHelpers:
         assert got == {"a": 100, "e": 80}
 
     def test_save_widths_enforces_bounds(self):
-        from ui_managed_treeview import _save_widths
+        from src.shared.ui.managed_treeview import _save_widths
         saved = {}
         def _setter(k, v):
             saved[k] = v
@@ -131,7 +131,7 @@ class TestWidthHelpers:
         assert saved["mykey"] == {"a": 100}
 
     def test_load_widths_tolerates_non_dict(self):
-        from ui_managed_treeview import _load_widths
+        from src.shared.ui.managed_treeview import _load_widths
         with patch("preferences.get", return_value="not-a-dict"):
             assert _load_widths("mykey") == {}
 
@@ -142,7 +142,7 @@ class TestWidthHelpers:
 
 class TestLegacyMigration:
     def test_migrates_when_new_missing_and_legacy_present(self):
-        from ui_managed_treeview import _migrate_legacy_pref_keys
+        from src.shared.ui.managed_treeview import _migrate_legacy_pref_keys
         store = {
             "legacy.visible": ["a", "b"],
             "legacy.order": ["b", "a"],
@@ -170,7 +170,7 @@ class TestLegacyMigration:
         assert store["legacy.visible"] == ["a", "b"]
 
     def test_does_not_overwrite_existing_new_key(self):
-        from ui_managed_treeview import _migrate_legacy_pref_keys
+        from src.shared.ui.managed_treeview import _migrate_legacy_pref_keys
         store = {
             "ui.myview.visible_cols": ["new", "value"],
             "legacy.visible": ["old", "value"],
@@ -193,7 +193,7 @@ class TestLegacyMigration:
         assert store["ui.myview.visible_cols"] == ["new", "value"]
 
     def test_no_op_when_both_missing(self):
-        from ui_managed_treeview import _migrate_legacy_pref_keys
+        from src.shared.ui.managed_treeview import _migrate_legacy_pref_keys
         store = {}
 
         def _get(k, d=None):
@@ -214,7 +214,7 @@ class TestLegacyMigration:
     def test_ignores_unknown_aspect(self):
         """Only known aspects (visible_cols, column_order, column_widths)
         trigger migration. Bogus aspect names are silently skipped."""
-        from ui_managed_treeview import _migrate_legacy_pref_keys
+        from src.shared.ui.managed_treeview import _migrate_legacy_pref_keys
         store = {"legacy.weird": "something"}
 
         def _get(k, d=None):
@@ -237,7 +237,7 @@ class TestLegacyMigration:
         """End-to-end: ManagedTreeview with legacy_pref_keys reads the
         legacy value through the migration path so column_manager sees
         it under the new name."""
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         store = {
             "saldobalanse.columns.visible": ["a", "b"],
             "saldobalanse.columns.order": ["b", "a", "c"],
@@ -277,7 +277,7 @@ class TestLegacyMigration:
 
 class TestBindings:
     def test_auto_bind_false_skips_binding(self):
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         tree = _make_tree()
         with patch("preferences.get", return_value=None), \
              patch("preferences.set"):
@@ -292,7 +292,7 @@ class TestBindings:
         assert "<ButtonPress-1>" not in bind_events_keys
 
     def test_auto_bind_true_registers_events(self):
-        from ui_managed_treeview import ManagedTreeview
+        from src.shared.ui.managed_treeview import ManagedTreeview
         tree = _make_tree()
         with patch("preferences.get", return_value=None), \
              patch("preferences.set"):
@@ -314,7 +314,7 @@ class TestBindings:
 
 class TestUpdateColumns:
     def test_update_columns_refreshes_column_manager_metadata(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
         tree = _make_tree(("a", "b", "c"))
         with patch("preferences.get", return_value=None), \
@@ -358,7 +358,7 @@ def _make_event(**overrides):
 
 class TestDragReorder:
     def test_press_on_pinned_blocks_drag(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [
             ColumnSpec(id="a", pinned=True),
@@ -376,7 +376,7 @@ class TestDragReorder:
         assert mt._drag_state is None  # pinned → no drag started
 
     def test_press_on_unpinned_starts_pending_drag(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [
             ColumnSpec(id="a", pinned=True),
@@ -396,7 +396,7 @@ class TestDragReorder:
         assert mt._drag_state["active"] is False  # not past threshold yet
 
     def test_is_valid_drop_rules(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [
             ColumnSpec(id="a", pinned=True),
@@ -421,7 +421,7 @@ class TestDragReorder:
         assert mt._is_valid_drop("b", "a", after=True) is True
 
     def test_finish_drag_invalid_does_not_reorder(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
         with patch("preferences.get", return_value=None), \
@@ -439,7 +439,7 @@ class TestDragReorder:
         assert list(mt.column_manager._order) == original
 
     def test_finish_drag_valid_reorders(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
         with patch("preferences.get", return_value=None), \
@@ -458,7 +458,7 @@ class TestDragReorder:
         assert list(mt.column_manager._order) == ["b", "c", "a"]
 
     def test_escape_cancels_active_drag(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
         with patch("preferences.get", return_value=None), \
@@ -483,7 +483,7 @@ class TestDragReorder:
         tuple. After a reorder, the two differ and the drag handler
         must resolve against displaycolumns.
         """
-        from ui_managed_treeview import _column_id_from_event
+        from src.shared.ui.managed_treeview import _column_id_from_event
         tree = MagicMock()
         tree.identify_column = MagicMock(return_value="#2")
         # Original columns: a, b, c. User has reordered to: c, a, b.
@@ -499,7 +499,7 @@ class TestDragReorder:
     def test_column_id_lookup_displaycolumns_all_fallback(self):
         """When displaycolumns is the sentinel '#all' we fall back to
         the raw columns tuple (legacy default for fresh trees)."""
-        from ui_managed_treeview import _column_id_from_event
+        from src.shared.ui.managed_treeview import _column_id_from_event
         tree = MagicMock()
         tree.identify_column = MagicMock(return_value="#3")
         tree.__getitem__ = MagicMock(
@@ -511,7 +511,7 @@ class TestDragReorder:
         assert _column_id_from_event(tree, evt) == "c"
 
     def test_reorder_columns_after_flag_forwarded(self):
-        from ui_managed_treeview import ColumnSpec, ManagedTreeview
+        from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
         tree = _make_tree(("a", "b", "c"))
         specs = [ColumnSpec(id=c) for c in ("a", "b", "c")]
         with patch("preferences.get", return_value=None), \

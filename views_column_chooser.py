@@ -48,7 +48,7 @@ def open_column_chooser(
       lagrer via "Lagre"-knappen.
     """
 
-    from ui_dialog import make_dialog
+    from src.shared.ui.dialog import make_dialog
 
     dialog = make_dialog(
         master,

@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover
 from .mapping_tab import MappingTab
 from .common import DETAIL_TB_COLUMN_SPECS
 from treeview_column_manager import TreeviewColumnManager
-from ui_managed_treeview import ColumnSpec, ManagedTreeview
+from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
 if TYPE_CHECKING:
     from .page import ConsolidationPage

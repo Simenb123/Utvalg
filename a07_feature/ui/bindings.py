@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from tkinter import ttk
 
-import ui_selection_summary
-
+import src.shared.ui.selection_summary as ui_selection_summary
 from ..page_a07_constants import _SUMMARY_TOTAL_TAG
 
 
@@ -98,7 +97,7 @@ class A07PageBindingsMixin:
         tag_tokens: dict[str, tuple[str, str]],
     ) -> None:
         try:
-            import vaak_tokens as vt  # type: ignore
+            import src.shared.ui.tokens as vt  # type: ignore
 
             for tag_name, (bg_token, fg_token) in tag_tokens.items():
                 tree.tag_configure(

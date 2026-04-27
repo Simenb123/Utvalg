@@ -875,7 +875,7 @@ def enable_tx_sorting(*, page: Any, enable_fn: Any = None) -> None:
         return
     if enable_fn is None:
         try:
-            from ui_treeview_sort import enable_treeview_sorting
+            from src.shared.ui.treeview_sort import enable_treeview_sorting
             enable_fn = enable_treeview_sorting
         except Exception:
             return

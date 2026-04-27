@@ -13,7 +13,7 @@ from formatting import fmt_amount, fmt_int, fmt_date
 from controller_sample import frames_for_sample, export_sample_to_temp_and_open
 from views_dataset import open_dataset_window
 from preferences import load_preferences
-from ui_utils import enable_treeview_sort
+from src.shared.ui.utils import enable_treeview_sort
 
 
 class MainView:

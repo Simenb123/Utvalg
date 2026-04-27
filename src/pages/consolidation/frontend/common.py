@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..backend.models import AssociateCase
-from ui_managed_treeview import ColumnSpec
+from src.shared.ui.managed_treeview import ColumnSpec
 
 SOURCE_LABELS = {
     "excel": "TB-fil",

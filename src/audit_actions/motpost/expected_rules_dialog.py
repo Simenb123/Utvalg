@@ -631,7 +631,7 @@ def choose_expected_rules(
         return sum_map.get(konto)
 
     try:
-        import vaak_tokens as vt  # type: ignore
+        import src.shared.ui.tokens as vt  # type: ignore
 
         accounts_tree.tag_configure("excluded", foreground=vt.hex_gui(vt.NEG_TEXT), background=vt.hex_gui(vt.NEG_SOFT))
         accounts_tree.tag_configure("included", foreground=vt.hex_gui(vt.POS_TEXT))

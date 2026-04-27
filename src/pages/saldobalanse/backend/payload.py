@@ -1432,7 +1432,7 @@ def build_column_specs(year: int | None = None):
     ``year`` brukes for å formatere årsavhengige kolonne-overskrifter
     (f.eks. "IB 2025" / "UB 2024") via ``columns_vocabulary.heading``.
     """
-    from ui_managed_treeview import ColumnSpec
+    from src.shared.ui.managed_treeview import ColumnSpec
     from src.shared.columns_vocabulary import heading
 
     specs = []

@@ -24,11 +24,11 @@ except Exception:  # pragma: no cover
 import pandas as pd
 
 try:
-    from ui_treeview_sort import enable_treeview_sorting
+    from src.shared.ui.treeview_sort import enable_treeview_sorting
 except Exception:  # pragma: no cover
     enable_treeview_sorting = None  # type: ignore
 
-from ui_managed_treeview import ColumnSpec, ManagedTreeview
+from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
 
 
 def _reset_sort_state(tree) -> None:
