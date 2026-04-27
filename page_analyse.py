@@ -67,9 +67,15 @@ except Exception:  # pragma: no cover
     _enable_treeview_sorting = None  # type: ignore
 
 try:
-    from selection_studio.drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
+    # Default ved dobbeltklikk på bilag: split-view (bilagsføring +
+    # PDF side-ved-side). Drill-dialogen er fortsatt tilgjengelig via
+    # overstyring-panelet og som fallback hvis split-view feiler.
+    from selection_studio.bilag_split_view import open_bilag_split_view as _open_bilag_drill_dialog
 except Exception:  # pragma: no cover
-    _open_bilag_drill_dialog = None  # type: ignore
+    try:
+        from selection_studio.drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
+    except Exception:
+        _open_bilag_drill_dialog = None  # type: ignore
 
 try:
     from views_motpost_konto import show_motpost_konto as _show_motpost_konto

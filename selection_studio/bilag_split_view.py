@@ -42,6 +42,168 @@ from selection_studio.drill import (
 )
 
 
+def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> None:
+    """Modal dialog for å registrere haphazard-kontroll av et bilag.
+
+    Brukeren velger konklusjon, kan legge til notat, og kan velge å
+    arkivere PDF'en under ``documents/bilag/`` for senere referanse.
+    """
+    if tk is None or ttk is None:
+        return
+    from src.shared.ui.dialog import make_dialog
+    from selection_studio.haphazard_store import save_haphazard_test  # noqa: F401 (also imported in _save)
+    from document_control_voucher_index import find_and_extract_bilag
+
+    # Sammendrag fra første rad i utvalget (sum/største linje)
+    konto_str = ""
+    kontonavn_str = ""
+    beløp_sum = 0.0
+    dato_str = ""
+    if not rows.empty:
+        try:
+            sel = rows[rows.get("I kontoutvalg", False) == True] if "I kontoutvalg" in rows.columns else rows
+            if sel.empty:
+                sel = rows
+            konto_str = str(sel.iloc[0].get("Konto", ""))
+            kontonavn_str = str(sel.iloc[0].get("Kontonavn", ""))
+            beløp_sum = float(pd.to_numeric(sel.get("Beløp", 0), errors="coerce").fillna(0.0).sum())
+            dato_str = str(sel.iloc[0].get("Dato", ""))
+        except Exception:
+            pass
+
+    # Hent klient/år fra session
+    try:
+        import session as _session
+        client = getattr(_session, "client", None) or ""
+        year = getattr(_session, "year", None) or ""
+    except Exception:
+        client = ""
+        year = ""
+
+    # Hent brukerens initialer hvis mulig
+    granskede_av = ""
+    try:
+        import team_config
+        user = team_config.current_user()
+        if user is not None:
+            granskede_av = (user.visena_initials or user.windows_user or "").strip()
+    except Exception:
+        pass
+
+    if not client or not year:
+        messagebox.showwarning(
+            "Kontroller bilag",
+            "Klient/år er ikke satt — kan ikke lagre kontroll.",
+        )
+        return
+
+    dlg = make_dialog(
+        parent,
+        title=f"Kontroller bilag {bilag_nr}",
+        width=480,
+        height=420,
+        modal=True,
+    )
+
+    body = ttk.Frame(dlg, padding=14)
+    body.pack(fill="both", expand=True)
+
+    # Sammendrag
+    info = ttk.LabelFrame(body, text="Bilag", padding=8)
+    info.pack(fill="x", pady=(0, 10))
+    ttk.Label(info, text=f"Klient: {client} ({year})").pack(anchor="w")
+    ttk.Label(info, text=f"Bilag: {bilag_nr}").pack(anchor="w")
+    if konto_str:
+        ttk.Label(info, text=f"Konto: {konto_str} {kontonavn_str}").pack(anchor="w")
+    if dato_str:
+        ttk.Label(info, text=f"Dato: {dato_str}").pack(anchor="w")
+    ttk.Label(info, text=f"Sum: {formatting.fmt_amount(beløp_sum)}").pack(anchor="w")
+
+    # Konklusjon
+    ttk.Label(body, text="Konklusjon:").pack(anchor="w", pady=(4, 2))
+    var_konklusjon = tk.StringVar(value="ok")
+    konklusjon_row = ttk.Frame(body)
+    konklusjon_row.pack(fill="x")
+    ttk.Radiobutton(konklusjon_row, text="OK", variable=var_konklusjon, value="ok").pack(side="left", padx=(0, 12))
+    ttk.Radiobutton(konklusjon_row, text="Avvik", variable=var_konklusjon, value="avvik").pack(side="left", padx=(0, 12))
+    ttk.Radiobutton(konklusjon_row, text="Ikke konkluderende", variable=var_konklusjon, value="ikke_konkluderende").pack(side="left")
+
+    # Notat
+    ttk.Label(body, text="Notat (valgfritt):").pack(anchor="w", pady=(10, 2))
+    txt_notat = tk.Text(body, height=5, wrap="word")
+    txt_notat.pack(fill="both", expand=True)
+
+    # Lagre PDF i klientarkivet?
+    var_save_pdf = tk.BooleanVar(value=True)
+    ttk.Checkbutton(
+        body,
+        text="Lagre PDF i klientarkivet (documents/bilag/)",
+        variable=var_save_pdf,
+    ).pack(anchor="w", pady=(8, 0))
+
+    # Bunn-knapper
+    btn_row = ttk.Frame(dlg, padding=(14, 0, 14, 14))
+    btn_row.pack(fill="x")
+
+    def _save() -> None:
+        konklusjon = var_konklusjon.get()
+        notat = txt_notat.get("1.0", "end").strip()
+        save_pdf = bool(var_save_pdf.get())
+
+        pdf_path = None
+        if save_pdf:
+            try:
+                pdf_path = find_and_extract_bilag(
+                    bilag_nr,
+                    client=client,
+                    year=year,
+                )
+            except Exception:
+                pdf_path = None
+            if pdf_path is None:
+                # Spør om brukeren vil lagre uten PDF
+                if not messagebox.askyesno(
+                    "Mangler PDF",
+                    "Fant ingen PDF for bilaget. Lagre kontroll uten PDF?",
+                    parent=dlg,
+                ):
+                    return
+                save_pdf = False
+
+        try:
+            from selection_studio.haphazard_store import save_haphazard_test
+            test = save_haphazard_test(
+                client=client,
+                year=year,
+                bilag_nr=bilag_nr,
+                konto=konto_str,
+                kontonavn=kontonavn_str,
+                beløp=beløp_sum,
+                dato=dato_str,
+                konklusjon=konklusjon,
+                notat=notat,
+                granskede_av=granskede_av,
+                pdf_source_path=pdf_path if save_pdf else None,
+                save_pdf=save_pdf,
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Kunne ikke lagre",
+                f"Feil ved lagring:\n{exc}",
+                parent=dlg,
+            )
+            return
+
+        msg = f"Kontroll lagret som {test.test_id}."
+        if test.pdf_attached:
+            msg += "\nPDF arkivert i documents/bilag/."
+        messagebox.showinfo("Lagret", msg, parent=dlg)
+        dlg.destroy()
+
+    ttk.Button(btn_row, text="Avbryt", command=dlg.destroy).pack(side="right", padx=(8, 0))
+    ttk.Button(btn_row, text="Lagre", command=_save).pack(side="right")
+
+
 def open_bilag_split_view(
     master: Any,
     df_base: Optional[pd.DataFrame] = None,
@@ -299,6 +461,11 @@ def open_bilag_split_view(
             messagebox.showerror("Se bilag", f"Kunne ikke åpne PDF:\n{exc}")
 
     ttk.Button(btn_row, text="📂 Åpne i ekstern viewer", command=_open_external).pack(side="left")
+    ttk.Button(
+        btn_row,
+        text="✓ Kontroller bilag…",
+        command=lambda: _open_kontroll_dialog(top, bilag_norm, rows),
+    ).pack(side="left", padx=(8, 0))
     ttk.Button(btn_row, text="Lukk", command=top.destroy).pack(side="right")
 
     # Fokus på treet for tastatur-navigasjon
