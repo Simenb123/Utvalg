@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-import workpaper_klientinfo as wk
-from workpaper_klientinfo import (
+import src.shared.workpapers.klientinfo as wk
+from src.shared.workpapers.klientinfo import (
     CrossMatch,
     build_conclusion_text,
     build_cross_matches,

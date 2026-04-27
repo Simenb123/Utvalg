@@ -380,7 +380,7 @@ def build_data_source_rows() -> list[DataSourceRow]:
         action_library_path = data_dir / "action_library.json"
 
     try:
-        import workpaper_library
+        import src.shared.workpapers.library as workpaper_library
 
         workpaper_library_path = workpaper_library.library_path()
     except Exception:

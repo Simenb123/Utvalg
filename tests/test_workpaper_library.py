@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 import action_library
-import workpaper_library
+import src.shared.workpapers.library as workpaper_library
 from action_library import LocalAction
-from workpaper_library import Workpaper
+from src.shared.workpapers.library import Workpaper
 
 
 @pytest.fixture
@@ -99,7 +99,7 @@ def test_by_id_index() -> None:
 
 
 def test_list_builtins_non_empty_and_locked() -> None:
-    import workpaper_generators
+    import src.shared.workpapers.generators as workpaper_generators
 
     builtins = workpaper_library.list_builtins()
     assert len(builtins) == len(workpaper_generators.BUILTIN_GENERATORS)
@@ -129,7 +129,7 @@ def test_list_all_merges_builtins_then_manual(tmp_wp: Path) -> None:
 
 
 def test_builtin_ids_stable_for_known_generators() -> None:
-    import workpaper_generators
+    import src.shared.workpapers.generators as workpaper_generators
 
     ids = {g.id for g in workpaper_generators.BUILTIN_GENERATORS}
     # Bakoverkompat — disse id-ene kan referanses i action_library.workpaper_ids
@@ -145,7 +145,7 @@ def test_builtin_methods_exist_on_analyse_page() -> None:
     Vi importerer ikke AnalysePage her (Tk-avhengig), men bekrefter at
     navnene minst har _export-prefiks slik at retning stemmer.
     """
-    import workpaper_generators
+    import src.shared.workpapers.generators as workpaper_generators
 
     for g in workpaper_generators.BUILTIN_GENERATORS:
         assert g.method_name.startswith("_export_"), g.method_name

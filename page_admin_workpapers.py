@@ -12,8 +12,8 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
 
-import workpaper_library
-from workpaper_library import DEFAULT_KATEGORIER, Workpaper
+import src.shared.workpapers.library as workpaper_library
+from src.shared.workpapers.library import DEFAULT_KATEGORIER, Workpaper
 
 
 class _WorkpaperLibraryEditor(ttk.Frame):  # type: ignore[misc]

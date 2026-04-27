@@ -20,7 +20,7 @@ from openpyxl.utils import get_column_letter
 
 import vaak_excel_theme as vxt
 import vaak_tokens as vt
-from workpaper_forside import build_forside_sheet
+from src.shared.workpapers.forside import build_forside_sheet
 
 
 _TITLE_FILL     = vxt.FILL_TITLE

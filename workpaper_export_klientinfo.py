@@ -39,7 +39,7 @@ def export_klientinfo_workpaper(page) -> None:
 
     import src.pages.ar.backend.store as ar_store
     import src.shared.brreg.client as brreg_client
-    import workpaper_klientinfo
+    import src.shared.workpapers.klientinfo as workpaper_klientinfo
 
     client = getattr(session, "client", None) or ""
     year = str(getattr(session, "year", None) or "")

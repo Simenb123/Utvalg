@@ -5,7 +5,7 @@ from __future__ import annotations
 from openpyxl import Workbook
 
 import action_context
-import workpaper_forside
+import src.shared.workpapers.forside as workpaper_forside
 
 
 def test_forside_skipped_when_no_context() -> None:

@@ -25,7 +25,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from src.pages.ar.backend.ownership_chain import walk_indirect_chain
-from workpaper_forside import build_forside_sheet
+from .forside import build_forside_sheet
 
 
 # ---------------------------------------------------------------------------

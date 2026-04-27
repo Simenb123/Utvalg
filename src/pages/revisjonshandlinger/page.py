@@ -14,10 +14,10 @@ from typing import Any
 import action_assignment_store as assignment_store
 import action_library
 import action_workpaper_store as workpaper_store
-import workpaper_library
+import src.shared.workpapers.library as workpaper_library
 from action_library import LocalAction
 from action_workpaper_store import ActionWorkpaper
-from workpaper_library import Workpaper
+from src.shared.workpapers.library import Workpaper
 
 
 # Revisjonsprosessens faser. Vises som sidebar på Handlinger-fanen
@@ -1109,7 +1109,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         item = self._selected_local_action()
         if item is None or self._analyse_page is None:
             return
-        import workpaper_generators
+        import src.shared.workpapers.generators as workpaper_generators
 
         builtins = [
             workpaper_generators.find_builtin(wid)

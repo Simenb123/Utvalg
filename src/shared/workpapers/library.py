@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Iterable
 
 import app_paths
-import workpaper_generators
+from . import generators as workpaper_generators
 
 
 DEFAULT_KATEGORIER: tuple[str, ...] = ("generert", "manuell")

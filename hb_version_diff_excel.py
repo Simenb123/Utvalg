@@ -16,7 +16,7 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-from workpaper_forside import build_forside_sheet
+from src.shared.workpapers.forside import build_forside_sheet
 
 _TITLE_FILL = PatternFill("solid", fgColor="DDEBF7")
 _HEADER_FILL = PatternFill("solid", fgColor="E2F0D9")

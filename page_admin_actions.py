@@ -13,9 +13,9 @@ except Exception:  # pragma: no cover
     messagebox = None  # type: ignore
 
 import action_library
-import workpaper_library
+import src.shared.workpapers.library as workpaper_library
 from action_library import LocalAction
-from workpaper_library import Workpaper
+from src.shared.workpapers.library import Workpaper
 
 
 _AUTOSAVE_DELAY_MS = 400
