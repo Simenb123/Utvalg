@@ -454,6 +454,40 @@ def build_transactions_view_df(
             # manglende RL-config). Fallback-løkken under fyller med tom.
             log.warning("RL-beriking i build_transactions_view_df feilet: %s", exc, exc_info=True)
 
+    # Bilag_PDF — sjekk om bilagsnummeret finnes i voucher-indeksen
+    # (PowerOffice GO-ZIP eller Tripletex-PDF lastet inn for klient/år).
+    # Fyller "✓" hvis bilag er importert, "" hvis ikke. Lazy import +
+    # try/except slik at viewdata virker uten document_control-modulen.
+    if "Bilag_PDF" in tx_cols and "Bilag" in out.columns:
+        try:
+            import session as _session
+            _client = getattr(_session, "client", None)
+            _year = getattr(_session, "year", None)
+            from document_control_voucher_index import get_cached_index
+            _index = get_cached_index(
+                str(_client) if _client else None,
+                str(_year) if _year else None,
+            )
+            if _index:
+                # Indeksen er keyet på normalisert bilag-nr (strip + fjern
+                # trailing .0 + konverter til int). Bruk samme normalisering
+                # som document_control_voucher_index._norm før lookup.
+                from document_control_voucher_index import _norm as _norm_bilag
+                bilag_keys_in_index = set(_index.keys())
+
+                def _has_pdf(b: object) -> str:
+                    key = _norm_bilag(b)
+                    if not key:
+                        return ""
+                    return "✓" if key in bilag_keys_in_index else ""
+
+                out["Bilag_PDF"] = out["Bilag"].map(_has_pdf)
+            else:
+                out["Bilag_PDF"] = ""
+        except Exception as exc:
+            log.debug("Bilag_PDF-beriking feilet: %s", exc)
+            out["Bilag_PDF"] = ""
+
     # Sikre kolonner i riktig rekkefølge.
     #
     # Merk: tx_cols kan inneholde *flere* kolonner enn de som er

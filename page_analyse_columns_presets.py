@@ -159,16 +159,22 @@ def build_tx_column_specs(
     optional_set = set(optional_cols)
     # Heading-overrides for konsistens med pivot-siden (RL-mode bruker
     # "Nr" som heading for regnr-kolonnen — samme bør gjelde i TX-treet).
-    _HEADING_OVERRIDES = {"Regnr": "Nr"}
+    # Bilag_PDF vises som binders-emoji (📎) for kompakthet — kolonnen
+    # er ren markør (✓ / tom).
+    _HEADING_OVERRIDES = {"Regnr": "Nr", "Bilag_PDF": "📎"}
+    # Per-kolonne anchor-override (center for markør-kolonner).
+    _ANCHOR_OVERRIDES = {"Bilag_PDF": "center"}
+    # Per-kolonne bredde-override (smal markør-kolonne).
+    _WIDTH_OVERRIDES = {"Bilag_PDF": 42}
     specs = []
     for col in tx_cols_default:
         specs.append(
             ColumnSpec(
                 id=col,
                 heading=_HEADING_OVERRIDES.get(col, col),
-                width=analyse_treewidths.default_column_width(col),
+                width=_WIDTH_OVERRIDES.get(col, analyse_treewidths.default_column_width(col)),
                 minwidth=analyse_treewidths.column_minwidth(col),
-                anchor=analyse_treewidths.column_anchor(col),
+                anchor=_ANCHOR_OVERRIDES.get(col, analyse_treewidths.column_anchor(col)),
                 # Ingen kolonne skal stretche. Når en kolonne har stretch=True
                 # vil Tk fylle ledig plass med den, og brukerens manuelle
                 # resize blir overstyrt av neste layout-runde — kolonnen

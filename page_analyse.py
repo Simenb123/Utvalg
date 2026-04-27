@@ -162,11 +162,14 @@ class AnalysePage(ttk.Frame):  # type: ignore[misc]
         "Valutabeløp",
         "Regnr",
         "Regnskapslinje",
+        "Bilag_PDF",
     )
 
-    # Kolonner som ikke skal vises som default. Joines fra konto via
-    # RL-mapping i build_transactions_view_df når brukeren aktiverer dem.
-    OPTIONAL_TX_COLS = ("Regnr", "Regnskapslinje")
+    # Kolonner som ikke skal vises som default. Joines i
+    # build_transactions_view_df når brukeren aktiverer dem:
+    # - Regnr/Regnskapslinje fra konto via RL-mapping
+    # - Bilag_PDF fra voucher-indeksen (har du lastet opp PDF for dette bilaget?)
+    OPTIONAL_TX_COLS = ("Regnr", "Regnskapslinje", "Bilag_PDF")
 
     # "Pinned" kolonner vi alltid ønsker helt til venstre
     PINNED_TX_COLS = ("Konto", "Kontonavn")
