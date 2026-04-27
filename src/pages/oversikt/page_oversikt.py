@@ -281,6 +281,7 @@ class OversiktPage(ttk.Frame):
             ColumnSpec(id="knr",       heading="Knr",       width=80,  anchor="w"),
             ColumnSpec(id="ansvarlig", heading="Ansvarlig", width=90,  anchor="w"),
             ColumnSpec(id="manager",   heading="Manager",   width=180, anchor="w"),
+            ColumnSpec(id="regnskapssystem", heading="Regnskapssystem", width=140, anchor="w"),
             ColumnSpec(id="team",      heading="Team",      width=220, anchor="w", stretch=True),
         ]
         cols = [spec.id for spec in column_specs]
@@ -325,6 +326,15 @@ class OversiktPage(ttk.Frame):
             except Exception:
                 pass
 
+        # Regnskapssystem auto-utfylles ved SAF-T-import (jf.
+        # pane_build.py:65). Tom for klienter uten SAF-T eller med
+        # manuell Excel-import. Lazy import + try/except slik at
+        # Oversikt fortsatt virker hvis modulen mangler.
+        try:
+            from src.shared.regnskap.client_overrides import load_accounting_system
+        except Exception:
+            load_accounting_system = lambda _c: ""  # type: ignore[assignment]
+
         rows = []
         for name, meta in sorted(meta_index.items()):
             org = meta.get("org_number", "")
@@ -336,7 +346,11 @@ class OversiktPage(ttk.Frame):
             team = ", ".join(
                 part.strip() for part in team_raw.replace("\r", "\n").split("\n") if part.strip()
             )
-            rows.append((name, org, knr, ansvarlig, manager, team))
+            try:
+                regnskapssystem = load_accounting_system(name)
+            except Exception:
+                regnskapssystem = ""
+            rows.append((name, org, knr, ansvarlig, manager, regnskapssystem, team))
 
         self._all_client_rows = rows
 
@@ -357,7 +371,7 @@ class OversiktPage(ttk.Frame):
             my_name = self._user.full_name or ""
 
         count = 0
-        for name, org, knr, ansvarlig, manager, team in self._all_client_rows:
+        for name, org, knr, ansvarlig, manager, regnskapssystem, team in self._all_client_rows:
             # Mine-filter
             if mine_only:
                 if not self._client_store_enrich:
@@ -372,11 +386,11 @@ class OversiktPage(ttk.Frame):
 
             # Sok-filter
             if search_text:
-                haystack = f"{name} {org} {knr} {ansvarlig} {manager} {team}".lower()
+                haystack = f"{name} {org} {knr} {ansvarlig} {manager} {regnskapssystem} {team}".lower()
                 if search_text not in haystack:
                     continue
 
-            self._tree.insert("", "end", values=(name, org, knr, ansvarlig, manager, team))
+            self._tree.insert("", "end", values=(name, org, knr, ansvarlig, manager, regnskapssystem, team))
             count += 1
 
         self._lbl_count.configure(text=f"{count} klienter")
