@@ -349,29 +349,16 @@ def build_toolbar(
     page._view_menu_btn = view_btn
     page._view_menu = view_menu
 
-    columns_cmd = (
-        getattr(page, "_open_column_chooser", None)
-        or getattr(page, "_open_tx_column_chooser", None)
-    )
-    btn_columns = ttk.Button(
-        row1,
-        text="Kolonner...",
-        command=columns_cmd if callable(columns_cmd) else None,
-        state=("normal" if callable(columns_cmd) else "disabled"),
-    )
-    btn_columns.grid(row=0, column=9, padx=(0, 6), sticky="e")
-
-    btn_reset = ttk.Button(row1, text="Nullstill", command=page._reset_filters)
-    btn_reset.grid(row=0, column=10, padx=(0, 6), sticky="e")
-
     btn_select_all = ttk.Button(row1, text="Marker alle", command=page._select_all_accounts)
-    btn_select_all.grid(row=0, column=11, padx=(0, 6), sticky="e")
+    btn_select_all.grid(row=0, column=9, padx=(0, 6), sticky="e")
+    btn_columns = None
+    btn_reset = None
 
     reports_btn = ttk.Menubutton(row1, text="Rapporter ▾", direction="below")
-    reports_btn.grid(row=0, column=12, padx=(0, 6), sticky="e")
+    reports_btn.grid(row=0, column=10, padx=(0, 6), sticky="e")
 
     actions_btn = ttk.Menubutton(row1, text="Handlinger ▾", direction="below")
-    actions_btn.grid(row=0, column=13, sticky="e")
+    actions_btn.grid(row=0, column=11, sticky="e")
 
     # Datanivå-indikator (Hovedbok / Kun saldobalanse) — fjernet fra UI.
     # StringVar (_var_data_level) beholdes for bakoverkompat med eksisterende kode.
@@ -395,12 +382,6 @@ def build_toolbar(
     else:
         actions_menu.add_command(label="Motpost-analyse (valgte kontoer)", state="disabled")
 
-    rl_drill_cmd = getattr(page, "_open_rl_drilldown_from_pivot_selection", None)
-    if callable(rl_drill_cmd):
-        actions_menu.add_command(label="RL-drilldown til kontoer", command=rl_drill_cmd)
-    else:
-        actions_menu.add_command(label="RL-drilldown til kontoer", state="disabled")
-
     open_handl_cmd = getattr(page, "_open_handlinger_for_selected_rl", None)
     if callable(open_handl_cmd):
         actions_menu.add_command(label="Åpne Handlinger for valgt RL", command=open_handl_cmd)
@@ -418,12 +399,6 @@ def build_toolbar(
         reports_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", command=export_rl_cmd)
     else:
         reports_menu.add_command(label="Eksporter regnskapsoppstilling til Excel", state="disabled")
-
-    export_nk_cmd = getattr(page, "_export_nokkeltall_html", None)
-    if callable(export_nk_cmd):
-        reports_menu.add_command(label="Nøkkeltallsrapport (HTML)", command=export_nk_cmd)
-    else:
-        reports_menu.add_command(label="Nøkkeltallsrapport (HTML)", state="disabled")
 
     export_nk_pdf_cmd = getattr(page, "_export_nokkeltall_pdf", None)
     if callable(export_nk_pdf_cmd):
@@ -475,19 +450,8 @@ def build_toolbar(
 
     actions_menu.add_separator()
 
-    reset_columns_cmd      = getattr(page, "_reset_tx_columns_to_default", None)
     auto_fit_columns_cmd   = getattr(page, "_auto_fit_analyse_columns",    None)
     reset_widths_cmd       = getattr(page, "_reset_all_column_widths",     None)
-    if callable(columns_cmd):
-        actions_menu.add_command(label="Velg kolonner…", command=columns_cmd)
-    else:
-        actions_menu.add_command(label="Velg kolonner…", state="disabled")
-
-    if callable(reset_columns_cmd):
-        actions_menu.add_command(label="Standard kolonner", command=reset_columns_cmd)
-    else:
-        actions_menu.add_command(label="Standard kolonner", state="disabled")
-
     if callable(auto_fit_columns_cmd):
         actions_menu.add_command(label="Autotilpass kolonner", command=auto_fit_columns_cmd)
     else:
