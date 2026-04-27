@@ -40,6 +40,8 @@ class HaphazardTest:
     bilag_nr: str
     konto: str
     kontonavn: str
+    regnr: str          # Regnskapslinje-nummer (fra RL-mapping). Tom hvis konto ikke mappet.
+    regnskapslinje: str # Regnskapslinje-navn. Tom hvis konto ikke mappet.
     beløp: float
     dato: str
     konklusjon: str  # "ok" | "avvik" | "ikke_konkluderende"
@@ -80,6 +82,8 @@ def save_haphazard_test(
     bilag_nr: str,
     konto: str = "",
     kontonavn: str = "",
+    regnr: str = "",
+    regnskapslinje: str = "",
     beløp: float = 0.0,
     dato: str = "",
     konklusjon: str,
@@ -129,6 +133,8 @@ def save_haphazard_test(
         bilag_nr=str(bilag_nr),
         konto=str(konto),
         kontonavn=str(kontonavn),
+        regnr=str(regnr or ""),
+        regnskapslinje=str(regnskapslinje or ""),
         beløp=float(beløp) if beløp is not None else 0.0,
         dato=str(dato),
         konklusjon=konklusjon,
@@ -155,6 +161,12 @@ def load_haphazard_tests(client: str, year: str) -> list[HaphazardTest]:
     if not path.exists():
         return []
     out: list[HaphazardTest] = []
+    # Felter som ble lagt til i senere versjoner — fyll defaults for
+    # gamle JSON-linjer slik at HaphazardTest(**data) ikke feiler.
+    _DEFAULTS_FOR_OLDER_VERSIONS = {
+        "regnr": "",
+        "regnskapslinje": "",
+    }
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -162,6 +174,8 @@ def load_haphazard_tests(client: str, year: str) -> list[HaphazardTest]:
                 continue
             try:
                 data = json.loads(line)
+                for k, v in _DEFAULTS_FOR_OLDER_VERSIONS.items():
+                    data.setdefault(k, v)
                 out.append(HaphazardTest(**data))
             except Exception:
                 continue  # hopper over korrupte linjer

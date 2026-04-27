@@ -71,6 +71,24 @@ def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> Non
         except Exception:
             pass
 
+    # Regnr/Regnskapslinje fra konto via RL-mapping. Lagres med testen
+    # slik at vi senere kan akkumulere kontroller per regnskapslinje
+    # (f.eks. "alle haphazard-tester på RL 70 Annen driftskostnad").
+    regnr_str = ""
+    regnskapslinje_str = ""
+    if konto_str:
+        try:
+            import regnskapslinje_mapping_service as _rl_svc
+            _rl_ctx = _rl_svc.load_rl_mapping_context()
+            _resolved = _rl_svc.resolve_accounts_to_rl([konto_str], context=_rl_ctx)
+            if not _resolved.empty:
+                regnr_val = _resolved.iloc[0].get("regnr")
+                if regnr_val is not None and not pd.isna(regnr_val):
+                    regnr_str = str(int(regnr_val))
+                regnskapslinje_str = str(_resolved.iloc[0].get("regnskapslinje", "") or "")
+        except Exception:
+            pass
+
     # Hent klient/år fra session
     try:
         import session as _session
@@ -115,6 +133,11 @@ def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> Non
     ttk.Label(info, text=f"Bilag: {bilag_nr}").pack(anchor="w")
     if konto_str:
         ttk.Label(info, text=f"Konto: {konto_str} {kontonavn_str}").pack(anchor="w")
+    if regnr_str or regnskapslinje_str:
+        rl_text = f"RL: {regnr_str}".strip()
+        if regnskapslinje_str:
+            rl_text += f" {regnskapslinje_str}"
+        ttk.Label(info, text=rl_text).pack(anchor="w")
     if dato_str:
         ttk.Label(info, text=f"Dato: {dato_str}").pack(anchor="w")
     ttk.Label(info, text=f"Sum: {formatting.fmt_amount(beløp_sum)}").pack(anchor="w")
@@ -178,6 +201,8 @@ def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> Non
                 bilag_nr=bilag_nr,
                 konto=konto_str,
                 kontonavn=kontonavn_str,
+                regnr=regnr_str,
+                regnskapslinje=regnskapslinje_str,
                 beløp=beløp_sum,
                 dato=dato_str,
                 konklusjon=konklusjon,
@@ -270,25 +295,52 @@ def open_bilag_split_view(
     top = tk.Toplevel(master)
     top.title(f"Bilag {bilag_norm}")
     try:
-        top.geometry("1500x800")
+        top.geometry("1500x900")
     except Exception:
         pass
 
     # Én konsolidert header-rad — bilag-info venstre, PDF-toolbar +
     # action-knapper høyre. Layouten gir maksimal vertikal plass til
     # PDF-en (A4-bilag er høye).
-    hdr = ttk.Frame(top, padding=(10, 6, 10, 4))
+    hdr = ttk.Frame(top, padding=(12, 8, 12, 4))
     hdr.pack(fill="x")
 
+    # Venstre side: bilag-tittel + sammendrag
+    info_left = ttk.Frame(hdr)
+    info_left.pack(side="left", anchor="w")
+
+    # Bilag-nr som stor tittel
     ttk.Label(
-        hdr,
-        text=(
-            f"Bilag: {bilag_norm}  |  Rader: {formatting.format_int_no(len(rows))}  |  "
-            f"Sum: {formatting.fmt_amount(sum_all)}  |  "
-            f"I kontoutvalg: {formatting.fmt_amount(sum_sel)}  |  "
-            f"Motposter: {formatting.fmt_amount(sum_mot)}"
-        ),
-    ).pack(side="left", anchor="w")
+        info_left,
+        text=f"Bilag {bilag_norm}",
+        font=("TkDefaultFont", 13, "bold"),
+        foreground="#1a4c7a",
+    ).pack(side="left", anchor="w", padx=(0, 14))
+
+    # Sammendrag i kompakt form med fargekode
+    summary_frame = ttk.Frame(info_left)
+    summary_frame.pack(side="left", anchor="w")
+
+    def _add_stat(parent, label: str, value: str, *, value_color: str = "#222") -> None:
+        cell = ttk.Frame(parent)
+        cell.pack(side="left", padx=(0, 16))
+        ttk.Label(
+            cell, text=label,
+            font=("TkDefaultFont", 8),
+            foreground="#888",
+        ).pack(anchor="w")
+        ttk.Label(
+            cell, text=value,
+            font=("TkDefaultFont", 10, "bold"),
+            foreground=value_color,
+        ).pack(anchor="w")
+
+    _add_stat(summary_frame, "Rader", formatting.format_int_no(len(rows)))
+    _add_stat(summary_frame, "Sum", formatting.fmt_amount(sum_all))
+    sel_color = "#1a7a2a" if sum_sel else "#888"
+    _add_stat(summary_frame, "I utvalg", formatting.fmt_amount(sum_sel), value_color=sel_color)
+    mot_color = "#888" if not sum_mot else "#222"
+    _add_stat(summary_frame, "Motposter", formatting.fmt_amount(sum_mot), value_color=mot_color)
 
     # Split-pane: venstre = bilag-rader, høyre = PDF-preview
     paned = ttk.PanedWindow(top, orient="horizontal")
@@ -665,6 +717,12 @@ def open_bilag_split_view(
                 )
                 return
             preview_frame.load_file(str(pdf_path))
+            # Auto-fit etter at canvas har fått størrelse — A4-bilag er
+            # høye så fit-to-width gir best lesbarhet umiddelbart.
+            try:
+                top.after(150, preview_frame.fit_to_width)
+            except Exception:
+                pass
 
         try:
             top.after_idle(_load_pdf)
