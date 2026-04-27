@@ -293,7 +293,26 @@ def open_bilag_drill_dialog(
         except Exception as exc:
             messagebox.showerror("Se bilag", f"Kunne ikke åpne PDF:\n{exc}")
 
-    btn_voucher = ttk.Button(hdr_row, text="📎 Se bilag", command=_open_voucher_pdf)
+    def _open_split_view() -> None:
+        """Åpne split-view popup med bilag-rader + PDF side-ved-side."""
+        try:
+            from selection_studio.bilag_split_view import open_bilag_split_view
+        except Exception as exc:
+            messagebox.showerror("Bilag", f"Kunne ikke åpne split-view:\n{exc}")
+            return
+        try:
+            open_bilag_split_view(
+                master,
+                df_base=df_base_res,
+                df_all=df_all_res,
+                bilag_value=bilag_norm,
+                bilag_col=bilag_col_res,
+            )
+        except Exception as exc:
+            messagebox.showerror("Bilag", f"Feil ved åpning av split-view:\n{exc}")
+
+    ttk.Button(hdr_row, text="📑 Vis side-ved-side", command=_open_split_view).pack(side="right", padx=(0, 6))
+    btn_voucher = ttk.Button(hdr_row, text="📂 Åpne i ekstern viewer", command=_open_voucher_pdf)
     btn_voucher.pack(side="right")
 
     desired_cols = ["I kontoutvalg", "Dato", "Konto", "Kontonavn", "Beløp", "Tekst", "Motpart"]
