@@ -301,30 +301,80 @@ def open_bilag_split_view(
     except Exception:
         paned.add(left)
 
-    desired_cols = ["I kontoutvalg", "Dato", "Konto", "Kontonavn", "Beløp", "Tekst", "Motpart"]
-    cols = [c for c in desired_cols if c in rows.columns]
+    # Migrert til ManagedTreeview (playbook-mønster). Brukerens valg av
+    # synlige kolonner, rekkefølge og bredder huskes mellom økter
+    # (view_id="bilag_split"). Samme kolonneutvalg som TX-treet pluss
+    # "I kontoutvalg" som første pinned-kolonne.
+    from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
+    import analyse_treewidths
 
-    tree = ttk.Treeview(left, columns=cols, show="headings", height=20)
-    vsb = ttk.Scrollbar(left, orient="vertical", command=tree.yview)
+    # Kolonner: "I kontoutvalg" (split-view-spesifikk) + alle TX-kolonnene
+    # (minus "Bilag" siden alle rader i denne popupen har samme bilag-nr).
+    _SPLIT_TX_COLS = (
+        "Konto",
+        "Kontonavn",
+        "Dato",
+        "Tekst",
+        "Beløp",
+        "Kunder",
+        "Leverandør",
+        "MVA-kode",
+        "MVA-beløp",
+        "MVA-prosent",
+        "Valuta",
+        "Valutabeløp",
+    )
+    # Default visible: smal pakke som dekker 90 % av bruksbehovet.
+    # Resten kan slås på via høyreklikk-velgeren.
+    _SPLIT_DEFAULT_VISIBLE = {
+        "I kontoutvalg", "Konto", "Kontonavn", "Dato", "Tekst", "Beløp",
+        "Kunder", "Leverandør",
+    }
+
+    column_specs = [
+        ColumnSpec(
+            id="I kontoutvalg",
+            heading="I utvalg",
+            width=70,
+            minwidth=50,
+            anchor="center",
+            visible_by_default=True,
+            pinned=True,
+        ),
+    ]
+    for col in _SPLIT_TX_COLS:
+        column_specs.append(
+            ColumnSpec(
+                id=col,
+                heading=col,
+                width=analyse_treewidths.default_column_width(col),
+                minwidth=analyse_treewidths.column_minwidth(col),
+                anchor=analyse_treewidths.column_anchor(col),
+                stretch=False,
+                visible_by_default=col in _SPLIT_DEFAULT_VISIBLE,
+                sortable=True,
+            )
+        )
+
+    all_col_ids = [spec.id for spec in column_specs]
+
+    tree_frame = ttk.Frame(left)
+    tree_frame.pack(fill="both", expand=True)
+    tree = ttk.Treeview(tree_frame, columns=all_col_ids, show="headings", height=20, selectmode="browse")
+    vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=vsb.set)
     tree.pack(side="left", fill="both", expand=True)
     vsb.pack(side="left", fill="y")
 
-    def col_width(c: str) -> int:
-        return {
-            "I kontoutvalg": 100,
-            "Dato": 90,
-            "Konto": 70,
-            "Kontonavn": 200,
-            "Beløp": 100,
-            "Tekst": 280,
-            "Motpart": 180,
-        }.get(c, 120)
-
-    for c in cols:
-        tree.heading(c, text=c)
-        anchor = "e" if c == "Beløp" else "w"
-        tree.column(c, width=col_width(c), anchor=anchor, stretch=False)
+    try:
+        managed = ManagedTreeview(
+            tree,
+            view_id="bilag_split",
+            pref_prefix="ui",
+            column_specs=column_specs,
+        )
+    except Exception:
+        managed = None  # fallback: tabell virker uten ManagedTreeview-features
 
     try:
         tree.tag_configure("scope_no", foreground="#666666")
@@ -339,27 +389,45 @@ def open_bilag_split_view(
             return ""
         if isinstance(v, str) and v.lower() == "nan":
             return ""
-        if c == "Beløp":
-            return formatting.fmt_amount(v)
+        if c == "Beløp" or c == "MVA-beløp" or c == "Valutabeløp":
+            try:
+                return formatting.fmt_amount(v)
+            except Exception:
+                return str(v)
+        if c == "MVA-prosent":
+            try:
+                num = float(v)
+                # Normaliser 0.25 → 25, behold heltall som 25
+                if 0 < num <= 1:
+                    num *= 100
+                return formatting.format_number_no(num, decimals=0 if abs(num - round(num)) < 1e-9 else 2)
+            except Exception:
+                return str(v)
         if c == "Dato":
             try:
                 return formatting.fmt_date(v)
             except Exception:
                 return str(v)
         if c == "I kontoutvalg":
-            return "Ja" if bool(v) else "Nei"
+            return "✓" if bool(v) else ""
         return str(v)
 
     for _, row in rows.iterrows():
         tags = []
-        if "I kontoutvalg" in cols and not bool(row.get("I kontoutvalg", False)):
+        if not bool(row.get("I kontoutvalg", False)):
             tags.append("scope_no")
         try:
             if float(row.get("Beløp", 0)) < 0:
                 tags.append("neg")
         except Exception:
             pass
-        tree.insert("", "end", values=[fmt(c, row.get(c)) for c in cols], tags=tuple(tags))
+        # Insert posisjonelt mot tree["columns"] (= all_col_ids), ikke
+        # bare displaycolumns — playbook-regelen for ManagedTreeview.
+        tree.insert(
+            "", "end",
+            values=[fmt(c, row.get(c)) for c in all_col_ids],
+            tags=tuple(tags),
+        )
 
     # ── HØYRE: PDF-preview (full høyde, ingen egen toolbar her) ──
     right = ttk.Frame(paned)
