@@ -204,7 +204,17 @@ class ClientStoreSection:
         w.cb_year.bind("<<ComboboxSelected>>", lambda _e: sec._debounced_refresh())
         w.cb_year.bind("<Return>", lambda _e: sec._debounced_refresh())
 
-        sec.refresh()
+        # Defer den første refresh-en til etter at vinduet er rendret.
+        # refresh() kaller client_store.list_clients() + list_versions()
+        # for hver dtype og er hovedårsaken til ~3-5 s blokkering under
+        # Dataset-fanens oppstart. Brukeren ser et tomt skall først, og
+        # dropdowns + status-pills fylles inn etter at vinduet er synlig.
+        try:
+            w.frame.after(50, sec.refresh)
+        except Exception:
+            # Fallback: kjør synkront hvis after() ikke er tilgjengelig
+            # (f.eks. headless test-miljø).
+            sec.refresh()
         return sec
 
     def _persist_prefs(self) -> None:
