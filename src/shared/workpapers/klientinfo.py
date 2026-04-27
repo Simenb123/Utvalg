@@ -23,6 +23,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from src.pages.ar.backend.ownership_chain import walk_indirect_chain
 from .forside import build_forside_sheet
@@ -654,7 +655,7 @@ def _build_eide_sheet(
 # Felles
 
 def _write_title_and_header(ws, title: str, headers: list[str], *, span: int) -> None:
-    last_col_letter = chr(ord("A") + span - 1)
+    last_col_letter = get_column_letter(span)
     ws.merge_cells(f"A1:{last_col_letter}1")
     ws["A1"] = title
     ws["A1"].font = Font(size=14, bold=True)

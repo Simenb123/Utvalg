@@ -15,6 +15,7 @@ from typing import Dict, Optional
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from src.shared.workpapers.forside import build_forside_sheet
 
@@ -249,7 +250,7 @@ def _build_changed_sheet(
 # ---------------------------------------------------------------------------
 
 def _write_title_row(ws, title: str, *, span: int) -> None:
-    last_col = chr(ord("A") + span - 1)
+    last_col = get_column_letter(span)
     ws.merge_cells(f"A1:{last_col}1")
     ws["A1"] = title
     ws["A1"].font = Font(size=14, bold=True)
@@ -296,8 +297,8 @@ def _write_transaction_sheet(ws, title: str, df: pd.DataFrame) -> None:
 
     # Autobredde (enkel heuristikk)
     for col_idx, col_name in enumerate(cols, start=1):
-        letter = chr(ord("A") + col_idx - 1)
+        letter = get_column_letter(col_idx)
         ws.column_dimensions[letter].width = max(12, len(str(col_name)) + 4)
 
     ws.freeze_panes = "A5"
-    ws.auto_filter.ref = f"A4:{chr(ord('A') + len(cols) - 1)}{max(5, 4 + len(df))}"
+    ws.auto_filter.ref = f"A4:{get_column_letter(len(cols))}{max(5, 4 + len(df))}"
