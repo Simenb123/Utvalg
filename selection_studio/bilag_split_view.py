@@ -270,13 +270,16 @@ def open_bilag_split_view(
     top = tk.Toplevel(master)
     top.title(f"Bilag {bilag_norm}")
     try:
-        top.geometry("1500x700")
+        top.geometry("1500x800")
     except Exception:
         pass
 
-    # Header
-    hdr = ttk.Frame(top, padding=(10, 8, 10, 4))
+    # Én konsolidert header-rad — bilag-info venstre, PDF-toolbar +
+    # action-knapper høyre. Layouten gir maksimal vertikal plass til
+    # PDF-en (A4-bilag er høye).
+    hdr = ttk.Frame(top, padding=(10, 6, 10, 4))
     hdr.pack(fill="x")
+
     ttk.Label(
         hdr,
         text=(
@@ -289,7 +292,7 @@ def open_bilag_split_view(
 
     # Split-pane: venstre = bilag-rader, høyre = PDF-preview
     paned = ttk.PanedWindow(top, orient="horizontal")
-    paned.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+    paned.pack(fill="both", expand=True, padx=10, pady=(2, 8))
 
     # ── VENSTRE: bilag-føringen ──
     left = ttk.Frame(paned)
@@ -358,16 +361,12 @@ def open_bilag_split_view(
             pass
         tree.insert("", "end", values=[fmt(c, row.get(c)) for c in cols], tags=tuple(tags))
 
-    # ── HØYRE: PDF-preview ──
+    # ── HØYRE: PDF-preview (full høyde, ingen egen toolbar her) ──
     right = ttk.Frame(paned)
     try:
         paned.add(right, weight=3)
     except Exception:
         paned.add(right)
-
-    # Toolbar med page-nav + zoom — settes ABOVE preview-frame
-    pdf_toolbar = ttk.Frame(right)
-    pdf_toolbar.pack(fill="x", pady=(0, 4))
 
     preview_frame = None
     try:
@@ -381,13 +380,19 @@ def open_bilag_split_view(
             foreground="#999",
         ).pack(padx=20, pady=20)
 
+    # ── PDF-toolbar + action-knapper i SAMME header-rad ──
+    # Pack-rekkefølgen er reversert siden side="right" stabler fra høyre.
+    # Ønsket synlig rekkefølge (venstre→høyre):
+    #   info ... ◄ [1/1] ► − + Tilpass | 📂 Åpne PDF  ✓ Kontroller bilag…
+    # Action-knappene plasseres FØRST i pack-rekkefølge for å havne lengst
+    # til høyre. PDF-toolbar pakkes etterpå og havner til venstre for dem.
     if preview_frame is not None:
-        ttk.Button(pdf_toolbar, text="◄", command=preview_frame.show_previous_page, width=3).pack(side="left")
-        ttk.Label(pdf_toolbar, textvariable=preview_frame.var_page, width=8, anchor="center").pack(side="left", padx=2)
-        ttk.Button(pdf_toolbar, text="►", command=preview_frame.show_next_page, width=3).pack(side="left", padx=(0, 8))
-        ttk.Button(pdf_toolbar, text="−", command=preview_frame.zoom_out, width=2).pack(side="left")
-        ttk.Button(pdf_toolbar, text="+", command=preview_frame.zoom_in, width=2).pack(side="left")
-        ttk.Button(pdf_toolbar, text="Tilpass", command=preview_frame.fit_to_width, width=8).pack(side="left", padx=(4, 0))
+        # 1. Action-knapper (lengst til høyre)
+        ttk.Button(
+            hdr,
+            text="✓ Kontroller bilag…",
+            command=lambda: _open_kontroll_dialog(top, bilag_norm, rows),
+        ).pack(side="right", padx=(0, 0))
 
         # Last bilag-PDF i bakgrunnen — find_and_extract_bilag kan ta tid
         # første gang (utpakking fra ZIP). Bruk after_idle for å unngå
@@ -424,12 +429,11 @@ def open_bilag_split_view(
         except Exception:
             _load_pdf()
 
-    # Bunn-knapper
-    btn_row = ttk.Frame(top, padding=(10, 4, 10, 10))
-    btn_row.pack(fill="x")
-
+    # ── "Åpne PDF" (ekstern viewer) som ekstra header-knapp ──
+    # Plasseres rett før "Kontroller bilag" i header. X i hjørnet
+    # erstatter Lukk-knappen — ingen bunn-rad lenger.
     def _open_external() -> None:
-        """Åpne PDF i systemets standard viewer (samme som drill.py)."""
+        """Åpne PDF i systemets standard viewer."""
         try:
             import session as _session
             client = getattr(_session, "client", None)
@@ -445,7 +449,7 @@ def open_bilag_split_view(
                 year=str(year) if year else None,
             )
         except Exception as exc:
-            messagebox.showerror("Se bilag", f"Feil:\n{exc}")
+            messagebox.showerror("Åpne PDF", f"Feil:\n{exc}")
             return
         if pdf_path is None:
             messagebox.showinfo("Bilag ikke funnet", f"Ingen PDF for bilag {bilag_norm}.")
@@ -458,15 +462,22 @@ def open_bilag_split_view(
             else:
                 subprocess.Popen(["xdg-open", str(pdf_path)])
         except Exception as exc:
-            messagebox.showerror("Se bilag", f"Kunne ikke åpne PDF:\n{exc}")
+            messagebox.showerror("Åpne PDF", f"Kunne ikke åpne PDF:\n{exc}")
 
-    ttk.Button(btn_row, text="📂 Åpne i ekstern viewer", command=_open_external).pack(side="left")
-    ttk.Button(
-        btn_row,
-        text="✓ Kontroller bilag…",
-        command=lambda: _open_kontroll_dialog(top, bilag_norm, rows),
-    ).pack(side="left", padx=(8, 0))
-    ttk.Button(btn_row, text="Lukk", command=top.destroy).pack(side="right")
+    if preview_frame is not None:
+        # 2. Åpne PDF — neste høyre-pakkede havner til venstre for
+        #    Kontroller bilag.
+        ttk.Button(hdr, text="📂 Åpne PDF", command=_open_external).pack(side="right", padx=(0, 8))
+
+        # 3. PDF-toolbar (page-nav + zoom) — pakkes etter action-knappene
+        #    så de havner til venstre for dem. Reversert pack-rekkefølge
+        #    siden side="right" stabler fra høyre kant.
+        ttk.Button(hdr, text="Tilpass", command=preview_frame.fit_to_width, width=8).pack(side="right", padx=(4, 8))
+        ttk.Button(hdr, text="+", command=preview_frame.zoom_in, width=2).pack(side="right")
+        ttk.Button(hdr, text="−", command=preview_frame.zoom_out, width=2).pack(side="right")
+        ttk.Button(hdr, text="►", command=preview_frame.show_next_page, width=3).pack(side="right", padx=(4, 0))
+        ttk.Label(hdr, textvariable=preview_frame.var_page, width=8, anchor="center").pack(side="right", padx=2)
+        ttk.Button(hdr, text="◄", command=preview_frame.show_previous_page, width=3).pack(side="right")
 
     # Fokus på treet for tastatur-navigasjon
     try:
