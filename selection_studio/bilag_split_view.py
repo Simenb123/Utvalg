@@ -429,6 +429,153 @@ def open_bilag_split_view(
             tags=tuple(tags),
         )
 
+    # ── Leverandør-info-panel under bilag-tabellen ──
+    # Henter Leverandørorgnr fra rader (SAF-T-import legger den på som
+    # egen kolonne via saft_reader.look.supplier_orgnr). Slår opp BRREG
+    # i bakgrunnstråd og viser MVA-registrert + bransje + warning hvis
+    # MVA-fradrag (konto 27xx) er tatt på ikke-MVA-registrert leverandør.
+    supplier_panel = ttk.LabelFrame(left, text="Leverandør / BRREG", padding=8)
+    supplier_panel.pack(fill="x", pady=(8, 0))
+
+    supplier_text = tk.Text(
+        supplier_panel,
+        height=6,
+        wrap="word",
+        relief="flat",
+        borderwidth=0,
+        font=("TkDefaultFont", 9),
+        cursor="arrow",
+        state="disabled",
+    )
+    supplier_text.pack(fill="x")
+    supplier_text.tag_configure("key",  foreground="#555555")
+    supplier_text.tag_configure("val",  foreground="#111111")
+    supplier_text.tag_configure("ok",   foreground="#1a7a2a")
+    supplier_text.tag_configure("bad",  foreground="#C75000")
+    supplier_text.tag_configure("warn", foreground="#C75000", font=("TkDefaultFont", 9, "bold"))
+    supplier_text.tag_configure("dim",  foreground="#888888")
+
+    def _supplier_write(*parts: tuple[str, str]) -> None:
+        try:
+            supplier_text.configure(state="normal")
+            for text, tag in parts:
+                supplier_text.insert("end", text, (tag,))
+            supplier_text.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _supplier_clear() -> None:
+        try:
+            supplier_text.configure(state="normal")
+            supplier_text.delete("1.0", "end")
+            supplier_text.configure(state="disabled")
+        except Exception:
+            pass
+
+    # Hent leverandør-info fra første rad med Leverandør-data
+    leverandør_navn = ""
+    leverandør_orgnr = ""
+    if "Leverandørnavn" in rows.columns:
+        for v in rows["Leverandørnavn"]:
+            if v and not pd.isna(v):
+                leverandør_navn = str(v).strip()
+                break
+    if "Leverandørorgnr" in rows.columns:
+        for v in rows["Leverandørorgnr"]:
+            if v and not pd.isna(v):
+                leverandør_orgnr = str(v).strip()
+                break
+
+    # MVA-fradrag-sjekk: er konto 27xx (inngående MVA) brukt i bilaget?
+    has_mva_fradrag = False
+    if "Konto" in rows.columns:
+        for k in rows["Konto"]:
+            ks = str(k or "")
+            if ks.startswith("271") or ks.startswith("272") or ks.startswith("273"):
+                has_mva_fradrag = True
+                break
+
+    if not leverandør_navn and not leverandør_orgnr:
+        _supplier_write(("Ingen leverandør-info funnet på dette bilaget.", "dim"))
+    else:
+        # Vis det vi har umiddelbart
+        if leverandør_navn:
+            _supplier_write(("Leverandør: ", "key"), (leverandør_navn, "val"))
+        if leverandør_orgnr:
+            sep = "  |  " if leverandør_navn else ""
+            _supplier_write((sep + "Orgnr: ", "key"), (leverandør_orgnr, "val"))
+        _supplier_write(("\n", "val"))
+        _supplier_write(("Henter BRREG-info...", "dim"))
+
+        # Hent BRREG i bakgrunnstråd for å unngå at popup fryser
+        def _fetch_brreg() -> None:
+            enhet = None
+            try:
+                from src.shared.brreg.client import fetch_enhet, is_likely_exempt
+                enhet = fetch_enhet(leverandør_orgnr) if leverandør_orgnr else None
+            except Exception:
+                enhet = None
+
+            def _render() -> None:
+                _supplier_clear()
+                if not leverandør_orgnr:
+                    _supplier_write(("Leverandør: ", "key"), (leverandør_navn, "val"), ("\n", "val"))
+                    _supplier_write(("(Ingen orgnr på bilag — kan ikke slå opp BRREG)", "dim"))
+                    return
+                if enhet is None:
+                    _supplier_write(("Leverandør: ", "key"), (leverandør_navn or "—", "val"))
+                    _supplier_write(("  |  Orgnr: ", "key"), (leverandør_orgnr, "val"), ("\n", "val"))
+                    _supplier_write(("Ikke funnet i Enhetsregisteret.", "bad"))
+                    return
+
+                navn = enhet.get("navn") or leverandør_navn or "—"
+                _supplier_write(("Leverandør: ", "key"), (navn, "val"))
+                _supplier_write(("  |  Orgnr: ", "key"), (leverandør_orgnr, "val"), ("\n", "val"))
+
+                mva_reg = bool(enhet.get("registrertIMvaregisteret"))
+                mva_txt = "✓ Ja" if mva_reg else "✗ Nei"
+                _supplier_write(("MVA-registrert: ", "key"), (mva_txt, "ok" if mva_reg else "bad"))
+
+                bransje_kode = enhet.get("naeringskode", "") or ""
+                bransje_navn = enhet.get("naeringsnavn", "") or ""
+                bransje = f"{bransje_kode} {bransje_navn}".strip() or "—"
+                _supplier_write(("  |  Bransje: ", "key"), (bransje, "val"), ("\n", "val"))
+
+                addr = enhet.get("forretningsadresse", "") or "—"
+                _supplier_write(("Adresse: ", "key"), (addr, "val"), ("\n", "val"))
+
+                # Status-flagg
+                if enhet.get("konkurs"):
+                    _supplier_write(("⚠ Konkurs", "bad"), ("\n", "val"))
+                elif enhet.get("underAvvikling") or enhet.get("underTvangsavvikling"):
+                    _supplier_write(("⚠ Under avvikling", "bad"), ("\n", "val"))
+
+                # Bransje typisk unntatt MVA?
+                exempt = False
+                try:
+                    exempt = is_likely_exempt(bransje_kode)
+                except Exception:
+                    pass
+                if exempt:
+                    _supplier_write(("⚠ Bransjen er typisk unntatt MVA", "warn"), ("\n", "val"))
+
+                # KRITISK: MVA-fradrag på ikke-MVA-registrert leverandør
+                if has_mva_fradrag and not mva_reg:
+                    _supplier_write(
+                        ("⚠ MVA-fradrag tatt (konto 27xx) på leverandør som IKKE er MVA-registrert. Sjekk grundig.", "warn"),
+                    )
+
+            try:
+                top.after(0, _render)
+            except Exception:
+                _render()
+
+        try:
+            import threading
+            threading.Thread(target=_fetch_brreg, daemon=True).start()
+        except Exception:
+            _fetch_brreg()
+
     # ── HØYRE: PDF-preview (full høyde, ingen egen toolbar her) ──
     right = ttk.Frame(paned)
     try:
