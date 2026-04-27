@@ -486,9 +486,27 @@ def open_bilag_split_view(
                 leverandør_orgnr = str(v).strip()
                 break
 
-    # MVA-fradrag-sjekk: er konto 27xx (inngående MVA) brukt i bilaget?
+    # MVA-fradrag-sjekk: ble fradrag tatt i dette bilaget?
+    # To uavhengige signaler — begge gir True:
+    #   1. MVA-kode er en eksplisitt fradrags-kode (1, 11, 13, 14, 15,
+    #      81, 83, 86, 88, 91 — alle som starter med "Fradrag inngående"
+    #      i SAF-T standardlisten). Den mest pålitelige indikatoren.
+    #   2. Konto 271x/272x/273x (inngående MVA) er brukt — backup hvis
+    #      MVA-kode ikke er på linjen.
     has_mva_fradrag = False
-    if "Konto" in rows.columns:
+    fradrag_codes_used: list[str] = []
+    if "MVA-kode" in rows.columns:
+        try:
+            from src.pages.mva.backend.codes import is_deduction_code
+            for code in rows["MVA-kode"]:
+                code_s = str(code or "").strip()
+                if code_s and is_deduction_code(code_s):
+                    has_mva_fradrag = True
+                    if code_s not in fradrag_codes_used:
+                        fradrag_codes_used.append(code_s)
+        except Exception:
+            pass
+    if not has_mva_fradrag and "Konto" in rows.columns:
         for k in rows["Konto"]:
             ks = str(k or "")
             if ks.startswith("271") or ks.startswith("272") or ks.startswith("273"):
@@ -561,9 +579,18 @@ def open_bilag_split_view(
 
                 # KRITISK: MVA-fradrag på ikke-MVA-registrert leverandør
                 if has_mva_fradrag and not mva_reg:
-                    _supplier_write(
-                        ("⚠ MVA-fradrag tatt (konto 27xx) på leverandør som IKKE er MVA-registrert. Sjekk grundig.", "warn"),
-                    )
+                    if fradrag_codes_used:
+                        koder = ", ".join(fradrag_codes_used)
+                        msg = (
+                            f"⚠ MVA-fradrag-kode brukt ({koder}) på leverandør som "
+                            "IKKE er MVA-registrert. Sjekk grundig."
+                        )
+                    else:
+                        msg = (
+                            "⚠ MVA-fradrag tatt (konto 27xx) på leverandør som "
+                            "IKKE er MVA-registrert. Sjekk grundig."
+                        )
+                    _supplier_write((msg, "warn"))
 
             try:
                 top.after(0, _render)

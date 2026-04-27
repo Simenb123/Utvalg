@@ -89,3 +89,22 @@ def get_code_info(code: str) -> dict | None:
 def standard_code_choices() -> list[str]:
     """Returner liste med ``'kode - beskrivelse'`` for bruk i combobox."""
     return [f"{c['code']} - {c['description']}" for c in STANDARD_MVA_CODES]
+
+
+def is_deduction_code(code: object) -> bool:
+    """Returner True hvis MVA-koden gir inngående fradrag.
+
+    Fradrags-koder er inngående-retning der beskrivelsen starter med
+    "Fradrag inngående". Det skiller dem fra ikke-fradragsberettiget
+    inngående (kode 20-22, 82, 84, 87, 89, 92) og utgående (3, 31...).
+
+    Brukes f.eks. av bilag-kontroll-flyten til å sjekke om fradrag er
+    tatt på en leverandør som ikke er MVA-registrert.
+    """
+    info = get_code_info(str(code or "").strip())
+    if not info:
+        return False
+    if info.get("direction") != "inngående":
+        return False
+    desc = str(info.get("description", ""))
+    return desc.startswith("Fradrag inngående")
