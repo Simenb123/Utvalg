@@ -8,7 +8,7 @@ import pytest
 from openpyxl import Workbook
 
 from src.pages.dataset.backend.build_fast import build_from_file
-from excel_importer import infer_excel_sheet_and_headers
+from src.shared.excel.importer import infer_excel_sheet_and_headers
 
 
 def _excel_serial(date_: dt.date) -> int:

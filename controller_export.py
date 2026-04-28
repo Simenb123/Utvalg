@@ -37,7 +37,7 @@ from typing import Any, Mapping
 import pandas as pd
 from openpyxl import load_workbook
 
-from excel_formatting import polish_sheet
+from src.shared.excel.formatting import polish_sheet
 
 logger = logging.getLogger(__name__)
 

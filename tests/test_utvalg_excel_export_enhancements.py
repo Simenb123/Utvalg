@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
 
-import excel_formatting
+import src.shared.excel.formatting as excel_formatting
 from controller_export import export_to_excel
 
 

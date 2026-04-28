@@ -433,7 +433,7 @@ def _read_sheet_with_detected_header(
     import pandas as pd
 
     try:
-        from excel_import_heuristics import detect_header_row_df, clean_header_cell
+        from src.shared.excel.import_heuristics import detect_header_row_df, clean_header_cell
     except Exception:
         detect_header_row_df = None  # type: ignore[assignment]
         clean_header_cell = None  # type: ignore[assignment]

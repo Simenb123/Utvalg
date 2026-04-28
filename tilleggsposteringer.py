@@ -34,7 +34,7 @@ def import_entries_from_excel(path: str | Path) -> SupplementaryImportResult:
     if file_path.suffix.lower() not in _EXCEL_EXTS:
         raise ValueError("Kun Excel-filer (.xlsx/.xlsm/.xltx/.xltm/.xls) støttes.")
 
-    from excel_importer import read_excel_robust
+    from src.shared.excel.importer import read_excel_robust
 
     df = read_excel_robust(str(file_path))
     return _parse_import_dataframe(df)

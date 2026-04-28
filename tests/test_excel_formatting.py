@@ -1,7 +1,7 @@
 # tests/test_excel_formatting.py
 from openpyxl import Workbook
 
-from excel_formatting import polish_sheet
+from src.shared.excel.formatting import polish_sheet
 
 
 def test_polish_sheet_exists_and_runs():

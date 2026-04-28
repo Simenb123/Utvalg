@@ -142,7 +142,7 @@ class ScopeController:
             pd.DataFrame(wide).to_excel(excel_writer=xw, sheet_name="Oppsummering", index=False)
 
             try:
-                from excel_formatting import polish_excel_writer  # optional
+                from src.shared.excel.formatting import polish_excel_writer  # optional
                 polish_excel_writer(xw)
             except Exception:
                 pass

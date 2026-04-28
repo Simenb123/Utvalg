@@ -582,7 +582,7 @@ class OverrideChecksPanel(ttk.Frame):
             return
 
         try:
-            from excel_export import export_temp_excel  # type: ignore
+            from src.shared.excel.export import export_temp_excel  # type: ignore
         except Exception as e:  # pragma: no cover
             messagebox.showerror("Overstyring", f"Excel-eksport er ikke tilgjengelig: {e}")
             return

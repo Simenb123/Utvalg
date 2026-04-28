@@ -27,7 +27,7 @@ from pathlib import Path
 import csv
 
 from column_names import make_safe_unique_column_names
-from excel_sheet_guess import guess_best_excel_sheet
+from src.shared.excel.sheet_guess import guess_best_excel_sheet
 
 EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 _CSV_DELIMS = [";", ",", "\t", "|"]
