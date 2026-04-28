@@ -130,6 +130,71 @@ def test_ar_target_overrides_historikk_when_they_differ() -> None:
     assert "historikk" not in suggestion.reason
 
 
+def test_suggest_top_n_returns_ranked_list() -> None:
+    """Topp-N-funksjonen skal returnere flere kandidater rangert på score."""
+    rl_df = pd.DataFrame(
+        {
+            "nr": [560, 575, 585],
+            "regnskapslinje": [
+                "Investering i datterselskap",
+                "Investeringer i tilknyttet selskap",
+                "Investeringer i aksjer og andeler",
+            ],
+            "sumpost": ["nei", "nei", "nei"],
+            "Formel": ["", "", ""],
+        }
+    )
+    rulebook = {
+        "rules": {
+            "560": {"aliases": ["aksjer", "datter"], "account_ranges": ["1300-1369"]},
+            "575": {"aliases": ["aksjer", "tilknyttet"], "account_ranges": ["1300-1369"]},
+            "585": {"aliases": ["aksjer", "andeler"], "account_ranges": ["1300-1369"]},
+        }
+    }
+
+    top = suggest.suggest_top_n_regnskapslinje(
+        n=5,
+        konto="1320",
+        kontonavn="Aksjer i datter AS",
+        regnskapslinjer=rl_df,
+        rulebook_document=rulebook,
+    )
+
+    assert len(top) >= 2
+    # Sortert høyest først
+    assert all(top[i].confidence >= top[i + 1].confidence for i in range(len(top) - 1))
+    # Datter vinner over de andre på "datter"-alias-treff
+    assert top[0].regnr == 560
+
+
+def test_suggest_top_n_respects_limit() -> None:
+    """N-parameteren skal begrense lengden på resultatet."""
+    rl_df = pd.DataFrame(
+        {
+            "nr": [10, 20, 30, 40],
+            "regnskapslinje": ["A", "B", "C", "D"],
+            "sumpost": ["nei", "nei", "nei", "nei"],
+            "Formel": ["", "", "", ""],
+        }
+    )
+    rulebook = {
+        "rules": {
+            str(n): {"aliases": ["test", "konto"], "account_ranges": ["1000-1099"]}
+            for n in (10, 20, 30, 40)
+        }
+    }
+
+    top = suggest.suggest_top_n_regnskapslinje(
+        n=2,
+        konto="1050",
+        kontonavn="Test konto",
+        regnskapslinjer=rl_df,
+        rulebook_document=rulebook,
+    )
+
+    assert len(top) <= 2
+
+
 def test_historikk_still_wins_when_ar_agrees_or_silent() -> None:
     """Historikk skal *ikke* undertrykkes hvis AR peker på samme RL eller
     ikke gir noe utsagn. Sikrer at vi ikke regrederer det generelle

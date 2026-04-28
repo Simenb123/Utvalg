@@ -466,6 +466,114 @@ def _owned_company_match(
     return 0.0, ""
 
 
+def _score_one_candidate(
+    candidate: _Candidate,
+    *,
+    konto: str,
+    account_tokens: set[str],
+    usage_tokens: set[str],
+    kontonavn_upper: str,
+    ar_target: int | None,
+    historical_regnr: int | None,
+    owned_companies: list[OwnedCompany],
+    ib: float,
+    movement: float,
+    ub: float,
+) -> RegnskapslinjeSuggestion | None:
+    """Skår én kandidat mot konto+navn+bruk og returner forslag (eller None).
+
+    Hjelpefunksjon delt mellom ``suggest_with_candidates`` (returnerer
+    beste) og ``suggest_top_n_with_candidates`` (returnerer rangert liste).
+    Returnerer ``None`` hvis kandidaten ikke har nok signaler eller faller
+    under min-score 0.45.
+    """
+    score = 0.0
+    reasons: list[str] = []
+
+    alias_hits = sorted(account_tokens & candidate.alias_tokens)
+    if alias_hits:
+        score += min(0.52, 0.18 + (0.12 * len(alias_hits)))
+        reasons.append(f"navn/alias: {', '.join(alias_hits[:3])}")
+
+    exclude_hits = sorted((account_tokens | usage_tokens) & candidate.exclude_tokens)
+    if exclude_hits:
+        score -= min(0.40, 0.18 + (0.10 * len(exclude_hits)))
+        reasons.append(f"negativt alias: {', '.join(exclude_hits[:2])}")
+
+    usage_hits = sorted(usage_tokens & candidate.usage_tokens)
+    if usage_hits:
+        score += min(0.24, 0.12 + (0.08 * len(usage_hits)))
+        reasons.append(f"kontobruk: {', '.join(usage_hits[:3])}")
+
+    if candidate.account_ranges and _konto_in_ranges(konto, candidate.account_ranges):
+        score += 0.16
+        reasons.append("konto-intervall")
+
+    if historical_regnr is not None and int(historical_regnr) == candidate.regnr:
+        if ar_target is not None and ar_target != candidate.regnr:
+            # AR peker mot annen RL — historikk er sannsynligvis utdatert
+            # (kontoen var feil-mappet i fjor). Undertrykk historikk-bonusen.
+            pass
+        else:
+            score += 0.48
+            reasons.append("historikk")
+
+    ar_bonus, ar_reason = _owned_company_match(
+        kontonavn_upper=kontonavn_upper,
+        owned_companies=owned_companies,
+        candidate_regnr=candidate.regnr,
+    )
+    if ar_bonus > 0:
+        score += ar_bonus
+        reasons.append(ar_reason)
+
+    sign_score, sign_text = _sign_note(hint=candidate.normal_balance_hint, ub=ub, movement=movement, ib=ib)
+    score += sign_score
+
+    if not reasons and abs(sign_score) < 1e-9:
+        return None
+
+    score = max(0.0, min(score, 1.0))
+    if score < 0.45:
+        return None
+
+    if ar_bonus > 0 and ar_bonus >= 0.45 and not alias_hits:
+        source = "eid_selskap"
+    elif ar_bonus > 0:
+        source = "akronym"
+    elif (
+        historical_regnr is not None
+        and int(historical_regnr) == candidate.regnr
+        and not (ar_target is not None and ar_target != candidate.regnr)
+        and not alias_hits
+        and not usage_hits
+    ):
+        source = "historikk"
+    elif alias_hits and usage_hits:
+        source = "alias+kontobruk"
+    elif alias_hits:
+        source = "alias"
+    elif usage_hits:
+        source = "kontobruk"
+    elif candidate.account_ranges and _konto_in_ranges(konto, candidate.account_ranges):
+        source = "konto_intervall"
+    else:
+        source = "heuristikk"
+
+    if sign_text:
+        reasons.append(sign_text)
+    reason_text = "; ".join(reasons) if reasons else "Ingen tydelige signaler."
+    return RegnskapslinjeSuggestion(
+        regnr=candidate.regnr,
+        regnskapslinje=candidate.regnskapslinje,
+        source=source,
+        reason=reason_text,
+        confidence=score,
+        confidence_bucket=_confidence_bucket(score),
+        sign_note=sign_text,
+    )
+
+
 def suggest_with_candidates(
     candidates: list[_Candidate],
     *,
@@ -498,102 +606,111 @@ def suggest_with_candidates(
         kontonavn_upper=kontonavn_upper,
         owned_companies=owned_companies or [],
     )
+
     best: RegnskapslinjeSuggestion | None = None
-    best_score = -10.0
-
     for candidate in candidates:
-        score = 0.0
-        reasons: list[str] = []
-
-        alias_hits = sorted(account_tokens & candidate.alias_tokens)
-        if alias_hits:
-            score += min(0.52, 0.18 + (0.12 * len(alias_hits)))
-            reasons.append(f"navn/alias: {', '.join(alias_hits[:3])}")
-
-        exclude_hits = sorted((account_tokens | usage_tokens) & candidate.exclude_tokens)
-        if exclude_hits:
-            score -= min(0.40, 0.18 + (0.10 * len(exclude_hits)))
-            reasons.append(f"negativt alias: {', '.join(exclude_hits[:2])}")
-
-        usage_hits = sorted(usage_tokens & candidate.usage_tokens)
-        if usage_hits:
-            score += min(0.24, 0.12 + (0.08 * len(usage_hits)))
-            reasons.append(f"kontobruk: {', '.join(usage_hits[:3])}")
-
-        if candidate.account_ranges and _konto_in_ranges(konto, candidate.account_ranges):
-            score += 0.16
-            reasons.append("konto-intervall")
-
-        if historical_regnr is not None and int(historical_regnr) == candidate.regnr:
-            if ar_target is not None and ar_target != candidate.regnr:
-                # AR peker mot annen RL — historikk er sannsynligvis utdatert
-                # (kontoen var feil-mappet i fjor). Undertrykk historikk-bonusen.
-                pass
-            else:
-                score += 0.48
-                reasons.append("historikk")
-
-        # AR-bonus: kontonavnet matcher et selskap klienten eier, og
-        # eierskapsgrad-RL stemmer med kandidaten.
-        ar_bonus, ar_reason = _owned_company_match(
+        suggestion = _score_one_candidate(
+            candidate,
+            konto=konto,
+            account_tokens=account_tokens,
+            usage_tokens=usage_tokens,
             kontonavn_upper=kontonavn_upper,
+            ar_target=ar_target,
+            historical_regnr=historical_regnr,
             owned_companies=owned_companies or [],
-            candidate_regnr=candidate.regnr,
+            ib=ib,
+            movement=movement,
+            ub=ub,
         )
-        if ar_bonus > 0:
-            score += ar_bonus
-            reasons.append(ar_reason)
-
-        sign_score, sign_text = _sign_note(hint=candidate.normal_balance_hint, ub=ub, movement=movement, ib=ib)
-        score += sign_score
-
-        if not reasons and abs(sign_score) < 1e-9:
+        if suggestion is None:
             continue
-
-        score = max(0.0, min(score, 1.0))
-        if score < 0.45:
-            continue
-
-        if ar_bonus > 0 and ar_bonus >= 0.45 and not alias_hits:
-            source = "eid_selskap"
-        elif ar_bonus > 0:
-            source = "akronym"
-        elif (
-            historical_regnr is not None
-            and int(historical_regnr) == candidate.regnr
-            and not (ar_target is not None and ar_target != candidate.regnr)
-            and not alias_hits
-            and not usage_hits
-        ):
-            source = "historikk"
-        elif alias_hits and usage_hits:
-            source = "alias+kontobruk"
-        elif alias_hits:
-            source = "alias"
-        elif usage_hits:
-            source = "kontobruk"
-        elif candidate.account_ranges and _konto_in_ranges(konto, candidate.account_ranges):
-            source = "konto_intervall"
-        else:
-            source = "heuristikk"
-
-        if sign_text:
-            reasons.append(sign_text)
-        reason_text = "; ".join(reasons) if reasons else "Ingen tydelige signaler."
-        suggestion = RegnskapslinjeSuggestion(
-            regnr=candidate.regnr,
-            regnskapslinje=candidate.regnskapslinje,
-            source=source,
-            reason=reason_text,
-            confidence=score,
-            confidence_bucket=_confidence_bucket(score),
-            sign_note=sign_text,
-        )
-        if score > best_score:
+        if best is None or suggestion.confidence > best.confidence:
             best = suggestion
-            best_score = score
 
     return best
+
+
+def suggest_top_n_with_candidates(
+    candidates: list[_Candidate],
+    *,
+    n: int = 5,
+    konto: str,
+    kontonavn: str,
+    ib: float = 0.0,
+    movement: float = 0.0,
+    ub: float = 0.0,
+    usage: AccountUsageFeatures | None = None,
+    historical_regnr: int | None = None,
+    owned_companies: list[OwnedCompany] | None = None,
+) -> list[RegnskapslinjeSuggestion]:
+    """Returner topp-N forslag rangert på score (høyest først).
+
+    Brukes når UI skal vise flere alternativer (f.eks. remap-dialogen),
+    ikke bare det beste forslaget. Kandidater under min-score-terskel
+    (0.45) filtreres ut, så listen kan inneholde færre enn N elementer.
+    """
+    if not candidates or n <= 0:
+        return []
+
+    account_tokens = _dedupe_tokens(_tokenize(kontonavn))
+    usage_tokens = _dedupe_tokens(set(getattr(usage, "top_text_tokens", ()) or ()))
+    kontonavn_upper = (kontonavn or "").upper()
+    ar_target = _ar_target_regnr(
+        kontonavn_upper=kontonavn_upper,
+        owned_companies=owned_companies or [],
+    )
+
+    scored: list[RegnskapslinjeSuggestion] = []
+    for candidate in candidates:
+        suggestion = _score_one_candidate(
+            candidate,
+            konto=konto,
+            account_tokens=account_tokens,
+            usage_tokens=usage_tokens,
+            kontonavn_upper=kontonavn_upper,
+            ar_target=ar_target,
+            historical_regnr=historical_regnr,
+            owned_companies=owned_companies or [],
+            ib=ib,
+            movement=movement,
+            ub=ub,
+        )
+        if suggestion is not None:
+            scored.append(suggestion)
+
+    scored.sort(key=lambda s: s.confidence, reverse=True)
+    return scored[:n]
+
+
+def suggest_top_n_regnskapslinje(
+    *,
+    n: int = 5,
+    konto: str,
+    kontonavn: str,
+    ib: float = 0.0,
+    movement: float = 0.0,
+    ub: float = 0.0,
+    regnskapslinjer: pd.DataFrame | None,
+    rulebook_document: Mapping[str, Any] | None = None,
+    usage: AccountUsageFeatures | None = None,
+    historical_regnr: int | None = None,
+    owned_companies: list[OwnedCompany] | None = None,
+) -> list[RegnskapslinjeSuggestion]:
+    """Wrapper rundt ``suggest_top_n_with_candidates`` som bygger
+    kandidatene først. Bruk denne for én-gang-kall (typisk fra UI)."""
+    candidates = build_candidates(regnskapslinjer, rulebook_document=rulebook_document)
+    return suggest_top_n_with_candidates(
+        candidates,
+        n=n,
+        konto=konto,
+        kontonavn=kontonavn,
+        ib=ib,
+        movement=movement,
+        ub=ub,
+        usage=usage,
+        historical_regnr=historical_regnr,
+        owned_companies=owned_companies,
+    )
 
 
 def suggest_regnskapslinje(

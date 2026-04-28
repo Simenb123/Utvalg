@@ -117,6 +117,47 @@ def _label_for_regnr(values: list[str], regnr: int) -> str | None:
     return None
 
 
+def _compute_top_suggestions(
+    *,
+    client: str,
+    konto: str,
+    kontonavn: str,
+    regnskapslinjer: Optional[pd.DataFrame],
+    n: int = 5,
+) -> list:
+    """Beregn topp-N forslag for kontoen ved å kalle suggester med alle
+    tilgjengelige inputs (rulebook, AR-data, historikk)."""
+    if regnskapslinjer is None:
+        return []
+    try:
+        import regnskapslinje_suggest as _suggest
+        import regnskapslinje_mapping_service as _svc
+        import session as _session
+
+        year = getattr(_session, "year", None) or ""
+        try:
+            year_int = int(str(year)) if year else None
+        except Exception:
+            year_int = None
+
+        rulebook = _suggest.load_rulebook_document()
+        owned = _svc._load_owned_companies_for_client(client or None, year_int)
+        history = _svc._history_overrides_by_account(client or None, year_int)
+        historical_regnr = history.get(konto)
+
+        return _suggest.suggest_top_n_regnskapslinje(
+            n=n,
+            konto=konto,
+            kontonavn=kontonavn,
+            regnskapslinjer=regnskapslinjer,
+            rulebook_document=rulebook,
+            historical_regnr=historical_regnr,
+            owned_companies=owned,
+        )
+    except Exception:
+        return []
+
+
 def open_account_mapping_dialog(
     master: tk.Misc,
     *,
@@ -153,18 +194,26 @@ def open_account_mapping_dialog(
     except Exception:
         current_overrides = {}
 
+    # Hent topp-5 forslag (kan inkludere det som allerede er i suggested_regnr)
+    top_suggestions = _compute_top_suggestions(
+        client=client,
+        konto=konto,
+        kontonavn=kontonavn,
+        regnskapslinjer=regnskapslinjer,
+        n=5,
+    )
+
     win = tk.Toplevel(master)
     win.title(f"Endre mapping — {konto} {kontonavn}")
     win.transient(master)
     win.grab_set()
-    win.minsize(560, 360)
-    win.geometry("640x460")
+    win.minsize(720, 520)
+    win.geometry("860x640")
 
-    # Hovedcontainer med padding og expand
     outer = ttk.Frame(win, padding=14)
     outer.pack(fill=tk.BOTH, expand=True)
     outer.columnconfigure(0, weight=1)
-    outer.rowconfigure(2, weight=1)  # forslagspanelet kan strekke seg
+    outer.rowconfigure(3, weight=1)  # listbox-raden strekker seg
 
     # ----- Header: konto + kontonavn -----
     header = ttk.Frame(outer)
@@ -178,18 +227,13 @@ def open_account_mapping_dialog(
     )
     ttk.Separator(outer, orient="horizontal").grid(row=1, column=0, sticky="ew", pady=(8, 10))
 
-    # ----- Innhold-rad: Forslag + nåværende-info -----
-    body = ttk.Frame(outer)
-    body.grid(row=2, column=0, sticky="nsew")
-    body.columnconfigure(0, weight=1)
-
-    # Nåværende-mapping info
+    # ----- Nåværende-info -----
     info_text = _mapping_info_text(konto, current_overrides)
-    ttk.Label(body, text=info_text, foreground="#444").grid(
-        row=0, column=0, sticky="w", pady=(0, 8)
+    ttk.Label(outer, text=info_text, foreground="#444").grid(
+        row=2, column=0, sticky="w", pady=(0, 6)
     )
 
-    # Forslag-card (grønn match / gul konflikt) — beregn først
+    # ----- Konflikt-card (hvis aktuelt) -----
     suggested_regnr_int = parse_regnskapslinje_choice(suggested_regnr)
     current_regnr_int = parse_regnskapslinje_choice(current_regnr)
     is_conflict = (
@@ -198,17 +242,6 @@ def open_account_mapping_dialog(
         and suggested_regnr_int != current_regnr_int
     )
 
-    suggestion_text = _suggestion_info_text(
-        suggested_regnr=suggested_regnr,
-        suggested_regnskapslinje=suggested_regnskapslinje,
-        suggestion_reason=suggestion_reason,
-        suggestion_source=suggestion_source,
-        confidence_bucket=confidence_bucket,
-        sign_note=sign_note,
-    )
-
-    # Selve "Velg ny regnskapslinje"-raden — defineres her så vi kan
-    # binde "Bytt til forslag"-knappen mot var_choice nedenfor.
     values = [format_regnskapslinje_choice(regnr, navn) for regnr, navn in choice_pairs]
     initial_choice = _resolve_initial_choice(
         values,
@@ -219,71 +252,118 @@ def open_account_mapping_dialog(
     )
     var_choice = tk.StringVar(master=win, value=initial_choice)
 
-    if suggestion_text:
-        if is_conflict:
-            card_bg = "#FFF3CD"
-            card_fg = "#664d03"
-            header_text = "⚠ Konflikt: navnet peker mot en annen regnskapslinje"
-        else:
-            card_bg = "#E8F5E9"
-            card_fg = "#1B5E20"
-            header_text = "✓ Forslag stemmer overens med nåværende mapping"
+    suggestion_text = _suggestion_info_text(
+        suggested_regnr=suggested_regnr,
+        suggested_regnskapslinje=suggested_regnskapslinje,
+        suggestion_reason=suggestion_reason,
+        suggestion_source=suggestion_source,
+        confidence_bucket=confidence_bucket,
+        sign_note=sign_note,
+    )
 
+    if suggestion_text and is_conflict:
+        card_bg = "#FFF3CD"
+        card_fg = "#664d03"
         sugg_frame = tk.Frame(
-            body, bg=card_bg, padx=12, pady=10,
+            outer, bg=card_bg, padx=12, pady=8,
             highlightbackground=card_fg, highlightthickness=1,
         )
-        sugg_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 12))
+        sugg_frame.grid(row=2, column=0, sticky="ew", pady=(6, 8))
         sugg_frame.columnconfigure(0, weight=1)
-
         tk.Label(
-            sugg_frame, text=header_text, bg=card_bg, fg=card_fg,
-            font=("Segoe UI", 10, "bold"), justify="left",
+            sugg_frame, text="⚠ Konflikt: navnet peker mot en annen regnskapslinje",
+            bg=card_bg, fg=card_fg, font=("Segoe UI", 10, "bold"), justify="left",
         ).grid(row=0, column=0, sticky="w")
-
         tk.Label(
             sugg_frame, text=suggestion_text, bg=card_bg, fg=card_fg,
-            justify="left", wraplength=520, font=("Segoe UI", 9),
-        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+            justify="left", wraplength=780, font=("Segoe UI", 9),
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        if is_conflict and suggested_regnr_int is not None:
-            def _bytt_til_forslag() -> None:
-                # Robust: finn label ved å parse regnr-prefikset i values,
-                # ikke ved å rebuilde label-strengen (navnet kan avvike
-                # marginalt mellom kilder).
-                target = _label_for_regnr(values, suggested_regnr_int)
-                if target:
-                    var_choice.set(target)
-                else:
-                    messagebox.showinfo(
-                        "Endre mapping",
-                        f"Fant ikke regnskapslinje {suggested_regnr_int} i listen.",
-                        parent=win,
-                    )
+    # ----- To listbokser side om side -----
+    body = ttk.Frame(outer)
+    body.grid(row=3, column=0, sticky="nsew", pady=(4, 8))
+    body.columnconfigure(0, weight=1)
+    body.columnconfigure(1, weight=2)
+    body.rowconfigure(1, weight=1)
 
-            tk.Button(
-                sugg_frame, text=f"Bytt til {suggested_regnr_int}",
-                bg="#FFE69C", relief="flat", padx=12, pady=4,
-                command=_bytt_til_forslag,
-            ).grid(row=2, column=0, sticky="w", pady=(10, 0))
+    # ----- Venstre listbox: Topp 5 forslag -----
+    left = ttk.LabelFrame(body, text=f"Topp {len(top_suggestions) or 5} forslag", padding=4)
+    left.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 8))
+    left.columnconfigure(0, weight=1)
+    left.rowconfigure(0, weight=1)
 
-    # ----- "Ny regnskapslinje"-raden -----
-    chooser = ttk.Frame(outer)
-    chooser.grid(row=3, column=0, sticky="ew", pady=(0, 10))
-    chooser.columnconfigure(1, weight=1)
-    ttk.Label(chooser, text="Ny regnskapslinje:", font=("Segoe UI", 9, "bold")).grid(
-        row=0, column=0, sticky="w"
-    )
-    cmb = ttk.Combobox(
-        chooser, textvariable=var_choice, values=values, state="readonly",
-    )
-    cmb.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+    lb_top = tk.Listbox(left, font=("Segoe UI", 9), exportselection=False)
+    lb_top_sb = ttk.Scrollbar(left, orient="vertical", command=lb_top.yview)
+    lb_top.configure(yscrollcommand=lb_top_sb.set)
+    lb_top.grid(row=0, column=0, sticky="nsew")
+    lb_top_sb.grid(row=0, column=1, sticky="ns")
 
-    # ----- Knappe-rad -----
-    ttk.Separator(outer, orient="horizontal").grid(row=4, column=0, sticky="ew", pady=(0, 10))
-    btns = ttk.Frame(outer)
-    btns.grid(row=5, column=0, sticky="e")
+    # Map listbox-index → label-string i values
+    top_index_to_label: dict[int, str] = {}
+    for idx, sugg in enumerate(top_suggestions):
+        try:
+            regnr = int(getattr(sugg, "regnr", 0))
+            navn = str(getattr(sugg, "regnskapslinje", "") or "")
+            conf = float(getattr(sugg, "confidence", 0.0))
+            bucket = str(getattr(sugg, "confidence_bucket", "") or "")
+        except Exception:
+            continue
+        label = _label_for_regnr(values, regnr) or format_regnskapslinje_choice(regnr, navn)
+        top_index_to_label[idx] = label
+        display = f"{regnr}  {navn}    [{int(conf * 100)} % · {bucket}]"
+        lb_top.insert(tk.END, display)
+    if not top_suggestions:
+        lb_top.insert(tk.END, "(ingen forslag)")
+        lb_top.itemconfigure(0, foreground="#888")
 
+    # ----- Høyre listbox: Alle regnskapslinjer + søk -----
+    right = ttk.LabelFrame(body, text="Alle regnskapslinjer", padding=4)
+    right.grid(row=0, column=1, rowspan=2, sticky="nsew")
+    right.columnconfigure(1, weight=1)
+    right.rowconfigure(1, weight=1)
+
+    ttk.Label(right, text="Søk:").grid(row=0, column=0, sticky="w", padx=(0, 4), pady=(0, 4))
+    var_search = tk.StringVar(master=win)
+    ent_search = ttk.Entry(right, textvariable=var_search)
+    ent_search.grid(row=0, column=1, sticky="ew", pady=(0, 4))
+
+    lb_all = tk.Listbox(right, font=("Segoe UI", 9), exportselection=False)
+    lb_all_sb = ttk.Scrollbar(right, orient="vertical", command=lb_all.yview)
+    lb_all.configure(yscrollcommand=lb_all_sb.set)
+    lb_all.grid(row=1, column=0, columnspan=2, sticky="nsew")
+    lb_all_sb.grid(row=1, column=2, sticky="ns")
+
+    # Map listbox-index → label
+    all_index_to_label: list[str] = []
+
+    def _refill_all_listbox(filter_text: str = "") -> None:
+        nonlocal all_index_to_label
+        lb_all.delete(0, tk.END)
+        all_index_to_label = []
+        ft = filter_text.strip().lower()
+        for label in values:
+            if ft and ft not in label.lower():
+                continue
+            lb_all.insert(tk.END, label)
+            all_index_to_label.append(label)
+        # Marker eksisterende valg hvis synlig
+        try:
+            current = var_choice.get()
+            if current in all_index_to_label:
+                idx = all_index_to_label.index(current)
+                lb_all.selection_set(idx)
+                lb_all.see(idx)
+        except Exception:
+            pass
+
+    _refill_all_listbox()
+
+    def _on_search_changed(*_args: object) -> None:
+        _refill_all_listbox(var_search.get())
+
+    var_search.trace_add("write", _on_search_changed)
+
+    # ----- Save / Remove / Cancel -----
     def _save() -> None:
         regnr = parse_regnskapslinje_choice(var_choice.get())
         if regnr is None:
@@ -324,12 +404,82 @@ def open_account_mapping_dialog(
             except Exception:
                 pass
 
+    # ----- Listbox-bindings -----
+    def _select_from_top(_event=None) -> None:
+        sel = lb_top.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        label = top_index_to_label.get(idx)
+        if label:
+            var_choice.set(label)
+
+    def _select_from_all(_event=None) -> None:
+        sel = lb_all.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if 0 <= idx < len(all_index_to_label):
+            var_choice.set(all_index_to_label[idx])
+
+    def _accept_top(_event=None) -> None:
+        _select_from_top()
+        if parse_regnskapslinje_choice(var_choice.get()) is not None:
+            _save()
+
+    def _accept_all(_event=None) -> None:
+        _select_from_all()
+        if parse_regnskapslinje_choice(var_choice.get()) is not None:
+            _save()
+
+    lb_top.bind("<<ListboxSelect>>", _select_from_top)
+    lb_top.bind("<Double-Button-1>", _accept_top)
+    lb_top.bind("<Return>", _accept_top)
+    lb_top.bind("<KP_Enter>", _accept_top)
+
+    lb_all.bind("<<ListboxSelect>>", _select_from_all)
+    lb_all.bind("<Double-Button-1>", _accept_all)
+    lb_all.bind("<Return>", _accept_all)
+    lb_all.bind("<KP_Enter>", _accept_all)
+
+    # ----- Status-tekst (valgt RL) + hotkey-hint -----
+    status = ttk.Frame(outer)
+    status.grid(row=4, column=0, sticky="ew", pady=(2, 6))
+    status.columnconfigure(0, weight=1)
+    var_status = tk.StringVar(master=win, value=f"Valgt: {var_choice.get() or '(ingen)'}")
+
+    def _on_choice_changed(*_args: object) -> None:
+        var_status.set(f"Valgt: {var_choice.get() or '(ingen)'}")
+
+    var_choice.trace_add("write", _on_choice_changed)
+    ttk.Label(status, textvariable=var_status, font=("Segoe UI", 9, "bold")).grid(
+        row=0, column=0, sticky="w"
+    )
+    ttk.Label(
+        status,
+        text="Dobbeltklikk = bytt og lukk · Enter = bytt · Esc = avbryt",
+        foreground="#666", font=("Segoe UI", 8),
+    ).grid(row=1, column=0, sticky="w")
+
+    # ----- Knappe-rad -----
+    ttk.Separator(outer, orient="horizontal").grid(row=5, column=0, sticky="ew", pady=(0, 8))
+    btns = ttk.Frame(outer)
+    btns.grid(row=6, column=0, sticky="e")
     ttk.Button(btns, text="Lagre", command=_save).pack(side=tk.RIGHT)
     ttk.Button(btns, text="Avbryt", command=win.destroy).pack(side=tk.RIGHT, padx=(0, 8))
     ttk.Button(btns, text="Fjern override", command=_remove).pack(side=tk.RIGHT, padx=(0, 8))
 
-    # Fokus på combobox så bruker kan tastaturnavigere direkte
-    cmb.focus_set()
+    # Globale hotkeys på vinduet
+    win.bind("<Escape>", lambda _e=None: win.destroy())
+
+    # Fokus: hvis det er et top-forslag, start med fokus på top-listen,
+    # ellers på søkefeltet (raskest å finne en linje fra full liste)
+    if top_suggestions:
+        lb_top.selection_set(0)
+        lb_top.focus_set()
+        _select_from_top()
+    else:
+        ent_search.focus_set()
 
 
 class RLAccountDrillDialog(tk.Toplevel):
