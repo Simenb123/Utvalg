@@ -112,6 +112,15 @@ def create_sb_tree(parent_frame: Any) -> Any:
     except Exception:
         pass
 
+    # Lys gul bakgrunn for konti der suggesteren foreslår en annen RL enn
+    # nåværende mapping (has_suggestion_conflict). Signaliserer at navnet
+    # på kontoen peker mot en annen regnskapslinje enn den den havnet på
+    # via intervall/override — en mulig feil-mapping å vurdere.
+    try:
+        tree.tag_configure("mapping_conflict", background="#FFF3CD")
+    except Exception:
+        pass
+
     v_scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
     v_scroll.grid(row=0, column=1, sticky="ns")
     h_scroll = ttk.Scrollbar(frame, orient="horizontal", command=tree.xview)

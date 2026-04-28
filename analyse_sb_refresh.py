@@ -687,6 +687,20 @@ def refresh_sb_view(*, page: Any) -> None:
 
     _phase("build_regnr_map")
 
+    # Bygg konto-set for kontoer der suggester foreslår en annen RL enn
+    # nåværende mapping (has_suggestion_conflict). Brukes til å tagge rader
+    # med "mapping_conflict" så revisor ser hvilke mappinger som kanskje
+    # bør vurderes på nytt.
+    conflict_kontoer: set[str] = set()
+    try:
+        for issue in (getattr(page, "_mapping_issues", None) or []):
+            if getattr(issue, "has_suggestion_conflict", False):
+                _k = str(getattr(issue, "konto", "") or "").strip()
+                if _k:
+                    conflict_kontoer.add(_k)
+    except Exception:
+        conflict_kontoer = set()
+
     for tup in active.itertuples(index=False):
         try:
             konto = str(tup[konto_idx]) if konto_idx >= 0 else ""
@@ -706,6 +720,8 @@ def refresh_sb_view(*, page: Any) -> None:
                 _tag_list.append("gruppe")
             if is_ok:
                 _tag_list.append("ok_row")
+            if konto in conflict_kontoer:
+                _tag_list.append("mapping_conflict")
             tags = tuple(_tag_list)
             # Kommentar signaliseres via 'commented'-tag (farge), ikke via
             # \u00e5 lime inn tekst i Kontonavn.
