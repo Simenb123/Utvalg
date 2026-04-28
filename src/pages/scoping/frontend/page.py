@@ -500,7 +500,7 @@ class ScopingPage(ttk.Frame):
         for å re-laste fra disk.
         """
         try:
-            from ib_ub_control import build_account_reconciliation, build_rl_reconciliation
+            from src.audit_actions.diff.ib_ub_engine import build_account_reconciliation, build_rl_reconciliation
 
             if sb_df is None or df_hb is None:
                 return set()

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-import ib_ub_control
-import ib_ub_control_excel
+import src.audit_actions.diff.ib_ub_engine as ib_ub_control
+import src.audit_actions.diff.ib_ub_excel as ib_ub_control_excel
 
 
 def _make_sb() -> pd.DataFrame:

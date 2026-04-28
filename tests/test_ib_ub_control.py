@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import ib_ub_control
+import src.audit_actions.diff.ib_ub_engine as ib_ub_control
 
 
 def _make_sb() -> pd.DataFrame:

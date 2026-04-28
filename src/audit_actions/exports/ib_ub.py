@@ -43,8 +43,8 @@ def export_ib_ub_control(page) -> None:
     if filedialog is None:
         return
 
-    import ib_ub_control
-    import ib_ub_control_excel
+    import src.audit_actions.diff.ib_ub_engine as ib_ub_control
+    import src.audit_actions.diff.ib_ub_excel as ib_ub_control_excel
     import page_analyse_rl
 
     # Hent SB
@@ -192,8 +192,8 @@ def export_ib_ub_continuity(page) -> None:
     if filedialog is None:
         return
 
-    import ib_ub_control
-    import ib_ub_control_excel
+    import src.audit_actions.diff.ib_ub_engine as ib_ub_control
+    import src.audit_actions.diff.ib_ub_excel as ib_ub_control_excel
     import page_analyse_rl
     from previous_year_comparison import load_previous_year_sb
 

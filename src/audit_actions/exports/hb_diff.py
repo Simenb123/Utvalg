@@ -98,8 +98,8 @@ def export_hb_version_diff(page) -> None:
         return
 
     # Beregn diff
-    import hb_version_diff
-    import hb_version_diff_excel
+    import src.audit_actions.diff.hb_engine as hb_version_diff
+    import src.audit_actions.diff.hb_excel as hb_version_diff_excel
 
     try:
         result = hb_version_diff.diff_hb_versions(old_df, current_df)

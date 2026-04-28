@@ -5,8 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import hb_version_diff
-import hb_version_diff_excel
+import src.audit_actions.diff.hb_engine as hb_version_diff
+import src.audit_actions.diff.hb_excel as hb_version_diff_excel
 
 
 def _make_version_a() -> pd.DataFrame:
