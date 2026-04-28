@@ -834,6 +834,11 @@ def _load_owned_companies_for_client(
     investerings-kontoer (560/575/585) når kontonavnet matcher et eid
     selskap eller akronymet av det.
 
+    Bruker ``get_client_ownership_overview`` (ikke
+    ``list_owned_companies``) slik at vi får med «videreførte»
+    eierandeler som ligger i ``accepted_owned_base`` snarere enn i
+    rå-registeret. Dette samsvarer med visningen i AR-fanen.
+
     Returnerer tom liste hvis AR ikke har data for klient/år.
     """
     if not client or not year:
@@ -843,17 +848,17 @@ def _load_owned_companies_for_client(
     except Exception:
         return []
     try:
-        client_orgnr = ar_store.get_client_orgnr(str(client)) or ""
-    except Exception:
-        client_orgnr = ""
-    if not client_orgnr:
-        return []
-    try:
-        rows = ar_store.list_owned_companies(client_orgnr, str(year))
+        overview = ar_store.get_client_ownership_overview(str(client), str(year))
     except Exception:
         return []
+    rows = overview.get("owned_companies") if isinstance(overview, dict) else None
+    if not isinstance(rows, list):
+        return []
+
     out: list[regnskapslinje_suggest.OwnedCompany] = []
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         try:
             name = str(row.get("company_name", "") or "").strip()
             if not name:
