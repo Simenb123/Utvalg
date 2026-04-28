@@ -3,9 +3,11 @@
 ## Status (per 2026-04-28)
 
 Base-konfliktdeteksjon **levert og i bruk**. AR-utvidelse for
-investerings-kontoer levert. Trenger live smoke-test før vi bygger mer.
+investerings-kontoer levert med live-justeringer fra første smoke-test.
+UX-redesign av remap-dialogen og A1-kolonnen «Bokført på» i AR-fanen
+levert i samme runde.
 
-**Implementert:**
+### Implementert
 
 | Område | Commit |
 |---|---|
@@ -19,27 +21,75 @@ investerings-kontoer levert. Trenger live smoke-test før vi bygger mer.
 | Full dialog-redesign — 640×460 resizable, robust bytt-knapp | `51c2a1b` |
 | AR-utvidelse Step 1 — `OwnedCompany`, akronym-helper, score-bonus | `c3d90b9` |
 | AR-utvidelse Step 2 — pipeline laster AR-data automatisk | `20d1549` |
+| **Pakke 1** — undertrykk historikk når AR peker mot annen RL | `62e7f1d` |
+| **Pakke 2** — dialog: listbokser med topp-5 forslag + søk + hotkeys | `8812341` |
+| **Pakke 3** — A1 «Bokført på»-kolonne i AR-fanens «Eide selskaper»-tre | `3ae0e88` |
+| Hotfix — bruk `get_client_ownership_overview` for videreført AR-data | `06f880d` |
+| Perf — cache eide-selskaper (3-7 s overview-kall) + invalidate-hook | `093176b` |
+| Bug-fix — 50 % nøyaktig er tilknyttet (575), ikke datter (560) | `5a9a32b` |
 
-**Ikke implementert (åpne punkter):**
+### Live-funn fra smoke-test (2026-04-28)
+
+Tre regresjoner / bugs ble oppdaget under første kjøring på reell
+klient og fikset samme dag:
+
+1. **Historikk-overstyrte AR.** Konto «Aksjer i GPC» foreslo 575 (gammel
+   feil-historikk) selv om AR sa 560 (datter, 83.51 %). Fix: undertrykk
+   historikk-bonus når AR peker en annen vei. *Pakke 1 (`62e7f1d`).*
+2. **AR-data lastet ikke.** `list_owned_companies` spør rå
+   ownership_relations-tabellen, men «videreførte» eierandeler ligger
+   i `accepted_owned_base`. Resultat: tomt owned_companies → AR-bonus
+   fyrte aldri. Fix: bruk `get_client_ownership_overview` (samme kilde
+   som AR-fanens tre). *Hotfix (`06f880d`).*
+3. **App stallet.** `get_client_ownership_overview` er en 3-7 s
+   operasjon, kalt 3+ ganger per refresh uten cache. Fix: cache per
+   `(client, year)` med invalidate-hook. *Perf (`093176b`).*
+4. **50 %-grensen feil.** `pct >= 50` regnet 50/50-eierskap som datter
+   (560), men rskl. § 1-3 krever *over* 50 % for kontroll. Fix: bruk
+   `pct > 50.0`. *Bug-fix (`5a9a32b`).*
+
+### Ikke implementert (åpne punkter)
 
 - **Endring 5** — `mapping_review.json` med «Marker som vurdert»-flagg.
   Konsekvens: konflikter flagges på nytt hver oppstart selv om revisor
   har vurdert dem. Avventes til vi har observert om støy faktisk er et
   problem.
 - **Bulk-review-popup** «Gjennomgå mapping-forslag» — listevisning av
-  alle konflikter for én klient. Avventes til base-deteksjonen er
-  brukt en stund.
-- **Smoke-test på live-klient** med ekte AR-data. Vi har enhetstester
-  som passerer (30 stk grønne), men ingen ende-til-ende-verifikasjon
-  på en klient som faktisk eier andre selskaper.
+  alle konflikter for én klient.
+- **A2 «Aksjespesifikasjon»-fane** — full gap-analyse: hvilke
+  AR-eierandeler mangler bokføring (in AR, not in SB) og hvilke
+  SB-investeringer mangler AR-binding (in SB, not in AR).
+- **Bytt-til-forslag-knapp i konflikt-cardet.** Ble fjernet i Pakke 2
+  redesign — listbox + dobbeltklikk dekker funksjonen, men
+  hurtig-knappen kan være verdt å gjeninnføre hvis bruker savner den.
 
-**Kjente uvisser som bør observeres:**
+### Kjente uvisser som bør observeres videre
 
-- Threshold 0.7 — for lavt (støy) eller for høyt (savner konflikter)?
-- Konflikt-flagging på manuelle overrides — ønsket eller bør
-  undertrykkes?
-- Falske positiver fra akronym-treff (korte akronymer som GPC kan
-  matche tilfeldig).
+- **Threshold 0.7** — for lavt (støy) eller for høyt (savner konflikter)?
+- **Konflikt-flagging på manuelle overrides** — ønsket eller bør
+  undertrykkes? Etter Pakke 1-fixen er historikk-undertrykkelse
+  asymmetrisk (AR slår historikk, men ikke omvendt) — ikke testet
+  ennå om det gir falske positiver i praksis.
+- **Falske positiver fra akronym-treff** — korte akronymer som GPC kan
+  matche tilfeldig. Ingen rapportert ennå, men aktuell ved skalering.
+- **Cache-invalideringspunkter** — vi invaliderer ved klientbytte og
+  AR-import, men er det andre flyter som endrer eide selskaper og bør
+  tømme cache?
+
+## Plan videre
+
+Anbefalt rekkefølge når brukeren vil fortsette:
+
+1. **Lengre live-bruk på flere klienter.** Vi har bare smoke-testet på
+   én klient (Air Management AS). Test på 2-3 klienter til for å se
+   om threshold/akronymer holder generelt.
+2. **«Marker som vurdert»** (Endring 5) hvis støy fra gjentakende
+   konflikt-flagging blir et reelt problem.
+3. **A2 «Aksjespesifikasjon»-fane** når base-deteksjonen er stabil —
+   gir revisor en revisjons-handling som krysstester AR mot SB med gap-
+   analyse i begge retninger.
+4. **Bulk-review-popup** som videre utvikling av A2 — knapper for
+   «Bytt valgte» / «Marker valgte som vurdert» på tvers av klient.
 
 ## Bakgrunn
 
