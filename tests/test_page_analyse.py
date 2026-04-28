@@ -401,7 +401,7 @@ def test_export_regnskapsoppstilling_excel_uses_payload_and_save_dialog(monkeypa
 
     monkeypatch.setattr(analyse_regnskapsoppstilling_excel, "save_regnskapsoppstilling_workbook", fake_save)
     monkeypatch.setattr(page_analyse, "messagebox", None, raising=False)
-    import workpaper_export_rl
+    import src.audit_actions.exports.rl as workpaper_export_rl
     monkeypatch.setattr(workpaper_export_rl, "messagebox", None, raising=False)
 
     page_analyse.AnalysePage._export_regnskapsoppstilling_excel(page)
