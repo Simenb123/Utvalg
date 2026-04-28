@@ -919,6 +919,8 @@ class SaldobalansePage(ttk.Frame):  # type: ignore[misc]
             saldobalanse_payload._invalidate_group_mapping_cache()
             saldobalanse_payload._invalidate_mapping_issues_cache()
             saldobalanse_payload._invalidate_owned_company_cache()
+            import regnskapslinje_mapping_service as _rl_svc
+            _rl_svc.invalidate_owned_companies_cache()
         except Exception:
             pass
 

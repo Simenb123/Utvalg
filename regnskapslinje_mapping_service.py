@@ -824,6 +824,29 @@ def _history_overrides_by_account(client: str | None, year: int | None) -> dict[
         return {}
 
 
+# Cache for AR-eide-selskaper. ``get_client_ownership_overview`` er en
+# 3-7 s operasjon — uten cache ville hver SB-refresh + dialog-åpning
+# trigge denne på nytt. Invalideres via
+# ``invalidate_owned_companies_cache(client)`` etter AR-import el.l.
+_OWNED_COMPANIES_SUGGEST_CACHE: dict[
+    tuple[str, str], list[regnskapslinje_suggest.OwnedCompany]
+] = {}
+
+
+def invalidate_owned_companies_cache(client: str | None = None) -> None:
+    """Tøm AR-eide-selskaper-cache for én klient eller alle.
+
+    Kalles fra AR-importer/-overstyring slik at suggester-bonusen plukker
+    opp endringer uten app-restart.
+    """
+    if client is None:
+        _OWNED_COMPANIES_SUGGEST_CACHE.clear()
+        return
+    keys = [k for k in _OWNED_COMPANIES_SUGGEST_CACHE if k[0] == str(client)]
+    for k in keys:
+        _OWNED_COMPANIES_SUGGEST_CACHE.pop(k, None)
+
+
 def _load_owned_companies_for_client(
     client: str | None,
     year: int | None,
@@ -839,20 +862,30 @@ def _load_owned_companies_for_client(
     eierandeler som ligger i ``accepted_owned_base`` snarere enn i
     rå-registeret. Dette samsvarer med visningen i AR-fanen.
 
+    Cachet per (client, year) — overview-kallet er ~3-7 s og ville
+    ellers kjørt per pipeline-refresh + per dialog-åpning.
+
     Returnerer tom liste hvis AR ikke har data for klient/år.
     """
     if not client or not year:
         return []
+    cache_key = (str(client), str(year))
+    cached = _OWNED_COMPANIES_SUGGEST_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         import src.pages.ar.backend.store as ar_store
     except Exception:
+        _OWNED_COMPANIES_SUGGEST_CACHE[cache_key] = []
         return []
     try:
         overview = ar_store.get_client_ownership_overview(str(client), str(year))
     except Exception:
+        _OWNED_COMPANIES_SUGGEST_CACHE[cache_key] = []
         return []
     rows = overview.get("owned_companies") if isinstance(overview, dict) else None
     if not isinstance(rows, list):
+        _OWNED_COMPANIES_SUGGEST_CACHE[cache_key] = []
         return []
 
     out: list[regnskapslinje_suggest.OwnedCompany] = []
@@ -875,6 +908,7 @@ def _load_owned_companies_for_client(
             )
         except Exception:
             continue
+    _OWNED_COMPANIES_SUGGEST_CACHE[cache_key] = out
     return out
 
 
