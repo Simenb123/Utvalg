@@ -104,6 +104,19 @@ def _suggestion_info_text(
     return "\n".join(lines)
 
 
+def _label_for_regnr(values: list[str], regnr: int) -> str | None:
+    """Finn dropdown-label som starter med ``regnr``-nummeret.
+
+    Robust mot små forskjeller i RL-navnet — vi parser regnr-prefikset
+    fra hver verdi i listen og sammenligner som int. Returnerer None
+    hvis ingen treff.
+    """
+    for v in values:
+        if parse_regnskapslinje_choice(v) == regnr:
+            return v
+    return None
+
+
 def open_account_mapping_dialog(
     master: tk.Misc,
     *,
@@ -141,18 +154,61 @@ def open_account_mapping_dialog(
         current_overrides = {}
 
     win = tk.Toplevel(master)
-    win.title("Endre mapping")
+    win.title(f"Endre mapping — {konto} {kontonavn}")
     win.transient(master)
     win.grab_set()
-    win.resizable(False, False)
+    win.minsize(560, 360)
+    win.geometry("640x460")
 
-    frm = ttk.Frame(win, padding=10)
-    frm.pack(fill=tk.BOTH, expand=True)
+    # Hovedcontainer med padding og expand
+    outer = ttk.Frame(win, padding=14)
+    outer.pack(fill=tk.BOTH, expand=True)
+    outer.columnconfigure(0, weight=1)
+    outer.rowconfigure(2, weight=1)  # forslagspanelet kan strekke seg
 
-    ttk.Label(frm, text=f"Konto: {konto}").grid(row=0, column=0, columnspan=2, sticky="w")
-    ttk.Label(frm, text=f"Kontonavn: {kontonavn}").grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 8))
-    ttk.Label(frm, text="Ny regnskapslinje:").grid(row=2, column=0, sticky="w")
+    # ----- Header: konto + kontonavn -----
+    header = ttk.Frame(outer)
+    header.grid(row=0, column=0, sticky="ew")
+    header.columnconfigure(1, weight=1)
+    ttk.Label(header, text=str(konto), font=("Segoe UI", 14, "bold")).grid(
+        row=0, column=0, sticky="w"
+    )
+    ttk.Label(header, text=str(kontonavn or ""), font=("Segoe UI", 11)).grid(
+        row=0, column=1, sticky="w", padx=(10, 0)
+    )
+    ttk.Separator(outer, orient="horizontal").grid(row=1, column=0, sticky="ew", pady=(8, 10))
 
+    # ----- Innhold-rad: Forslag + nåværende-info -----
+    body = ttk.Frame(outer)
+    body.grid(row=2, column=0, sticky="nsew")
+    body.columnconfigure(0, weight=1)
+
+    # Nåværende-mapping info
+    info_text = _mapping_info_text(konto, current_overrides)
+    ttk.Label(body, text=info_text, foreground="#444").grid(
+        row=0, column=0, sticky="w", pady=(0, 8)
+    )
+
+    # Forslag-card (grønn match / gul konflikt) — beregn først
+    suggested_regnr_int = parse_regnskapslinje_choice(suggested_regnr)
+    current_regnr_int = parse_regnskapslinje_choice(current_regnr)
+    is_conflict = (
+        suggested_regnr_int is not None
+        and current_regnr_int is not None
+        and suggested_regnr_int != current_regnr_int
+    )
+
+    suggestion_text = _suggestion_info_text(
+        suggested_regnr=suggested_regnr,
+        suggested_regnskapslinje=suggested_regnskapslinje,
+        suggestion_reason=suggestion_reason,
+        suggestion_source=suggestion_source,
+        confidence_bucket=confidence_bucket,
+        sign_note=sign_note,
+    )
+
+    # Selve "Velg ny regnskapslinje"-raden — defineres her så vi kan
+    # binde "Bytt til forslag"-knappen mot var_choice nedenfor.
     values = [format_regnskapslinje_choice(regnr, navn) for regnr, navn in choice_pairs]
     initial_choice = _resolve_initial_choice(
         values,
@@ -162,79 +218,71 @@ def open_account_mapping_dialog(
         suggested_regnskapslinje=suggested_regnskapslinje,
     )
     var_choice = tk.StringVar(master=win, value=initial_choice)
-    cmb = ttk.Combobox(frm, textvariable=var_choice, values=values, state="readonly", width=40)
-    cmb.grid(row=2, column=1, sticky="ew", padx=(8, 0))
-    frm.columnconfigure(1, weight=1)
 
-    info_text = _mapping_info_text(konto, current_overrides)
-    ttk.Label(frm, text=info_text).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
-    suggestion_text = _suggestion_info_text(
-        suggested_regnr=suggested_regnr,
-        suggested_regnskapslinje=suggested_regnskapslinje,
-        suggestion_reason=suggestion_reason,
-        suggestion_source=suggestion_source,
-        confidence_bucket=confidence_bucket,
-        sign_note=sign_note,
-    )
-    # Konflikt-deteksjon: suggester foreslår en *annen* RL enn nåværende.
-    suggested_regnr_int = parse_regnskapslinje_choice(suggested_regnr)
-    current_regnr_int = parse_regnskapslinje_choice(current_regnr)
-    is_conflict = (
-        suggested_regnr_int is not None
-        and current_regnr_int is not None
-        and suggested_regnr_int != current_regnr_int
-    )
     if suggestion_text:
         if is_conflict:
-            # Konflikt — gul "card" med varsel + Bytt-til-forslag-knapp.
-            card_bg = "#FFF3CD"   # myk gul
+            card_bg = "#FFF3CD"
             card_fg = "#664d03"
             header_text = "⚠ Konflikt: navnet peker mot en annen regnskapslinje"
-            btn_bg = "#FFE69C"
         else:
-            # Match — grønn "card" som bekrefter at forslaget stemmer.
-            card_bg = "#E8F5E9"   # myk grønn
+            card_bg = "#E8F5E9"
             card_fg = "#1B5E20"
             header_text = "✓ Forslag stemmer overens med nåværende mapping"
-            btn_bg = None
 
-        sugg_frame = tk.Frame(frm, bg=card_bg, padx=10, pady=8,
-                              highlightbackground=card_fg, highlightthickness=1)
-        sugg_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        tk.Label(
-            sugg_frame,
-            text=header_text,
-            bg=card_bg,
-            fg=card_fg,
-            font=("Segoe UI", 9, "bold"),
-            justify="left",
-        ).pack(anchor="w")
-        tk.Label(
-            sugg_frame,
-            text=suggestion_text,
-            bg=card_bg,
-            fg=card_fg,
-            justify="left",
-            wraplength=420,
-        ).pack(anchor="w", pady=(4, 0))
+        sugg_frame = tk.Frame(
+            body, bg=card_bg, padx=12, pady=10,
+            highlightbackground=card_fg, highlightthickness=1,
+        )
+        sugg_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 12))
+        sugg_frame.columnconfigure(0, weight=1)
 
-        if is_conflict:
+        tk.Label(
+            sugg_frame, text=header_text, bg=card_bg, fg=card_fg,
+            font=("Segoe UI", 10, "bold"), justify="left",
+        ).grid(row=0, column=0, sticky="w")
+
+        tk.Label(
+            sugg_frame, text=suggestion_text, bg=card_bg, fg=card_fg,
+            justify="left", wraplength=520, font=("Segoe UI", 9),
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        if is_conflict and suggested_regnr_int is not None:
             def _bytt_til_forslag() -> None:
-                target_label = format_regnskapslinje_choice(
-                    suggested_regnr_int, str(suggested_regnskapslinje or "")
-                )
-                if target_label in values:
-                    var_choice.set(target_label)
+                # Robust: finn label ved å parse regnr-prefikset i values,
+                # ikke ved å rebuilde label-strengen (navnet kan avvike
+                # marginalt mellom kilder).
+                target = _label_for_regnr(values, suggested_regnr_int)
+                if target:
+                    var_choice.set(target)
+                else:
+                    messagebox.showinfo(
+                        "Endre mapping",
+                        f"Fant ikke regnskapslinje {suggested_regnr_int} i listen.",
+                        parent=win,
+                    )
 
             tk.Button(
-                sugg_frame,
-                text=f"Bytt til foreslått RL ({suggested_regnr_int})",
-                bg=btn_bg,
+                sugg_frame, text=f"Bytt til {suggested_regnr_int}",
+                bg="#FFE69C", relief="flat", padx=12, pady=4,
                 command=_bytt_til_forslag,
-            ).pack(anchor="w", pady=(6, 0))
+            ).grid(row=2, column=0, sticky="w", pady=(10, 0))
 
-    btns = ttk.Frame(frm)
-    btns.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
+    # ----- "Ny regnskapslinje"-raden -----
+    chooser = ttk.Frame(outer)
+    chooser.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+    chooser.columnconfigure(1, weight=1)
+    ttk.Label(chooser, text="Ny regnskapslinje:", font=("Segoe UI", 9, "bold")).grid(
+        row=0, column=0, sticky="w"
+    )
+    cmb = ttk.Combobox(
+        chooser, textvariable=var_choice, values=values, state="readonly",
+    )
+    cmb.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+
+    # ----- Knappe-rad -----
+    ttk.Separator(outer, orient="horizontal").grid(row=4, column=0, sticky="ew", pady=(0, 10))
+    btns = ttk.Frame(outer)
+    btns.grid(row=5, column=0, sticky="e")
 
     def _save() -> None:
         regnr = parse_regnskapslinje_choice(var_choice.get())
@@ -277,8 +325,11 @@ def open_account_mapping_dialog(
                 pass
 
     ttk.Button(btns, text="Lagre", command=_save).pack(side=tk.RIGHT)
-    ttk.Button(btns, text="Avbryt", command=win.destroy).pack(side=tk.RIGHT, padx=(0, 6))
-    ttk.Button(btns, text="Fjern override", command=_remove).pack(side=tk.RIGHT, padx=(0, 6))
+    ttk.Button(btns, text="Avbryt", command=win.destroy).pack(side=tk.RIGHT, padx=(0, 8))
+    ttk.Button(btns, text="Fjern override", command=_remove).pack(side=tk.RIGHT, padx=(0, 8))
+
+    # Fokus på combobox så bruker kan tastaturnavigere direkte
+    cmb.focus_set()
 
 
 class RLAccountDrillDialog(tk.Toplevel):
