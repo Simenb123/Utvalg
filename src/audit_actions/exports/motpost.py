@@ -134,7 +134,7 @@ def export_motpost_flowchart_html(page) -> None:
         return
 
     try:
-        from motpost_flowchart_report import save_flowchart_html
+        from src.audit_actions.motpost.flowchart_report import save_flowchart_html
 
         saved = save_flowchart_html(
             path,
@@ -214,7 +214,7 @@ def export_motpost_flowchart_pdf(page) -> None:
         return
 
     try:
-        from motpost_flowchart_report import save_flowchart_pdf
+        from src.audit_actions.motpost.flowchart_report import save_flowchart_pdf
 
         saved = save_flowchart_pdf(
             path,

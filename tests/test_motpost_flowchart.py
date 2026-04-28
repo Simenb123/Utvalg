@@ -45,7 +45,7 @@ def _sample_hb_df() -> pd.DataFrame:
 
 class TestMotpostEngine:
     def test_build_tree_single_root(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1, client="Test AS", year="2025")
@@ -65,7 +65,7 @@ class TestMotpostEngine:
         assert "1500" in targets
 
     def test_build_tree_depth_2(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=2)
@@ -84,7 +84,7 @@ class TestMotpostEngine:
         assert len(child.edges) >= 1
 
     def test_build_tree_multiple_roots(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000", "4000"], max_depth=1)
@@ -94,7 +94,7 @@ class TestMotpostEngine:
         assert kontos == {"3000", "4000"}
 
     def test_build_tree_unknown_account(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["9999"], max_depth=1)
@@ -103,7 +103,7 @@ class TestMotpostEngine:
         assert len(tree.root_nodes) == 0
 
     def test_edge_percentages_sum_close_to_100(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1, min_pct=0)
@@ -113,7 +113,7 @@ class TestMotpostEngine:
         assert 95.0 <= total_pct <= 100.1
 
     def test_edge_has_voucher_count(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1)
@@ -125,7 +125,7 @@ class TestMotpostEngine:
         assert edge_1500.voucher_count >= 2
 
     def test_min_pct_filters(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1, min_pct=99.0)
@@ -135,7 +135,7 @@ class TestMotpostEngine:
         assert len(root.edges) <= 1
 
     def test_top_n_limits_edges(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1, top_n=1)
@@ -144,7 +144,7 @@ class TestMotpostEngine:
         assert len(root.edges) <= 1
 
     def test_empty_df(self):
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = pd.DataFrame(columns=["Konto", "Kontonavn", "Bilag", "Beløp"])
         tree = build_motpost_tree(df, ["3000"], max_depth=1)
@@ -157,8 +157,8 @@ class TestMotpostEngine:
 
 class TestMotpostSvg:
     def test_render_produces_svg(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_svg import render_motpost_flowchart
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_svg import render_motpost_flowchart
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=2)
@@ -168,8 +168,8 @@ class TestMotpostSvg:
         assert "</svg>" in svg
 
     def test_render_contains_account_numbers(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_svg import render_motpost_flowchart
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_svg import render_motpost_flowchart
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1)
@@ -179,8 +179,8 @@ class TestMotpostSvg:
         assert "1500" in svg  # counterpart
 
     def test_render_contains_arrows(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_svg import render_motpost_flowchart
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_svg import render_motpost_flowchart
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1)
@@ -190,16 +190,16 @@ class TestMotpostSvg:
         assert "<path" in svg
 
     def test_render_empty_tree(self):
-        from motpost_flowchart_engine import MotpostTree
-        from motpost_flowchart_svg import render_motpost_flowchart
+        from src.audit_actions.motpost.flowchart_engine import MotpostTree
+        from src.audit_actions.motpost.flowchart_svg import render_motpost_flowchart
 
         tree = MotpostTree()
         svg = render_motpost_flowchart(tree)
         assert svg == ""
 
     def test_render_multiple_roots(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_svg import render_motpost_flowchart
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_svg import render_motpost_flowchart
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000", "4000"], max_depth=1)
@@ -215,8 +215,8 @@ class TestMotpostSvg:
 
 class TestMotpostReport:
     def test_build_flowchart_html(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_report import build_flowchart_html
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_report import build_flowchart_html
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=2, client="Test AS", year="2025")
@@ -229,8 +229,8 @@ class TestMotpostReport:
         assert "Motpostanalyse" in html
 
     def test_build_summary_table(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_report import _build_summary_table
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_report import _build_summary_table
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=2)
@@ -242,7 +242,7 @@ class TestMotpostReport:
         assert "%" in table
 
     def test_save_flowchart_html(self, tmp_path):
-        from motpost_flowchart_report import save_flowchart_html
+        from src.audit_actions.motpost.flowchart_report import save_flowchart_html
 
         df = _sample_hb_df()
         out = save_flowchart_html(
@@ -261,7 +261,7 @@ class TestMotpostReport:
         assert "<svg" in content
 
     def test_save_html_adds_extension(self, tmp_path):
-        from motpost_flowchart_report import save_flowchart_html
+        from src.audit_actions.motpost.flowchart_report import save_flowchart_html
 
         df = _sample_hb_df()
         out = save_flowchart_html(
@@ -272,8 +272,8 @@ class TestMotpostReport:
         assert out.endswith(".html")
 
     def test_legend_in_html(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_report import build_flowchart_html
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_report import build_flowchart_html
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=2)
@@ -284,15 +284,15 @@ class TestMotpostReport:
         assert "Motposter (ledd 2)" in html
 
     def test_format_amount(self):
-        from motpost_flowchart_report import _format_amount
+        from src.audit_actions.motpost.flowchart_report import _format_amount
 
         assert "M" in _format_amount(5_000_000)
         assert "k" in _format_amount(50_000)
         assert _format_amount(500) == "500"
 
     def test_rl_mode_legend(self):
-        from motpost_flowchart_engine import build_motpost_tree
-        from motpost_flowchart_report import build_flowchart_html
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_report import build_flowchart_html
 
         df = _sample_hb_df()
         tree = build_motpost_tree(df, ["3000"], max_depth=1)
@@ -303,7 +303,7 @@ class TestMotpostReport:
 
     def test_rl_mode_engine_aggregates_accounts(self):
         """Med konto_to_rl skal kontoer i samme RL slås sammen til én node."""
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         df = _sample_hb_df()
         # Map begge salgskontiene (3000 og 1500) til samme RL
@@ -333,7 +333,7 @@ class TestMotpostReport:
 
     def test_rl_mode_groups_multiple_accounts(self):
         """To kontoer i samme RL slås til én node."""
-        from motpost_flowchart_engine import build_motpost_tree
+        from src.audit_actions.motpost.flowchart_engine import build_motpost_tree
 
         # Legg til en ekstra salgskonto i samme RL som 3000
         extra_rows = [
