@@ -102,6 +102,29 @@ class _Candidate:
     normal_balance_hint: str
 
 
+@dataclass(frozen=True)
+class OwnedCompany:
+    """Et selskap klienten eier — brukes for AR-basert suggester-bonus.
+
+    Lastes fra ``src.pages.ar.backend.store.list_owned_companies`` av
+    pipeline-laget og sendes inn i ``suggest_with_candidates`` slik at
+    konto-kandidater i investerings-intervallet kan få en sterk bonus
+    når kontonavnet matcher et eid selskap (fullt navn eller akronym).
+
+    Felt:
+    - ``name`` — selskapsnavn (f.eks. "Gardermoen Perishable Center AS")
+    - ``acronym`` — beregnet akronym ("GPC")
+    - ``ownership_pct`` — eierskapsprosent (0.0–100.0)
+    - ``suggested_regnr`` — forventet RL basert på eierskapsgrad
+        (560 datter / 575 tilknyttet / 585 aksjer og andeler)
+    """
+
+    name: str
+    acronym: str
+    ownership_pct: float
+    suggested_regnr: int
+
+
 def _clean_text(value: object) -> str:
     return str(value or "").strip()
 
@@ -238,6 +261,68 @@ def _candidate_aliases(rule_payload: Mapping[str, Any], label: str) -> tuple[str
     return tuple(out)
 
 
+# Selskapsformer + småord som ekskluderes fra akronym-bygging.
+_ACRONYM_STOP_WORDS = frozenset({
+    # Norske selskapsformer
+    "as", "asa", "ans", "kf", "ks", "da", "ba", "iks", "stf", "fkf",
+    # Preposisjoner og småord
+    "i", "og", "av", "til", "for", "pa", "med", "om", "under", "ved",
+    # Engelsk
+    "the", "of", "and",
+})
+
+
+def company_acronym(name: str) -> str:
+    """Beregn akronym fra selskapsnavn.
+
+    Plukker første bokstav fra hvert "betydningsfulle" ord, hopper over
+    selskapsformer (AS/ASA/...) og småord (i, og, av, ...). Returnerer
+    tom streng hvis det ikke er nok bokstaver til å gi mening.
+
+    Eksempler:
+    - "Gardermoen Perishable Center AS" → "GPC"
+    - "Air Cargo Logistics AS"          → "ACL"
+    - "Live Seafood Center AS"          → "LSC"
+    - "BAGID AS"                         → "B"  (kun ett ord, ikke akronym)
+    """
+    if not name:
+        return ""
+    # Erstatt bindestrek og skråstrek så vi splitter på dem også
+    cleaned = name.replace("-", " ").replace("/", " ").replace(".", " ")
+    words = cleaned.split()
+    initials: list[str] = []
+    for w in words:
+        clean = w.strip("()[]{},;:!?\"'`").lower()
+        if not clean or clean in _ACRONYM_STOP_WORDS:
+            continue
+        if not w[0].isalpha():
+            continue
+        initials.append(w[0].upper())
+    # Kun reell akronym når 2+ initialer (ett ord = ikke akronym)
+    if len(initials) < 2:
+        return ""
+    return "".join(initials)
+
+
+def ownership_pct_to_regnr(pct: float) -> int:
+    """Mapper eierskapsprosent til typisk RL for investerings-konto.
+
+    Følger NGAAP og typisk norsk kontoplan-bruk:
+    - >= 50 %  → 560 Investering i datterselskap
+    - 20-50 %  → 575 Investeringer i tilknyttet selskap
+    - < 20 %   → 585 Investeringer i aksjer og andeler
+    """
+    try:
+        p = float(pct)
+    except (TypeError, ValueError):
+        p = 0.0
+    if p >= 50.0:
+        return 560
+    if p >= 20.0:
+        return 575
+    return 585
+
+
 def build_candidates(
     regnskapslinjer: pd.DataFrame | None,
     *,
@@ -312,6 +397,46 @@ def _sign_note(*, hint: str, ub: float, movement: float, ib: float) -> tuple[flo
     return -0.08, "Fortegn avviker fra forventet normalbalanse, men blokkerer ikke forslaget."
 
 
+def _owned_company_match(
+    *,
+    kontonavn_upper: str,
+    owned_companies: list[OwnedCompany],
+    candidate_regnr: int,
+) -> tuple[float, str]:
+    """Returner (bonus, reason) hvis kontonavnet matcher et eid selskap
+    *og* selskapets eierskaps-RL stemmer med kandidaten.
+
+    To match-typer:
+    - Fullt selskapsnavn (uten selskapsform-suffiks) i kontonavnet → +0.45
+    - Akronym (2+ bokstaver) som "ord" i kontonavnet → +0.30
+
+    Returnerer (0.0, "") hvis ingen treff.
+    """
+    if not owned_companies or not kontonavn_upper:
+        return 0.0, ""
+    konto_words = set(kontonavn_upper.replace(",", " ").replace(".", " ").split())
+    for company in owned_companies:
+        if company.suggested_regnr != candidate_regnr:
+            continue
+        # Strip selskapsform fra navnet og match på resten
+        full_name_upper = company.name.upper()
+        # Fjern vanlige selskapsform-suffiks for matching
+        base_name = full_name_upper
+        for suffix in (" AS", " ASA", " ANS", " DA"):
+            if base_name.endswith(suffix):
+                base_name = base_name[: -len(suffix)].strip()
+                break
+        if base_name and base_name in kontonavn_upper:
+            pct = company.ownership_pct
+            return 0.45, f"eid selskap: {company.name} ({pct:.0f}%)"
+        # Akronym-match (krever ord-grense)
+        if company.acronym and len(company.acronym) >= 2:
+            if company.acronym in konto_words:
+                pct = company.ownership_pct
+                return 0.30, f"akronym {company.acronym} = {company.name} ({pct:.0f}%)"
+    return 0.0, ""
+
+
 def suggest_with_candidates(
     candidates: list[_Candidate],
     *,
@@ -322,18 +447,24 @@ def suggest_with_candidates(
     ub: float = 0.0,
     usage: AccountUsageFeatures | None = None,
     historical_regnr: int | None = None,
+    owned_companies: list[OwnedCompany] | None = None,
 ) -> RegnskapslinjeSuggestion | None:
     """Score forhåndsbygde kandidater mot konto+navn+bruk og returner beste forslag.
 
     Trukket ut fra ``suggest_regnskapslinje`` slik at kallere som behandler
     mange kontoer (f.eks. ``enrich_rl_mapping_issues_with_suggestions``)
     kan bygge kandidatene én gang og gjenbruke dem.
+
+    ``owned_companies`` (valgfri): liste over selskaper klienten eier.
+    Når kontonavnet matcher et selskapsnavn eller akronym, gis stor bonus
+    til den RL-en som matcher eierskapsgraden (560/575/585).
     """
     if not candidates:
         return None
 
     account_tokens = _dedupe_tokens(_tokenize(kontonavn))
     usage_tokens = _dedupe_tokens(set(getattr(usage, "top_text_tokens", ()) or ()))
+    kontonavn_upper = (kontonavn or "").upper()
     best: RegnskapslinjeSuggestion | None = None
     best_score = -10.0
 
@@ -364,6 +495,17 @@ def suggest_with_candidates(
             score += 0.48
             reasons.append("historikk")
 
+        # AR-bonus: kontonavnet matcher et selskap klienten eier, og
+        # eierskapsgrad-RL stemmer med kandidaten.
+        ar_bonus, ar_reason = _owned_company_match(
+            kontonavn_upper=kontonavn_upper,
+            owned_companies=owned_companies or [],
+            candidate_regnr=candidate.regnr,
+        )
+        if ar_bonus > 0:
+            score += ar_bonus
+            reasons.append(ar_reason)
+
         sign_score, sign_text = _sign_note(hint=candidate.normal_balance_hint, ub=ub, movement=movement, ib=ib)
         score += sign_score
 
@@ -374,7 +516,11 @@ def suggest_with_candidates(
         if score < 0.45:
             continue
 
-        if historical_regnr is not None and int(historical_regnr) == candidate.regnr and not alias_hits and not usage_hits:
+        if ar_bonus > 0 and ar_bonus >= 0.45 and not alias_hits:
+            source = "eid_selskap"
+        elif ar_bonus > 0:
+            source = "akronym"
+        elif historical_regnr is not None and int(historical_regnr) == candidate.regnr and not alias_hits and not usage_hits:
             source = "historikk"
         elif alias_hits and usage_hits:
             source = "alias+kontobruk"
@@ -417,6 +563,7 @@ def suggest_regnskapslinje(
     rulebook_document: Mapping[str, Any] | None = None,
     usage: AccountUsageFeatures | None = None,
     historical_regnr: int | None = None,
+    owned_companies: list[OwnedCompany] | None = None,
 ) -> RegnskapslinjeSuggestion | None:
     """Bygg kandidater og kall ``suggest_with_candidates``.
 
@@ -434,4 +581,5 @@ def suggest_regnskapslinje(
         ub=ub,
         usage=usage,
         historical_regnr=historical_regnr,
+        owned_companies=owned_companies,
     )
