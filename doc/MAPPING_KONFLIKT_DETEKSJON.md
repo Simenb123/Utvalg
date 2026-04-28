@@ -91,6 +91,9 @@ Anbefalt rekkefølge når brukeren vil fortsette:
 4. **Bulk-review-popup** som videre utvikling av A2 — knapper for
    «Bytt valgte» / «Marker valgte som vurdert» på tvers av klient.
 
+For konkret innsats-estimat, oppskrift, filer som skal endres og tips
+til utvikleren som tar over: se [MAPPING_KONFLIKT_HANDOVER.md](MAPPING_KONFLIKT_HANDOVER.md).
+
 ## Bakgrunn
 
 Saldobalanse-til-regnskapslinje-mapping i appen har tre lag:
