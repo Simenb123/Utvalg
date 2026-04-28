@@ -199,7 +199,7 @@ def refresh_nokkeltall_view(page: Any) -> None:
             pass
 
     try:
-        import nokkeltall_engine
+        import src.audit_actions.nokkeltall.engine as nokkeltall_engine
         import page_analyse_export
     except Exception as exc:
         _write(f"Kunne ikke laste nøkkeltall-moduler:\n{exc}")

@@ -275,7 +275,7 @@ def export_nokkeltall_html(page) -> None:
         return
 
     try:
-        import nokkeltall_report
+        import src.audit_actions.nokkeltall.report as nokkeltall_report
 
         saved = nokkeltall_report.save_report_html(
             path,
@@ -339,7 +339,7 @@ def export_nokkeltall_pdf(page) -> None:
         return
 
     try:
-        import nokkeltall_report
+        import src.audit_actions.nokkeltall.report as nokkeltall_report
 
         saved = nokkeltall_report.save_report_pdf(
             path,

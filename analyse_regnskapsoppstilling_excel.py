@@ -599,7 +599,7 @@ def _append_nokkeltall_section(
 ) -> None:
     """Legg nøkkeltall inn på arket, startende fra start_row."""
     try:
-        from nokkeltall_engine import compute_nokkeltall
+        from src.audit_actions.nokkeltall.engine import compute_nokkeltall
     except ImportError:
         return
 
