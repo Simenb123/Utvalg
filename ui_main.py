@@ -25,7 +25,7 @@ _ADMIN_PASSWORD_TITLE = "Admin"
 from src.pages.dataset.frontend.page import DatasetPage
 from page_analyse import AnalysePage
 from src.pages.saldobalanse.frontend.page import SaldobalansePage
-from page_admin import AdminPage
+from src.pages.admin.page import AdminPage
 from src.pages.a07 import A07Page
 from src.pages.utvalg.frontend.strata import UtvalgStrataPage
 

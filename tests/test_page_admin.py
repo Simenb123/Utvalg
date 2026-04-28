@@ -4,8 +4,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import classification_workspace
-import page_admin
-import page_admin_rulebook
+import src.pages.admin.page as page_admin
+import src.pages.admin.rulebook as page_admin_rulebook
 
 
 def _field(display: str = "", *, provenance: classification_workspace.ClassificationProvenance | None = None) -> classification_workspace.ClassificationFieldState:
@@ -1488,7 +1488,7 @@ def test_admin_page_preview_ui_help_does_not_mention_rl_control() -> None:
 
     import inspect
 
-    import page_admin_preview_panel
+    import src.pages.admin.preview_panel as page_admin_preview_panel
 
     source = inspect.getsource(page_admin_preview_panel.build_preview_ui)
     assert "RL-kontroll" not in source
@@ -1746,7 +1746,7 @@ def test_build_preview_ui_initial_headline_says_not_loaded_yet() -> None:
 
     import inspect
 
-    import page_admin_preview_panel
+    import src.pages.admin.preview_panel as page_admin_preview_panel
 
     source = inspect.getsource(page_admin_preview_panel.build_preview_ui)
     assert "Preview er ikke lastet ennå" in source
@@ -1757,7 +1757,7 @@ def test_refresh_preview_button_still_wires_refresh_preview_rows() -> None:
 
     import inspect
 
-    import page_admin_preview_panel
+    import src.pages.admin.preview_panel as page_admin_preview_panel
 
     source = inspect.getsource(page_admin_preview_panel.build_preview_ui)
     assert 'text="Oppfrisk preview"' in source
