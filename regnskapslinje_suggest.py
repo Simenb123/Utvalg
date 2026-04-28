@@ -312,19 +312,23 @@ def _sign_note(*, hint: str, ub: float, movement: float, ib: float) -> tuple[flo
     return -0.08, "Fortegn avviker fra forventet normalbalanse, men blokkerer ikke forslaget."
 
 
-def suggest_regnskapslinje(
+def suggest_with_candidates(
+    candidates: list[_Candidate],
     *,
     konto: str,
     kontonavn: str,
     ib: float = 0.0,
     movement: float = 0.0,
     ub: float = 0.0,
-    regnskapslinjer: pd.DataFrame | None,
-    rulebook_document: Mapping[str, Any] | None = None,
     usage: AccountUsageFeatures | None = None,
     historical_regnr: int | None = None,
 ) -> RegnskapslinjeSuggestion | None:
-    candidates = build_candidates(regnskapslinjer, rulebook_document=rulebook_document)
+    """Score forhåndsbygde kandidater mot konto+navn+bruk og returner beste forslag.
+
+    Trukket ut fra ``suggest_regnskapslinje`` slik at kallere som behandler
+    mange kontoer (f.eks. ``enrich_rl_mapping_issues_with_suggestions``)
+    kan bygge kandidatene én gang og gjenbruke dem.
+    """
     if not candidates:
         return None
 
@@ -400,3 +404,34 @@ def suggest_regnskapslinje(
             best_score = score
 
     return best
+
+
+def suggest_regnskapslinje(
+    *,
+    konto: str,
+    kontonavn: str,
+    ib: float = 0.0,
+    movement: float = 0.0,
+    ub: float = 0.0,
+    regnskapslinjer: pd.DataFrame | None,
+    rulebook_document: Mapping[str, Any] | None = None,
+    usage: AccountUsageFeatures | None = None,
+    historical_regnr: int | None = None,
+) -> RegnskapslinjeSuggestion | None:
+    """Bygg kandidater og kall ``suggest_with_candidates``.
+
+    Bakoverkompat-wrapper for kallere som ikke har grunn til å gjenbruke
+    kandidatene mellom kontoer. Bruk ``build_candidates`` +
+    ``suggest_with_candidates`` direkte når du itererer over mange kontoer.
+    """
+    candidates = build_candidates(regnskapslinjer, rulebook_document=rulebook_document)
+    return suggest_with_candidates(
+        candidates,
+        konto=konto,
+        kontonavn=kontonavn,
+        ib=ib,
+        movement=movement,
+        ub=ub,
+        usage=usage,
+        historical_regnr=historical_regnr,
+    )
