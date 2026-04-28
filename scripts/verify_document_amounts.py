@@ -58,9 +58,9 @@ def _fmt_bbox(bbox: tuple[float, float, float, float] | None) -> str:
 
 def _load_profiles() -> dict[str, SupplierProfile] | None:
     try:
-        from document_control_store import load_supplier_profiles
+        from src.shared.document_control.store import load_supplier_profiles
     except Exception as exc:
-        print(f"[warn] could not import document_control_store: {exc}", file=sys.stderr)
+        print(f"[warn] could not import src.shared.document_control.store as document_control_store: {exc}", file=sys.stderr)
         return None
     raw = load_supplier_profiles() or {}
     out: dict[str, SupplierProfile] = {}

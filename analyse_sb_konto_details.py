@@ -314,7 +314,7 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
 
     # ---------- Delt visning: samlet venstreside ↔ preview (høyre) ----------
     try:
-        from document_control_viewer import (
+        from src.shared.document_control.viewer import (
             DocumentPreviewFrame,
             preview_target_from_ub_evidence,
         )
@@ -733,7 +733,7 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
         if preview is None or expected_ub_value is None:
             return None
         try:
-            from document_control_viewer import preview_kind_for_path
+            from src.shared.document_control.viewer import preview_kind_for_path
             if preview_kind_for_path(path) != "pdf":
                 return None
         except Exception:
@@ -759,7 +759,7 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
         if expected_ub_value is None or preview is None:
             return
         try:
-            from document_control_viewer import preview_kind_for_path
+            from src.shared.document_control.viewer import preview_kind_for_path
             kind = preview_kind_for_path(path)
         except Exception:
             kind = "unsupported"
@@ -896,7 +896,7 @@ def show_kontodetaljer_dialog(*, page: Any, konto: str, kontonavn: str = "") -> 
             return
 
         try:
-            from document_control_viewer import preview_kind_for_path
+            from src.shared.document_control.viewer import preview_kind_for_path
             kind = preview_kind_for_path(path)
         except Exception:
             kind = "unsupported"

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from document_control_review_dialog import (
+from src.shared.document_control.review_dialog import (
     _field_matches,
     _parse_amount,
     _pdf_search_variants,
@@ -206,7 +206,7 @@ def test_parse_amount_does_not_misread_two_digit_fractions() -> None:
 # a minimal fake-instance that carries the same state dicts / StringVars
 # the real dialog uses. The method only reads state; no window required.
 
-from document_control_review_dialog import DocumentControlReviewDialog, FIELD_DEFS
+from src.shared.document_control.review_dialog import DocumentControlReviewDialog, FIELD_DEFS
 
 
 class _FakeStringVar:

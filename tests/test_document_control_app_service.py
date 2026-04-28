@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from document_control_app_service import build_voucher_context
+from src.shared.document_control.app_service import build_voucher_context
 
 
 def test_build_voucher_context_handles_alternative_column_names() -> None:

@@ -362,7 +362,7 @@ class SelectionStudio(ttk.Frame):
 
     def _populate_tree(self, df: pd.DataFrame) -> None:
         try:
-            from document_control_app_service import load_document_statuses
+            from src.shared.document_control.app_service import load_document_statuses
 
             bilag_keys = [str(bilag or "").strip() for bilag in df["Bilag"].tolist()] if "Bilag" in df.columns else []
             dok_statuses = load_document_statuses(

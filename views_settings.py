@@ -344,7 +344,7 @@ def build_data_source_rows() -> list[DataSourceRow]:
         ar_db = data_dir / "aksjonaerregister" / "ar_index.sqlite"
 
     try:
-        import document_control_store
+        import src.shared.document_control.store as document_control_store
 
         document_store = document_control_store._store_path()  # type: ignore[attr-defined]
     except Exception:

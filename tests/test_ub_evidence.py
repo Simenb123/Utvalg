@@ -191,7 +191,7 @@ def test_parse_norwegian_number_handles_common_formats() -> None:
 
 
 def test_compute_ub_status_logic() -> None:
-    from document_control_viewer import preview_target_from_ub_evidence
+    from src.shared.document_control.viewer import preview_target_from_ub_evidence
 
     # Status helper lives inside the dialog closure, so test the minimum via
     # a direct equivalent here:

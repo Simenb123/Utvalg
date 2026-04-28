@@ -258,7 +258,7 @@ def open_bilag_drill_dialog(
             client = None
             year = None
         try:
-            from document_control_voucher_index import find_and_extract_bilag
+            from src.shared.document_control.voucher_index import find_and_extract_bilag
         except Exception as exc:
             messagebox.showerror("Se bilag", f"Bilag-modulen kunne ikke lastes:\n{exc}")
             return

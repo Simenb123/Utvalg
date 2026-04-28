@@ -31,7 +31,7 @@ class _FakeDoc:
 
 
 def test_variant_generation_covers_norwegian_and_english() -> None:
-    from document_control_viewer import generate_amount_search_variants
+    from src.shared.document_control.viewer import generate_amount_search_variants
 
     variants = generate_amount_search_variants(954386.28)
     assert "954 386,28" in variants
@@ -43,7 +43,7 @@ def test_variant_generation_covers_norwegian_and_english() -> None:
 
 
 def test_variant_generation_negative_wraps_with_minus_and_parens() -> None:
-    from document_control_viewer import generate_amount_search_variants
+    from src.shared.document_control.viewer import generate_amount_search_variants
 
     variants = generate_amount_search_variants(-1250.0)
     assert any(v.startswith("-") for v in variants)
@@ -51,14 +51,14 @@ def test_variant_generation_negative_wraps_with_minus_and_parens() -> None:
 
 
 def test_variant_generation_empty_for_bad_input() -> None:
-    from document_control_viewer import generate_amount_search_variants
+    from src.shared.document_control.viewer import generate_amount_search_variants
 
     assert generate_amount_search_variants(float("nan")) == []
     assert generate_amount_search_variants(None) == []  # type: ignore[arg-type]
 
 
 def test_find_ub_match_returns_best_when_keyword_is_near() -> None:
-    from document_control_viewer import find_ub_match_in_pdf
+    from src.shared.document_control.viewer import find_ub_match_in_pdf
 
     # Side 1: én treff for verdien, og ordet "UB" rett ved siden av
     page1 = _FakePage({
@@ -77,7 +77,7 @@ def test_find_ub_match_returns_best_when_keyword_is_near() -> None:
 
 
 def test_find_ub_match_returns_none_when_no_hit() -> None:
-    from document_control_viewer import find_ub_match_in_pdf
+    from src.shared.document_control.viewer import find_ub_match_in_pdf
 
     page1 = _FakePage({})
     doc = _FakeDoc([page1])
@@ -86,7 +86,7 @@ def test_find_ub_match_returns_none_when_no_hit() -> None:
 
 def test_find_ub_match_returns_none_when_ambiguous() -> None:
     """To treff langt fra stikkord med samme score skal avvises som tvetydig."""
-    from document_control_viewer import find_ub_match_in_pdf
+    from src.shared.document_control.viewer import find_ub_match_in_pdf
 
     page1 = _FakePage({
         "1 234,56": [
@@ -101,7 +101,7 @@ def test_find_ub_match_returns_none_when_ambiguous() -> None:
 
 def test_find_ub_match_picks_winner_when_one_near_keyword() -> None:
     """Av to treff velges den som er tett på et stikkord."""
-    from document_control_viewer import find_ub_match_in_pdf
+    from src.shared.document_control.viewer import find_ub_match_in_pdf
 
     page1 = _FakePage({
         "1 234,56": [
@@ -118,7 +118,7 @@ def test_find_ub_match_picks_winner_when_one_near_keyword() -> None:
 
 def test_find_ub_match_dedupes_across_variants_on_same_bbox() -> None:
     """Flere varianter som treffer nøyaktig samme bbox skal telles som én gruppe."""
-    from document_control_viewer import find_ub_match_in_pdf
+    from src.shared.document_control.viewer import find_ub_match_in_pdf
 
     # Samme bbox for to varianter — skal behandles som én kandidat, ikke tvetydig
     shared = [(100.0, 200.0, 160.0, 210.0)]
@@ -134,13 +134,13 @@ def test_find_ub_match_dedupes_across_variants_on_same_bbox() -> None:
 
 
 def test_find_ub_match_handles_none_doc() -> None:
-    from document_control_viewer import find_ub_match_in_pdf
+    from src.shared.document_control.viewer import find_ub_match_in_pdf
     assert find_ub_match_in_pdf(None, 100.0) is None
 
 
 def test_preview_frame_find_ub_match_requires_pdf() -> None:
     """find_ub_match på preview-instans uten lastet PDF returnerer None."""
-    from document_control_viewer import DocumentPreviewFrame
+    from src.shared.document_control.viewer import DocumentPreviewFrame
 
     # Bruk en SimpleNamespace i stedet for å konstruere et ekte Tk-vindu
     frame = SimpleNamespace(
@@ -157,7 +157,7 @@ def test_preview_frame_find_ub_match_requires_pdf() -> None:
 
 
 def test_preview_frame_find_ub_match_delegates_to_doc() -> None:
-    from document_control_viewer import DocumentPreviewFrame
+    from src.shared.document_control.viewer import DocumentPreviewFrame
 
     page1 = _FakePage({
         "1 234,56": [(100.0, 200.0, 160.0, 210.0)],

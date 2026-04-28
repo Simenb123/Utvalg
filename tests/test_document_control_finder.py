@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-import document_control_finder as finder
+import src.shared.document_control.finder as finder
 
 
 def test_suggest_documents_for_bilag_prefers_pdf_with_bilag_and_reference_match(

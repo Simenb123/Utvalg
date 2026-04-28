@@ -139,7 +139,7 @@ def test_scan_voucher_pdf_returns_empty_when_file_missing():
 # ---------------------------------------------------------------------------
 
 def test_find_and_extract_bilag_returns_none_when_no_vouchers(tmp_path, monkeypatch):
-    import document_control_voucher_index as idx
+    import src.shared.document_control.voucher_index as idx
 
     # Point search dirs to an empty temp directory
     monkeypatch.setattr(idx, "get_voucher_search_dirs", lambda *a, **kw: [tmp_path])

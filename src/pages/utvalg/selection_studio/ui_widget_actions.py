@@ -20,8 +20,8 @@ from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
 
 import session
-from document_control_dialog import DocumentControlDialog
-from document_control_service import normalize_bilag_key
+from src.shared.document_control.dialog import DocumentControlDialog
+from src.shared.document_control.service import normalize_bilag_key
 from controller_export import export_to_excel
 from .helpers import fmt_amount_no, fmt_int_no
 
@@ -306,7 +306,7 @@ def _refresh_tree_dok_status(
     visible without re-running the full selection.
     """
     try:
-        from document_control_app_service import load_document_statuses
+        from src.shared.document_control.app_service import load_document_statuses
 
         statuses = load_document_statuses(client, year, [bilag])
         new_status = statuses.get(bilag, "")
@@ -350,8 +350,8 @@ def _refresh_tree_dok_status(
 
 def open_batch_document_control(studio: Any) -> None:
     """Open the batch document control dialog for all bilag in the current sample."""
-    from document_control_batch_dialog import BatchDocumentControlDialog
-    from document_control_service import normalize_bilag_key
+    from src.shared.document_control.batch_dialog import BatchDocumentControlDialog
+    from src.shared.document_control.service import normalize_bilag_key
 
     df_sample = getattr(studio, "_df_sample", None)
     if df_sample is None or getattr(df_sample, "empty", True):
@@ -393,7 +393,7 @@ def open_batch_document_control(studio: Any) -> None:
 
 def open_voucher_setup(studio: Any) -> None:
     """Open the voucher PDF setup dialog for the current client/year."""
-    from document_control_voucher_dialog import VoucherSetupDialog
+    from src.shared.document_control.voucher_dialog import VoucherSetupDialog
 
     client = getattr(session, "client", None)
     year = getattr(session, "year", None)

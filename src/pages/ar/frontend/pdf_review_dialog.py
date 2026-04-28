@@ -13,7 +13,7 @@ from tkinter import ttk
 from pathlib import Path
 
 from ..backend.pdf_parser import ParseResult, ShareholderRecord
-from document_control_viewer import DocumentPreviewFrame
+from src.shared.document_control.viewer import DocumentPreviewFrame
 
 
 def _fmt_n(n: int) -> str:

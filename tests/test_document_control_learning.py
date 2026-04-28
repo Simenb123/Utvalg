@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from document_control_learning import (
+from src.shared.document_control.learning import (
     apply_supplier_profile,
     build_supplier_profile,
     match_supplier_profile,
@@ -661,8 +661,8 @@ def test_reload_segments_for_populates_raw_text_and_segments(monkeypatch, tmp_pa
     without first running 'Les oppl.' still persists non-empty text."""
     from document_engine.engine import ExtractedTextResult, TextSegment
     import document_engine.engine as _engine
-    import document_control_review_dialog as _dlg_mod
-    from document_control_review_dialog import DocumentControlReviewDialog as _Dlg
+    import src.shared.document_control.review_dialog as _dlg_mod
+    from src.shared.document_control.review_dialog import DocumentControlReviewDialog as _Dlg
 
     fake_text = "Brage Arkitekter AS\nFaktura 12345\nSum 800,00"
     fake_segments = [TextSegment(text=fake_text, source="pdf_text_fitz", page=1)]
@@ -691,7 +691,7 @@ def test_reload_segments_for_populates_raw_text_and_segments(monkeypatch, tmp_pa
 
 
 def test_reload_segments_for_resets_state_for_missing_path(tmp_path) -> None:
-    from document_control_review_dialog import DocumentControlReviewDialog as _Dlg
+    from src.shared.document_control.review_dialog import DocumentControlReviewDialog as _Dlg
     from document_engine.engine import TextSegment
 
     holder = _Dlg.__new__(_Dlg)
@@ -879,8 +879,8 @@ def test_reanalyse_uses_analysis_segments_without_calling_reload_helper(monkeypa
     pick a different candidate than the one analyze_document just chose
     (most importantly: would overwrite a redo-OCR selection with the native
     extraction)."""
-    import document_control_app_service as _app_service
-    from document_control_review_dialog import DocumentControlReviewDialog as _Dlg
+    import src.shared.document_control.app_service as _app_service
+    from src.shared.document_control.review_dialog import DocumentControlReviewDialog as _Dlg
     from document_engine.engine import TextSegment
     from document_engine.models import DocumentAnalysisResult, DocumentFacts
 
@@ -946,7 +946,7 @@ def test_reanalyse_uses_analysis_segments_without_calling_reload_helper(monkeypa
     holder.update_idletasks = lambda: None
 
     # Patch the module-level helpers used by _reanalyse (FIELD_DEFS, _bilag_rows)
-    import document_control_review_dialog as _dlg_mod
+    import src.shared.document_control.review_dialog as _dlg_mod
     monkeypatch.setattr(_dlg_mod, "FIELD_DEFS", [], raising=False)
     monkeypatch.setattr(_dlg_mod, "_bilag_rows", lambda _df, _nr: None)
 

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-import document_control_app_service as app_service
-import document_control_service as service
+import src.shared.document_control.app_service as app_service
+import src.shared.document_control.service as service
 import document_engine.engine as engine
 from document_engine.models import SupplierProfile
 

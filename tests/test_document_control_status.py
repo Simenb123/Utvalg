@@ -1,7 +1,7 @@
 """Tests for document status helpers in document_control_app_service."""
 from __future__ import annotations
 
-from document_control_app_service import (
+from src.shared.document_control.app_service import (
     DOK_STATUS_AVVIK,
     DOK_STATUS_LINKED,
     DOK_STATUS_NOT_LINKED,
@@ -66,7 +66,7 @@ def test_load_document_statuses_empty_list_returns_empty() -> None:
 
 
 def test_load_document_statuses_missing_bilag_returns_not_linked(tmp_path, monkeypatch) -> None:
-    import document_control_store as store
+    import src.shared.document_control.store as store
 
     monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "store.json")
 
@@ -75,7 +75,7 @@ def test_load_document_statuses_missing_bilag_returns_not_linked(tmp_path, monke
 
 
 def test_load_document_statuses_reflects_saved_record(tmp_path, monkeypatch) -> None:
-    import document_control_store as store
+    import src.shared.document_control.store as store
 
     monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "store.json")
 
@@ -97,7 +97,7 @@ def test_load_document_statuses_reflects_saved_record(tmp_path, monkeypatch) -> 
 
 
 def test_load_document_statuses_avvik_when_messages(tmp_path, monkeypatch) -> None:
-    import document_control_store as store
+    import src.shared.document_control.store as store
 
     monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "store.json")
 

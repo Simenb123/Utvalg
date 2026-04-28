@@ -463,7 +463,7 @@ def build_transactions_view_df(
             import session as _session
             _client = getattr(_session, "client", None)
             _year = getattr(_session, "year", None)
-            from document_control_voucher_index import get_cached_index
+            from src.shared.document_control.voucher_index import get_cached_index
             _index = get_cached_index(
                 str(_client) if _client else None,
                 str(_year) if _year else None,
@@ -472,7 +472,7 @@ def build_transactions_view_df(
                 # Indeksen er keyet på normalisert bilag-nr (strip + fjern
                 # trailing .0 + konverter til int). Bruk samme normalisering
                 # som document_control_voucher_index._norm før lookup.
-                from document_control_voucher_index import _norm as _norm_bilag
+                from src.shared.document_control.voucher_index import _norm as _norm_bilag
                 bilag_keys_in_index = set(_index.keys())
 
                 def _has_pdf(b: object) -> str:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from document_control_viewer import preview_kind_for_path, preview_target_from_evidence
+from src.shared.document_control.viewer import preview_kind_for_path, preview_target_from_evidence
 from document_engine.models import FieldEvidence
 
 

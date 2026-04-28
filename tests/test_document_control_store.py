@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import document_control_store
+import src.shared.document_control.store as document_control_store
 
 
 def test_save_and_load_document_record_roundtrip(tmp_path: Path, monkeypatch) -> None:

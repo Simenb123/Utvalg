@@ -259,7 +259,7 @@ def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> Non
         return
     from src.shared.ui.dialog import make_dialog
     from .haphazard_store import save_haphazard_test  # noqa: F401 (also imported in _save)
-    from document_control_voucher_index import find_and_extract_bilag
+    from src.shared.document_control.voucher_index import find_and_extract_bilag
 
     # Sammendrag fra første rad i utvalget (sum/største linje)
     konto_str = ""
@@ -1085,7 +1085,7 @@ def open_bilag_split_view(
 
     preview_frame = None
     try:
-        from document_control_viewer import DocumentPreviewFrame
+        from src.shared.document_control.viewer import DocumentPreviewFrame
         preview_frame = DocumentPreviewFrame(right, show_toolbar=False)
         preview_frame.pack(fill="both", expand=True)
     except Exception as exc:
@@ -1121,7 +1121,7 @@ def open_bilag_split_view(
                 client = None
                 year = None
             try:
-                from document_control_voucher_index import find_and_extract_bilag
+                from src.shared.document_control.voucher_index import find_and_extract_bilag
                 pdf_path = find_and_extract_bilag(
                     bilag_norm,
                     client=str(client) if client else None,
@@ -1163,7 +1163,7 @@ def open_bilag_split_view(
             client = None
             year = None
         try:
-            from document_control_voucher_index import find_and_extract_bilag
+            from src.shared.document_control.voucher_index import find_and_extract_bilag
             pdf_path = find_and_extract_bilag(
                 bilag_norm,
                 client=str(client) if client else None,
