@@ -248,7 +248,7 @@ class ARPage(ttk.Frame):
 
         tree = ttk.Treeview(
             parent,
-            columns=("company", "orgnr", "pct", "relation", "matched_client", "sb", "source"),
+            columns=("company", "orgnr", "pct", "relation", "matched_client", "sb", "booked", "source"),
             show="headings",
             selectmode="extended",
         )
@@ -258,6 +258,7 @@ class ARPage(ttk.Frame):
         tree.heading("relation", text="Klassifisering")
         tree.heading("matched_client", text="Klientmatch")
         tree.heading("sb", text="Aktiv SB")
+        tree.heading("booked", text="Bokført på")
         tree.heading("source", text="Status/kilde")
         tree.column("company", width=220, stretch=True)
         tree.column("orgnr", width=95)
@@ -265,6 +266,7 @@ class ARPage(ttk.Frame):
         tree.column("relation", width=90)
         tree.column("matched_client", width=160, stretch=True)
         tree.column("sb", width=70, anchor="center")
+        tree.column("booked", width=110, anchor="w")
         tree.column("source", width=105)
         tree.tag_configure("manual", background="#EAF7F0")
         tree.tag_configure("manual_override", background="#FFF4DD")
@@ -337,7 +339,7 @@ class ARPage(ttk.Frame):
         panel_frame.grid(row=2, column=0, sticky="nsew")
         self._brreg_frame = panel_frame
         try:
-            import reskontro_brreg_panel
+            from src.pages.reskontro.frontend import brreg_panel as reskontro_brreg_panel
             reskontro_brreg_panel.build_brreg_panel(self, parent=panel_frame)
         except Exception as exc:
             ttk.Label(
@@ -1282,11 +1284,30 @@ class ARPage(ttk.Frame):
         self._tree_owned.delete(*self._tree_owned.get_children())
         all_owned = self._overview.get("owned_companies") or []
         filtered_owned = self._filter_owned_rows(list(all_owned))
+
+        # Last AccountProfile-bindinger én gang per refresh — bruker disse til
+        # «Bokført på»-kolonnen som viser hvilke SB-kontoer som er eksplisitt
+        # knyttet til hvert eid selskap (via SB-fanens "Eid selskap"-kolonne).
+        try:
+            from src.pages.ar.backend import account_bindings as _ar_bindings
+            year_int = int(str(self._year)) if self._year else None
+            account_bindings_map = _ar_bindings.account_bindings_for_owned(
+                self._client, year_int
+            )
+        except Exception:
+            _ar_bindings = None  # type: ignore[assignment]
+            account_bindings_map = {}
+
         for idx, row in enumerate(filtered_owned, start=1):
             iid = f"owned-{idx}"
             self._owned_rows_by_iid[iid] = dict(row)
             source = _safe_text(row.get("source"))
             tag = (source,) if source in {"manual", "manual_override", "carry_forward"} else ()
+            booked = ""
+            if _ar_bindings is not None and account_bindings_map:
+                booked = _ar_bindings.format_account_binding(
+                    row.get("company_orgnr"), account_bindings_map
+                )
             self._tree_owned.insert(
                 "",
                 "end",
@@ -1298,6 +1319,7 @@ class ARPage(ttk.Frame):
                     _relation_label(row.get("relation_type")),
                     row.get("matched_client", ""),
                     "Ja" if row.get("has_active_sb") else "",
+                    booked,
                     _source_label(source),
                 ),
                 tags=tag,
