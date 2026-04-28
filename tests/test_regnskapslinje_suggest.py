@@ -79,3 +79,90 @@ def test_suggest_regnskapslinje_history_can_surface_without_alias_hit() -> None:
     assert suggestion.regnr == 20
     assert suggestion.source == "historikk"
     assert "historikk" in suggestion.reason
+
+
+def test_ar_target_overrides_historikk_when_they_differ() -> None:
+    """AR-eierskap skal slå historikk når de peker på forskjellige RL.
+
+    Case: konto 1321 «Aksjer i GPC». Historikk fra fjoråret peker på 575
+    (feil-mappet i fjor), men AR sier klienten eier «Gardermoen Perishable
+    Center AS» med 84 % → datter → 560. Suggesteren skal foreslå 560,
+    ikke videreføre historikk-feilen.
+    """
+    rl_df = pd.DataFrame(
+        {
+            "nr": [560, 575],
+            "regnskapslinje": [
+                "Investering i datterselskap",
+                "Investeringer i tilknyttet selskap",
+            ],
+            "sumpost": ["nei", "nei"],
+            "Formel": ["", ""],
+        }
+    )
+    owned = [
+        suggest.OwnedCompany(
+            name="Gardermoen Perishable Center AS",
+            acronym="GPC",
+            ownership_pct=84.0,
+            suggested_regnr=560,
+        )
+    ]
+    rulebook = {
+        "rules": {
+            "560": {"aliases": ["aksjer", "datter"]},
+            "575": {"aliases": ["aksjer", "tilknyttet"]},
+        }
+    }
+
+    suggestion = suggest.suggest_regnskapslinje(
+        konto="1321",
+        kontonavn="Aksjer i GPC",
+        regnskapslinjer=rl_df,
+        rulebook_document=rulebook,
+        historical_regnr=575,
+        owned_companies=owned,
+    )
+
+    assert suggestion is not None
+    assert suggestion.regnr == 560
+    assert "akronym" in suggestion.reason
+    assert "historikk" not in suggestion.reason
+
+
+def test_historikk_still_wins_when_ar_agrees_or_silent() -> None:
+    """Historikk skal *ikke* undertrykkes hvis AR peker på samme RL eller
+    ikke gir noe utsagn. Sikrer at vi ikke regrederer det generelle
+    historikk-tilfellet."""
+    rl_df = pd.DataFrame(
+        {
+            "nr": [560, 575],
+            "regnskapslinje": [
+                "Investering i datterselskap",
+                "Investeringer i tilknyttet selskap",
+            ],
+            "sumpost": ["nei", "nei"],
+            "Formel": ["", ""],
+        }
+    )
+    rulebook = {"rules": {"560": {"aliases": ["aksjer"]}, "575": {"aliases": ["aksjer"]}}}
+
+    # AR-data finnes men matcher ikke navnet → ingen ar_target → historikk gjelder
+    owned_no_match = [
+        suggest.OwnedCompany(
+            name="Helt Annet Selskap AS",
+            acronym="HAS",
+            ownership_pct=84.0,
+            suggested_regnr=560,
+        )
+    ]
+    suggestion = suggest.suggest_regnskapslinje(
+        konto="1321",
+        kontonavn="Aksjer i ukjent firma",
+        regnskapslinjer=rl_df,
+        rulebook_document=rulebook,
+        historical_regnr=575,
+        owned_companies=owned_no_match,
+    )
+    assert suggestion is not None
+    assert suggestion.regnr == 575  # historikk vinner

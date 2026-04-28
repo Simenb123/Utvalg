@@ -397,6 +397,35 @@ def _sign_note(*, hint: str, ub: float, movement: float, ib: float) -> tuple[flo
     return -0.08, "Fortegn avviker fra forventet normalbalanse, men blokkerer ikke forslaget."
 
 
+def _ar_target_regnr(
+    *,
+    kontonavn_upper: str,
+    owned_companies: list[OwnedCompany],
+) -> int | None:
+    """Hvilken RL peker AR-data mot for denne kontoen (hvis noen)?
+
+    Brukes til å undertrykke historikk-bonusen når AR peker mot en annen
+    RL — historikk er bare treghet, mens AR er objektiv eierskaps­data.
+
+    Returnerer ``None`` hvis ingen treff.
+    """
+    if not owned_companies or not kontonavn_upper:
+        return None
+    konto_words = set(kontonavn_upper.replace(",", " ").replace(".", " ").split())
+    for company in owned_companies:
+        full_name_upper = company.name.upper()
+        base_name = full_name_upper
+        for suffix in (" AS", " ASA", " ANS", " DA"):
+            if base_name.endswith(suffix):
+                base_name = base_name[: -len(suffix)].strip()
+                break
+        if base_name and base_name in kontonavn_upper:
+            return company.suggested_regnr
+        if company.acronym and len(company.acronym) >= 2 and company.acronym in konto_words:
+            return company.suggested_regnr
+    return None
+
+
 def _owned_company_match(
     *,
     kontonavn_upper: str,
@@ -465,6 +494,10 @@ def suggest_with_candidates(
     account_tokens = _dedupe_tokens(_tokenize(kontonavn))
     usage_tokens = _dedupe_tokens(set(getattr(usage, "top_text_tokens", ()) or ()))
     kontonavn_upper = (kontonavn or "").upper()
+    ar_target = _ar_target_regnr(
+        kontonavn_upper=kontonavn_upper,
+        owned_companies=owned_companies or [],
+    )
     best: RegnskapslinjeSuggestion | None = None
     best_score = -10.0
 
@@ -492,8 +525,13 @@ def suggest_with_candidates(
             reasons.append("konto-intervall")
 
         if historical_regnr is not None and int(historical_regnr) == candidate.regnr:
-            score += 0.48
-            reasons.append("historikk")
+            if ar_target is not None and ar_target != candidate.regnr:
+                # AR peker mot annen RL — historikk er sannsynligvis utdatert
+                # (kontoen var feil-mappet i fjor). Undertrykk historikk-bonusen.
+                pass
+            else:
+                score += 0.48
+                reasons.append("historikk")
 
         # AR-bonus: kontonavnet matcher et selskap klienten eier, og
         # eierskapsgrad-RL stemmer med kandidaten.
@@ -520,7 +558,13 @@ def suggest_with_candidates(
             source = "eid_selskap"
         elif ar_bonus > 0:
             source = "akronym"
-        elif historical_regnr is not None and int(historical_regnr) == candidate.regnr and not alias_hits and not usage_hits:
+        elif (
+            historical_regnr is not None
+            and int(historical_regnr) == candidate.regnr
+            and not (ar_target is not None and ar_target != candidate.regnr)
+            and not alias_hits
+            and not usage_hits
+        ):
             source = "historikk"
         elif alias_hits and usage_hits:
             source = "alias+kontobruk"
