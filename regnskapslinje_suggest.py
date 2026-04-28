@@ -147,7 +147,7 @@ def _dedupe_tokens(tokens: set[str]) -> frozenset[str]:
 def _confidence_bucket(value: float) -> str:
     normalized = float(value) + 1e-9
     if normalized >= 0.75:
-        return "Hoy"
+        return "Høy"
     if normalized >= 0.50:
         return "Middels"
     return "Lav"

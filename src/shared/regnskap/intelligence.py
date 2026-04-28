@@ -334,7 +334,7 @@ def _find_rule_by_key(key: str) -> _Rule | None:
 
 def _confidence_label(score: float) -> str:
     if score >= 80.0:
-        return "Hoy"
+        return "Høy"
     if score >= 60.0:
         return "Middels"
     return "Lav"

@@ -45,7 +45,7 @@ def test_analyze_account_rows_can_suggest_sales_from_behavior_outside_3xxx() -> 
 
     assert detail_df.loc[0, "OppforerSegSom"] == "Salgsinntekt"
     assert suggestions["8090"].suggested_regnr == 10
-    assert suggestions["8090"].confidence_label in {"Hoy", "Middels"}
+    assert suggestions["8090"].confidence_label in {"Høy", "Middels"}
 
 
 def test_build_account_behavior_profile_flags_credit_like_inventory() -> None:

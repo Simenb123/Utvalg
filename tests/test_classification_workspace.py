@@ -150,7 +150,7 @@ def test_format_why_panel_explains_when_suggestion_matches_saved_values() -> Non
         issue_text="",
         confidence=0.9,
         confidence_label="90%",
-        confidence_bucket="Hoy",
+        confidence_bucket="Høy",
         payroll_relevant=True,
         result=None,
     )
