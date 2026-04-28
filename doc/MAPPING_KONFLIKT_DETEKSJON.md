@@ -1,5 +1,46 @@
 # Mapping-konflikt-deteksjon — designnotat
 
+## Status (per 2026-04-28)
+
+Base-konfliktdeteksjon **levert og i bruk**. AR-utvidelse for
+investerings-kontoer levert. Trenger live smoke-test før vi bygger mer.
+
+**Implementert:**
+
+| Område | Commit |
+|---|---|
+| Splitt suggester for ytelse (`build_candidates` + `suggest_with_candidates`) | `45adbee` |
+| Endring 1 — kjør suggester for alle kontoer | `1f5d99e` |
+| Endring 2 — `has_suggestion_conflict`-property (threshold 0.7) | `1f5d99e` |
+| Endring 3 — gul tag (`#FFF3CD`) på SB-tre-rader med konflikt | `be9d903` |
+| Endring 4 — varsel + bytte-knapp i remap-dialog | `52040c1` |
+| Encoding-fiks: «Hoy» → «Høy» i `_confidence_bucket` | `2f15eb2` |
+| "Card"-stil for forslag (grønn match / gul konflikt) | `0f0c40a` |
+| Full dialog-redesign — 640×460 resizable, robust bytt-knapp | `51c2a1b` |
+| AR-utvidelse Step 1 — `OwnedCompany`, akronym-helper, score-bonus | `c3d90b9` |
+| AR-utvidelse Step 2 — pipeline laster AR-data automatisk | `20d1549` |
+
+**Ikke implementert (åpne punkter):**
+
+- **Endring 5** — `mapping_review.json` med «Marker som vurdert»-flagg.
+  Konsekvens: konflikter flagges på nytt hver oppstart selv om revisor
+  har vurdert dem. Avventes til vi har observert om støy faktisk er et
+  problem.
+- **Bulk-review-popup** «Gjennomgå mapping-forslag» — listevisning av
+  alle konflikter for én klient. Avventes til base-deteksjonen er
+  brukt en stund.
+- **Smoke-test på live-klient** med ekte AR-data. Vi har enhetstester
+  som passerer (30 stk grønne), men ingen ende-til-ende-verifikasjon
+  på en klient som faktisk eier andre selskaper.
+
+**Kjente uvisser som bør observeres:**
+
+- Threshold 0.7 — for lavt (støy) eller for høyt (savner konflikter)?
+- Konflikt-flagging på manuelle overrides — ønsket eller bør
+  undertrykkes?
+- Falske positiver fra akronym-treff (korte akronymer som GPC kan
+  matche tilfeldig).
+
 ## Bakgrunn
 
 Saldobalanse-til-regnskapslinje-mapping i appen har tre lag:
