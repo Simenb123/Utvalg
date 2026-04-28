@@ -4,7 +4,7 @@ from typing import Any, List
 
 import pandas as pd
 
-import views_nr_series
+import src.audit_actions.series_control.views as views_nr_series
 
 
 class DummyNrSeriesView:

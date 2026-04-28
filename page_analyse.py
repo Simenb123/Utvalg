@@ -83,7 +83,7 @@ except Exception:  # pragma: no cover
     _show_motpost_konto = None  # type: ignore
 
 try:
-    from views_nr_series import show_nr_series_control as _show_nr_series_control
+    from src.audit_actions.series_control.views import show_nr_series_control as _show_nr_series_control
 except Exception:  # pragma: no cover
     _show_nr_series_control = None  # type: ignore
 

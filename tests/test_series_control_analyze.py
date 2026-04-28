@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from series_control import (
+from src.audit_actions.series_control import (
     AUTO_FIELD_KEY,
     BILAG_FIELD_KEY,
     REFERENCE_FIELD_KEY,
@@ -53,7 +53,7 @@ def test_pick_default_series_field_prefers_reference_over_bilag() -> None:
 
 
 def test_pick_default_series_field_auto_ignores_custom_columns(monkeypatch) -> None:
-    import series_control.analyze as analyze_mod
+    import src.audit_actions.series_control.analyze as analyze_mod
 
     df = pd.DataFrame(
         {
