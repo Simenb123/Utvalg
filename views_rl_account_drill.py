@@ -176,13 +176,56 @@ def open_account_mapping_dialog(
         confidence_bucket=confidence_bucket,
         sign_note=sign_note,
     )
+    # Konflikt-deteksjon: suggester foreslår en *annen* RL enn nåværende.
+    suggested_regnr_int = parse_regnskapslinje_choice(suggested_regnr)
+    current_regnr_int = parse_regnskapslinje_choice(current_regnr)
+    is_conflict = (
+        suggested_regnr_int is not None
+        and current_regnr_int is not None
+        and suggested_regnr_int != current_regnr_int
+    )
     if suggestion_text:
-        ttk.Label(
-            frm,
-            text=suggestion_text,
-            justify="left",
-            wraplength=420,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        if is_conflict:
+            # Tk-frame med gul bakgrunn for å skille konflikt fra "vanlig" forslag.
+            sugg_frame = tk.Frame(frm, bg="#FFF3CD", padx=8, pady=6)
+            sugg_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            tk.Label(
+                sugg_frame,
+                text="⚠ Konflikt: navnet peker mot en annen regnskapslinje",
+                bg="#FFF3CD",
+                fg="#664d03",
+                font=("Segoe UI", 9, "bold"),
+                justify="left",
+            ).pack(anchor="w")
+            tk.Label(
+                sugg_frame,
+                text=suggestion_text,
+                bg="#FFF3CD",
+                fg="#664d03",
+                justify="left",
+                wraplength=420,
+            ).pack(anchor="w", pady=(2, 4))
+
+            def _bytt_til_forslag() -> None:
+                target_label = format_regnskapslinje_choice(
+                    suggested_regnr_int, str(suggested_regnskapslinje or "")
+                )
+                if target_label in values:
+                    var_choice.set(target_label)
+
+            tk.Button(
+                sugg_frame,
+                text=f"Bytt til foreslått RL ({suggested_regnr_int})",
+                bg="#FFE69C",
+                command=_bytt_til_forslag,
+            ).pack(anchor="w")
+        else:
+            ttk.Label(
+                frm,
+                text=suggestion_text,
+                justify="left",
+                wraplength=420,
+            ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
     btns = ttk.Frame(frm)
     btns.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
