@@ -88,6 +88,7 @@ def enrich_mapping_issues_with_suggestions(
     usage_features: dict[str, Any] | None = None,
     historical_overrides: dict[str, int] | None = None,
     rulebook_document: dict[str, Any] | None = None,
+    owned_companies: list[Any] | None = None,
 ) -> list[RLMappingIssue]:
     return enrich_rl_mapping_issues_with_suggestions(
         issues,
@@ -95,6 +96,7 @@ def enrich_mapping_issues_with_suggestions(
         usage_features=usage_features,
         historical_overrides=historical_overrides,
         rulebook_document=rulebook_document,
+        owned_companies=owned_companies,
     )
 
 

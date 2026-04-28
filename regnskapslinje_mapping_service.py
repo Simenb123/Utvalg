@@ -544,6 +544,7 @@ def build_admin_rl_rows(
     rulebook_document: dict[str, Any] | None = None,
     usage_features: dict[str, AccountUsageFeatures] | None = None,
     historical_overrides: dict[str, int] | None = None,
+    owned_companies: list[regnskapslinje_suggest.OwnedCompany] | None = None,
 ) -> list[RLAdminRow]:
     """Bygg Admin-rader med eksplisitt baseline + override + effektiv mapping.
 
@@ -565,6 +566,7 @@ def build_admin_rl_rows(
             usage_features=usage_features,
             historical_overrides=historical_overrides,
             rulebook_document=rulebook_document,
+            owned_companies=owned_companies,
         )
 
     accounts = [issue.konto for issue in issues]
@@ -658,6 +660,7 @@ def enrich_rl_mapping_issues_with_suggestions(
     usage_features: dict[str, AccountUsageFeatures] | None = None,
     historical_overrides: dict[str, int] | None = None,
     rulebook_document: dict[str, Any] | None = None,
+    owned_companies: list[regnskapslinje_suggest.OwnedCompany] | None = None,
 ) -> list[RLMappingIssue]:
     """Berik *alle* issues med smartforslag fra ``regnskapslinje_suggest``.
 
@@ -668,6 +671,10 @@ def enrich_rl_mapping_issues_with_suggestions(
 
     Performance: ``build_candidates(...)`` heves ut av loopen og gjenbrukes
     for alle issues, slik at vi ikke betaler tokenisering per konto.
+
+    ``owned_companies`` brukes til AR-basert akronym-bonus — kontoer som
+    matcher et eid selskap (fullt navn eller akronym) får sterk bonus mot
+    560/575/585 avhengig av eierskapsgrad.
     """
     if not issues:
         return []
@@ -685,6 +692,7 @@ def enrich_rl_mapping_issues_with_suggestions(
             ub=issue.ub,
             usage=(usage_features or {}).get(issue.konto),
             historical_regnr=(historical_overrides or {}).get(issue.konto),
+            owned_companies=owned_companies,
         )
         if suggestion is None:
             out.append(issue)
@@ -816,6 +824,55 @@ def _history_overrides_by_account(client: str | None, year: int | None) -> dict[
         return {}
 
 
+def _load_owned_companies_for_client(
+    client: str | None,
+    year: int | None,
+) -> list[regnskapslinje_suggest.OwnedCompany]:
+    """Last selskaper klienten eier (fra AR/aksjonærregisteret).
+
+    Brukes som hint av regnskapslinje_suggest til å gi bonus-score til
+    investerings-kontoer (560/575/585) når kontonavnet matcher et eid
+    selskap eller akronymet av det.
+
+    Returnerer tom liste hvis AR ikke har data for klient/år.
+    """
+    if not client or not year:
+        return []
+    try:
+        import src.pages.ar.backend.store as ar_store
+    except Exception:
+        return []
+    try:
+        client_orgnr = ar_store.get_client_orgnr(str(client)) or ""
+    except Exception:
+        client_orgnr = ""
+    if not client_orgnr:
+        return []
+    try:
+        rows = ar_store.list_owned_companies(client_orgnr, str(year))
+    except Exception:
+        return []
+    out: list[regnskapslinje_suggest.OwnedCompany] = []
+    for row in rows:
+        try:
+            name = str(row.get("company_name", "") or "").strip()
+            if not name:
+                continue
+            pct_raw = row.get("ownership_pct", 0.0)
+            pct = float(pct_raw) if pct_raw is not None else 0.0
+            out.append(
+                regnskapslinje_suggest.OwnedCompany(
+                    name=name,
+                    acronym=regnskapslinje_suggest.company_acronym(name),
+                    ownership_pct=pct,
+                    suggested_regnr=regnskapslinje_suggest.ownership_pct_to_regnr(pct),
+                )
+            )
+        except Exception:
+            continue
+    return out
+
+
 def context_from_page(page: Any) -> RLMappingContext:
     """Bygg ``RLMappingContext`` fra en AnalysePage som har preloadet
     ``_rl_intervals`` og ``_rl_regnskapslinjer`` på seg.
@@ -899,6 +956,7 @@ def build_page_admin_rl_rows(
         rulebook_document=regnskapslinje_suggest.load_rulebook_document(),
         usage_features=usage_features,
         historical_overrides=_history_overrides_by_account(context.client or None, year_int),
+        owned_companies=_load_owned_companies_for_client(context.client or None, year_int),
     )
 
 
@@ -956,4 +1014,5 @@ def build_page_rl_mapping_issues(
         usage_features=usage_features,
         historical_overrides=_history_overrides_by_account(context.client or None, year_int),
         rulebook_document=regnskapslinje_suggest.load_rulebook_document(),
+        owned_companies=_load_owned_companies_for_client(context.client or None, year_int),
     )
