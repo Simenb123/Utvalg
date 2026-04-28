@@ -186,26 +186,39 @@ def open_account_mapping_dialog(
     )
     if suggestion_text:
         if is_conflict:
-            # Tk-frame med gul bakgrunn for å skille konflikt fra "vanlig" forslag.
-            sugg_frame = tk.Frame(frm, bg="#FFF3CD", padx=8, pady=6)
-            sugg_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-            tk.Label(
-                sugg_frame,
-                text="⚠ Konflikt: navnet peker mot en annen regnskapslinje",
-                bg="#FFF3CD",
-                fg="#664d03",
-                font=("Segoe UI", 9, "bold"),
-                justify="left",
-            ).pack(anchor="w")
-            tk.Label(
-                sugg_frame,
-                text=suggestion_text,
-                bg="#FFF3CD",
-                fg="#664d03",
-                justify="left",
-                wraplength=420,
-            ).pack(anchor="w", pady=(2, 4))
+            # Konflikt — gul "card" med varsel + Bytt-til-forslag-knapp.
+            card_bg = "#FFF3CD"   # myk gul
+            card_fg = "#664d03"
+            header_text = "⚠ Konflikt: navnet peker mot en annen regnskapslinje"
+            btn_bg = "#FFE69C"
+        else:
+            # Match — grønn "card" som bekrefter at forslaget stemmer.
+            card_bg = "#E8F5E9"   # myk grønn
+            card_fg = "#1B5E20"
+            header_text = "✓ Forslag stemmer overens med nåværende mapping"
+            btn_bg = None
 
+        sugg_frame = tk.Frame(frm, bg=card_bg, padx=10, pady=8,
+                              highlightbackground=card_fg, highlightthickness=1)
+        sugg_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        tk.Label(
+            sugg_frame,
+            text=header_text,
+            bg=card_bg,
+            fg=card_fg,
+            font=("Segoe UI", 9, "bold"),
+            justify="left",
+        ).pack(anchor="w")
+        tk.Label(
+            sugg_frame,
+            text=suggestion_text,
+            bg=card_bg,
+            fg=card_fg,
+            justify="left",
+            wraplength=420,
+        ).pack(anchor="w", pady=(4, 0))
+
+        if is_conflict:
             def _bytt_til_forslag() -> None:
                 target_label = format_regnskapslinje_choice(
                     suggested_regnr_int, str(suggested_regnskapslinje or "")
@@ -216,16 +229,9 @@ def open_account_mapping_dialog(
             tk.Button(
                 sugg_frame,
                 text=f"Bytt til foreslått RL ({suggested_regnr_int})",
-                bg="#FFE69C",
+                bg=btn_bg,
                 command=_bytt_til_forslag,
-            ).pack(anchor="w")
-        else:
-            ttk.Label(
-                frm,
-                text=suggestion_text,
-                justify="left",
-                wraplength=420,
-            ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            ).pack(anchor="w", pady=(6, 0))
 
     btns = ttk.Frame(frm)
     btns.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
