@@ -64,13 +64,16 @@ def _rl_enriched_cache_key(
 ) -> tuple:
     """Cache-nøkkel for beriket pivot_df.
 
-    Baserer seg på STABILE source-objekter, ikke på derived/computed
-    objekter (som account_overrides og adjusted_sb_df som kan ha ny id()
-    hver gang selv med samme innhold). Vi bruker:
+    Baserer seg på STABILE source-objekter (id() av kilde-DataFramer)
+    pluss en innholds-hash av ``account_overrides`` slik at cachen
+    invalideres når brukeren endrer kontobruk uten at klient/år endres.
+
+    Bruker:
       - id() av rene kilde-DataFramer (df_filtered, intervals, regnskapslinjer)
       - id() av base SB og fjor-SB (de er stabile på page-instansen)
       - state-flagg (include_ao) i stedet for derived adjusted_sb_df
-      - klient + år (siden de styrer overrides + AO-entries)
+      - frozenset av account_overrides-items (innholds-hash)
+      - klient + år
     """
     base_sb_page = getattr(page, "_rl_sb_df", None)
     sb_prev = getattr(page, "_rl_sb_prev_df", None)
@@ -86,6 +89,17 @@ def _rl_enriched_cache_key(
     except Exception:
         client = ""
         year = ""
+    # Innholds-hash av overrides så cachen invalideres ved endret kontobruk.
+    # Bruker frozenset(items()) — overrides er typisk ~100 entries og
+    # nøklene/verdiene er hashbare (str → int).
+    if isinstance(account_overrides, dict) and account_overrides:
+        try:
+            overrides_key: object = frozenset(account_overrides.items())
+        except TypeError:
+            # Fallback hvis verdier ikke er hashbare av en eller annen grunn
+            overrides_key = tuple(sorted(account_overrides))
+    else:
+        overrides_key = 0
     return (
         id(df_filtered),
         id(intervals),
@@ -96,6 +110,7 @@ def _rl_enriched_cache_key(
         include_ao,
         client,
         year,
+        overrides_key,
     )
 
 
