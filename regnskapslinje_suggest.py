@@ -307,16 +307,19 @@ def company_acronym(name: str) -> str:
 def ownership_pct_to_regnr(pct: float) -> int:
     """Mapper eierskapsprosent til typisk RL for investerings-konto.
 
-    Følger NGAAP og typisk norsk kontoplan-bruk:
-    - >= 50 %  → 560 Investering i datterselskap
-    - 20-50 %  → 575 Investeringer i tilknyttet selskap
-    - < 20 %   → 585 Investeringer i aksjer og andeler
+    Følger NGAAP og rskl. § 1-3 om datterselskap:
+    - **> 50 %**  → 560 Investering i datterselskap (kontroll)
+    - **20-50 %** → 575 Investeringer i tilknyttet selskap (betydelig innflytelse)
+    - **< 20 %**  → 585 Investeringer i aksjer og andeler
+
+    Merk: 50 % nøyaktig regnes som tilknyttet, ikke datter. Det er
+    *over* 50 % som gir kontroll (kvalifisert flertall).
     """
     try:
         p = float(pct)
     except (TypeError, ValueError):
         p = 0.0
-    if p >= 50.0:
+    if p > 50.0:
         return 560
     if p >= 20.0:
         return 575

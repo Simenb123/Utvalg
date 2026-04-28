@@ -81,6 +81,25 @@ def test_suggest_regnskapslinje_history_can_surface_without_alias_hit() -> None:
     assert "historikk" in suggestion.reason
 
 
+def test_ownership_pct_to_regnr_threshold_boundaries() -> None:
+    """Følg rskl. § 1-3: kun *over* 50 % er datter, 20-50 % er tilknyttet."""
+    # Datter (>50%): kontroll
+    assert suggest.ownership_pct_to_regnr(50.01) == 560
+    assert suggest.ownership_pct_to_regnr(83.51) == 560
+    assert suggest.ownership_pct_to_regnr(100.0) == 560
+
+    # Tilknyttet (20-50%): betydelig innflytelse — 50% nøyaktig er tilknyttet, ikke datter
+    assert suggest.ownership_pct_to_regnr(50.0) == 575  # Boundary case: 50% er tilknyttet
+    assert suggest.ownership_pct_to_regnr(49.99) == 575
+    assert suggest.ownership_pct_to_regnr(20.0) == 575
+    assert suggest.ownership_pct_to_regnr(30.0) == 575
+
+    # Aksjer/andeler (<20%)
+    assert suggest.ownership_pct_to_regnr(19.99) == 585
+    assert suggest.ownership_pct_to_regnr(4.63) == 585
+    assert suggest.ownership_pct_to_regnr(0.0) == 585
+
+
 def test_ar_target_overrides_historikk_when_they_differ() -> None:
     """AR-eierskap skal slå historikk når de peker på forskjellige RL.
 
