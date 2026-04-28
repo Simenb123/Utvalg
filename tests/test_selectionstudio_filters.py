@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from selection_studio.filters import filter_selectionstudio_dataframe
+from src.pages.utvalg.selection_studio.filters import filter_selectionstudio_dataframe
 
 
 def _make_df():

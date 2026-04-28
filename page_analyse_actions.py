@@ -32,7 +32,7 @@ def _show_error(title: str, msg: str) -> None:
 
 # Optional dependency: bilagsdrill dialog
 try:  # pragma: no cover
-    from selection_studio.drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
+    from src.pages.utvalg.selection_studio.drill import open_bilag_drill_dialog as _open_bilag_drill_dialog
 except Exception:  # pragma: no cover
     _open_bilag_drill_dialog = None  # type: ignore
 

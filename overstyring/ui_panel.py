@@ -559,7 +559,7 @@ class OverrideChecksPanel(ttk.Frame):
 
     def _open_bilag_drill(self, bilag_value: str) -> None:
         try:
-            from selection_studio.drill import open_bilag_drill_dialog  # type: ignore
+            from src.pages.utvalg.selection_studio.drill import open_bilag_drill_dialog  # type: ignore
         except Exception as e:  # pragma: no cover
             messagebox.showerror("Overstyring", f"Drilldown er ikke tilgjengelig: {e}")
             return

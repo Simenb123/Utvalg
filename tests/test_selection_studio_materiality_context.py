@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from selection_studio import ui_widget_refresh as mod
+from src.pages.utvalg.selection_studio import ui_widget_refresh as mod
 
 
 class _DummyVar:

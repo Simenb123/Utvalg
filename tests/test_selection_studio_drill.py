@@ -1,6 +1,6 @@
 import pandas as pd
 
-from selection_studio.drill import (
+from src.pages.utvalg.selection_studio.drill import (
     _resolve_drilldown_inputs,
     annotate_scope,
     extract_bilag_rows,

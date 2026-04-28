@@ -296,7 +296,7 @@ def open_bilag_drill_dialog(
     def _open_split_view() -> None:
         """Åpne split-view popup med bilag-rader + PDF side-ved-side."""
         try:
-            from selection_studio.bilag_split_view import open_bilag_split_view
+            from .bilag_split_view import open_bilag_split_view
         except Exception as exc:
             messagebox.showerror("Bilag", f"Kunne ikke åpne split-view:\n{exc}")
             return

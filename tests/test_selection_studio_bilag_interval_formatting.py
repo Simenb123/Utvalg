@@ -1,6 +1,6 @@
 import math
 
-from selection_studio.bilag import _format_interval_no
+from src.pages.utvalg.selection_studio.bilag import _format_interval_no
 
 
 def test_format_interval_no_sorts_bounds_and_formats_norwegian() -> None:

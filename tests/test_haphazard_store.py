@@ -21,7 +21,7 @@ def _setup_app_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_save_and_load_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_app_paths(tmp_path, monkeypatch)
-    from selection_studio.haphazard_store import (
+    from src.pages.utvalg.selection_studio.haphazard_store import (
         save_haphazard_test,
         load_haphazard_tests,
     )
@@ -53,7 +53,7 @@ def test_save_and_load_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 def test_has_haphazard_test_for_bilag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_app_paths(tmp_path, monkeypatch)
-    from selection_studio.haphazard_store import (
+    from src.pages.utvalg.selection_studio.haphazard_store import (
         save_haphazard_test,
         has_haphazard_test_for_bilag,
     )
@@ -73,7 +73,7 @@ def test_has_haphazard_test_for_bilag(tmp_path: Path, monkeypatch: pytest.Monkey
 
 def test_append_only_multiple_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_app_paths(tmp_path, monkeypatch)
-    from selection_studio.haphazard_store import (
+    from src.pages.utvalg.selection_studio.haphazard_store import (
         save_haphazard_test,
         load_haphazard_tests,
     )
@@ -89,7 +89,7 @@ def test_append_only_multiple_tests(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 def test_save_pdf_copies_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_app_paths(tmp_path, monkeypatch)
-    from selection_studio.haphazard_store import save_haphazard_test
+    from src.pages.utvalg.selection_studio.haphazard_store import save_haphazard_test
     import src.shared.client_store.store as client_store
 
     # Lag en dummy "PDF" å arkivere
@@ -113,7 +113,7 @@ def test_save_pdf_copies_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 def test_invalid_konklusjon_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_app_paths(tmp_path, monkeypatch)
-    from selection_studio.haphazard_store import save_haphazard_test
+    from src.pages.utvalg.selection_studio.haphazard_store import save_haphazard_test
 
     with pytest.raises(ValueError, match="Ugyldig konklusjon"):
         save_haphazard_test(client="Demo AS", year="2025", bilag_nr="x", konklusjon="ukjent")

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from selection_studio.ui_widget_actions import build_konto_summary_df
+from src.pages.utvalg.selection_studio.ui_widget_actions import build_konto_summary_df
 
 
 def test_build_konto_summary_df_happy_path_counts_and_sums_and_sorts() -> None:

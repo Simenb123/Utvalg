@@ -1,7 +1,7 @@
 # tests/test_selection_studio_helpers_regression.py
 import pandas as pd
 
-from selection_studio.helpers import (
+from src.pages.utvalg.selection_studio.helpers import (
     PopulationMetrics,
     build_population_summary_text,
     build_sample_summary_text,

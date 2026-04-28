@@ -32,7 +32,7 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
 
-from selection_studio.drill import (
+from .drill import (
     _resolve_drilldown_inputs,
     annotate_scope,
     extract_bilag_rows,
@@ -40,6 +40,213 @@ from selection_studio.drill import (
     normalize_bilag_value,
     _first_existing_column,
 )
+
+
+def _open_supplier_transactions_popup(
+    parent: Any,
+    sub_df: pd.DataFrame,
+    leverandør_navn: str,
+    leverandør_orgnr: str,
+    drill_master: Any,
+    bilag_col: str,
+) -> None:
+    """Popup som lister alle transaksjoner mot en leverandør (året).
+
+    Dobbeltklikk på en rad åpner det bilaget i en ny split-view.
+    """
+    if tk is None or ttk is None:
+        return
+    if sub_df is None or sub_df.empty:
+        messagebox.showinfo(
+            "Leverandør-transaksjoner",
+            "Ingen transaksjoner mot denne leverandøren.",
+        )
+        return
+
+    win = tk.Toplevel(parent)
+    title_parts = []
+    if leverandør_navn:
+        title_parts.append(leverandør_navn)
+    if leverandør_orgnr:
+        title_parts.append(f"({leverandør_orgnr})")
+    win.title("Transaksjoner mot " + " ".join(title_parts) if title_parts else "Leverandør-transaksjoner")
+
+    try:
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        w = max(900, min(int(sw * 0.65), 1300))
+        h = max(600, min(int(sh * 0.75), 900))
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 3)
+        win.geometry(f"{w}x{h}+{x}+{y}")
+        win.minsize(800, 500)
+    except Exception:
+        pass
+
+    # Topptekst med leverandør + sum-stats
+    hdr = ttk.Frame(win, padding=(12, 10, 12, 4))
+    hdr.pack(fill="x")
+    title_label = ttk.Label(
+        hdr,
+        text=leverandør_navn or "(uten navn)",
+        font=("TkDefaultFont", 12, "bold"),
+        foreground="#1a4c7a",
+    )
+    title_label.pack(side="left", padx=(0, 14))
+    if leverandør_orgnr:
+        ttk.Label(hdr, text=f"Orgnr {leverandør_orgnr}", foreground="#888").pack(
+            side="left", padx=(0, 14)
+        )
+
+    # Sortér etter dato (nyeste først)
+    df = sub_df.copy()
+    if "Dato" in df.columns:
+        try:
+            df["_sort_dato"] = pd.to_datetime(df["Dato"], errors="coerce", dayfirst=True)
+            df = df.sort_values(by=["_sort_dato"], ascending=False, kind="mergesort")
+            df = df.drop(columns=["_sort_dato"])
+        except Exception:
+            pass
+
+    n_bilag = int(df[bilag_col].astype(str).nunique()) if bilag_col in df.columns else 0
+    bel = pd.to_numeric(df.get("Beløp", 0), errors="coerce").fillna(0.0)
+    sum_total = float(bel.sum())
+    sum_pos = float(bel[bel > 0].sum())
+
+    stats_frame = ttk.Frame(hdr)
+    stats_frame.pack(side="right")
+    for label, val, color in (
+        ("Bilag", formatting.format_int_no(n_bilag), "#222"),
+        ("Linjer", formatting.format_int_no(len(df)), "#222"),
+        ("Sum debet", formatting.fmt_amount(sum_pos), "#1a4c7a"),
+        ("Netto", formatting.fmt_amount(sum_total), "#222"),
+    ):
+        cell = ttk.Frame(stats_frame)
+        cell.pack(side="left", padx=(0, 14))
+        ttk.Label(cell, text=label, font=("TkDefaultFont", 8), foreground="#888").pack(anchor="w")
+        ttk.Label(cell, text=val, font=("TkDefaultFont", 10, "bold"), foreground=color).pack(anchor="w")
+
+    # Treeview
+    from src.shared.ui.managed_treeview import ColumnSpec, ManagedTreeview
+    import analyse_treewidths
+
+    cols = ("Bilag", "Dato", "Konto", "Kontonavn", "Tekst", "Beløp", "MVA-kode")
+    available_cols = [c for c in cols if c in df.columns]
+
+    column_specs = []
+    for c in available_cols:
+        column_specs.append(
+            ColumnSpec(
+                id=c,
+                heading=c,
+                width=analyse_treewidths.default_column_width(c),
+                minwidth=analyse_treewidths.column_minwidth(c),
+                anchor=analyse_treewidths.column_anchor(c),
+                stretch=False,
+                visible_by_default=True,
+                sortable=True,
+            )
+        )
+
+    tree_frame = ttk.Frame(win, padding=(12, 4, 12, 12))
+    tree_frame.pack(fill="both", expand=True)
+    tree = ttk.Treeview(
+        tree_frame,
+        columns=available_cols,
+        show="headings",
+        height=24,
+        selectmode="browse",
+    )
+    vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=vsb.set)
+    tree.pack(side="left", fill="both", expand=True)
+    vsb.pack(side="left", fill="y")
+
+    try:
+        ManagedTreeview(
+            tree,
+            view_id="bilag_split_supplier_transactions",
+            pref_prefix="ui",
+            column_specs=column_specs,
+        )
+    except Exception:
+        pass
+
+    try:
+        tree.tag_configure("neg", foreground="red")
+    except Exception:
+        pass
+
+    def _fmt(c: str, v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, float) and pd.isna(v):
+            return ""
+        if isinstance(v, str) and v.lower() == "nan":
+            return ""
+        if c == "Beløp":
+            try:
+                return formatting.fmt_amount(v)
+            except Exception:
+                return str(v)
+        if c == "Dato":
+            try:
+                return formatting.fmt_date(v)
+            except Exception:
+                return str(v)
+        return str(v)
+
+    iid_to_bilag: dict[str, str] = {}
+    for _, row in df.iterrows():
+        tags = []
+        try:
+            if float(row.get("Beløp", 0)) < 0:
+                tags.append("neg")
+        except Exception:
+            pass
+        iid = tree.insert(
+            "", "end",
+            values=[_fmt(c, row.get(c)) for c in available_cols],
+            tags=tuple(tags),
+        )
+        try:
+            iid_to_bilag[iid] = str(row.get(bilag_col, ""))
+        except Exception:
+            pass
+
+    def _open_selected_bilag(event: Any = None) -> None:
+        sel = tree.selection()
+        if not sel:
+            return
+        bilag_nr = iid_to_bilag.get(sel[0], "")
+        if not bilag_nr:
+            return
+        try:
+            open_bilag_split_view(
+                drill_master,
+                df_base=None,
+                df_all=None,
+                bilag_value=bilag_nr,
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Kunne ikke åpne bilag",
+                f"Feil ved åpning av bilag {bilag_nr}:\n{exc}",
+                parent=win,
+            )
+
+    tree.bind("<Double-1>", _open_selected_bilag)
+    tree.bind("<Return>", _open_selected_bilag)
+
+    btn_row = ttk.Frame(win, padding=(12, 0, 12, 12))
+    btn_row.pack(fill="x")
+    ttk.Label(
+        btn_row,
+        text="Dobbeltklikk på en rad for å åpne bilaget.",
+        foreground="#888",
+        font=("TkDefaultFont", 9),
+    ).pack(side="left")
+    ttk.Button(btn_row, text="Lukk", command=win.destroy).pack(side="right")
 
 
 def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> None:
@@ -51,7 +258,7 @@ def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> Non
     if tk is None or ttk is None:
         return
     from src.shared.ui.dialog import make_dialog
-    from selection_studio.haphazard_store import save_haphazard_test  # noqa: F401 (also imported in _save)
+    from .haphazard_store import save_haphazard_test  # noqa: F401 (also imported in _save)
     from document_control_voucher_index import find_and_extract_bilag
 
     # Sammendrag fra første rad i utvalget (sum/største linje)
@@ -194,7 +401,7 @@ def _open_kontroll_dialog(parent: Any, bilag_nr: str, rows: pd.DataFrame) -> Non
                 save_pdf = False
 
         try:
-            from selection_studio.haphazard_store import save_haphazard_test
+            from .haphazard_store import save_haphazard_test
             test = save_haphazard_test(
                 client=client,
                 year=year,
@@ -294,10 +501,24 @@ def open_bilag_split_view(
     # Bygg dialog
     top = tk.Toplevel(master)
     top.title(f"Bilag {bilag_norm}")
+
+    # Adaptiv start-størrelse: 78 % bredde / 85 % høyde, sentrert. Mindre
+    # enn 90 % gir luft rundt popupen og unngår at bilag med få rader får
+    # massivt tomrom. A4-bilag er høye, så høyden prioriteres.
     try:
-        top.geometry("1500x900")
+        sw = top.winfo_screenwidth()
+        sh = top.winfo_screenheight()
+        win_w = max(1150, min(int(sw * 0.78), 1600))
+        win_h = max(750, min(int(sh * 0.85), 1080))
+        x = max(0, (sw - win_w) // 2)
+        y = max(0, (sh - win_h) // 3)  # litt høyere enn midten — mer naturlig for høy popup
+        top.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        top.minsize(1050, 680)
     except Exception:
-        pass
+        try:
+            top.geometry("1400x880")
+        except Exception:
+            pass
 
     # Én konsolidert header-rad — bilag-info venstre, PDF-toolbar +
     # action-knapper høyre. Layouten gir maksimal vertikal plass til
@@ -410,9 +631,22 @@ def open_bilag_split_view(
 
     all_col_ids = [spec.id for spec in column_specs]
 
+    # Tree-høyden tilpasses antall rader (min 5, maks 14) — slik at små
+    # bilag (3-5 rader) ikke får massivt tomrom og store bilag (50+) blir
+    # scrollbare uten å sluke hele venstre kolonne. Tree-frame får IKKE
+    # expand=True — i stedet legger vi en filler-frame nederst som suger
+    # opp eventuell ekstra vertikal plass. Da ligger leverandør-panelene
+    # rett under bilags-tabellen i stedet for å bli presset til bunnen.
+    tree_height = min(max(len(rows), 5), 14)
     tree_frame = ttk.Frame(left)
-    tree_frame.pack(fill="both", expand=True)
-    tree = ttk.Treeview(tree_frame, columns=all_col_ids, show="headings", height=20, selectmode="browse")
+    tree_frame.pack(fill="x")
+    tree = ttk.Treeview(
+        tree_frame,
+        columns=all_col_ids,
+        show="headings",
+        height=tree_height,
+        selectmode="browse",
+    )
     vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=vsb.set)
     tree.pack(side="left", fill="both", expand=True)
@@ -655,6 +889,193 @@ def open_bilag_split_view(
         except Exception:
             _fetch_brreg()
 
+    # ── Leverandør-aktivitet (HB-stats for året) ──
+    # Felles filter brukes både av stats-panel og transaksjons-popup, så de
+    # alltid viser samme utvalg. Foretrekk Leverandørorgnr (sikker match);
+    # fall tilbake til Leverandørnavn (case-insensitiv) hvis orgnr mangler.
+    def _filter_supplier_transactions(src: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(src, pd.DataFrame) or src.empty:
+            return pd.DataFrame()
+        mask = pd.Series(False, index=src.index)
+        if leverandør_orgnr and "Leverandørorgnr" in src.columns:
+            mask = src["Leverandørorgnr"].astype(str).str.strip() == leverandør_orgnr
+        if not mask.any() and leverandør_navn and "Leverandørnavn" in src.columns:
+            mask = (
+                src["Leverandørnavn"].astype(str).str.strip().str.casefold()
+                == leverandør_navn.casefold()
+            )
+        return src[mask]
+
+    if leverandør_navn or leverandør_orgnr:
+        activity_panel = ttk.LabelFrame(
+            left, text="Leverandør-aktivitet (året)", padding=8
+        )
+        activity_panel.pack(fill="x", pady=(8, 0))
+
+        activity_text = tk.Text(
+            activity_panel,
+            height=4,
+            wrap="word",
+            relief="flat",
+            borderwidth=0,
+            font=("TkDefaultFont", 9),
+            cursor="arrow",
+            state="disabled",
+        )
+        activity_text.pack(fill="x")
+        activity_text.tag_configure("key", foreground="#555555")
+        activity_text.tag_configure("val", foreground="#111111")
+        activity_text.tag_configure("dim", foreground="#888888")
+        activity_text.tag_configure(
+            "amount", foreground="#1a4c7a", font=("TkDefaultFont", 9, "bold")
+        )
+
+        def _activity_write(*parts: tuple[str, str]) -> None:
+            try:
+                activity_text.configure(state="normal")
+                for text, tag in parts:
+                    activity_text.insert("end", text, (tag,))
+                activity_text.configure(state="disabled")
+            except Exception:
+                pass
+
+        sub = _filter_supplier_transactions(df_all_res)
+        if sub.empty:
+            _activity_write(
+                ("Kun dette bilaget mot leverandøren i år.", "dim"),
+            )
+        else:
+            n_bilag = 0
+            if bilag_col_res in sub.columns:
+                try:
+                    n_bilag = int(sub[bilag_col_res].astype(str).nunique())
+                except Exception:
+                    n_bilag = 0
+            n_rows = len(sub)
+            bel_sub = pd.to_numeric(sub.get("Beløp", 0), errors="coerce").fillna(0.0)
+
+            # "Kost" = positive beløp på konto 4-7 (varekost, lønn, drift,
+            # finans). Ekskluderer 24xx leverandørgjeld og 27xx MVA — de
+            # er motposter, ikke selve kostnaden.
+            if "Konto" in sub.columns:
+                konto_str = sub["Konto"].astype(str)
+                kost_mask = konto_str.str.startswith(("4", "5", "6", "7")) & (bel_sub > 0)
+                sum_kost = float(bel_sub[kost_mask].sum())
+            else:
+                sum_kost = float(bel_sub[bel_sub > 0].sum())
+
+            # Største enkelt-bilag (basert på sum kost per bilag)
+            largest_bilag = ""
+            largest_sum = 0.0
+            try:
+                if bilag_col_res in sub.columns and "Konto" in sub.columns:
+                    kost_only = sub[
+                        sub["Konto"].astype(str).str.startswith(("4", "5", "6", "7"))
+                    ].copy()
+                    if not kost_only.empty:
+                        kost_only["_b"] = pd.to_numeric(
+                            kost_only["Beløp"], errors="coerce"
+                        ).fillna(0.0)
+                        per_bilag = (
+                            kost_only.groupby(bilag_col_res)["_b"].sum().abs().sort_values(ascending=False)
+                        )
+                        if not per_bilag.empty:
+                            largest_bilag = str(per_bilag.index[0])
+                            largest_sum = float(per_bilag.iloc[0])
+            except Exception:
+                pass
+
+            dato_min, dato_max = "", ""
+            if "Dato" in sub.columns:
+                try:
+                    dt = pd.to_datetime(
+                        sub["Dato"], errors="coerce", dayfirst=True
+                    ).dropna()
+                    if not dt.empty:
+                        dato_min = dt.min().strftime("%d.%m.%Y")
+                        dato_max = dt.max().strftime("%d.%m.%Y")
+                except Exception:
+                    pass
+
+            # Linje 1: bilag-count + linjer + periode
+            _activity_write(
+                ("Bilag: ", "key"),
+                (formatting.format_int_no(n_bilag), "amount"),
+                ("  |  Linjer: ", "key"),
+                (formatting.format_int_no(n_rows), "val"),
+            )
+            if dato_min and dato_max:
+                if dato_min == dato_max:
+                    _activity_write(("  |  Dato: ", "key"), (dato_min, "val"))
+                else:
+                    _activity_write(
+                        ("  |  Periode: ", "key"),
+                        (f"{dato_min} – {dato_max}", "val"),
+                    )
+            _activity_write(("\n", "val"))
+
+            # Linje 2: sum kost + snitt + største
+            _activity_write(
+                ("Sum kost: ", "key"),
+                (formatting.fmt_amount(sum_kost), "amount"),
+            )
+            if n_bilag > 0 and sum_kost:
+                snitt = sum_kost / n_bilag
+                _activity_write(
+                    ("  |  Snitt/bilag: ", "key"),
+                    (formatting.fmt_amount(snitt), "val"),
+                )
+            if largest_bilag and largest_sum:
+                _activity_write(
+                    ("  |  Største: ", "key"),
+                    (formatting.fmt_amount(largest_sum), "val"),
+                    (f" (bilag {largest_bilag})", "dim"),
+                )
+            _activity_write(("\n", "val"))
+
+            # Linje 3: top 3 konti (kun kost-konti 4-7)
+            if "Konto" in sub.columns and "Kontonavn" in sub.columns:
+                try:
+                    kost_only = sub[
+                        sub["Konto"].astype(str).str.startswith(("4", "5", "6", "7"))
+                    ].copy()
+                    if not kost_only.empty:
+                        kost_only["_b"] = pd.to_numeric(
+                            kost_only["Beløp"], errors="coerce"
+                        ).fillna(0.0)
+                        konto_grp = (
+                            kost_only.groupby(["Konto", "Kontonavn"], dropna=False)["_b"]
+                            .sum()
+                            .sort_values(ascending=False)
+                            .head(3)
+                        )
+                        if not konto_grp.empty:
+                            _activity_write(("Mest brukte konti: ", "key"))
+                            items = []
+                            for (k, navn), s in konto_grp.items():
+                                items.append(
+                                    f"{k} {navn} ({formatting.fmt_amount(float(s))})"
+                                )
+                            _activity_write((" | ".join(items), "val"))
+                except Exception:
+                    pass
+
+            # Knapp for å åpne full transaksjonsoversikt
+            btn_row = ttk.Frame(activity_panel)
+            btn_row.pack(fill="x", pady=(6, 0))
+            ttk.Button(
+                btn_row,
+                text="Vis alle transaksjoner mot leverandør…",
+                command=lambda: _open_supplier_transactions_popup(
+                    top, sub, leverandør_navn, leverandør_orgnr, master, bilag_col_res
+                ),
+            ).pack(side="left")
+
+    # Filler-frame helt nederst i venstre kolonne — suger opp eventuell
+    # ekstra vertikal plass slik at tabellen + leverandør-panelene ligger
+    # samlet øverst. Uten denne ble panelene presset til bunnen av popupen.
+    ttk.Frame(left).pack(fill="both", expand=True)
+
     # ── HØYRE: PDF-preview (full høyde, ingen egen toolbar her) ──
     right = ttk.Frame(paned)
     try:
@@ -778,6 +1199,25 @@ def open_bilag_split_view(
         ttk.Button(hdr, text="►", command=preview_frame.show_next_page, width=3).pack(side="right", padx=(4, 0))
         ttk.Label(hdr, textvariable=preview_frame.var_page, width=8, anchor="center").pack(side="right", padx=2)
         ttk.Button(hdr, text="◄", command=preview_frame.show_previous_page, width=3).pack(side="right")
+
+    # Sett sash-posisjon når PanedWindow har fått størrelse: ca. 37 %
+    # til bilag-tabellen, 63 % til PDF-en. PDF-en prioriteres siden
+    # A4-bilag trenger plass og en bredere PDF blir mye mer leselig
+    # ved fit-to-width. Tabellen har færre default-kolonner enn TX-treet,
+    # så den klarer seg fint på ~38 %.
+    def _set_sash_position() -> None:
+        try:
+            top.update_idletasks()
+            total_width = paned.winfo_width()
+            if total_width > 200:
+                paned.sashpos(0, int(total_width * 0.37))
+        except Exception:
+            pass
+
+    try:
+        top.after(50, _set_sash_position)
+    except Exception:
+        pass
 
     # Fokus på treet for tastatur-navigasjon
     try:

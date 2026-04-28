@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-import selection_studio.ui_widget_actions as actions
+import src.pages.utvalg.selection_studio.ui_widget_actions as actions
 
 
 class _FakeTree:

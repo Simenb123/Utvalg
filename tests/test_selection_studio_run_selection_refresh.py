@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from selection_studio.ui_logic import build_bilag_dataframe
-from selection_studio.ui_widget_selection import run_selection
+from src.pages.utvalg.selection_studio.ui_logic import build_bilag_dataframe
+from src.pages.utvalg.selection_studio.ui_widget_selection import run_selection
 
 
 class _DummyVar:
@@ -28,15 +28,15 @@ def test_run_selection_refreshes_before_using_amount_filtered_population(monkeyp
     shown = {"info": [], "warning": [], "error": []}
 
     monkeypatch.setattr(
-        "selection_studio.ui_widget_selection.messagebox.showinfo",
+        "src.pages.utvalg.selection_studio.ui_widget_selection.messagebox.showinfo",
         lambda *args, **kwargs: shown["info"].append((args, kwargs)),
     )
     monkeypatch.setattr(
-        "selection_studio.ui_widget_selection.messagebox.showwarning",
+        "src.pages.utvalg.selection_studio.ui_widget_selection.messagebox.showwarning",
         lambda *args, **kwargs: shown["warning"].append((args, kwargs)),
     )
     monkeypatch.setattr(
-        "selection_studio.ui_widget_selection.messagebox.showerror",
+        "src.pages.utvalg.selection_studio.ui_widget_selection.messagebox.showerror",
         lambda *args, **kwargs: shown["error"].append((args, kwargs)),
     )
 
