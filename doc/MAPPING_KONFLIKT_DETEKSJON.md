@@ -119,9 +119,51 @@ konto. Spesielt nyttig for nye klienter.
 Lagres som ide for senere — implementeres etter at base-konfliktdeteksjonen
 (endring 1-5 over) er på plass og brukt en stund.
 
+## Utvidelse — AR-basert akronym-bonus (commit c3d90b9 + 20d1549)
+
+For kontoer som representerer eierandeler i andre selskaper (typisk
+1320-1389), er kontonavnet ofte en **forkortelse** av selskapet. Eksempel:
+
+```
+Konto 1321 «Aksjer i GPC»
+```
+
+Uten ekstra signal mapper suggesteren typisk feil — det finnes ingen alias
+for «GPC». Men hvis klienten eier et selskap kalt
+«Gardermoen Perishable Center AS» i AR (aksjonærregisteret), kan vi:
+
+1. Bygge akronymet `GPC` av selskapsnavnet (skipper selskapsformer som AS,
+   ASA og småord som «og», «for», …).
+2. Sjekke om kontonavnet inneholder fullt navn eller akronym (case-
+   insensitive).
+3. Gi sterk score-bonus mot riktig RL basert på eierskaps­andel:
+   - **≥ 50 %** → RL **560** (Investering i datterselskap)
+   - **20-50 %** → RL **575** (Investering i tilknyttet selskap)
+   - **< 20 %** → RL **585** (Investeringer i aksjer og andeler)
+
+### Implementasjon
+
+- `regnskapslinje_suggest.OwnedCompany` — dataklasse (navn, akronym, %, regnr)
+- `regnskapslinje_suggest.company_acronym(name)` — bygger forkortelse
+- `regnskapslinje_suggest.ownership_pct_to_regnr(pct)` — % → regnr
+- `_load_owned_companies_for_client(client, year)` i
+  `regnskapslinje_mapping_service.py` — laster AR-data automatisk i
+  pipeline-callerne (`build_page_admin_rl_rows`,
+  `build_page_rl_mapping_issues`).
+- Bonus i suggesterens score: fullt navn-treff = **+0.45**, akronym-treff
+  = **+0.30**.
+
+### Effekt på konflikt-deteksjonen
+
+AR-bonusen gir suggesteren høy confidence (typisk > 0.85) på
+investerings-kontoer der intervallet ellers ville plassert dem
+generelt (f.eks. 591). Med `has_suggestion_conflict`-flagget løftes da
+konflikten umiddelbart i SB-treet og remap-dialogen.
+
 ## Referanser
 
-- [regnskapslinje_suggest.py](../regnskapslinje_suggest.py) — score-engine
-- [regnskapslinje_mapping_service.py](../regnskapslinje_mapping_service.py) — issue-bygging og override-prioritering
+- [regnskapslinje_suggest.py](../regnskapslinje_suggest.py) — score-engine, `OwnedCompany`, akronym-helper
+- [regnskapslinje_mapping_service.py](../regnskapslinje_mapping_service.py) — issue-bygging, override-prioritering, `_load_owned_companies_for_client`
+- [src/pages/ar/backend/store.py](../src/pages/ar/backend/store.py) — AR-store med `list_owned_companies` og `get_client_orgnr`
 - [analyse_sb_remap.py](../analyse_sb_remap.py) — høyreklikk-meny og remap-dialog-bridging
 - [views_rl_account_drill.py](../views_rl_account_drill.py) — selve remap-dialogen
