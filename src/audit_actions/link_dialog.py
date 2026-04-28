@@ -62,7 +62,7 @@ def open_action_link_dialog(
         return
 
     try:
-        from crmsystem_actions import load_audit_actions
+        from .crm_actions import load_audit_actions
     except Exception as exc:
         messagebox.showerror("Handlinger", f"Kan ikke laste handlinger: {exc}", parent=parent)
         return

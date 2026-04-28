@@ -373,7 +373,7 @@ def build_data_source_rows() -> list[DataSourceRow]:
         column_memory_path = data_dir / "column_memory.json"
 
     try:
-        import action_library
+        import src.audit_actions.library as action_library
 
         action_library_path = action_library.library_path()
     except Exception:

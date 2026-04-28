@@ -20,8 +20,8 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
 
-import action_artifact_store
-from action_artifact_store import Artifact
+import src.audit_actions.artifact_store as action_artifact_store
+from src.audit_actions.artifact_store import Artifact
 
 
 class _PdfPreview(ttk.Frame):  # type: ignore[misc]

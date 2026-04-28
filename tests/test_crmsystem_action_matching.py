@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from crmsystem_action_matching import (
+from src.audit_actions.crm_action_matching import (
     ActionMatch,
     RegnskapslinjeInfo,
     group_by_regnskapslinje,
     match_actions_to_regnskapslinjer,
 )
-from crmsystem_actions import AuditAction
+from src.audit_actions.crm_actions import AuditAction
 
 # Standard regnskapslinjer used in tests
 _RL = [

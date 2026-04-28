@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import action_workpaper_store as store
-from action_workpaper_store import ActionWorkpaper
+import src.audit_actions.workpaper_store as store
+from src.audit_actions.workpaper_store import ActionWorkpaper
 
 
 @pytest.fixture

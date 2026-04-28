@@ -469,12 +469,12 @@ class ScopingPage(ttk.Frame):
         for å re-laste fra disk — den er allerede i minnet derfra.
         """
         try:
-            from crmsystem_action_matching import (
+            from src.audit_actions.crm_action_matching import (
                 RegnskapslinjeInfo,
                 group_by_regnskapslinje,
                 match_actions_to_regnskapslinjer,
             )
-            from crmsystem_actions import load_audit_actions
+            from src.audit_actions.crm_actions import load_audit_actions
 
             result = load_audit_actions(self._client, self._year)
             if result.error or not result.actions:
@@ -563,7 +563,7 @@ class ScopingPage(ttk.Frame):
                 _fmt_pct(line.change_pct),
                 "" if line.is_summary else f"{line.pct_of_pm:.0f}%",
                 _CLASS_DISPLAY_LABELS.get(line.classification, ""),
-                "Ut" if line.scoping == "ut" else "",
+                "Ut" if line.scoping == "ut" else ("Inn" if line.scoping == "inn" else ""),
                 line.audit_action if not line.is_summary else "",
                 str(line.action_count) if line.action_count else "",
             ), tags=tags)
@@ -672,7 +672,7 @@ class ScopingPage(ttk.Frame):
             line = next((l for l in self._result.lines if l.regnr == regnr), None)
             if not line or line.is_summary:
                 continue
-            new_scoping = "" if line.scoping == "ut" else "ut"
+            new_scoping = "inn" if line.scoping == "ut" else "ut"
             self._save_scoping_silent(regnr, scoping=new_scoping)
 
         self._apply_filter()
@@ -687,7 +687,7 @@ class ScopingPage(ttk.Frame):
         sel = self._tree.selection()
         if not sel or not self._result:
             return
-        new_scoping = "ut" if self._scope_var.get() else ""
+        new_scoping = "ut" if self._scope_var.get() else "inn"
         for regnr in sel:
             line = next((l for l in self._result.lines if l.regnr == regnr), None)
             if not line or line.is_summary:
@@ -860,7 +860,11 @@ class ScopingPage(ttk.Frame):
         for line in self._result.lines:
             if line.is_summary:
                 continue
-            line.scoping = ""
+            # Default-tilstanden er "inn" (alle linjer trenger eksplisitt
+            # beslutning). Vi fjerner override-en — neste rebuild vil
+            # auto-klassifisere på nytt og lande på "inn" eller "ut" via
+            # auto_suggestions.
+            line.scoping = "inn"
             entry = overrides.get(line.regnr, {})
             entry.pop("scoping", None)
             if not entry:

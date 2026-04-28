@@ -11,12 +11,12 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from typing import Any
 
-import action_assignment_store as assignment_store
-import action_library
-import action_workpaper_store as workpaper_store
+import src.audit_actions.assignment_store as assignment_store
+import src.audit_actions.library as action_library
+import src.audit_actions.workpaper_store as workpaper_store
 import src.shared.workpapers.library as workpaper_library
-from action_library import LocalAction
-from action_workpaper_store import ActionWorkpaper
+from src.audit_actions.library import LocalAction
+from src.audit_actions.workpaper_store import ActionWorkpaper
 from src.shared.workpapers.library import Workpaper
 
 
@@ -452,7 +452,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         self.update_idletasks()
 
         try:
-            from crmsystem_actions import load_audit_actions
+            from src.audit_actions.crm_actions import load_audit_actions
             result = load_audit_actions(self._client, self._year)
         except Exception as exc:
             self.var_status.set(f"Feil: {exc}")
@@ -606,7 +606,7 @@ class RevisjonshandlingerPage(ttk.Frame):
     def _run_matching(self) -> None:
         """Match actions to regnskapslinjer."""
         try:
-            from crmsystem_action_matching import (
+            from src.audit_actions.crm_action_matching import (
                 RegnskapslinjeInfo,
                 match_actions_to_regnskapslinjer,
             )
@@ -1184,7 +1184,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         ctx = self._build_action_context(action_key=action_key, generator=generator)
         try:
             if ctx is not None:
-                import action_context as _ctx
+                import src.audit_actions.context as _ctx
                 with _ctx.push(ctx):
                     method()
             else:
@@ -1206,7 +1206,7 @@ class RevisjonshandlingerPage(ttk.Frame):
     def _build_action_context(self, *, action_key: str, generator: Any) -> Any:
         if not action_key:
             return None
-        import action_context as _ctx
+        import src.audit_actions.context as _ctx
         import getpass
 
         try:
@@ -1254,7 +1254,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         kommentar = ""
         if self._client and self._year:
             try:
-                import action_artifact_store as _store
+                import src.audit_actions.artifact_store as _store
                 kommentar = _store.get_comment(self._client, self._year, action_key).text
             except Exception:
                 kommentar = ""
@@ -1343,7 +1343,7 @@ class RevisjonshandlingerPage(ttk.Frame):
         if not new_paths:
             return
         import getpass
-        import action_artifact_store as _store
+        import src.audit_actions.artifact_store as _store
         try:
             user = getpass.getuser()
         except Exception:
@@ -1503,7 +1503,7 @@ class RevisjonshandlingerPage(ttk.Frame):
                 rl_name = str(getattr(rl, "regnskapslinje", "") or "")
                 break
         try:
-            from action_link_dialog import open_action_link_dialog
+            from src.audit_actions.link_dialog import open_action_link_dialog
         except Exception as exc:
             messagebox.showerror("Koble handling", str(exc), parent=self)
             return

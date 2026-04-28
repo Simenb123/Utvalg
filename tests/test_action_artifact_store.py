@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import action_artifact_store as store
-from action_artifact_store import Artifact
+import src.audit_actions.artifact_store as store
+from src.audit_actions.artifact_store import Artifact
 
 
 @pytest.fixture

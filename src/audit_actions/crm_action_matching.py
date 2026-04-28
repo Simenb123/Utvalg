@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from crmsystem_actions import AuditAction
+from .crm_actions import AuditAction
 
 
 @dataclass

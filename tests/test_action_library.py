@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import action_library
-from action_library import DEFAULT_ACTION_TYPES, LocalAction
+import src.audit_actions.library as action_library
+from src.audit_actions.library import DEFAULT_ACTION_TYPES, LocalAction
 
 
 @pytest.fixture

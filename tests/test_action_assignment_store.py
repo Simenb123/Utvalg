@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import action_assignment_store as store
+import src.audit_actions.assignment_store as store
 
 
 @pytest.fixture

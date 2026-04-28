@@ -71,7 +71,7 @@ def _open_action_link_dialog(
     if not client or not year or not entity_key:
         return
     try:
-        from action_link_dialog import open_action_link_dialog as _open
+        from src.audit_actions.link_dialog import open_action_link_dialog as _open
     except Exception:
         return
     _open(

@@ -12,9 +12,9 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
     messagebox = None  # type: ignore
 
-import action_library
+import src.audit_actions.library as action_library
 import src.shared.workpapers.library as workpaper_library
-from action_library import LocalAction
+from src.audit_actions.library import LocalAction
 from src.shared.workpapers.library import Workpaper
 
 

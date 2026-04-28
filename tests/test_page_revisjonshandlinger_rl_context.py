@@ -30,8 +30,8 @@ def _make_page(tmp_path, monkeypatch):
     nb = ttk.Notebook(root)
     nb.pack(fill="both", expand=True)
 
-    import action_assignment_store as asg_store
-    import action_workpaper_store as wp_store
+    import src.audit_actions.assignment_store as asg_store
+    import src.audit_actions.workpaper_store as wp_store
 
     def fake_years_dir(display_name: str, *, year: str) -> Path:
         p = tmp_path / display_name / "years" / year
@@ -46,8 +46,8 @@ def _make_page(tmp_path, monkeypatch):
                         lambda c, y: fake_years_dir(c, year=y) / "scoping_overrides.json")
 
     from src.pages.revisjonshandlinger import page as page_mod
-    from crmsystem_action_matching import ActionMatch, RegnskapslinjeInfo
-    from crmsystem_actions import AuditAction, EngagementInfo
+    from src.audit_actions.crm_action_matching import ActionMatch, RegnskapslinjeInfo
+    from src.audit_actions.crm_actions import AuditAction, EngagementInfo
 
     page = page_mod.RevisjonshandlingerPage(nb)
     nb.add(page, text="Handlinger")
@@ -217,12 +217,12 @@ def test_heading_click_sorts_ascending_then_descending(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
         # Legg til en lokal handling slik at vi har minst to rader å sortere
-        from crmsystem_actions import AuditAction
+        from src.audit_actions.crm_actions import AuditAction
         page._actions.append(
             AuditAction(action_id=2, area_name="Bank", action_type="substantive",
                         procedure_name="020 Bankavstemming", status="Åpen")
         )
-        from crmsystem_action_matching import ActionMatch
+        from src.audit_actions.crm_action_matching import ActionMatch
         page._match_by_action_id[2] = ActionMatch(
             action=page._actions[1], regnr="655", regnskapslinje="Bank",
             match_method="prefix", confidence=1.0,
@@ -246,8 +246,8 @@ def test_heading_click_sorts_ascending_then_descending(tmp_path, monkeypatch):
 def test_belop_sort_is_numeric(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
-        from crmsystem_actions import AuditAction
-        from crmsystem_action_matching import ActionMatch
+        from src.audit_actions.crm_actions import AuditAction
+        from src.audit_actions.crm_action_matching import ActionMatch
         page._actions.append(
             AuditAction(action_id=2, area_name="Bank", action_type="substantive",
                         procedure_name="020 Bankavstemming", status="Åpen")
@@ -293,7 +293,7 @@ def test_double_click_on_rl_gap_calls_link_dialog(tmp_path, monkeypatch):
         page._tree.selection_set("RL:70")
 
         calls: list[dict[str, Any]] = []
-        import action_link_dialog
+        import src.audit_actions.link_dialog as action_link_dialog
         monkeypatch.setattr(action_link_dialog, "open_action_link_dialog",
                             lambda **kw: calls.append(kw))
 

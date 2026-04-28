@@ -35,7 +35,7 @@ def _make_page(tmp_path, monkeypatch):
     nb = ttk.Notebook(root)
     nb.pack(fill="both", expand=True)
 
-    import action_workpaper_store as store
+    import src.audit_actions.workpaper_store as store
 
     def fake_years_dir(display_name: str, *, year: str) -> Path:
         p = tmp_path / display_name / "years" / year
@@ -45,8 +45,8 @@ def _make_page(tmp_path, monkeypatch):
     monkeypatch.setattr(store.client_store, "years_dir", fake_years_dir)
 
     from src.pages.revisjonshandlinger import page as page_mod
-    from crmsystem_action_matching import ActionMatch, RegnskapslinjeInfo
-    from crmsystem_actions import AuditAction, EngagementInfo
+    from src.audit_actions.crm_action_matching import ActionMatch, RegnskapslinjeInfo
+    from src.audit_actions.crm_actions import AuditAction, EngagementInfo
 
     page = page_mod.RevisjonshandlingerPage(nb)
     nb.add(page, text="Handlinger")
@@ -126,7 +126,7 @@ def test_apply_filter_shows_auto_source_for_unconfirmed(tmp_path, monkeypatch):
 def test_apply_filter_shows_confirmed_source_and_tag(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
-        import action_workpaper_store as store
+        import src.audit_actions.workpaper_store as store
         store.confirm_regnr(
             "Acme AS", "2025", 1,
             regnr="70", regnskapslinje="Annen driftskostnad",
@@ -150,7 +150,7 @@ def test_on_confirm_current_persists_auto_match(tmp_path, monkeypatch):
         page._tree.selection_set("1")
         page._on_confirm_current()
 
-        import action_workpaper_store as store
+        import src.audit_actions.workpaper_store as store
         loaded = store.load_workpapers("Acme AS", "2025")
         assert 1 in loaded
         assert loaded[1].confirmed_regnr == "10"
@@ -173,7 +173,7 @@ def test_on_confirm_current_skips_when_no_auto_match(tmp_path, monkeypatch):
         monkeypatch.setattr(mb, "showinfo", lambda *a, **k: calls.append(("info", a, k)))
         page._on_confirm_current()
 
-        import action_workpaper_store as store
+        import src.audit_actions.workpaper_store as store
         assert store.load_workpapers("Acme AS", "2025") == {}
         assert calls, "user should have been informed"
     finally:
@@ -184,7 +184,7 @@ def test_on_confirm_current_skips_when_no_auto_match(tmp_path, monkeypatch):
 def test_on_clear_confirmation_removes_entry(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
-        import action_workpaper_store as store
+        import src.audit_actions.workpaper_store as store
         store.confirm_regnr("Acme AS", "2025", 2, regnr="70", regnskapslinje="ADK")
         page._workpapers = store.load_workpapers("Acme AS", "2025")
         page._apply_filter()
@@ -220,7 +220,7 @@ def test_action_buttons_reflect_selection_state(tmp_path, monkeypatch):
         assert str(page._btn_confirm["state"]) == "disabled"
         assert str(page._btn_override["state"]) == "normal"
 
-        import action_workpaper_store as store
+        import src.audit_actions.workpaper_store as store
         store.confirm_regnr("Acme AS", "2025", 1, regnr="10", regnskapslinje="Salgsinntekt")
         page._workpapers = store.load_workpapers("Acme AS", "2025")
         page._tree.selection_set("1")
@@ -234,7 +234,7 @@ def test_action_buttons_reflect_selection_state(tmp_path, monkeypatch):
 def test_select_shows_workpaper_info_in_detail_panel(tmp_path, monkeypatch):
     root, page = _make_page(tmp_path, monkeypatch)
     try:
-        import action_workpaper_store as store
+        import src.audit_actions.workpaper_store as store
         store.confirm_regnr(
             "Acme AS", "2025", 2, regnr="70",
             regnskapslinje="Annen driftskostnad",
