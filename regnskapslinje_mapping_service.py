@@ -92,6 +92,20 @@ class RLMappingIssue:
         """En issue er et problem hvis statusen krever brukerhandling."""
         return self.mapping_status in {"unmapped", "sumline"}
 
+    @property
+    def has_suggestion_conflict(self) -> bool:
+        """True hvis suggesteren foreslår en *annen* RL enn nåværende mapping.
+
+        Brukes til å flagge rader i SB-treet og konflikt-panel i remap-
+        dialogen. Krever at suggesteren har høy nok confidence (>= 0.7)
+        for å unngå støy fra usikre forslag.
+        """
+        if self.suggested_regnr is None or self.regnr is None:
+            return False
+        if self.suggestion_confidence is None or float(self.suggestion_confidence) < 0.7:
+            return False
+        return int(self.suggested_regnr) != int(self.regnr)
+
 
 @dataclass(frozen=True)
 class RLAdminRow:
@@ -645,25 +659,30 @@ def enrich_rl_mapping_issues_with_suggestions(
     historical_overrides: dict[str, int] | None = None,
     rulebook_document: dict[str, Any] | None = None,
 ) -> list[RLMappingIssue]:
-    """Berik problem-issues med smartforslag fra ``regnskapslinje_suggest``.
+    """Berik *alle* issues med smartforslag fra ``regnskapslinje_suggest``.
 
-    Issues som ikke er problem (status interval/override) berøres ikke.
+    Tidligere kjørte denne kun for problem-issues (unmapped/sumline). Nå
+    kjører den også for ``interval``- og ``override``-mappede kontoer slik
+    at vi kan oppdage konflikter — kontoer der suggesteren foreslår en
+    annen RL enn nåværende mapping (se ``RLMappingIssue.has_suggestion_conflict``).
+
+    Performance: ``build_candidates(...)`` heves ut av loopen og gjenbrukes
+    for alle issues, slik at vi ikke betaler tokenisering per konto.
     """
     if not issues:
         return []
+    candidates = regnskapslinje_suggest.build_candidates(
+        regnskapslinjer, rulebook_document=rulebook_document
+    )
     out: list[RLMappingIssue] = []
     for issue in issues:
-        if not issue.is_problem:
-            out.append(issue)
-            continue
-        suggestion = regnskapslinje_suggest.suggest_regnskapslinje(
+        suggestion = regnskapslinje_suggest.suggest_with_candidates(
+            candidates,
             konto=issue.konto,
             kontonavn=issue.kontonavn,
             ib=issue.ib,
             movement=issue.movement,
             ub=issue.ub,
-            regnskapslinjer=regnskapslinjer,
-            rulebook_document=rulebook_document,
             usage=(usage_features or {}).get(issue.konto),
             historical_regnr=(historical_overrides or {}).get(issue.konto),
         )
