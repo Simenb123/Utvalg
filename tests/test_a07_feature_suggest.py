@@ -132,6 +132,27 @@ def test_suggest_mappings_filters_irrelevant_accounts_and_keeps_columns_stable()
     assert bonus["GL_Sum"] == 50_000
 
 
+def test_suggest_mappings_excludes_zero_amount_accounts_on_active_basis():
+    a07 = pd.DataFrame([{"Kode": "fastloenn", "Navn": "Fastloenn", "Belop": 1000.0}])
+    gl = pd.DataFrame(
+        [
+            {"Konto": "5000", "Navn": "Lonn null paa endring", "Endring": 0.0, "UB": 1000.0},
+            {"Konto": "5001", "Navn": "Lonn aktiv endring", "Endring": 1000.0, "UB": 1000.0},
+        ]
+    )
+
+    df = suggest_mappings(
+        a07, gl, mapping={}, max_combo=1, candidates_per_code=10, top_suggestions_per_code=3,
+        filter_mode="a07", basis_strategy="fixed", basis="Endring", tolerance_rel=0.001, tolerance_abs=1.0,
+    )
+
+    assert not df["ForslagKontoer"].astype(str).str.contains("5000").any()
+    row = df.loc[df["Kode"] == "fastloenn"].iloc[0]
+    assert row["Basis"] == "Endring"
+    assert row["ForslagKontoer"] == "5001"
+    assert row["GL_Sum"] == 1000.0
+
+
 def test_build_suggest_config_lets_rule_basis_override_ui_fallback(tmp_path):
     rulebook_path = tmp_path / "a07_rulebook.json"
     rulebook_path.write_text(
@@ -244,11 +265,16 @@ def test_load_rulebook_supports_pipe_ranges_and_special_add(tmp_path):
     rulebook_path.write_text(
         json.dumps(
             {
+                "global_blocked_regnskapslinjer": ["655 Bankinnskudd"],
                 "rules": {
                     "fastloenn": {
                         "label": "Fast loenn",
                         "allowed_ranges": ["5000-5099 | 5190", "5290"],
+                        "preferred_regnskapslinjer": ["500 Lonn"],
+                        "extra_regnskapslinjer": ["111"],
+                        "blocked_regnskapslinjer": ["999 Annet"],
                         "keywords": ["loenn", "maanedsloenn", "fastlonn"],
+                        "related_codes": ["fastTillegg", "timeloenn", "fastTillegg"],
                         "special_add": [
                             {"account": "2940", "keywords": ["feriepenger"], "basis": "Endring", "weight": -1.0}
                         ],
@@ -266,7 +292,9 @@ def test_load_rulebook_supports_pipe_ranges_and_special_add(tmp_path):
     rule = rulebook["fastloenn"]
 
     assert rule.allowed_ranges == ((5000, 5099), (5190, 5190), (5290, 5290))
+    assert (rule.preferred_regnskapslinjer, rule.extra_regnskapslinjer, rule.blocked_regnskapslinjer) == ((500,), (111,), (655, 999))
     assert "maanedsloenn" in rule.keywords
+    assert rule.related_codes == ("fastTillegg", "timeloenn")
     assert len(rule.special_add) == 1
     assert rule.special_add[0].account == "2940"
     assert rule.special_add[0].keywords == ("feriepenger",)
