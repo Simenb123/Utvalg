@@ -133,16 +133,27 @@ class SkattPage(ttk.Frame):  # type: ignore[misc]
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        tb = ttk.Frame(self, padding=(6, 4))
-        tb.grid(row=0, column=0, sticky="ew")
+        # Standard PageHeader: tittel venstre, kjernehandlinger ("Beregn" +
+        # status) i midten, refresh + eksport-meny til h\u00f8yre.
+        from src.shared.ui.page_header import PageHeader
 
-        ttk.Label(tb, text="Skatteanalyse",
-                  font=("TkDefaultFont", 11, "bold")).pack(side="left", padx=(0, 12))
-        ttk.Button(tb, text="Beregn", command=self._refresh_all,
-                   width=10).pack(side="left")
-        ttk.Button(tb, text="Eksporter til Excel\u2026",
-                   command=self._export_excel).pack(side="left", padx=(6, 0))
-        self._status_lbl = ttk.Label(tb, text="", foreground="#555")
+        self._client_subtitle_var = tk.StringVar(value="")
+        header = PageHeader(
+            self, title="Skatt",
+            subtitle_var=self._client_subtitle_var,
+        )
+        header.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+
+        # F5 + \u21bb-knapp triggrer Beregn p\u00e5 nytt
+        header.set_refresh(command=self._refresh_all, key="<F5>")
+        header.add_export("Excel", command=self._export_excel)
+
+        # Side-spesifikk kjernehandling: "Beregn"-knappen + status
+        ttk.Button(
+            header.center, text="Beregn",
+            command=self._refresh_all, width=10,
+        ).pack(side="left")
+        self._status_lbl = ttk.Label(header.center, text="", style="Muted.TLabel")
         self._status_lbl.pack(side="left", padx=(12, 0))
 
         # Hoved-layout: venstre = beregning, høyre = forklaringer
@@ -204,16 +215,25 @@ class SkattPage(ttk.Frame):  # type: ignore[misc]
                   font=("TkDefaultFont", 10, "bold")).grid(
                       row=0, column=0, sticky="w", pady=(0, 4))
 
-        self._kpi_text = tk.Text(right, width=28, height=14,
-                                  state="disabled", relief="flat",
-                                  bg="#F4F6F9", font=("TkDefaultFont", 10),
-                                  wrap="word")
+        # Importer status-tokens for grønn/rød — fungerer både her og i tree-tags.
+        from src.shared.ui.tokens import (
+            POS_TEXT_DARK as _POS_DARK, NEG_TEXT_DARK as _NEG_DARK,
+            INFO_TEXT as _INFO_TEXT, hex_gui as _hex_gui,
+        )
+
+        self._kpi_text = tk.Text(
+            right, width=28, height=14,
+            state="disabled", relief="flat",
+            bg="#F4F6F9",  # design-exception: KPI-panel egen lys grå bakgrunn
+            font=("TkDefaultFont", 10),
+            wrap="word",
+        )
         self._kpi_text.grid(row=1, column=0, sticky="nsew")
         right.rowconfigure(1, weight=1)
         self._kpi_text.tag_configure("bold",  font=("TkDefaultFont", 10, "bold"))
-        self._kpi_text.tag_configure("green", foreground="#1B7F35")
-        self._kpi_text.tag_configure("red",   foreground="#C0392B")
-        self._kpi_text.tag_configure("gray",  foreground="#888888")
+        self._kpi_text.tag_configure("green", foreground=_hex_gui(_POS_DARK))
+        self._kpi_text.tag_configure("red",   foreground=_hex_gui(_NEG_DARK))
+        self._kpi_text.tag_configure("gray",  foreground="#888888")  # design-exception: KPI nøytral grå
 
     def _make_calc_tree(self, parent: Any) -> Any:
         cols = ("post", "beregnet", "bokfort", "avvik")
@@ -227,14 +247,26 @@ class SkattPage(ttk.Frame):  # type: ignore[misc]
         tree.column("beregnet",  width=130, anchor="e", stretch=False)
         tree.column("bokfort",   width=130, anchor="e", stretch=False)
         tree.column("avvik",     width=120, anchor="e", stretch=False)
-        tree.tag_configure(_TAG_HEADER, background="#E8EFF7",
+        # Tag-farger — grønn/rød/blå bruker tokens; grå-toner og lys blå header
+        # er egne kategorifarger som beholdes.
+        from src.shared.ui.tokens import (
+            POS_TEXT_DARK as _POS_DARK, NEG_TEXT_DARK as _NEG_DARK,
+            INFO_TEXT as _INFO_TEXT, hex_gui as _hex_gui,
+        )
+        tree.tag_configure(
+            _TAG_HEADER,
+            background="#E8EFF7",  # design-exception: skatt-tabell header-bakgrunn (lys blå)
+            font=("TkDefaultFont", 9, "bold"),
+        )
+        tree.tag_configure(_TAG_AUTO, foreground=_hex_gui(_INFO_TEXT))
+        tree.tag_configure(
+            _TAG_INFO,
+            foreground="#555555",  # design-exception: skatt-tabell info-grå
+            font=("TkDefaultFont", 9, "italic"),
+        )
+        tree.tag_configure(_TAG_OK, foreground=_hex_gui(_POS_DARK),
                            font=("TkDefaultFont", 9, "bold"))
-        tree.tag_configure(_TAG_AUTO,   foreground="#1A56A0")
-        tree.tag_configure(_TAG_INFO,   foreground="#555555",
-                           font=("TkDefaultFont", 9, "italic"))
-        tree.tag_configure(_TAG_OK,     foreground="#1B7F35",
-                           font=("TkDefaultFont", 9, "bold"))
-        tree.tag_configure(_TAG_AVVIK,  foreground="#C0392B",
+        tree.tag_configure(_TAG_AVVIK, foreground=_hex_gui(_NEG_DARK),
                            font=("TkDefaultFont", 9, "bold"))
         return tree
 

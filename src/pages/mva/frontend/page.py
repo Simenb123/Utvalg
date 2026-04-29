@@ -164,30 +164,27 @@ class MvaPage(ttk.Frame):  # type: ignore[misc]
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        # Toolbar
-        tb = ttk.Frame(self, padding=(6, 4))
-        tb.grid(row=0, column=0, sticky="ew")
+        from src.shared.ui.page_header import PageHeader
 
-        ttk.Label(tb, text="MVA-analyse",
-                  font=("TkDefaultFont", 11, "bold")).pack(side="left", padx=(0, 12))
-        ttk.Button(tb, text="Oppdater", command=self._refresh_all,
-                   width=10).pack(side="left")
-        ttk.Button(tb, text="MVA-oppsett\u2026",
-                   command=self._open_mva_config).pack(side="left", padx=(6, 0))
-        ttk.Button(tb, text="Importer Skatteetaten\u2026",
+        header = PageHeader(
+            self,
+            title="MVA-analyse",
+            subtitle="Klassifiser kontoer i Analyse-fanen for å aktivere MVA-analyse.",
+        )
+        header.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+        header.set_refresh(command=self._refresh_all, key="<F5>")
+
+        ttk.Button(header.center, text="MVA-oppsett\u2026",
+                   command=self._open_mva_config).pack(side="left")
+        ttk.Button(header.center, text="Importer Skatteetaten\u2026",
                    command=self._import_skatteetaten).pack(side="left", padx=(6, 0))
-        ttk.Button(tb, text="Importer MVA-melding\u2026",
+        ttk.Button(header.center, text="Importer MVA-melding\u2026",
                    command=self._import_mva_melding).pack(side="left", padx=(6, 0))
-        ttk.Button(tb, text="Eksporter til Excel\u2026",
-                   command=self._export_excel).pack(side="left", padx=(6, 0))
-        self._status_lbl = ttk.Label(tb, text="", foreground="#555")
-        self._status_lbl.pack(side="left", padx=(12, 0))
 
-        ttk.Label(
-            tb,
-            text="Klassifiser kontoer i Analyse-fanen for å aktivere MVA-analyse.",
-            foreground="#888",
-        ).pack(side="right", padx=(0, 8))
+        header.add_export("Excel", command=self._export_excel)
+
+        self._status_lbl = ttk.Label(header.center, text="")
+        self._status_lbl.pack(side="left", padx=(12, 0))
 
         # Hoved-notebook med 5 sub-faner
         nb = ttk.Notebook(self)

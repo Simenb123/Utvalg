@@ -62,32 +62,34 @@ class ScopingPage(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        # ── Top bar: vesentlighetsgrenser ──
-        top = ttk.Frame(self)
-        top.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
-        top.columnconfigure(10, weight=1)
+        from src.shared.ui.page_header import PageHeader
 
-        self._lbl_om = ttk.Label(top, text="OM: —", font=("", 9, "bold"))
-        self._lbl_om.grid(row=0, column=0, sticky="w", padx=(0, 16))
-        self._lbl_pm = ttk.Label(top, text="PM: —", font=("", 9, "bold"))
-        self._lbl_pm.grid(row=0, column=1, sticky="w", padx=(0, 16))
-        self._lbl_sum = ttk.Label(top, text="SUM: —", font=("", 9, "bold"))
-        self._lbl_sum.grid(row=0, column=2, sticky="w", padx=(0, 16))
+        # ── Topptittel + vesentlighetsgrenser i header.center ──
+        header = PageHeader(self, title="Scoping", subtitle="Regnskapslinjer i scope")
+        header.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
+        header.set_refresh(command=self._refresh, key="<F5>")
+        header.add_export("Excel", command=self._export_excel)
 
-        ttk.Label(top, textvariable=self.var_status, foreground="#667085").grid(
-            row=0, column=10, sticky="e"
-        )
-        ttk.Button(top, text="Oppdater", command=self._refresh).grid(
-            row=0, column=11, sticky="e", padx=(6, 0)
-        )
+        self._lbl_om = ttk.Label(header.center, text="OM: —", font=("", 9, "bold"))
+        self._lbl_om.pack(side="left", padx=(0, 16))
+        self._lbl_pm = ttk.Label(header.center, text="PM: —", font=("", 9, "bold"))
+        self._lbl_pm.pack(side="left", padx=(0, 16))
+        self._lbl_sum = ttk.Label(header.center, text="SUM: —", font=("", 9, "bold"))
+        self._lbl_sum.pack(side="left", padx=(0, 16))
 
-        # ── Metric-kort: Resultat (PL) + Balanse (BS) + Lås + Eksport ──
+        ttk.Label(
+            header.center, textvariable=self.var_status,
+            foreground="#667085",  # design-exception: tailwind muted-grey for sub-status
+        ).pack(side="left", padx=(8, 0))
+
+        # ── Metric-kort: Resultat (PL) + Balanse (BS) + Lås ──
         # Flyttet hit fra bunnen — gir brukeren umiddelbar oversikt over
         # scopet-ut totalt per gruppe, med fargekodet OK/ADVARSEL.
+        # (Eksport flyttet til PageHeader.)
         agg = ttk.Frame(self)
         agg.grid(row=1, column=0, sticky="ew", padx=8, pady=(2, 4))
         # Begge kortene skal ekspandere horisontalt og dele plassen likt;
-        # lås/eksport-knappene legger seg helt til høyre.
+        # lås legger seg helt til høyre.
         agg.columnconfigure(0, weight=1, uniform="card")
         agg.columnconfigure(1, weight=1, uniform="card")
 
@@ -115,10 +117,6 @@ class ScopingPage(ttk.Frame):
             command=self._on_lock_toggled,
         )
         self._chk_lock.grid(row=0, column=3, sticky="e", padx=(8, 0))
-
-        ttk.Button(agg, text="Eksporter Excel", command=self._export_excel).grid(
-            row=0, column=4, sticky="e", padx=(8, 0),
-        )
 
         # Bakoverkompat-alias brukt av eldre kode/tester
         self._agg_var = tk.StringVar(value="")
@@ -229,13 +227,18 @@ class ScopingPage(ttk.Frame):
         except Exception:
             pass
 
-        # Tagging for fargekoding
-        self._tree.tag_configure("vesentlig", background="#fde8e8")
-        self._tree.tag_configure("moderat", background="#fef3c7")
-        self._tree.tag_configure("ikke_vesentlig", background="#d1fae5")
-        self._tree.tag_configure("manuell", background="#dbeafe")
-        self._tree.tag_configure("summary", foreground="#9ca3af")
-        self._tree.tag_configure("stripe", background="#f8f9fa")
+        # Tagging for fargekoding — bruker delte status-tokens
+        from src.shared.ui.tokens import (
+            NEG_SOFT as _NEG_SOFT, WARN_SOFT as _WARN_SOFT,
+            POS_SOFT as _POS_SOFT, INFO_SOFT as _INFO_SOFT,
+            hex_gui as _hex_gui,
+        )
+        self._tree.tag_configure("vesentlig", background=_hex_gui(_NEG_SOFT))
+        self._tree.tag_configure("moderat", background=_hex_gui(_WARN_SOFT))
+        self._tree.tag_configure("ikke_vesentlig", background=_hex_gui(_POS_SOFT))
+        self._tree.tag_configure("manuell", background=_hex_gui(_INFO_SOFT))
+        self._tree.tag_configure("summary", foreground="#9ca3af")  # design-exception: tailwind-grey for sumposter
+        self._tree.tag_configure("stripe", background="#f8f9fa")  # design-exception: tailwind alternerende rad
 
         # Registrer i global selection-summary (footer-teksten nederst
         # til venstre). Gjør at brukeren ser sumtall for valgt rad(er) i
@@ -970,7 +973,9 @@ class ScopingPage(ttk.Frame):
 
         Returnerer dict med widget-referanser som _populate_card oppdaterer.
         """
-        bg = "#FFFFFF"
+        # Metric-card kategorifarger — beholdes hardkodet (Tailwind-palett brukt
+        # bevisst i 3 ulike paletter: nøytral/grønn/rød — se _color_metric_card).
+        bg = "#FFFFFF"  # design-exception: metric-card kategorifarge
         card = tk.Frame(parent, relief="solid", borderwidth=1, background=bg)
         card.columnconfigure(0, weight=0, minsize=140)  # tall-kolonnen
         card.columnconfigure(1, weight=1, minsize=240)  # bar-kolonnen vokser
@@ -978,7 +983,7 @@ class ScopingPage(ttk.Frame):
         title_lbl = ttk.Label(
             card, text=title,
             font=("Segoe UI", 10, "bold"),
-            foreground="#344054", background=bg,
+            foreground="#344054", background=bg,  # design-exception: metric-card kategorifarge
         )
         title_lbl.grid(row=0, column=0, columnspan=2, sticky="w",
                        padx=12, pady=(6, 2))
@@ -987,7 +992,7 @@ class ScopingPage(ttk.Frame):
         value_lbl = ttk.Label(
             card, text="—",
             font=("Segoe UI", 16, "bold"),
-            foreground="#1F2937", background=bg,
+            foreground="#1F2937", background=bg,  # design-exception: metric-card kategorifarge
         )
         value_lbl.grid(row=1, column=0, sticky="w", padx=(12, 8))
 
@@ -999,8 +1004,8 @@ class ScopingPage(ttk.Frame):
         style_name = f"ScopingMetric{title.replace(' ', '').replace('(', '').replace(')', '')}.Horizontal.TProgressbar"
         style = ttk.Style()
         try:
-            style.configure(style_name, troughcolor="#EEF2F7", background="#3B82F6",
-                            thickness=8)
+            # design-exception: custom Tailwind progressbar-farger
+            style.configure(style_name, troughcolor="#EEF2F7", background="#3B82F6", thickness=8)  # design-exception: progressbar-palett
         except Exception:
             pass
         bar = ttk.Progressbar(
@@ -1011,7 +1016,7 @@ class ScopingPage(ttk.Frame):
         pct_lbl = ttk.Label(
             bar_holder, text="",
             font=("Segoe UI", 8),
-            foreground="#667085", background=bg,
+            foreground="#667085", background=bg,  # design-exception: metric-card kategorifarge
         )
         pct_lbl.grid(row=1, column=0, sticky="w")
 
@@ -1019,14 +1024,14 @@ class ScopingPage(ttk.Frame):
         pm_lbl = ttk.Label(
             card, text="—",
             font=("Segoe UI", 9),
-            foreground="#475569", background=bg,
+            foreground="#475569", background=bg,  # design-exception: metric-card kategorifarge
         )
         pm_lbl.grid(row=2, column=0, sticky="w", padx=(12, 8), pady=(0, 8))
 
         count_lbl = ttk.Label(
             card, text="",
             font=("Segoe UI", 9),
-            foreground="#4B5563", background=bg,
+            foreground="#4B5563", background=bg,  # design-exception: metric-card kategorifarge
         )
         count_lbl.grid(row=2, column=1, sticky="w", padx=(0, 12), pady=(0, 8))
 
@@ -1085,31 +1090,24 @@ class ScopingPage(ttk.Frame):
         self._set_card_status(refs, ok=ok)
 
     def _set_card_status(self, refs: dict, *, ok: bool | None) -> None:
-        """Fargelegg hele metric-kortet basert på OK / advarsel / nøytral."""
+        """Fargelegg hele metric-kortet basert på OK / advarsel / nøytral.
+
+        Hver av de 3 paletten under er en bevisst kategorisert sett av
+        7 farger som hører sammen visuelt (Tailwind-palett). Ikke gjør om
+        til generelle tokens — de tilhører dette ene komponentet.
+        """
         if ok is None:
-            bg = "#FFFFFF"
-            title_fg = "#344054"
-            value_fg = "#1F2937"
-            pm_fg = "#475569"
-            muted_fg = "#667085"
-            count_fg = "#4B5563"
-            bar_color = "#9CA3AF"
+            bg = "#FFFFFF"; title_fg = "#344054"; value_fg = "#1F2937"  # design-exception: metric-card nøytral palett
+            pm_fg = "#475569"; muted_fg = "#667085"; count_fg = "#4B5563"  # design-exception: metric-card nøytral palett
+            bar_color = "#9CA3AF"  # design-exception: metric-card nøytral palett
         elif ok:
-            bg = "#F0FDF4"
-            title_fg = "#14532D"
-            value_fg = "#166534"
-            pm_fg = "#166534"
-            muted_fg = "#3F8558"
-            count_fg = "#2F6B46"
-            bar_color = "#22C55E"
+            bg = "#F0FDF4"; title_fg = "#14532D"; value_fg = "#166534"  # design-exception: metric-card OK-palett
+            pm_fg = "#166534"; muted_fg = "#3F8558"; count_fg = "#2F6B46"  # design-exception: metric-card OK-palett
+            bar_color = "#22C55E"  # design-exception: metric-card OK-palett
         else:
-            bg = "#FEF2F2"
-            title_fg = "#7F1D1D"
-            value_fg = "#991B1B"
-            pm_fg = "#991B1B"
-            muted_fg = "#B54141"
-            count_fg = "#A93232"
-            bar_color = "#EF4444"
+            bg = "#FEF2F2"; title_fg = "#7F1D1D"; value_fg = "#991B1B"  # design-exception: metric-card advarsel-palett
+            pm_fg = "#991B1B"; muted_fg = "#B54141"; count_fg = "#A93232"  # design-exception: metric-card advarsel-palett
+            bar_color = "#EF4444"  # design-exception: metric-card advarsel-palett
         try:
             refs["frame"].configure(background=bg)
             refs["title"].configure(background=bg, foreground=title_fg)

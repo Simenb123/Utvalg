@@ -50,6 +50,11 @@ from ..backend.formatters import (  # noqa: E402,F401
     _source_label,
 )
 
+from src.shared.ui.tokens import (  # noqa: E402
+    SAGE_WASH_SOFT as _SAGE_WASH_SOFT,
+    hex_gui as _hex_gui,
+)
+
 
 
 class ARPage(ttk.Frame):
@@ -125,18 +130,23 @@ class ARPage(ttk.Frame):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        from src.shared.ui.page_header import PageHeader
+
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
 
-        top = ttk.Frame(self, padding=(12, 8, 12, 0))
-        top.grid(row=0, column=0, sticky="ew")
-        top.columnconfigure(1, weight=1)
+        header = PageHeader(self, title="Aksjonærregisteret", subtitle_var=self.var_context)
+        header.grid(row=0, column=0, sticky="ew", padx=12, pady=(8, 0))
+        header.set_refresh(command=self._refresh_current_overview, key="<F5>")
+        header.add_export("Excel", command=self._export_excel)
 
-        ttk.Label(top, textvariable=self.var_context, font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(top, textvariable=self.var_status, foreground="#667085").grid(row=0, column=1, sticky="w", padx=(12, 0))
-        ttk.Button(top, text="Importer RF-1086 (PDF)", command=self._on_import_pdf).grid(row=0, column=2, sticky="e")
-        ttk.Button(top, text="Oppdater", command=self._refresh_current_overview).grid(row=0, column=3, sticky="e", padx=(6, 0))
-        ttk.Button(top, text="Eksporter AR-data\u2026", command=self._export_excel).grid(row=0, column=4, sticky="e", padx=(6, 0))
+        ttk.Button(
+            header.center, text="Importer RF-1086 (PDF)",
+            command=self._on_import_pdf,
+        ).pack(side="left")
+        ttk.Label(
+            header.center, textvariable=self.var_status, foreground="#667085",  # design-exception: tailwind grey/aksentfarge
+        ).pack(side="left", padx=(12, 0))
 
         # ── Sporbarhetsstripe: sammenligning / grunnlag / RF-1086 ──
         self.var_trace_compare = tk.StringVar(value="Sammenligning: –")
@@ -145,11 +155,11 @@ class ARPage(ttk.Frame):
         trace = ttk.Frame(self, padding=(12, 2, 12, 6))
         trace.grid(row=1, column=0, sticky="ew")
         trace.columnconfigure(5, weight=1)
-        ttk.Label(trace, textvariable=self.var_trace_compare, foreground="#475467").grid(row=0, column=0, sticky="w")
+        ttk.Label(trace, textvariable=self.var_trace_compare, foreground="#475467").grid(row=0, column=0, sticky="w")  # design-exception: tailwind grey/aksentfarge
         ttk.Separator(trace, orient="vertical").grid(row=0, column=1, sticky="ns", padx=8)
-        ttk.Label(trace, textvariable=self.var_trace_basis, foreground="#475467").grid(row=0, column=2, sticky="w")
+        ttk.Label(trace, textvariable=self.var_trace_basis, foreground="#475467").grid(row=0, column=2, sticky="w")  # design-exception: tailwind grey/aksentfarge
         ttk.Separator(trace, orient="vertical").grid(row=0, column=3, sticky="ns", padx=8)
-        ttk.Label(trace, textvariable=self.var_trace_import, foreground="#475467").grid(row=0, column=4, sticky="w")
+        ttk.Label(trace, textvariable=self.var_trace_import, foreground="#475467").grid(row=0, column=4, sticky="w")  # design-exception: tailwind grey/aksentfarge
         self._btn_open_source_pdf = ttk.Button(
             trace, text="Åpne siste RF-1086", command=self._open_current_source_pdf, state="disabled",
         )
@@ -268,9 +278,9 @@ class ARPage(ttk.Frame):
         tree.column("sb", width=70, anchor="center")
         tree.column("booked", width=110, anchor="w")
         tree.column("source", width=105)
-        tree.tag_configure("manual", background="#EAF7F0")
-        tree.tag_configure("manual_override", background="#FFF4DD")
-        tree.tag_configure("carry_forward", background="#EDF3FF")
+        tree.tag_configure("manual", background=_hex_gui(_SAGE_WASH_SOFT))
+        tree.tag_configure("manual_override", background="#FFF4DD")  # design-exception: tabell-tag-bakgrunn
+        tree.tag_configure("carry_forward", background="#EDF3FF")  # design-exception: tabell-tag-bakgrunn
         tree.grid(row=2, column=0, sticky="nsew")
         tree.bind("<<TreeviewSelect>>", self._on_owned_selected)
         self._tree_owned = tree
@@ -313,7 +323,7 @@ class ARPage(ttk.Frame):
         ttk.Label(editor, text="Notat").grid(row=4, column=0, sticky="w")
         ttk.Entry(editor, textvariable=self.var_manual_note).grid(row=4, column=1, sticky="ew", pady=2)
         ttk.Label(editor, text="Kilde").grid(row=5, column=0, sticky="w")
-        ttk.Label(editor, textvariable=self.var_manual_source, foreground="#475467").grid(row=5, column=1, sticky="w", pady=2)
+        ttk.Label(editor, textvariable=self.var_manual_source, foreground="#475467").grid(row=5, column=1, sticky="w", pady=2)  # design-exception: tailwind grey/aksentfarge
 
     def _build_brreg_subtab(self, parent: ttk.Frame) -> None:
         header = ttk.Frame(parent)
@@ -332,7 +342,7 @@ class ARPage(ttk.Frame):
 
         ttk.Label(
             parent, textvariable=self.var_brreg_status,
-            foreground="#667085",
+            foreground="#667085",  # design-exception: tailwind grey/aksentfarge
         ).grid(row=1, column=0, sticky="w")
 
         panel_frame = ttk.Frame(parent)
@@ -344,7 +354,7 @@ class ARPage(ttk.Frame):
         except Exception as exc:
             ttk.Label(
                 panel_frame, text=f"Kunne ikke initialisere BRREG-panel: {exc}",
-                foreground="#B42318",
+                foreground="#B42318",  # design-exception: tailwind grey/aksentfarge
             ).grid(row=0, column=0, sticky="w")
 
     def _build_changes_tab(self, parent: ttk.Frame) -> None:
@@ -366,7 +376,7 @@ class ARPage(ttk.Frame):
         toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 0))
         ttk.Button(toolbar, text="+", width=3, command=lambda: self._chart_apply_zoom(1.15)).pack(side="left")
         ttk.Button(toolbar, text="\u2212", width=3, command=lambda: self._chart_apply_zoom(1 / 1.15)).pack(side="left", padx=(2, 0))
-        ttk.Label(toolbar, textvariable=self.var_chart_zoom, foreground="#475467", width=6).pack(side="left", padx=(6, 0))
+        ttk.Label(toolbar, textvariable=self.var_chart_zoom, foreground="#475467", width=6).pack(side="left", padx=(6, 0))  # design-exception: tailwind grey/aksentfarge
         ttk.Button(toolbar, text="Tilpass", command=self._chart_fit_view).pack(side="left", padx=(4, 0))
         ttk.Button(toolbar, text="Nullstill", command=self._chart_reset_view).pack(side="left", padx=(2, 0))
 
@@ -374,7 +384,7 @@ class ARPage(ttk.Frame):
         sep.pack(side="left", padx=(10, 10), fill="y", pady=2)
 
         for label, color in (
-            ("Klient", "#E6F0FF"),
+            ("Klient", "#E6F0FF"),  # design-exception: farge-aksent
             ("Datter", _relation_fill("datter")),
             ("Tilknyttet", _relation_fill("tilknyttet")),
             ("Investering", _relation_fill("investering")),
@@ -382,7 +392,7 @@ class ARPage(ttk.Frame):
         ):
             swatch = tk.Label(toolbar, width=2, background=color, relief="solid", bd=1)
             swatch.pack(side="left", padx=(0, 2))
-            ttk.Label(toolbar, text=label, foreground="#475467").pack(side="left", padx=(0, 8))
+            ttk.Label(toolbar, text=label, foreground="#475467").pack(side="left", padx=(0, 8))  # design-exception: tailwind grey/aksentfarge
 
         wrap = ttk.Frame(parent)
         wrap.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
@@ -391,9 +401,9 @@ class ARPage(ttk.Frame):
 
         canvas = tk.Canvas(
             wrap,
-            background="#FFFFFF",
+            background="#FFFFFF",  # design-exception: tailwind soft-bakgrunn
             highlightthickness=1,
-            highlightbackground="#D0D5DD",
+            highlightbackground="#D0D5DD",  # design-exception: tailwind soft-bakgrunn
         )
         xscroll = ttk.Scrollbar(wrap, orient="horizontal", command=canvas.xview)
         yscroll = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview)
@@ -838,7 +848,7 @@ class ARPage(ttk.Frame):
         ttk.Label(
             owner_tools,
             text="Manuelle endringer overlever RF-1086-import. Konflikter må aksepteres i Registerendringer.",
-            foreground="#667085",
+            foreground="#667085",  # design-exception: tailwind grey/aksentfarge
         ).pack(side="left", padx=(12, 0))
 
         pw = ttk.PanedWindow(parent, orient="vertical")
@@ -854,7 +864,7 @@ class ARPage(ttk.Frame):
         ttk.Label(
             upper,
             textvariable=self.var_owners_caption,
-            foreground="#475467",
+            foreground="#475467",  # design-exception: tailwind grey/aksentfarge
         ).grid(row=0, column=0, sticky="w", pady=(0, 2))
 
         cols = (
@@ -887,12 +897,12 @@ class ARPage(ttk.Frame):
         tree.column("tx_value", width=110, anchor="e")
         tree.column("pct_current", width=100, anchor="e")
 
-        tree.tag_configure("new", background="#EAF7F0")
-        tree.tag_configure("removed", background="#F2F4F7", foreground="#98A2B3")
-        tree.tag_configure("changed", background="#FFFBEB")
-        tree.tag_configure("hidden", background="#F9FAFB", foreground="#98A2B3")
-        tree.tag_configure("manual", background="#EAF7F0")
-        tree.tag_configure("manual_override", background="#FFF4DD")
+        tree.tag_configure("new", background=_hex_gui(_SAGE_WASH_SOFT))
+        tree.tag_configure("removed", background="#F2F4F7", foreground="#98A2B3")  # design-exception: tabell-tag-bakgrunn
+        tree.tag_configure("changed", background="#FFFBEB")  # design-exception: tabell-tag-bakgrunn
+        tree.tag_configure("hidden", background="#F9FAFB", foreground="#98A2B3")  # design-exception: tabell-tag-bakgrunn
+        tree.tag_configure("manual", background=_hex_gui(_SAGE_WASH_SOFT))
+        tree.tag_configure("manual_override", background="#FFF4DD")  # design-exception: tabell-tag-bakgrunn
 
         ysb = ttk.Scrollbar(upper, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=ysb.set)
@@ -933,24 +943,24 @@ class ARPage(ttk.Frame):
         self.var_detail_pct_current = tk.StringVar(value="–")
         self.var_detail_change_type = tk.StringVar(value="–")
         self._lbl_detail_shares_base_title = ttk.Label(
-            details_box, text="Aksjer (base):", foreground="#475467",
+            details_box, text="Aksjer (base):", foreground="#475467",  # design-exception: tailwind grey/aksentfarge
         )
         self._lbl_detail_shares_current_title = ttk.Label(
-            details_box, text="Aksjer (nå):", foreground="#475467",
+            details_box, text="Aksjer (nå):", foreground="#475467",  # design-exception: tailwind grey/aksentfarge
         )
         self._lbl_detail_pct_base_title = ttk.Label(
-            details_box, text="Eierandel (base):", foreground="#475467",
+            details_box, text="Eierandel (base):", foreground="#475467",  # design-exception: tailwind grey/aksentfarge
         )
         self._lbl_detail_pct_current_title = ttk.Label(
-            details_box, text="Eierandel (nå):", foreground="#475467",
+            details_box, text="Eierandel (nå):", foreground="#475467",  # design-exception: tailwind grey/aksentfarge
         )
         self._lbl_detail_shares_base_title.grid(row=0, column=0, sticky="w")
         ttk.Label(details_box, textvariable=self.var_detail_shares_base).grid(row=0, column=1, sticky="w", padx=(6, 12))
         self._lbl_detail_shares_current_title.grid(row=0, column=2, sticky="w")
         ttk.Label(details_box, textvariable=self.var_detail_shares_current).grid(row=0, column=3, sticky="w", padx=(6, 0))
-        ttk.Label(details_box, text="Δ aksjer:", foreground="#475467").grid(row=1, column=0, sticky="w")
+        ttk.Label(details_box, text="Δ aksjer:", foreground="#475467").grid(row=1, column=0, sticky="w")  # design-exception: tailwind grey/aksentfarge
         ttk.Label(details_box, textvariable=self.var_detail_shares_delta).grid(row=1, column=1, sticky="w", padx=(6, 12))
-        ttk.Label(details_box, text="Endring:", foreground="#475467").grid(row=1, column=2, sticky="w")
+        ttk.Label(details_box, text="Endring:", foreground="#475467").grid(row=1, column=2, sticky="w")  # design-exception: tailwind grey/aksentfarge
         ttk.Label(details_box, textvariable=self.var_detail_change_type).grid(row=1, column=3, sticky="w", padx=(6, 0))
         self._lbl_detail_pct_base_title.grid(row=2, column=0, sticky="w")
         ttk.Label(details_box, textvariable=self.var_detail_pct_base).grid(row=2, column=1, sticky="w", padx=(6, 12))
@@ -967,7 +977,7 @@ class ARPage(ttk.Frame):
         self._lbl_compare_tx_empty = ttk.Label(
             tx_box,
             textvariable=self.var_compare_tx_empty,
-            foreground="#98A2B3",
+            foreground="#98A2B3",  # design-exception: tailwind grey/aksentfarge
             wraplength=600,
             justify="left",
         )
@@ -976,7 +986,7 @@ class ARPage(ttk.Frame):
         self._lbl_compare_no_import = ttk.Label(
             tx_box,
             textvariable=self.var_compare_no_import,
-            foreground="#475467",
+            foreground="#475467",  # design-exception: tailwind grey/aksentfarge
             wraplength=600,
             justify="left",
         )
@@ -1018,7 +1028,7 @@ class ARPage(ttk.Frame):
             ("Importert:", self.var_compare_imported_at),
             ("Kildefil:", self.var_compare_source_file),
         )):
-            ttk.Label(detail_right, text=label, foreground="#475467").grid(row=r, column=0, sticky="w")
+            ttk.Label(detail_right, text=label, foreground="#475467").grid(row=r, column=0, sticky="w")  # design-exception: tailwind grey/aksentfarge
             ttk.Label(detail_right, textvariable=var, wraplength=240, justify="left").grid(row=r, column=1, sticky="w", padx=(8, 0))
 
         self._btn_compare_open_pdf = ttk.Button(
@@ -1547,7 +1557,7 @@ class ARPage(ttk.Frame):
         title: str,
         subtitle: str,
         fill: str,
-        accent: str = "#98A2B3",
+        accent: str = "#98A2B3",  # design-exception: farge-aksent
         action_key: str | None = None,
     ) -> None:
         page_ar_chart.draw_box(
@@ -1832,7 +1842,7 @@ class _ManualOwnerChangeDialog(tk.Toplevel):
             "register genereres en pending-endring som må godkjennes eksplisitt."
         )
         ttk.Label(
-            body, text=help_text, foreground="#667085", wraplength=360, justify="left",
+            body, text=help_text, foreground="#667085", wraplength=360, justify="left",  # design-exception: tailwind grey/aksentfarge
         ).grid(row=len(rows), column=0, columnspan=2, sticky="w", pady=(8, 2))
 
         btns = ttk.Frame(body)

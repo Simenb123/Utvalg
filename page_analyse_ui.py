@@ -54,6 +54,34 @@ def build_ui(
     if not dir_labels:
         dir_labels = ["Alle", "+", "-"]
 
+    # PageHeader øverst — felles topptittel + refresh + eksport-meny.
+    # Filterlinjen som build_toolbar bygger fortsetter under headeren som
+    # egen rad (mange side-spesifikke kontroller, krever bredde).
+    # NB: PageHeader krever et ekte Tk-widget som parent. I tester der
+    # `page` er en DummyPage uten Tk hopper vi over headeren — UI-bygging
+    # av filterlinje/paneler er hovedansvaret til denne funksjonen.
+    try:
+        from src.shared.ui.page_header import PageHeader
+
+        header = PageHeader(page, title="Analyse", subtitle="Hovedbok og saldobalanse")
+        header.pack(fill="x", padx=6, pady=(6, 0))
+        header.set_refresh(command=lambda: page.refresh_from_session(), key="<F5>")
+
+        # Rapport-eksporter samles i header-eksportmenyen.
+        for label, attr in (
+            ("Regnskapsoppstilling (Excel)", "_export_regnskapsoppstilling_excel"),
+            ("Nøkkeltallsrapport (PDF)", "_export_nokkeltall_pdf"),
+            ("SB/HB-avstemming (Excel)", "_export_ib_ub_control"),
+            ("IB/UB-kontinuitet (Excel)", "_export_ib_ub_continuity"),
+        ):
+            cmd = getattr(page, attr, None)
+            if callable(cmd):
+                header.add_export(label, command=cmd)
+        page._page_header = header
+    except Exception:
+        # Tk ikke tilgjengelig (typisk i tester med DummyPage) — skipp header.
+        page._page_header = None
+
     from page_analyse_ui_toolbar import build_toolbar
 
     refs = build_toolbar(page, tk=tk, ttk=ttk, dir_labels=dir_labels)

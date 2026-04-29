@@ -121,6 +121,17 @@ def _safe_filename_part(value: str) -> str:
     return cleaned or "klient"
 
 
+class _NoopStateWidget:
+    """Stand-in for en widget som mottar .state(...)-kall.
+
+    PageHeader-eksport har ikke en disable-mekanisme, så _update_action_states
+    sender disse kallene til en no-op i stedet for å feile.
+    """
+
+    def state(self, _spec: object) -> None:
+        return None
+
+
 class MaterialityPage(ttk.Frame):
     def __init__(self, parent: ttk.Notebook) -> None:
         super().__init__(parent)
@@ -252,6 +263,8 @@ class MaterialityPage(ttk.Frame):
         style.configure("MaterialitySummary.TLabelframe.Label", font=(body_family, 10, "bold"))
 
     def _build_ui(self) -> None:
+        from src.shared.ui.page_header import PageHeader
+
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -260,36 +273,31 @@ class MaterialityPage(ttk.Frame):
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(4, weight=1)
 
-        header = ttk.Frame(outer)
-        header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(0, weight=1)
+        header_box = ttk.Frame(outer)
+        header_box.grid(row=0, column=0, sticky="ew")
+        header_box.columnconfigure(0, weight=1)
 
-        title_box = ttk.Frame(header)
-        title_box.grid(row=0, column=0, sticky="w")
-        ttk.Label(title_box, text="Vesentlighet", style="MaterialityTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(title_box, textvariable=self.var_context, style="MaterialityContext.TLabel").grid(
-            row=1, column=0, sticky="w", pady=(2, 0)
-        )
+        header = PageHeader(header_box, title="Vesentlighet", subtitle_var=self.var_context)
+        header.grid(row=0, column=0, sticky="ew")
+        header.set_refresh(command=self._reload_all, key="<F5>")
+        header.add_export("Arbeidspapir", command=self._export_workpaper)
+
+        # Status-tekst under headeren — kan inneholde lengre meldinger.
         ttk.Label(
-            title_box,
+            header_box,
             text="Henter CRM-verdier, beregner benchmark og dokumenterer aktiv verdi for utvalg.",
             style="MaterialitySub.TLabel",
-        ).grid(row=2, column=0, sticky="w", pady=(2, 0))
-        ttk.Label(title_box, textvariable=self.var_status, style="MaterialityStatus.TLabel", wraplength=860).grid(
-            row=3, column=0, sticky="w", pady=(6, 0)
-        )
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(
+            header_box,
+            textvariable=self.var_status,
+            style="MaterialityStatus.TLabel",
+            wraplength=860,
+        ).grid(row=2, column=0, sticky="w", pady=(4, 0))
 
-        actions = ttk.Frame(header)
-        actions.grid(row=0, column=1, sticky="e")
-        self.btn_export = ttk.Button(
-            actions,
-            text="Eksporter arbeidspapir",
-            style="Secondary.TButton",
-            command=self._export_workpaper,
-        )
-        self.btn_export.grid(row=0, column=0, padx=(0, 8))
-        self.btn_refresh = ttk.Button(actions, text="Oppdater", style="Primary.TButton", command=self._reload_all)
-        self.btn_refresh.grid(row=0, column=1)
+        # PageHeader-eksport har ikke disable-API — la _update_action_states
+        # få et tomt mål så .state(...)-kall blir uskadelig.
+        self.btn_export = _NoopStateWidget()
 
         stats = ttk.LabelFrame(outer, text="Aktiv oversikt", style="MaterialitySummary.TLabelframe", padding=(10, 8))
         stats.grid(row=1, column=0, sticky="ew", pady=(10, 0))

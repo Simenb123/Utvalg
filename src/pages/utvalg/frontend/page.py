@@ -180,7 +180,17 @@ class UtvalgPage(ttk.Frame):
         self._update_filter_summary()
 
     def _build_ui(self) -> None:
-        """Bygg topp-panel med søk, retning og kontoserier samt transaksjonstabell."""
+        """Bygg PageHeader, filter-toolbar og transaksjonstabell."""
+        from src.shared.ui.page_header import PageHeader
+
+        # Standard topptittel: refresh = "Bruk filtre" (oppdaterer visningen).
+        # Ingen eksport-handling på Utvalg — utvalget commitres til underpopulasjon
+        # via "Til underpop/Stratifisering"-flyten.
+        header = PageHeader(self, title="Utvalg", subtitle="Filtrerte transaksjoner")
+        header.pack(fill="x", padx=4, pady=(4, 0))
+        header.set_refresh(command=self.apply_filters, key="<F5>")
+
+        # Filter-toolbar — egen rad under header (mange kontroller, krever bredde)
         top = ttk.Frame(self)
         top.pack(fill="x", pady=4, padx=4)
 

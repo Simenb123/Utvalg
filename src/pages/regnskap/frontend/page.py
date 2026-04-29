@@ -117,6 +117,24 @@ _build_note_form = regnskap_noter.build_note_form
 # RegnskapPage
 # ---------------------------------------------------------------------------
 
+class _SubtitleProxy:
+    """Liten kompatibilitetsbro: lar gammel kode bruke ``_lbl_client.configure(text=...)``
+    når sub-tittelen nå styres av en ``StringVar`` i PageHeader.
+    """
+
+    def __init__(self, var: tk.StringVar) -> None:
+        self._var = var
+
+    def configure(self, **kwargs: Any) -> None:
+        if "text" in kwargs:
+            try:
+                self._var.set(str(kwargs["text"]))
+            except Exception:
+                pass
+
+    config = configure
+
+
 class RegnskapPage(ttk.Frame):  # type: ignore[misc]
     """Regnskap-fane: Resultatregnskap, Balanse, Kontantstrøm og Noter."""
 
@@ -154,42 +172,46 @@ class RegnskapPage(ttk.Frame):  # type: ignore[misc]
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        # Toolbar row 1: client + buttons
-        toolbar = ttk.Frame(self)
-        toolbar.grid(row=0, column=0, sticky="ew", padx=6, pady=4)
+        # Standardisert page-header (felles komponent på tvers av faner).
+        # Tittel + sub-tittel til venstre, Rammeverk-velger i midten,
+        # ↻-refresh og ⬇-eksport-meny til høyre.
+        from src.shared.ui.page_header import PageHeader
 
-        self._lbl_client = ttk.Label(toolbar, text="",
-                                      font=("TkDefaultFont", 10, "bold"))
-        self._lbl_client.pack(side="left", padx=(0, 10))
+        # Sub-tittelen viser klient · år, og oppdateres når klient skifter.
+        self._client_subtitle_var = tk.StringVar(value="")
+        header = PageHeader(
+            self,
+            title="Regnskap",
+            subtitle_var=self._client_subtitle_var,
+        )
+        header.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
 
-        ttk.Button(toolbar, text="Oppdater", command=self.refresh,
-                   width=10).pack(side="left", padx=2)
+        # Refresh-knappen (↻) — F5 binder også
+        header.set_refresh(command=self.refresh, key="<F5>")
 
-        ttk.Separator(toolbar, orient="vertical").pack(
-            side="left", fill="y", padx=6, pady=2)
+        # Eksporter — automatisk dropdown når flere er lagt til
+        header.add_export("Excel", command=self._on_export_excel)
+        header.add_export("HTML",  command=self._on_export_html)
+        header.add_export("PDF",   command=self._on_export_pdf)
 
-        ttk.Button(toolbar, text="Eksporter Excel", command=self._on_export_excel,
-                   width=14).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="Eksporter HTML", command=self._on_export_html,
-                   width=14).pack(side="left", padx=2)
-        ttk.Button(toolbar, text="Eksporter PDF", command=self._on_export_pdf,
-                   width=13).pack(side="left", padx=2)
-
-        ttk.Separator(toolbar, orient="vertical").pack(
-            side="left", fill="y", padx=6, pady=2)
-
-        ttk.Label(toolbar, text="Rammeverk:").pack(side="left", padx=(0, 2))
+        # Side-spesifikke kontroller i midt-sonen: rammeverk-velger + status
+        ttk.Label(header.center, text="Rammeverk:").pack(side="left", padx=(0, 4))
         self._framework_var = tk.StringVar(value=self._framework)
         fw_cb = ttk.Combobox(
-            toolbar, textvariable=self._framework_var,
+            header.center, textvariable=self._framework_var,
             values=FRAMEWORK_CHOICES, state="readonly", width=28,
         )
-        fw_cb.pack(side="left", padx=(0, 6))
+        fw_cb.pack(side="left", padx=(0, 12))
         self._framework_var.trace_add("write", self._on_framework_change)
 
-        self._lbl_status = ttk.Label(toolbar, text="Ingen data",
+        self._lbl_status = ttk.Label(header.center, text="Ingen data",
                                       foreground="#888888")
-        self._lbl_status.pack(side="left", padx=10)
+        self._lbl_status.pack(side="left")
+
+        # Bakoverkompatibel: gammel kode setter _lbl_client direkte.
+        # Vi peker på sub-tittel-StringVar via en proxy slik at eksisterende
+        # konfigure-kall fortsatt virker.
+        self._lbl_client = _SubtitleProxy(self._client_subtitle_var)
 
         # Sub-notebook
         self._nb = ttk.Notebook(self)

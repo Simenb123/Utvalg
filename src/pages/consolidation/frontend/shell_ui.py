@@ -21,11 +21,27 @@ if TYPE_CHECKING:
 
 
 def build_ui(page: "ConsolidationPage") -> None:
-    page.columnconfigure(0, weight=1)
-    page.rowconfigure(2, weight=1)
+    from src.shared.ui.page_header import PageHeader
 
+    page.columnconfigure(0, weight=1)
+    page.rowconfigure(3, weight=1)
+
+    header = PageHeader(
+        page,
+        title="Konsolidering",
+        subtitle="Konsernregnskap fra datterselskaper",
+    )
+    header.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
+    header.set_refresh(
+        command=lambda: page.refresh_from_session(__import__("session")),
+        key="<F5>",
+    )
+    page._page_header = header
+
+    # Side-spesifikk toolbar under headeren — beholder import-meny, Kjør,
+    # ÅO-toggle og statusvisning. Eksport-knappen er flyttet til PageHeader.
     toolbar = ttk.Frame(page)
-    toolbar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 0))
+    toolbar.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 0))
 
     page._import_menu_btn = ttk.Menubutton(toolbar, text="Importer grunnlag")
     page._import_menu_btn.pack(side="left", padx=(0, 4))
@@ -44,8 +60,10 @@ def build_ui(page: "ConsolidationPage") -> None:
 
     page._btn_run = ttk.Button(toolbar, text="Kjoer konsolidering", command=page._on_run)
     page._btn_run.pack(side="left", padx=(0, 4))
-    page._btn_export = ttk.Button(toolbar, text="Eksporter", command=page._on_export)
-    page._btn_export.pack(side="left", padx=(0, 4))
+    # _btn_export beholdes som no-op-attributt for bakoverkomp; eksport
+    # går nå via PageHeader.add_export.
+    header.add_export("Konsolidert resultat", command=page._on_export)
+    page._btn_export = page._btn_run  # placeholder ref — kjøremåten er menyen i header
 
     ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
     page._include_ao_var = tk.BooleanVar(value=False)
@@ -58,12 +76,12 @@ def build_ui(page: "ConsolidationPage") -> None:
     ttk.Label(toolbar, textvariable=page._status_var).pack(side="left")
 
     readiness_strip = ttk.Frame(page)
-    readiness_strip.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 0))
+    readiness_strip.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 0))
     ttk.Label(readiness_strip, textvariable=page._readiness_status_var, anchor="w").pack(fill="x")
 
     page._main_pw = ttk.PanedWindow(page, orient="horizontal")
     page._right_panel_visible = True
-    page._main_pw.grid(row=2, column=0, sticky="nsew", padx=8, pady=8)
+    page._main_pw.grid(row=3, column=0, sticky="nsew", padx=8, pady=8)
 
     page._left_nb = ttk.Notebook(page._main_pw)
     page._left_tab_companies = ttk.Frame(page._left_nb)
@@ -114,7 +132,7 @@ def build_ui(page: "ConsolidationPage") -> None:
     page._update_workspace_layout()
 
     status_bar = ttk.Frame(page)
-    status_bar.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 4))
+    status_bar.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 4))
     page._lbl_statusbar = ttk.Label(status_bar, text="Konsolidering | TB-only", anchor="w")
     page._lbl_statusbar.pack(fill="x")
 

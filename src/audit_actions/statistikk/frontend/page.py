@@ -48,6 +48,12 @@ from ..backend.compute import (  # noqa: E402
     get_konto_set_for_regnr,
 )
 
+from src.shared.ui.tokens import (  # noqa: E402
+    POS_TEXT_DARK as _POS_TEXT_DARK,
+    NEG_TEXT_DARK as _NEG_TEXT_DARK,
+    hex_gui as _hex_gui,
+)
+
 
 def _open_file(path: str) -> None:
     try:
@@ -254,7 +260,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             self._kpi_label_vars[key] = label_var
             f = ttk.Frame(kpi_frame)
             f.grid(row=0, column=i, padx=(0 if i == 0 else 20, 0), sticky="w")
-            ttk.Label(f, textvariable=label_var, font=("", 8), foreground="#666666").pack(anchor="w")
+            ttk.Label(f, textvariable=label_var, font=("", 8), foreground="#666666").pack(anchor="w")  # design-exception: KPI sub-label gray
             var = tk.StringVar(value="\u2013")
             self._kpi_vars[key] = var
             ttk.Label(f, textvariable=var, font=("", 12, "bold")).pack(anchor="w")
@@ -276,7 +282,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         ]):
             f = ttk.Frame(ext_frame)
             f.grid(row=0, column=i, padx=(0 if i == 0 else 16, 0), sticky="w")
-            ttk.Label(f, text=label, font=("", 8), foreground="#888888").pack(anchor="w")
+            ttk.Label(f, text=label, font=("", 8), foreground="#888888").pack(anchor="w")  # design-exception: ext-stats sub-label gray
             var = tk.StringVar(value="\u2013")
             self._ext_vars[key] = var
             ttk.Label(f, textvariable=var, font=("", 10)).pack(anchor="w")
@@ -324,7 +330,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         self._tree_kontoer.bind("<Double-Button-1>", self._on_kontoer_doubleclick)
         ttk.Label(
             self._tab_kontoer, text="Dobbeltklikk en rad for å se transaksjoner",
-            foreground="#888888", font=("", 8),
+            foreground="#888888", font=("", 8),  # design-exception: hint-tekst gray
         ).grid(row=1, column=0, sticky="w", padx=6, pady=(2, 2))
 
         # --- Månedspivot (dynamisk) ---
@@ -340,7 +346,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         self._tree_bilag.bind("<Double-Button-1>", self._on_bilag_doubleclick)
         ttk.Label(
             self._tab_bilag, text="Dobbeltklikk et bilag for å se enkeltposteringene",
-            foreground="#888888", font=("", 8),
+            foreground="#888888", font=("", 8),  # design-exception: hint-tekst gray
         ).grid(row=1, column=0, sticky="w", padx=6, pady=(2, 2))
 
         # --- MVA-analyse ---
@@ -353,9 +359,9 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
              "Sats %": 70, "Effektiv %": 80, "Status": 240},
             text_cols=("MVA-kode", "Status"), stretch_col="Status",
         )
-        self._tree_mva.tag_configure("ok", foreground="#2E7D32")
-        self._tree_mva.tag_configure("avvik", foreground="#C62828")
-        self._tree_mva.tag_configure("ingen", foreground="#888888")
+        self._tree_mva.tag_configure("ok", foreground=_hex_gui(_POS_TEXT_DARK))
+        self._tree_mva.tag_configure("avvik", foreground=_hex_gui(_NEG_TEXT_DARK))
+        self._tree_mva.tag_configure("ingen", foreground="#888888")  # design-exception: ingen-MVA-data gray
         self._tree_mva.bind("<Double-Button-1>", self._on_mva_doubleclick)
 
         # Avstemmingspanel
@@ -373,19 +379,19 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             ("avvik", "Avvik:", 2, 2),
         ]
         for key, label, row_i, col_i in _avs_fields:
-            ttk.Label(avsf, text=label, foreground="#555555").grid(
+            ttk.Label(avsf, text=label, foreground="#555555").grid(  # design-exception: avstemming-label gray  # design-exception: avstemming-label gray
                 row=row_i, column=col_i, sticky="w", padx=(0 if col_i == 0 else 20, 4)
             )
             var = tk.StringVar(value="\u2013")
             self._mva_avs_vars[key] = var
-            fg = "#2E7D32" if key == "avvik" else "#222222"
+            fg = _hex_gui(_POS_TEXT_DARK) if key == "avvik" else "#222222"  # design-exception: near-black for value text
             ttk.Label(avsf, textvariable=var, foreground=fg, font=("TkFixedFont", 10)).grid(
                 row=row_i, column=col_i + 1, sticky="e"
             )
 
         ttk.Label(
             self._tab_mva, text="Dobbeltklikk en kode for å se transaksjoner",
-            foreground="#888888", font=("", 8),
+            foreground="#888888", font=("", 8),  # design-exception: hint-tekst gray
         ).grid(row=2, column=0, sticky="w", padx=6, pady=(0, 2))
 
         # --- Motpostfordeling ---
@@ -395,7 +401,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
 
         motpost_top = ttk.Frame(self._tab_motpost)
         motpost_top.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
-        ttk.Label(motpost_top, text="Gruppér på:", foreground="#555555").grid(row=0, column=0, sticky="w")
+        ttk.Label(motpost_top, text="Gruppér på:", foreground="#555555").grid(row=0, column=0, sticky="w")  # design-exception: motpost-mode label gray
         self._var_motpost_mode = tk.StringVar(value="konto")
         ttk.Radiobutton(
             motpost_top, text="Konto", value="konto",
@@ -425,7 +431,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         )
         ttk.Label(
             motpost_bot, textvariable=self._motpost_hint_var,
-            foreground="#888888", font=("", 8),
+            foreground="#888888", font=("", 8),  # design-exception: hint-tekst gray
         ).grid(row=0, column=0, sticky="w")
         ttk.Button(
             motpost_bot, text="\U0001f4ca  Vis flowchart", command=self._show_motpost_flowchart,
@@ -438,7 +444,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
 
         kombo_top = ttk.Frame(self._tab_kombo)
         kombo_top.grid(row=0, column=0, sticky="ew", padx=6, pady=(4, 2))
-        ttk.Label(kombo_top, text="Vis kombinasjon som:", foreground="#555555").grid(row=0, column=0, sticky="w")
+        ttk.Label(kombo_top, text="Vis kombinasjon som:", foreground="#555555").grid(row=0, column=0, sticky="w")  # design-exception: kombo-mode label gray
         self._var_kombo_mode = tk.StringVar(value="konto")
         ttk.Radiobutton(
             kombo_top, text="Kontoer", value="konto",
@@ -463,12 +469,12 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         ttk.Label(
             self._tab_kombo,
             text="Dobbeltklikk en rad for å se bilagene i kombinasjonen",
-            foreground="#888888", font=("", 8),
+            foreground="#888888", font=("", 8),  # design-exception: hint-tekst gray
         ).grid(row=2, column=0, sticky="w", padx=6, pady=(2, 2))
 
         # Statuslinje
         self._status_var = tk.StringVar(value="Velg en regnskapslinje og trykk Vis")
-        ttk.Label(self, textvariable=self._status_var, foreground="#555555").grid(
+        ttk.Label(self, textvariable=self._status_var, foreground="#555555").grid(  # design-exception: status-bar gray
             row=3, column=0, sticky="w", padx=8, pady=(0, 4)
         )
 
@@ -727,7 +733,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         _attach_sort(tree)
 
         # Negative verdier i rødt
-        tree.tag_configure("neg", foreground="#C62828")
+        tree.tag_configure("neg", foreground=_hex_gui(_NEG_TEXT_DARK))
 
         totals: dict[str, float] = {c: 0.0 for c in mnds}
         grand_total = 0.0
@@ -763,7 +769,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
                 _safe_int(row["Antall poster"]),
                 str(row.get("Kontoer", "") or ""),
             ), tags=("neg",) if bel < 0 else ())
-        self._tree_bilag.tag_configure("neg", foreground="#C62828")
+        self._tree_bilag.tag_configure("neg", foreground=_hex_gui(_NEG_TEXT_DARK))
 
     def _populate_mva(self, result: dict) -> None:
         tree = self._tree_mva
@@ -831,7 +837,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
             key_col, name_col = "Konto", "Kontonavn"
 
         if df is None or df.empty:
-            self._tree_motpost.tag_configure("neg", foreground="#C62828")
+            self._tree_motpost.tag_configure("neg", foreground=_hex_gui(_NEG_TEXT_DARK))
             return
 
         for _, row in df.iterrows():
@@ -843,7 +849,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
                 f"{float(row.get('Andel') or 0):.1f}",
                 _safe_int(row.get("AntallBilag")),
             ), tags=("neg",) if bel < 0 else ())
-        self._tree_motpost.tag_configure("neg", foreground="#C62828")
+        self._tree_motpost.tag_configure("neg", foreground=_hex_gui(_NEG_TEXT_DARK))
 
     def _on_motpost_mode_change(self) -> None:
         """Triggeres når brukeren bytter Konto/RL-modus."""
@@ -945,7 +951,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
         _attach_sort(tree)
-        tree.tag_configure("neg", foreground="#C62828")
+        tree.tag_configure("neg", foreground=_hex_gui(_NEG_TEXT_DARK))
 
         sum_bel = 0.0
         for _, row in df.iterrows():
@@ -1160,7 +1166,7 @@ class StatistikkPage(ttk.Frame):  # type: ignore[misc]
                 _fmt_amount(bel),
                 f"{float(row.get('% andel bilag') or 0):.1f}",
             ), tags=("neg",) if bel < 0 else ())
-        tree.tag_configure("neg", foreground="#C62828")
+        tree.tag_configure("neg", foreground=_hex_gui(_NEG_TEXT_DARK))
 
     def _on_kombo_mode_change(self) -> None:
         self._populate_kombo()
@@ -1302,8 +1308,8 @@ const graph = sankey({{
 
 const color = d3.scaleOrdinal()
   .domain(["source"])
-  .range(["#1565C0"])
-  .unknown("#2196F3");
+  .range(["#1565C0"])  // design-exception: chart-palette
+  .unknown("#2196F3");  // design-exception: chart-palette
 
 // Links
 const link = svg.append("g").attr("fill", "none")
@@ -1327,8 +1333,8 @@ node.append("rect")
   .attr("y", d => d.y0)
   .attr("width", d => d.x1 - d.x0)
   .attr("height", d => Math.max(1, d.y1 - d.y0))
-  .attr("fill", d => d.group === "source" ? "#E3F2FD" : "#EEF2FF")
-  .attr("stroke", d => d.group === "source" ? "#1565C0" : "#3F51B5");
+  .attr("fill", d => d.group === "source" ? "#E3F2FD" : "#EEF2FF")  // design-exception: sankey-node-bakgrunn
+  .attr("stroke", d => d.group === "source" ? "#1565C0" : "#3F51B5");  // design-exception: sankey-node-stroke
 
 node.append("text")
   .attr("x", d => d.x0 + (d.x1 - d.x0) / 2)
@@ -1336,7 +1342,7 @@ node.append("text")
   .attr("text-anchor", "middle")
   .attr("dominant-baseline", "middle")
   .attr("font-weight", "600")
-  .attr("fill", d => d.group === "source" ? "#0D47A1" : "#1a1a2e")
+  .attr("fill", d => d.group === "source" ? "#0D47A1" : "#1a1a2e")  // design-exception: sankey-text
   .attr("font-size", d => d.group === "source" ? "12px" : "12px")
   .each(function(d) {{
     const el = d3.select(this);
@@ -1346,7 +1352,7 @@ node.append("text")
         .attr("x", d.x0 + (d.x1 - d.x0) / 2)
         .attr("dy", "0")
         .attr("font-weight", "700")
-        .attr("fill", "#1565C0")
+        .attr("fill", "#1565C0")  // design-exception: regnr-fontfarge
         .text(parts[0]);
       el.append("tspan")
         .attr("x", d.x0 + (d.x1 - d.x0) / 2)

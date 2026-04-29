@@ -49,58 +49,57 @@ from .tree_helpers import (
 
 
 def build_ui(page) -> None:
-    tb = ttk.Frame(page, padding=(6, 4))
-    tb.grid(row=0, column=0, sticky="ew")
+    from src.shared.ui.page_header import PageHeader
 
-    ttk.Label(tb, text="Reskontro",
-              font=("TkDefaultFont", 11, "bold")).pack(side="left", padx=(0, 12))
+    header = PageHeader(
+        page,
+        title="Reskontro",
+        subtitle="Kunde- og leverandørtransaksjoner",
+    )
+    header.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 4))
+    header.set_refresh(command=page.refresh_from_session, key="<F5>")
+    header.add_export("Excel", command=page._export_excel)
+    header.add_export("PDF-rapport", command=page._export_pdf_report)
 
+    # Side-spesifikke kontroller i header.center
     page._mode_var = tk.StringVar(value="kunder")
-    ttk.Radiobutton(tb, text="Kunder", variable=page._mode_var,
+    ttk.Radiobutton(header.center, text="Kunder", variable=page._mode_var,
                     value="kunder",
                     command=page._on_mode_change).pack(side="left")
-    ttk.Radiobutton(tb, text="Leverandører", variable=page._mode_var,
-                    value="leverandorer",
+    ttk.Radiobutton(header.center, text="Leverandører",
+                    variable=page._mode_var, value="leverandorer",
                     command=page._on_mode_change).pack(side="left",
                                                        padx=(6, 12))
 
-    ttk.Label(tb, text="Søk:").pack(side="left")
+    ttk.Label(header.center, text="Søk:").pack(side="left")
     page._filter_var = tk.StringVar()
-    search = ttk.Entry(tb, textvariable=page._filter_var, width=22)
+    search = ttk.Entry(header.center, textvariable=page._filter_var, width=22)
     search.pack(side="left", padx=(4, 8))
     page._filter_var.trace_add("write", lambda *_: page._apply_filter())
 
-    ttk.Button(tb, text="Oppdater",
-               command=page.refresh_from_session,
-               width=10).pack(side="left")
-
     page._brreg_btn = ttk.Button(
-        tb, text="BRREG-sjekk\u2026",
+        header.center, text="BRREG-sjekk\u2026",
         command=page._start_brreg_sjekk, width=14)
-    page._brreg_btn.pack(side="left", padx=(6, 0))
+    page._brreg_btn.pack(side="left")
 
-    ttk.Button(tb, text="Eksporter til Excel\u2026",
-               command=page._export_excel).pack(side="left", padx=(6, 0))
-
-    ttk.Button(tb, text="Reskontrorapport (PDF)\u2026",
-               command=page._export_pdf_report).pack(side="left", padx=(6, 0))
-
-    ttk.Separator(tb, orient="vertical").pack(side="left", fill="y",
-                                               padx=(8, 8), pady=2)
+    ttk.Separator(header.center, orient="vertical").pack(
+        side="left", fill="y", padx=(8, 8), pady=2,
+    )
 
     page._hide_zero_var = tk.BooleanVar(value=False)
-    ttk.Checkbutton(tb, text="Skjul nullposter",
+    ttk.Checkbutton(header.center, text="Skjul nullposter",
                     variable=page._hide_zero_var,
                     command=page._apply_filter).pack(side="left")
 
     page._decimals_var = tk.BooleanVar(value=True)
-    ttk.Checkbutton(tb, text="Desimaler",
+    ttk.Checkbutton(header.center, text="Desimaler",
                     variable=page._decimals_var,
                     command=page._on_decimals_toggle).pack(side="left",
                                                             padx=(6, 0))
 
     ttk.Button(
-        tb, text="Saldoliste\u2026", command=page._show_saldoliste_popup,
+        header.center, text="Saldoliste\u2026",
+        command=page._show_saldoliste_popup,
     ).pack(side="left", padx=(6, 0))
 
     pane = ttk.PanedWindow(page, orient="horizontal")

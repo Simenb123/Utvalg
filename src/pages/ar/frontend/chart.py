@@ -76,7 +76,7 @@ def draw_box(
     title: str,
     subtitle: str,
     fill: str,
-    accent: str = "#98A2B3",
+    accent: str = "#98A2B3",  # design-exception: chart-palette
     action_key: str | None = None,
     dashed: bool = False,
 ) -> None:
@@ -87,14 +87,14 @@ def draw_box(
     tags: tuple[str, ...] = ("chart-node",)
     if action_key:
         tags = ("chart-node", action_key)
-    canvas.create_rectangle(left + 2, top + 3, right + 2, bottom + 3, fill="#E4E7EC", outline="", tags=tags)
-    border_kwargs: dict[str, Any] = {"outline": "#D0D5DD", "width": 1, "tags": tags}
+    canvas.create_rectangle(left + 2, top + 3, right + 2, bottom + 3, fill="#E4E7EC", outline="", tags=tags)  # design-exception: chart-fill-palette
+    border_kwargs: dict[str, Any] = {"outline": "#D0D5DD", "width": 1, "tags": tags}  # design-exception: chart-palette
     if dashed:
         border_kwargs["dash"] = (3, 2)
     canvas.create_rectangle(left, top, right, bottom, fill=fill, **border_kwargs)
     canvas.create_rectangle(left, top, right, top + 4, fill=accent, outline=accent, tags=tags)
     canvas.create_text(x, y - 6, text=title, font=("Segoe UI", 9, "bold"), width=width - 16, tags=tags)
-    canvas.create_text(x, y + 12, text=subtitle, font=("Segoe UI", 8), width=width - 16, fill="#475467", tags=tags)
+    canvas.create_text(x, y + 12, text=subtitle, font=("Segoe UI", 8), width=width - 16, fill="#475467", tags=tags)  # design-exception: chart-fill-palette
 
 
 def chart_action_key_from_current(page) -> str:
@@ -916,7 +916,7 @@ def _build_model(page, saved: dict[str, list[float]]) -> None:
 def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
     canvas = page._org_canvas
     canvas.delete("all")
-    canvas.configure(background="#FAFAF8")
+    canvas.configure(background="#FAFAF8")  # design-exception: tailwind soft-bakgrunn
     page._update_chart_zoom_label()
 
     meta = getattr(page, "_chart_model_meta", None) or {}
@@ -924,7 +924,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
     # hjelpetekst, uavhengig av om _chart_node_centers fortsatt har noe
     # (gammel state fra forrige render).
     if meta.get("empty", True) or "root_pos_key" not in meta:
-        canvas.create_text(320, 120, text="Ingen eierdata tilgjengelig ennå.", font=("Segoe UI", 10), fill="#667085")
+        canvas.create_text(320, 120, text="Ingen eierdata tilgjengelig ennå.", font=("Segoe UI", 10), fill="#667085")  # design-exception: chart-fill-palette
         canvas.configure(scrollregion=(0, 0, 640, 240))
         page._chart_dirty = False
         # Ny render-id slik at utestående auto-fit ignoreres.
@@ -947,7 +947,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
         page, canvas, rx, ry, box_w + 16 * z, box_h + 4 * z,
         title=root_name,
         subtitle=root_orgnr or page._year,
-        fill="#E6F0FF", accent="#2952A3",
+        fill="#E6F0FF", accent="#2952A3",  # design-exception: chart-fill-palette
         action_key=root_action_key,
     )
 
@@ -960,7 +960,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
             note = f"{note} ({shares} av {total})"
         canvas.create_text(
             rx, ry + 46 * z, text=note,
-            font=("Segoe UI", 8, "italic"), fill="#8A5A00",
+            font=("Segoe UI", 8, "italic"), fill="#8A5A00",  # design-exception: chart-fill-palette
             tags=("chart-node", root_action_key),
         )
 
@@ -973,18 +973,18 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
             title=_safe_text(row.get("shareholder_name")) or "Ukjent eier",
             subtitle=_safe_text(row.get("shareholder_orgnr"))
                      or _safe_text(row.get("shareholder_kind")) or "-",
-            fill="#F8FAFC", accent="#667085",
+            fill="#F8FAFC", accent="#667085",  # design-exception: chart-fill-palette
             action_key=action_key,
         )
         line_tag = f"edge:line:{pos_key}"
         lbl_tag = f"edge:lbl:{pos_key}"
         y1 = oy + box_h / 2
         y2 = ry - (box_h + 4 * z) / 2
-        canvas.create_line(ox, y1, rx, y2, fill="#B0B8C8", width=1, tags=(line_tag,))
+        canvas.create_line(ox, y1, rx, y2, fill="#B0B8C8", width=1, tags=(line_tag,))  # design-exception: chart-fill-palette
         canvas.create_text(
             (ox + rx) / 2, (y1 + y2) / 2,
             text=f"{_fmt_pct(row.get('ownership_pct'))}%",
-            font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
+            font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),  # design-exception: chart-fill-palette
         )
 
     # Eide selskaper + kanter.
@@ -1003,11 +1003,11 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
         lbl_tag = f"edge:lbl:{pos_key}"
         y1 = ry + (box_h + 4 * z) / 2
         y2 = cy - box_h / 2
-        canvas.create_line(rx, y1, cx, y2, fill="#B0B8C8", width=1, tags=(line_tag,))
+        canvas.create_line(rx, y1, cx, y2, fill="#B0B8C8", width=1, tags=(line_tag,))  # design-exception: chart-fill-palette
         canvas.create_text(
             (rx + cx) / 2, (y1 + y2) / 2,
             text=f"{_fmt_pct(row.get('ownership_pct'))}%",
-            font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
+            font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),  # design-exception: chart-fill-palette
         )
 
     # Indirekte eierkjede + kanter (over direkte eiere).
@@ -1034,7 +1034,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
                     page, canvas, ex, ey, indirect_box_w, box_h,
                     title="Ikke i AR for året",
                     subtitle=f"Kjeden brytes ({year_label})",
-                    fill="#FFF7E6", accent="#D08700",
+                    fill="#FFF7E6", accent="#D08700",  # design-exception: chart-fill-palette
                     action_key=action_key,
                     dashed=True,
                 )
@@ -1046,8 +1046,8 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
                     title=_safe_text(row.get("shareholder_name")) or "Ukjent eier",
                     subtitle=_safe_text(row.get("shareholder_orgnr"))
                              or _safe_text(row.get("shareholder_kind")) or "-",
-                    fill="#FAF5FF" if not is_person else "#F4F0FF",
-                    accent="#7E5BEF" if not is_person else "#9F7AEA",
+                    fill="#FAF5FF" if not is_person else "#F4F0FF",  # design-exception: chart-fill-palette
+                    accent="#7E5BEF" if not is_person else "#9F7AEA",  # design-exception: chart-palette
                     action_key=action_key,
                     dashed=True,
                 )
@@ -1062,7 +1062,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
             y2 = py - box_h / 2
             canvas.create_line(
                 ex, y1, px, y2,
-                fill="#B0B8C8", width=1, dash=(3, 2),
+                fill="#B0B8C8", width=1, dash=(3, 2),  # design-exception: chart-fill-palette
                 tags=(line_tag,),
             )
             pct = row.get("ownership_pct")
@@ -1070,7 +1070,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
                 canvas.create_text(
                     (ex + px) / 2, (y1 + y2) / 2,
                     text=f"{_fmt_pct(pct)}%",
-                    font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),
+                    font=("Segoe UI", 8), fill="#475467", tags=(lbl_tag,),  # design-exception: chart-fill-palette
                 )
 
     # Sirkulært eierskap — les fra overview (beregnet i worker).
@@ -1083,7 +1083,7 @@ def _render_from_model(page, *, suppress_auto_fit: bool) -> None:
         warn_y_logical = (max(all_ys) + _BOX_H_LOGICAL / 2 + 30) if all_ys else 400
         canvas.create_text(
             rx, warn_y_logical * z, text=f"\u26a0 {cycle_text}",
-            font=("Segoe UI", 9), fill="#856404",
+            font=("Segoe UI", 9), fill="#856404",  # design-exception: chart-fill-palette
         )
 
     page._update_chart_scrollregion()

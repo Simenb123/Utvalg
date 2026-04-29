@@ -18,12 +18,15 @@ _HEX_RE = re.compile(r"^[0-9A-Fa-f]{6}$")
 def test_color_tokens_are_6digit_hex() -> None:
     names = [
         "BG_SAND", "BG_SAND_SOFT", "BG_NEUTRAL", "BG_DATA", "BG_ZEBRA",
-        "SAGE", "SAGE_DARK", "FOREST", "FOREST_HOVER", "OLIVE",
+        "SAGE", "SAGE_DARK", "SAGE_WASH", "SAGE_WASH_SOFT",
+        "FOREST", "FOREST_HOVER", "OLIVE",
         "SELECT_BG", "SELECT_FG",
         "TEXT_PRIMARY", "TEXT_MUTED", "TEXT_ON_SAND", "TEXT_ON_FOREST",
-        "BORDER", "BORDER_SOFT",
+        "BORDER", "BORDER_SOFT", "BORDER_LIGHT",
         "POS_TEXT", "NEG_TEXT", "WARN_TEXT",
         "POS_SOFT", "NEG_SOFT", "WARN_SOFT",
+        "POS_TEXT_DARK", "NEG_TEXT_DARK",
+        "INFO_TEXT", "INFO_SOFT",
     ]
     for name in names:
         value = getattr(vt, name)
