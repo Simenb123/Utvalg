@@ -43,6 +43,7 @@ from src.pages.materiality.frontend.page import MaterialityPage
 from src.pages.mva.frontend.page import MvaPage
 from src.pages.skatt import SkattPage
 from src.pages.reskontro.frontend.page import ReskontroPage
+from src.pages.arsoppgjor import ArsoppgjorPage
 
 # Fagchat-fanen er midlertidig deaktivert — utviklingen er parkert.
 # Sett _FAGCHAT_ENABLED = True (eller miljøvariabel UTVALG_ENABLE_FAGCHAT=1)
@@ -309,11 +310,27 @@ class App(tk.Tk):
         self.page_ar = _build("ar", lambda: ARPage(self.nb))
         self.page_utvalg = _build("utvalg_strata", lambda: UtvalgStrataPage(self.nb, on_commit_sample=self._on_utvalg_commit_sample))
         self.page_logg = _build("logg", lambda: LoggPage(self.nb))
-        self.page_consolidation = _build("consolidation", lambda: ConsolidationPage(self.nb))
-        self.page_regnskap = _build("regnskap", lambda: RegnskapPage(self.nb))
+        # Årsoppgjør-paraplyen samler Regnskap, Skatt og Konsolidering
+        # under én top-level fane med tre under-faner. ArsoppgjorPage må
+        # bygges FØR de tre under-fanene, siden de bruker dens interne
+        # notebook som parent. ui_main beholder fortsatt direkte
+        # referanser (self.page_regnskap, self.page_skatt,
+        # self.page_consolidation) — koden ute i app-en bruker dem direkte.
+        self.page_arsoppgjor = _build("arsoppgjor", lambda: ArsoppgjorPage(self.nb))
+        self.page_consolidation = _build(
+            "consolidation",
+            lambda: ConsolidationPage(self.page_arsoppgjor.sub_notebook),
+        )
+        self.page_regnskap = _build(
+            "regnskap",
+            lambda: RegnskapPage(self.page_arsoppgjor.sub_notebook),
+        )
         self.page_materiality = _build("materiality", lambda: MaterialityPage(self.nb))
         self.page_mva = _build("mva", lambda: MvaPage(self.nb))
-        self.page_skatt = _build("skatt", lambda: SkattPage(self.nb))
+        self.page_skatt = _build(
+            "skatt",
+            lambda: SkattPage(self.page_arsoppgjor.sub_notebook),
+        )
         self.page_reskontro = _build("reskontro", lambda: ReskontroPage(self.nb))
         self.page_fagchat = _build("fagchat", lambda: FagchatPage(self.nb)) if FagchatPage is not None else None
         self.page_documents = _build("documents", lambda: DocumentsPage(self.nb)) if DocumentsPage is not None else None
@@ -355,15 +372,21 @@ class App(tk.Tk):
         if self.page_driftsmidler is not None:
             self.nb.add(self.page_driftsmidler, text="Driftsmidler")
         self.nb.add(self.page_ar, text="AR")
-        self.nb.add(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_utvalg, text="Utvalg")
         if self.page_fagchat is not None:
             self.nb.add(self.page_fagchat, text="Fagchat")
         if self.page_documents is not None:
             self.nb.add(self.page_documents, text="Dokumenter")
-        # Regnskap + Skatt + Admin helt til høyre (avslutning + skattemelding + systeminnstillinger).
-        self.nb.add(self.page_regnskap, text="Regnskap")
-        self.nb.add(self.page_skatt, text="Skatt")
+        # Årsoppgjør-paraplyen samler Regnskap, Skatt og Konsolidering
+        # under én fane med tre under-faner. Plasseres til høyre fordi
+        # dette er year-end-arbeid som kommer etter selve revisjonen.
+        # Rekkefølgen Regnskap → Skatt → Konsolidering følger den
+        # naturlige flyten (regnskap ferdigstilles → skatt beregnes →
+        # konsolidering for konsernselskaper).
+        self.nb.add(self.page_arsoppgjor, text="Årsoppgjør")
+        self.page_arsoppgjor.add_subpage(self.page_regnskap, text="Regnskap")
+        self.page_arsoppgjor.add_subpage(self.page_skatt, text="Skatt")
+        self.page_arsoppgjor.add_subpage(self.page_consolidation, text="Konsolidering")
         self.nb.add(self.page_admin, text="Admin")
         # Statistikk lives in a Toplevel-popup — ikke i tab-strippen.
         try:
